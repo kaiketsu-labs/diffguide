@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Checkouts, type Checkout } from '../src/checkouts.js';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Checkouts, nestedRepositoryRoots, type Checkout } from '../src/checkouts.js';
 import type { FileReviews } from '../src/reviewedFiles.js';
 import type { PullRequestSessions } from '../src/pullRequestSessions.js';
 import { EventEmitter } from './fakes/vscode.js';
@@ -40,4 +43,12 @@ test('lists the workspace folder first, then its nested repositories once each',
   const again = await checkouts.list();
   assert.ok(again.every((checkout, index) => checkout === listed[index]));
   assert.deepEqual(restored, ['/work', '/work/service-a', '/work/service-b']);
+});
+
+test('finds repositories one folder deep, including dot folders and worktree files, and skips ignored folders', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'local-review-scan-'));
+  for (const folder of ['.git', 'api/.git', '.github-organization/.git', 'node_modules/lib/.git', 'docs', 'deep/inner/.git']) await mkdir(join(root, folder), { recursive: true });
+  await mkdir(join(root, 'linked'));
+  await writeFile(join(root, 'linked', '.git'), 'gitdir: ../.git/worktrees/linked');
+  assert.deepEqual([...await nestedRepositoryRoots(root)].sort(), ['.github-organization', 'api', 'linked'].map((name) => join(root, name)));
 });

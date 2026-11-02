@@ -360,7 +360,7 @@ function composerHtml(): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>Review-Kommentar</title><style nonce="${nonce}">
 ${webviewFontStyles}
-${codePreviewStyles}
+${codePreviewStyles()}
 :root { --review-line: var(--vscode-widget-border, var(--vscode-panel-border, #80808045)); --review-accent: var(--vscode-localReview-selectionBorder, var(--vscode-focusBorder)); --review-tint: var(--vscode-localReview-selectionBackground, var(--vscode-textBlockQuote-background)); --review-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
 * { box-sizing: border-box; } body { margin: 0; padding: 16px 14px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.5 var(--review-font-ui); }
 main { max-width: 620px; margin: auto; } .code-header { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 7px 3px 12px; border-bottom: 1px solid var(--review-line); } #path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: var(--vscode-descriptionForeground); font: 11px/1.5 var(--review-font-code); }

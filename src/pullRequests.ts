@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { findGitHubCli } from './github.js';
+import { git } from './worktrees.js';
 
 /** Open pull request shown in the sidebar, validated from provider output. */
 export interface PullRequestSummary {
@@ -104,11 +105,89 @@ export interface PullRequestProvider {
   merge(number: number, method: MergeMethod): Promise<void>;
 }
 
-const listFields = 'number,title,url,author,isDraft,headRefName,baseRefName,latestReviews';
-const listLimit = '50';
+/** A repository on a GitHub host, as a git remote names it. */
+export interface GitHubRemote {
+  readonly host: string;
+  readonly owner: string;
+  readonly name: string;
+}
+
+/** Read a GitHub repository from an HTTPS, SSH or scp-style remote URL. */
+export function parseGitRemote(url: string): GitHubRemote | undefined {
+  const match = /^(?:https?:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|ssh:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|[^@/:]+@([^/:]+):)([^/]+)\/([^/]+?)(?:\.git)?\/?$/u.exec(url.trim());
+  const host = match?.[1] ?? match?.[2] ?? match?.[3];
+  const owner = match?.[4];
+  const name = match?.[5];
+  if (host === undefined || owner === undefined || name === undefined) return undefined;
+  const valid = /^[A-Za-z0-9_.-]+$/u;
+  return valid.test(owner) && valid.test(name) && valid.test(host) ? { host: host.toLowerCase(), owner, name } : undefined;
+}
+
+/** Order GitHub CLI uses when no default repository is set. */
+const remotePriority = ['upstream', 'github', 'origin'];
+
+/** The repository GitHub CLI picks from `git config --get-regexp ^remote\.` output: the `gh repo set-default` choice, else upstream, github, origin, then the rest. */
+export function pickGitHubRemote(config: string): GitHubRemote | undefined {
+  const remotes = new Map<string, { url?: string; resolved?: string }>();
+  for (const line of config.split('\n')) {
+    const match = /^remote\.(.+)\.(url|gh-resolved) (.+)$/u.exec(line.trim());
+    if (match === null) continue;
+    const [, remote = '', key, value = ''] = match;
+    const entry = remotes.get(remote) ?? {};
+    if (key === 'url') entry.url ??= value;
+    else entry.resolved = value;
+    remotes.set(remote, entry);
+  }
+  const rank = (remote: string): number => {
+    const index = remotePriority.indexOf(remote);
+    return index === -1 ? remotePriority.length : index;
+  };
+  const ordered = [...remotes].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
+  const chosen = ordered.find(([, entry]) => entry.resolved !== undefined);
+  if (chosen !== undefined) {
+    const remote = chosen[1].url === undefined ? undefined : parseGitRemote(chosen[1].url);
+    const [owner, name] = (chosen[1].resolved ?? '').split('/');
+    if (remote !== undefined && owner !== undefined && name !== undefined && chosen[1].resolved !== 'base') return { host: remote.host, owner, name };
+    if (remote !== undefined) return remote;
+  }
+  for (const [, entry] of ordered) {
+    const remote = entry.url === undefined ? undefined : parseGitRemote(entry.url);
+    if (remote !== undefined) return remote;
+  }
+  return undefined;
+}
+
+/** Open PRs by the viewer and requesting the viewer's review, keyed by lowercase `owner/name`. */
+type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>;
+
+const searchFields = 'number title url isDraft headRefName baseRefName author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
+const searchPages = 10;
+
+/** Group search hits by repository, in the shape `parsePullRequestList` reads. */
+export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
+  const grouped = new Map<string, { mine: unknown[]; reviewRequested: unknown[] }>();
+  const add = (node: unknown, list: 'mine' | 'reviewRequested'): void => {
+    const record = object(node);
+    const repository = object(record['repository'])['nameWithOwner'];
+    if (typeof repository !== 'string') return;
+    const key = repository.toLowerCase();
+    const entry = grouped.get(key) ?? { mine: [], reviewRequested: [] };
+    entry[list].push({
+      ...record,
+      author: record['author'] ?? { login: 'ghost' },
+      latestReviews: Array.isArray(object(record['latestReviews'] ?? {})['nodes']) ? object(record['latestReviews'])['nodes'] : [],
+    });
+    grouped.set(key, entry);
+  };
+  for (const node of mine) add(node, 'mine');
+  for (const node of reviewRequested) add(node, 'reviewRequested');
+  return new Map([...grouped].map(([key, entry]) => [key, { mine: parsePullRequestList(entry.mine), reviewRequested: parsePullRequestList(entry.reviewRequested) }]));
+}
 
 /** Query pull requests through the user's existing GitHub CLI login. */
 export class GitHubCliProvider implements PullRequestProvider {
+  /** One search per GitHub host serves every repository's PR lists, instead of two `gh pr list` calls each. */
+  static readonly #searches = new Map<string, Promise<SearchResults>>();
   #repository: Promise<{ readonly owner: string; readonly name: string; readonly host: string }> | undefined;
   readonly #ids = new Map<number, Promise<string>>();
 
@@ -119,16 +198,59 @@ export class GitHubCliProvider implements PullRequestProvider {
     return new GitHubCliProvider(await findGitHubCli(workspaceRoot), workspaceRoot);
   }
 
+  /** Search again on the next listing. */
+  static forgetSearches(): void {
+    GitHubCliProvider.#searches.clear();
+  }
+
+  /** Read from git remotes like GitHub CLI does, falling back to `gh repo view` for remotes it cannot parse. */
   async readRepository(): Promise<PullRequestRepository> {
+    const config = await git(this.workspaceRoot, ['config', '--get-regexp', '^remote\\.']).catch(() => '');
+    const remote = pickGitHubRemote(config);
+    if (remote !== undefined) return { name: `${remote.owner}/${remote.name}`, url: `https://${remote.host}/${remote.owner}/${remote.name}` };
     return parseRepository(await this.#json(['repo', 'view', '--json', 'nameWithOwner,url']));
   }
 
   async listMine(): Promise<readonly PullRequestSummary[]> {
-    return parsePullRequestList(await this.#json(['pr', 'list', '--author', '@me', '--limit', listLimit, '--json', listFields]));
+    return (await this.#listed()).mine;
   }
 
   async listReviewRequested(): Promise<readonly PullRequestSummary[]> {
-    return parsePullRequestList(await this.#json(['pr', 'list', '--search', 'review-requested:@me', '--limit', listLimit, '--json', listFields]));
+    return (await this.#listed()).reviewRequested;
+  }
+
+  async #listed(): Promise<{ readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }> {
+    const { owner, name, host } = await this.#repo();
+    const key = `${this.executable}\n${host}`;
+    let search = GitHubCliProvider.#searches.get(key);
+    if (search === undefined) {
+      search = this.#search(host);
+      search.catch(() => { GitHubCliProvider.#searches.delete(key); });
+      GitHubCliProvider.#searches.set(key, search);
+    }
+    return (await search).get(`${owner}/${name}`.toLowerCase()) ?? { mine: [], reviewRequested: [] };
+  }
+
+  async #search(host: string): Promise<SearchResults> {
+    const all = async (query: string): Promise<unknown[]> => {
+      const nodes: unknown[] = [];
+      let after: string | null = null;
+      for (let page = 0; page < searchPages; page += 1) {
+        const data = await this.#graphqlOn(host, `query($query:String!,$after:String){search(query:$query,type:ISSUE,first:100,after:$after){
+          pageInfo{hasNextPage endCursor} nodes{... on PullRequest{${searchFields}}}}}`, { query, after });
+        const result = object(data['search']);
+        if (Array.isArray(result['nodes'])) nodes.push(...(result['nodes'] as unknown[]).filter((node) => typeof node === 'object' && node !== null && 'number' in node));
+        const info = object(result['pageInfo']);
+        if (info['hasNextPage'] !== true || typeof info['endCursor'] !== 'string') break;
+        after = info['endCursor'];
+      }
+      return nodes;
+    };
+    const [mine, reviewRequested] = await Promise.all([
+      all('is:pr is:open author:@me sort:created-desc'),
+      all('is:pr is:open review-requested:@me sort:created-desc'),
+    ]);
+    return groupSearchResults(mine, reviewRequested);
   }
 
   async listFiles(number: number): Promise<readonly PullRequestFile[]> {
@@ -278,7 +400,11 @@ export class GitHubCliProvider implements PullRequestProvider {
   /** Run a GraphQL request for this repository, with the body kept off the command line. */
   async #graphql(query: string, variables: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
     const { owner, name, host } = await this.#repo();
-    const response = object(await this.#json(['api', '--hostname', host, 'graphql', '--input', '-'], JSON.stringify({ query, variables: { owner, name, ...variables } })));
+    return await this.#graphqlOn(host, query, { owner, name, ...variables });
+  }
+
+  async #graphqlOn(host: string, query: string, variables: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+    const response = object(await this.#json(['api', '--hostname', host, 'graphql', '--input', '-'], JSON.stringify({ query, variables })));
     const errors = response['errors'];
     if (Array.isArray(errors) && errors.length > 0) {
       const message = (errors as unknown[]).map((error) => (typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined))

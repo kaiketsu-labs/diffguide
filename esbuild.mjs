@@ -1,3 +1,4 @@
+import { copyFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 
 await build({
@@ -12,3 +13,5 @@ await build({
   sourcemap: true,
   logLevel: 'info'
 });
+
+await copyFile('node_modules/vscode-oniguruma/release/onig.wasm', 'dist/onig.wasm');

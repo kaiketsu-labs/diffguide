@@ -4,16 +4,19 @@ import type { PullRequestFile, PullRequestProvider, PullRequestRepository, PullR
 import type { PullRequestRole } from './worktrees.js';
 
 type Listing =
-  | { readonly kind: 'ready'; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
+  | { readonly kind: 'ready'; readonly folder: string; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
   | { readonly kind: 'failed'; readonly folder: string; readonly message: string };
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
 
 type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary };
 
+type RepositoryNode = { readonly kind: 'repository'; readonly listing: Ready; /** Set when grouped by role: the row then holds only that role's PRs. */ readonly role?: PullRequestRole };
+
 type Node =
-  | { readonly kind: 'repository'; readonly listing: Ready; readonly expanded: boolean }
-  | { readonly kind: 'section'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequests: readonly PullRequestSummary[] }
+  | { readonly kind: 'role'; readonly role: PullRequestRole; readonly listings: readonly Ready[] }
+  | RepositoryNode
+  | { readonly kind: 'section'; readonly listing: Ready; readonly role: PullRequestRole }
   | PullRequestNode
   | FileNode
   | FolderNode
@@ -62,6 +65,12 @@ export function fileTree(files: readonly PullRequestFile[]): FileFolder {
 }
 
 const fileViewKey = 'localReview.fileView';
+const groupByKey = 'localReview.groupBy';
+const hiddenKey = 'localReview.hiddenRepositories';
+const snapshotKey = 'localReview.pullRequestSnapshot';
+
+/** A repository's PR lists from the last load, shown at once while fresh ones load. */
+type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>>;
 
 const fileScheme = 'local-review-pr-file';
 
@@ -126,19 +135,82 @@ const verdicts: Record<ReviewVerdict, { readonly icon: string; readonly color: s
 };
 
 const sectionLabels: Record<PullRequestRole, string> = { author: 'Mine', reviewer: 'Review requested' };
+const roleIcons: Record<PullRequestRole, string> = { author: 'account', reviewer: 'eye' };
+const roles: readonly PullRequestRole[] = ['reviewer', 'author'];
+
+function pullRequestsOf(listing: Ready, role: PullRequestRole): readonly PullRequestSummary[] {
+  return role === 'author' ? listing.mine : listing.reviewRequested;
+}
+
+/** Run at most `count` tasks at once, starting the rest in call order. */
+function limited(count: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async (task) => {
+    if (running < count) running += 1;
+    else await new Promise<void>((resolve) => { waiting.push(resolve); });
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next === undefined) running -= 1;
+      else next();
+    }
+  };
+}
 
 /** List each repository's open pull requests by the user's role in them. */
 class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #changed = new vscode.EventEmitter<undefined>();
   readonly onDidChangeTreeData = this.#changed.event;
-  #listings: Promise<readonly Listing[]> | undefined;
+  #checkouts: Promise<readonly PullRequestCheckout[]> | undefined;
   #listed: readonly PullRequestCheckout[] = [];
+  readonly #listings = new Map<string, Promise<Listing>>();
+  readonly #done = new Map<string, Listing>();
+  #saving: Promise<void> = Promise.resolve();
+  readonly #queue = limited(parallelListings);
   readonly #files = new Map<string, Promise<readonly PullRequestFile[]>>();
 
   constructor(
     private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
     private readonly settings: vscode.Memento,
+    private readonly workspace: vscode.Memento,
+    private readonly describe: (text: string | undefined) => void,
+    private readonly report: (message: string | undefined) => void,
   ) {}
+
+  get byRole(): boolean {
+    return this.settings.get(groupByKey, 'role') === 'role';
+  }
+
+  async setByRole(byRole: boolean): Promise<void> {
+    await this.settings.update(groupByKey, byRole ? 'role' : 'repository');
+    this.#changed.fire(undefined);
+  }
+
+  get #hidden(): ReadonlySet<string> {
+    return new Set(this.workspace.get<readonly string[]>(hiddenKey, []));
+  }
+
+  async hide(node: RepositoryNode): Promise<void> {
+    await this.workspace.update(hiddenKey, [...this.#hidden, node.listing.folder]);
+    this.#changed.fire(undefined);
+  }
+
+  /** Let the user tick the repositories the view lists; unticked ones are not queried. */
+  async chooseRepositories(): Promise<void> {
+    const all = await this.#allCheckouts().catch(() => []);
+    if (all.length === 0) return;
+    const hidden = this.#hidden;
+    const picked = await vscode.window.showQuickPick(
+      all.map((checkout) => ({ label: checkout.folder, picked: !hidden.has(checkout.folder) })),
+      { canPickMany: true, title: 'Repositories to show', placeHolder: 'Type to filter' },
+    );
+    if (picked === undefined) return;
+    const shown = new Set(picked.map((item) => item.label));
+    await this.workspace.update(hiddenKey, all.map((checkout) => checkout.folder).filter((folder) => !shown.has(folder)));
+    this.#changed.fire(undefined);
+  }
 
   get asTree(): boolean {
     return this.settings.get(fileViewKey, 'tree') === 'tree';
@@ -150,7 +222,9 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   }
 
   refresh(): void {
-    this.#listings = undefined;
+    this.#checkouts = undefined;
+    this.#listings.clear();
+    this.#done.clear();
     this.#files.clear();
     for (const checkout of this.#listed) checkout.worktrees.forget();
     this.#changed.fire(undefined);
@@ -162,24 +236,18 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   }
 
   async getChildren(node?: Node): Promise<Node[]> {
-    if (node === undefined) {
-      this.#listings ??= this.#load();
-      const listings = await this.#listings;
-      const single = listings.length === 1;
-      return listings.map((listing): Node => listing.kind === 'failed'
-        ? { kind: 'message', text: single ? listing.message : `${listing.folder}: ${listing.message}`, icon: 'warning' }
-        : { kind: 'repository', listing, expanded: single || listing.mine.length + listing.reviewRequested.length > 0 });
-    }
-    if (node.kind === 'repository') {
-      return [
-        { kind: 'section', listing: node.listing, role: 'author', pullRequests: node.listing.mine },
-        { kind: 'section', listing: node.listing, role: 'reviewer', pullRequests: node.listing.reviewRequested },
-      ];
-    }
-    if (node.kind === 'section') {
-      return node.pullRequests.length === 0
+    if (node === undefined) return await this.#rootChildren();
+    if (node.kind === 'role') {
+      return node.listings.length === 0
         ? [{ kind: 'message', text: 'No open PRs', icon: 'check' }]
-        : node.pullRequests.map((pullRequest) => ({ kind: 'pullRequest', listing: node.listing, role: node.role, pullRequest }));
+        : node.listings.map((listing) => ({ kind: 'repository', listing, role: node.role }));
+    }
+    if (node.kind === 'repository' && node.role === undefined) {
+      return roles.filter((role) => pullRequestsOf(node.listing, role).length > 0).map((role) => ({ kind: 'section', listing: node.listing, role }));
+    }
+    if (node.kind === 'repository' || node.kind === 'section') {
+      const role = node.role as PullRequestRole;
+      return pullRequestsOf(node.listing, role).map((pullRequest) => ({ kind: 'pullRequest', listing: node.listing, role, pullRequest }));
     }
     if (node.kind === 'folder') return this.#folderChildren(node.parent, node.folder);
     if (node.kind === 'pullRequest') {
@@ -197,14 +265,27 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
   async getTreeItem(node: Node): Promise<vscode.TreeItem> {
     switch (node.kind) {
+      case 'role': {
+        const item = new vscode.TreeItem(sectionLabels[node.role].toUpperCase(), vscode.TreeItemCollapsibleState.Expanded);
+        item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
+        item.description = String(node.listings.reduce((sum, listing) => sum + pullRequestsOf(listing, node.role).length, 0));
+        return item;
+      }
       case 'repository': {
-        const item = new vscode.TreeItem(node.listing.repository.name, node.expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
+        const { listing, role } = node;
+        const item = new vscode.TreeItem(listing.repository.name, vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon('repo');
+        item.description = role === undefined
+          ? roles.filter((each) => pullRequestsOf(listing, each).length > 0).map((each) => `${pullRequestsOf(listing, each).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
+          : String(pullRequestsOf(listing, role).length);
+        item.tooltip = listing.folder;
+        item.contextValue = 'localReview.repository';
         return item;
       }
       case 'section': {
         const item = new vscode.TreeItem(sectionLabels[node.role], vscode.TreeItemCollapsibleState.Expanded);
-        item.description = String(node.pullRequests.length);
+        item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
+        item.description = String(pullRequestsOf(node.listing, node.role).length);
         return item;
       }
       case 'pullRequest': {
@@ -288,23 +369,84 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     return `${reviewed.size}/${files.length} reviewed`;
   }
 
-  async #load(): Promise<readonly Listing[]> {
+  async #rootChildren(): Promise<Node[]> {
+    let all: readonly PullRequestCheckout[];
     try {
-      this.#listed = await this.checkouts();
+      all = await this.#allCheckouts();
     } catch (error: unknown) {
-      return [{ kind: 'failed', folder: '', message: error instanceof Error ? error.message : String(error) }];
+      this.describe(undefined);
+      return [{ kind: 'message', text: error instanceof Error ? error.message : String(error), icon: 'warning' }];
     }
-    const checkouts = this.#listed;
-    const listings: Listing[] = [];
-    let next = 0;
-    const work = async (): Promise<void> => {
-      for (let index = next++; index < checkouts.length; index = next++) {
-        const checkout = checkouts[index];
-        if (checkout !== undefined) listings[index] = await this.#loadOne(checkout);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(parallelListings, checkouts.length) }, work));
-    return listings;
+    const hidden = this.#hidden;
+    const shown = all.filter((checkout) => !hidden.has(checkout.folder));
+    this.describe(shown.length < all.length ? `${all.length - shown.length} hidden` : undefined);
+    if (shown.length === 0 && all.length > 0) return [{ kind: 'message', text: 'All repositories are hidden', icon: 'eye-closed' }];
+    const loading = Promise.all(shown.map((checkout) => this.#listingOf(checkout)));
+    let listings: readonly Listing[];
+    const cached = shown.every((checkout) => this.#done.has(checkout.folder)) ? undefined : await this.#cachedListings(shown);
+    if (cached === undefined) {
+      listings = await loading;
+      this.report(undefined);
+    } else {
+      listings = cached;
+      this.report('Updating pull requests...');
+      void loading.then(() => { this.#changed.fire(undefined); });
+    }
+    const failed = listings.flatMap((listing): Node[] => listing.kind === 'failed'
+      ? [{ kind: 'message', text: shown.length === 1 ? listing.message : `${listing.folder}: ${listing.message}`, icon: 'warning' }]
+      : []);
+    const ready = listings.filter((listing): listing is Ready => listing.kind === 'ready');
+    if (ready.length === 0) return failed;
+    if (this.byRole) {
+      return [...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => pullRequestsOf(listing, role).length > 0) })), ...failed];
+    }
+    const withPullRequests = ready.filter((listing) => listing.mine.length + listing.reviewRequested.length > 0);
+    return [
+      ...withPullRequests.length === 0 ? [{ kind: 'message', text: 'No open PRs', icon: 'check' } as const] : [],
+      ...withPullRequests.map((listing): Node => ({ kind: 'repository', listing })),
+      ...failed,
+    ];
+  }
+
+  #allCheckouts(): Promise<readonly PullRequestCheckout[]> {
+    this.#checkouts ??= this.checkouts().then((all) => { this.#listed = all; return all; });
+    return this.#checkouts;
+  }
+
+  #listingOf(checkout: PullRequestCheckout): Promise<Listing> {
+    let listing = this.#listings.get(checkout.folder);
+    if (listing === undefined) {
+      const loaded = listing = this.#queue(() => this.#loadOne(checkout));
+      this.#listings.set(checkout.folder, loaded);
+      void loaded.then((done) => {
+        if (this.#listings.get(checkout.folder) !== loaded) return;
+        this.#done.set(checkout.folder, done);
+        this.#saving = this.#saving.then(() => this.#remember(done), () => this.#remember(done));
+      });
+    }
+    return listing;
+  }
+
+  /** Last load's lists for repositories still loading, or undefined when there is nothing saved to show. */
+  async #cachedListings(shown: readonly PullRequestCheckout[]): Promise<readonly Listing[] | undefined> {
+    const snapshot = this.workspace.get<Snapshot>(snapshotKey, {});
+    if (!shown.some((checkout) => Object.hasOwn(snapshot, checkout.folder) && !this.#done.has(checkout.folder))) return undefined;
+    const listings = await Promise.all(shown.map(async (checkout): Promise<Listing | undefined> => {
+      const done = this.#done.get(checkout.folder);
+      if (done !== undefined) return done;
+      const saved = Object.hasOwn(snapshot, checkout.folder) ? snapshot[checkout.folder] : undefined;
+      if (saved === undefined) return undefined;
+      const provider = await checkout.connect().catch(() => undefined);
+      return provider === undefined ? undefined : { kind: 'ready', folder: checkout.folder, provider, worktrees: checkout.worktrees, ...saved };
+    }));
+    return listings.filter((listing): listing is Listing => listing !== undefined);
+  }
+
+  async #remember(listing: Listing): Promise<void> {
+    const snapshot = { ...this.workspace.get<Snapshot>(snapshotKey, {}) };
+    if (listing.kind === 'ready') snapshot[listing.folder] = { repository: listing.repository, mine: listing.mine, reviewRequested: listing.reviewRequested };
+    else delete snapshot[listing.folder];
+    await this.workspace.update(snapshotKey, snapshot);
   }
 
   async #loadOne({ folder, connect, worktrees }: PullRequestCheckout): Promise<Listing> {
@@ -313,7 +455,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       const [repository, mine, reviewRequested] = await Promise.all([
         provider.readRepository(), provider.listMine(), provider.listReviewRequested(),
       ]);
-      return { kind: 'ready', provider, worktrees, repository, mine, reviewRequested };
+      return { kind: 'ready', folder, provider, worktrees, repository, mine, reviewRequested };
     } catch (error: unknown) {
       return { kind: 'failed', folder, message: error instanceof Error ? error.message : String(error) };
     }
@@ -322,10 +464,14 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
 /** Register the pull request sidebar and its commands. */
 export function registerPullRequestView(
-  checkouts: () => Promise<readonly PullRequestCheckout[]>, onDidChangeStatus: vscode.Event<unknown>, settings: vscode.Memento,
+  checkouts: () => Promise<readonly PullRequestCheckout[]>, onDidChangeStatus: vscode.Event<unknown>, settings: vscode.Memento, workspace: vscode.Memento,
 ): vscode.Disposable {
-  const tree = new PullRequestTree(checkouts, settings);
-  const showMode = (): void => { void vscode.commands.executeCommand('setContext', 'localReview.filesAsTree', tree.asTree); };
+  const tree = new PullRequestTree(checkouts, settings, workspace,
+    (text) => { view.description = text ?? ''; }, (message) => { view.message = message ?? ''; });
+  const showMode = (): void => {
+    void vscode.commands.executeCommand('setContext', 'localReview.filesAsTree', tree.asTree);
+    void vscode.commands.executeCommand('setContext', 'localReview.groupByRole', tree.byRole);
+  };
   showMode();
   const report = (error: unknown): void => {
     void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
@@ -346,6 +492,12 @@ export function registerPullRequestView(
     vscode.commands.registerCommand('localReview.refreshPullRequests', () => { tree.refresh(); }),
     vscode.commands.registerCommand('localReview.viewFilesAsTree', async () => { await tree.setAsTree(true); showMode(); }),
     vscode.commands.registerCommand('localReview.viewFilesAsList', async () => { await tree.setAsTree(false); showMode(); }),
+    vscode.commands.registerCommand('localReview.groupByRole', async () => { await tree.setByRole(true); showMode(); }),
+    vscode.commands.registerCommand('localReview.groupByRepository', async () => { await tree.setByRole(false); showMode(); }),
+    vscode.commands.registerCommand('localReview.chooseRepositories', async () => { await tree.chooseRepositories(); }),
+    vscode.commands.registerCommand('localReview.hideRepository', async (node: unknown) => {
+      if (isRepositoryNode(node)) await tree.hide(node);
+    }),
     vscode.commands.registerCommand('localReview.openPullRequestInBrowser', async (node: unknown) => {
       if (isPullRequestNode(node)) await vscode.env.openExternal(vscode.Uri.parse(node.pullRequest.url));
     }),
@@ -396,6 +548,11 @@ export function registerPullRequestView(
       tree.redraw();
     }),
   );
+}
+
+function isRepositoryNode(value: unknown): value is RepositoryNode {
+  return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'repository'
+    && typeof (value as { listing?: { folder?: unknown } }).listing?.folder === 'string';
 }
 
 /** Accept only tree nodes this view created; command arguments are otherwise untrusted. */

@@ -1,4 +1,5 @@
-import { isAbsolute, relative, sep } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import type { FileReviews } from './reviewedFiles.js';
 import type { PullRequestProvider } from './pullRequests.js';
@@ -126,28 +127,20 @@ function isNested(workspaceRoot: string, root: string): boolean {
   return inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) && !inside.split(sep).includes('.git');
 }
 
-/** Root folders of the Git repositories VS Code's Git extension opened, once its first scan is done. */
-export async function gitRepositoryRoots(): Promise<readonly string[]> {
-  const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
-  if (extension === undefined || !vscode.workspace.getConfiguration('git').get('enabled', true)) return [];
-  const git = (extension.isActive ? extension.exports : await extension.activate()).getAPI(1);
-  if (git.state !== 'initialized') {
-    await new Promise<void>((resolve) => {
-      const listener = git.onDidChangeState((state) => {
-        if (state !== 'initialized') return;
-        listener.dispose();
-        resolve();
-      });
-    });
-  }
-  return git.repositories.map((repository) => repository.rootUri.fsPath);
-}
-
-/** The part of VS Code's Git extension API used here. */
-interface GitExtension {
-  getAPI(version: 1): {
-    readonly state: 'uninitialized' | 'initialized';
-    readonly onDidChangeState: vscode.Event<'uninitialized' | 'initialized'>;
-    readonly repositories: readonly { readonly rootUri: vscode.Uri }[];
+/** Git repositories inside the workspace folder, found like VS Code's Git extension does but without waiting for its full scan. */
+export async function nestedRepositoryRoots(workspaceRoot: string): Promise<readonly string[]> {
+  const git = vscode.workspace.getConfiguration('git');
+  if (!git.get('enabled', true)) return [];
+  const maxDepth = git.get<number>('repositoryScanMaxDepth', 1);
+  const ignored = new Set(git.get<readonly string[]>('repositoryScanIgnoredFolders', ['node_modules']));
+  const found: string[] = [];
+  const scan = async (folder: string, depth: number): Promise<void> => {
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+    if (folder !== workspaceRoot && entries.some((entry) => entry.name === '.git')) found.push(folder);
+    if (maxDepth >= 0 && depth >= maxDepth) return;
+    await Promise.all(entries.filter((entry) => entry.isDirectory() && entry.name !== '.git' && !ignored.has(entry.name))
+      .map((entry) => scan(join(folder, entry.name), depth + 1)));
   };
+  await scan(workspaceRoot, 0);
+  return found;
 }

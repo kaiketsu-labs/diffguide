@@ -92,6 +92,8 @@ export interface OverviewActions {
   readPreview(path: string): Promise<FilePreview>;
   /** Definition of the name at a position in a PR file, or in an earlier definition result. */
   findDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<DefinitionPeek | undefined>;
+  /** Whether the name at a position has a definition, to underline it while Cmd or Ctrl is held. */
+  hasDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<boolean>;
   openDefinition(peek: string): Promise<void>;
   setViewed(path: string, viewed: boolean): Promise<void>;
   openInEditor(path: string): Promise<void>;
@@ -181,6 +183,10 @@ export async function showPullRequestOverview(
         else if (action === 'definition' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0) {
           const found = await actions.findDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number);
           post(found === undefined ? { error: 'No definition found here. VS Code needs a language extension for this file type.' } : { definition: found });
+        } else if (action === 'probe' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0
+          && typeof id === 'string' && id.length <= 400) {
+          const found = await actions.hasDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number).catch(() => false);
+          post({ probe: { id, found } });
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
         else if (action === 'log') actions.showLog();
         else if (action === 'retry') actions.retry();
@@ -230,7 +236,7 @@ export function overviewHtml(state: OverviewState, claudeIcon = ''): string {
 <title>Review</title>
 <style nonce="${nonce}">
 ${webviewFontStyles}
-${codePreviewStyles}
+${codePreviewStyles()}
 :root{--border:var(--vscode-panel-border,var(--vscode-widget-border,rgba(128,128,128,.35)));--local:var(--vscode-charts-orange,#d18616);--github:var(--vscode-charts-blue,#3794ff)}
 body{margin:0;padding:20px 24px 48px;color:var(--vscode-foreground);background:var(--vscode-editor-background);font-family:var(--review-font-ui);font-size:var(--vscode-font-size);line-height:1.5}
 h1{font-size:18px;font-weight:600;margin:0;overflow-wrap:anywhere}
@@ -277,16 +283,18 @@ table{border-collapse:collapse;width:100%;table-layout:fixed;font-family:var(--v
 col.num{width:52px}td{vertical-align:top;padding:0}
 td.num{text-align:right;padding:0 8px;color:var(--vscode-editorLineNumber-foreground);user-select:none}
 td.code{white-space:pre-wrap;word-break:break-all;padding:0 10px 0 18px;text-indent:-10px}
-td.code::before{display:inline-block;width:10px;color:var(--vscode-descriptionForeground)}
+td.code::before{content:'';display:inline-block;width:10px;color:var(--vscode-descriptionForeground)}
 tr.add td.code::before{content:'+'}tr.del td.code::before{content:'-'}td.code.add::before{content:'+'}td.code.del::before{content:'-'}
 tr.add td,td.add{background:var(--vscode-diffEditor-insertedLineBackground,rgba(46,160,67,.18))}
 tr.del td,td.del{background:var(--vscode-diffEditor-removedLineBackground,rgba(248,81,73,.18))}
 td.empty{background:rgba(128,128,128,.08)}
 tr.hunk td{padding:2px 10px;color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.1);font-size:11px}
 .expand{display:inline-flex;gap:2px;margin-right:10px}.expand button{padding:0 8px;font-size:11px;line-height:1.6}
-body.peeking td.code[data-line]{cursor:pointer}
+td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground));text-decoration:underline}
+::highlight(lr-name){background-color:var(--vscode-editor-wordHighlightStrongBackground,rgba(255,213,0,.3))}
 #peek{position:fixed;top:0;right:0;bottom:0;z-index:6;width:min(560px,92vw);display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--vscode-editorWidget-background,var(--vscode-editor-background,Canvas));box-shadow:-6px 0 16px rgba(0,0,0,.25)}
 #peek[hidden]{display:none}.peek-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}.peek-head .where{flex:1;overflow-wrap:anywhere}
+.peek-head button{display:inline-flex;align-items:center;gap:5px;padding:3px 6px}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 #peek-code{flex:1;overflow:auto}tr.focus td{background:var(--vscode-editor-rangeHighlightBackground,rgba(255,213,0,.12))}
 .note{padding:10px 14px}
 .preview.md{padding:8px 20px 12px;font-family:var(--review-font-ui);line-height:1.6;overflow-wrap:anywhere}
@@ -332,8 +340,12 @@ tr.inline>td{padding:6px 10px 8px}
 <div class="row"><span id="subtitle" class="muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div class="row status"><div class="row" id="reviewed"></div><span id="claude"></span><a id="log">Show log</a><button id="retry">Retry</button></div>
 <p id="error" role="alert"></p>
-<aside id="peek" hidden aria-label="Definition"><div class="peek-head"><button id="peek-back" title="Previous definition">Back</button><span id="peek-title" class="where"></span>
-<button id="peek-open">Open in editor</button><button id="peek-close" aria-label="Close">Close</button></div><div id="peek-code"></div></aside>
+<aside id="peek" hidden aria-label="Definition"><div class="peek-head">
+<button id="peek-back" title="Back" aria-label="Back"><svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg></button>
+<button id="peek-forward" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></svg></button>
+<span id="peek-title" class="where"></span>
+<button id="peek-open" title="Open in editor"><svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 10v3.5H2.5V4H6"/></svg>Open in editor</button>
+<button id="peek-close" title="Close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div><div id="peek-code"></div></aside>
 <div class="layout">
 <div class="main-col">
 <section class="card"><h3>Description</h3><div id="body"></div></section>
@@ -402,7 +414,7 @@ const claudeIcon=${JSON.stringify(claudeIcon).replaceAll('<', '\\u003c')};
 let composer=saved.composer;
 const replies=new Map(Object.entries(saved.replies||{}));
 const sending=new Set();const threadOpen=new Map();let focusNext;let sentPending=true;
-const contextLines=new Map();const expanded=new Map();const loading=new Set();const step=20;const peeks=[];
+const contextLines=new Map();const expanded=new Map();const loading=new Set();const step=20;const peeks=[];let peekAt=-1;
 const reviewButtons=[...document.querySelectorAll('[data-event]')];
 const labels={approved:['✓','ok','Approved'],changes:['✗','bad','Requested changes'],commented:['●','muted','Commented'],dismissed:['○','muted','Dismissed'],requested:['○','wait','Review requested'],
   success:['✓','ok','Passed'],failure:['✗','bad','Failed'],pending:['●','wait','Running'],neutral:['○','muted','Skipped']};
@@ -720,21 +732,48 @@ $('error').addEventListener('click',()=>{$('error').textContent='';});
 function columnAt(cell,event){const range=document.caretRangeFromPoint(event.clientX,event.clientY);if(!range||!cell.contains(range.startContainer))return undefined;
   const walker=document.createTreeWalker(cell,NodeFilter.SHOW_TEXT);let offset=0;let node;
   while((node=walker.nextNode())){if(node===range.startContainer)return offset+range.startOffset;offset+=node.textContent.length;}return undefined;}
+function textRange(cell,start,end){const range=document.createRange();const walker=document.createTreeWalker(cell,NodeFilter.SHOW_TEXT);let offset=0;let node;let begun=false;
+  while((node=walker.nextNode())){const length=node.textContent.length;
+    if(!begun&&start<=offset+length){range.setStart(node,start-offset);begun=true;}
+    if(begun&&end<=offset+length){range.setEnd(node,end-offset);return range;}offset+=length;}return undefined;}
+function wordAt(cell,column){const text=cell.textContent;const word=/[\\p{L}\\p{N}_$]/u;if(column>=text.length||!word.test(text[column]))return undefined;
+  let start=column;let end=column;while(start>0&&word.test(text[start-1]))start-=1;while(end<text.length&&word.test(text[end]))end+=1;return {start,end};}
+function lookupTarget(cell){const peekId=cell.closest('#peek')?peeks[peekAt]&&peeks[peekAt].id:undefined;const fileBox=cell.closest('.file');
+  return peekId?{peek:peekId}:fileBox?{path:fileBox.dataset.path}:undefined;}
+const probes=new Map();let hovered;let pointer;let probeTimer;
+function setHighlight(name,range){if(!window.CSS||!CSS.highlights)return;if(range)CSS.highlights.set(name,new Highlight(range));else CSS.highlights.delete(name);}
+function showLink(){document.querySelectorAll('td.code.linked').forEach((cell)=>cell.classList.remove('linked'));
+  if(!hovered||probes.get(hovered.id)!==true){setHighlight('lr-link');return;}
+  hovered.cell.classList.add('linked');setHighlight('lr-link',textRange(hovered.cell,hovered.start,hovered.end));}
+function probeAt(event){clearTimeout(probeTimer);hovered=undefined;
+  const cell=event.target&&event.target.closest&&event.target.closest('td.code[data-line]');const target=cell&&lookupTarget(cell);
+  const column=cell?columnAt(cell,event):undefined;const word=column===undefined?undefined:wordAt(cell,column);
+  if(!target||!word){showLink();return;}
+  const id=JSON.stringify([target.peek||target.path,cell.dataset.line,word.start]);hovered={id,cell,start:word.start,end:word.end};showLink();
+  if(probes.has(id))return;
+  probeTimer=setTimeout(()=>{probes.set(id,'pending');api.postMessage({action:'probe',id,...target,line:Number(cell.dataset.line),column:word.start});},60);}
+document.addEventListener('mousemove',(event)=>{pointer=event;if(event.metaKey||event.ctrlKey)probeAt(event);else if(hovered){hovered=undefined;showLink();}});
 document.addEventListener('click',(event)=>{if(!(event.metaKey||event.ctrlKey))return;const cell=event.target.closest&&event.target.closest('td.code[data-line]');if(!cell)return;
-  const column=columnAt(cell,event);if(column===undefined)return;event.preventDefault();$('error').textContent='';
-  const peekId=cell.closest('#peek')?peeks.at(-1).id:undefined;const fileBox=cell.closest('.file');
-  api.postMessage(peekId?{action:'definition',peek:peekId,line:Number(cell.dataset.line),column}:{action:'definition',path:fileBox&&fileBox.dataset.path,line:Number(cell.dataset.line),column});});
-for(const type of ['keydown','keyup'])window.addEventListener(type,(event)=>document.body.classList.toggle('peeking',event.metaKey||event.ctrlKey));
-window.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&peeks.length&&!(event.target instanceof HTMLTextAreaElement)){peeks.length=0;renderPeek();}});
-function renderPeek(){const panel=$('peek');panel.hidden=!peeks.length;if(!peeks.length)return;const peek=peeks.at(-1);
-  $('peek-title').textContent=peek.location;$('peek-back').hidden=peeks.length<2;
-  const body=el('table');const columns=el('colgroup');columns.append(el('col','num'),el('col'));body.append(columns);
+  const column=columnAt(cell,event);const target=lookupTarget(cell);if(column===undefined||!target)return;event.preventDefault();$('error').textContent='';
+  api.postMessage({action:'definition',...target,line:Number(cell.dataset.line),column});});
+for(const type of ['keydown','keyup'])window.addEventListener(type,(event)=>{const held=event.metaKey||event.ctrlKey;document.body.classList.toggle('peeking',held);
+  if(held&&pointer)probeAt(pointer);else if(!held){clearTimeout(probeTimer);hovered=undefined;showLink();}});
+window.addEventListener('blur',()=>{hovered=undefined;showLink();});
+function closePeek(){peeks.length=0;peekAt=-1;renderPeek();}
+window.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&peeks.length&&!(event.target instanceof HTMLTextAreaElement))closePeek();});
+function renderPeek(){const panel=$('peek');panel.hidden=peekAt<0;setHighlight('lr-name');if(peekAt<0)return;const peek=peeks[peekAt];
+  $('peek-title').textContent=peek.location;$('peek-back').disabled=peekAt<1;$('peek-forward').disabled=peekAt>=peeks.length-1;
+  const body=el('table');const columns=el('colgroup');columns.append(el('col','num'),el('col'));body.append(columns);let nameCell;
   peek.lines.forEach((html,index)=>{const line=peek.startLine+index;const row=el('tr',line>=peek.focus.start&&line<=peek.focus.end?'focus':'');
-    const cell=el('td','code');cell.innerHTML=html;cell.dataset.line=String(line);row.append(el('td','num',String(line)),cell);body.append(row);});
-  $('peek-code').replaceChildren(body);const first=body.querySelector('tr.focus');if(first)first.scrollIntoView({block:'nearest'});}
-$('peek-close').addEventListener('click',()=>{peeks.length=0;renderPeek();});
-$('peek-back').addEventListener('click',()=>{peeks.pop();renderPeek();});
-$('peek-open').addEventListener('click',()=>{const peek=peeks.at(-1);if(peek)api.postMessage({action:'open-definition',peek:peek.id});});
+    const cell=el('td','code');cell.innerHTML=html;cell.dataset.line=String(line);row.append(el('td','num',String(line)),cell);body.append(row);
+    if(peek.name&&peek.name.line===line)nameCell=cell;});
+  const code=$('peek-code');code.replaceChildren(body);
+  if(nameCell)setHighlight('lr-name',textRange(nameCell,peek.name.start,peek.name.end));
+  const first=body.querySelector('tr.focus');if(first)code.scrollTop=Math.max(0,first.getBoundingClientRect().top-code.getBoundingClientRect().top-3*first.offsetHeight);}
+$('peek-close').addEventListener('click',closePeek);
+$('peek-back').addEventListener('click',()=>{if(peekAt>0){peekAt-=1;renderPeek();}});
+$('peek-forward').addEventListener('click',()=>{if(peekAt<peeks.length-1){peekAt+=1;renderPeek();}});
+$('peek-open').addEventListener('click',()=>{const peek=peeks[peekAt];if(peek)api.postMessage({action:'open-definition',peek:peek.id});});
 $('unified').addEventListener('click',()=>{layout='unified';save();renderFiles();});
 $('split').addEventListener('click',()=>{layout='split';save();renderFiles();});
 $('collapse').addEventListener('click',()=>{for(const file of files||[])collapsed.set(file.path,true);save();renderFiles();});
@@ -749,7 +788,8 @@ window.addEventListener('message',(event)=>{const data=event.data;
   if(data.files){files=data.files;contextLines.clear();loading.clear();renderFiles();}
   if(data.preview){previews.set(data.preview.path,data.preview);loading.delete('preview:'+data.preview.path);renderFiles();}
   if(data.context){contextLines.set(data.context.path,data.context.lines);loading.delete(data.context.path);renderFiles();}
-  if(data.definition){peeks.push(data.definition);renderPeek();}
+  if(data.definition){peeks.length=peekAt+1;peeks.push(data.definition);peekAt=peeks.length-1;renderPeek();}
+  if(data.probe){probes.set(data.probe.id,data.probe.found);showLink();}
   if(data.reveal&&files){collapsed.set(data.reveal,false);save();renderFiles();const target=document.querySelector('[data-path="'+CSS.escape(data.reveal)+'"]');if(target)target.scrollIntoView({block:'start'});}
   if(data.filesError)$('files').replaceChildren(el('p','bad','Could not read the changes: '+data.filesError));
   if(data.error){loading.clear();$('error').textContent=String(data.error);if(data.form&&sending.delete(data.form))renderFiles();}
