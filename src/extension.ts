@@ -20,10 +20,12 @@ import { buildOverviewState, showPullRequestOverview, type PageComment } from '.
 import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
 import { openPullRequestFile, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
-import { Checkouts, gitRepositoryRoots, type Checkout } from './checkouts.js';
+import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
 import { getHeadRevision, readGitBase } from './git.js';
 import { anchorFromText } from './anchors.js';
+import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
+import { editorHighlighter } from './textMate.js';
 import { placeComment } from './pullRequestComments.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
 
@@ -36,9 +38,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (folder === undefined || folder.uri.scheme !== 'file' || !vscode.workspace.isTrusted) return;
   const root = folder.uri.fsPath;
+  let themeLoads = 0;
+  const loadHighlighter = (): void => {
+    const load = ++themeLoads;
+    void editorHighlighter(context.asAbsolutePath(join('dist', 'onig.wasm'))).catch(() => undefined).then((highlighter) => {
+      if (load === themeLoads) useEditorHighlighter(highlighter);
+    });
+  };
+  loadHighlighter();
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveColorTheme(loadHighlighter),
+    vscode.extensions.onDidChange(loadHighlighter),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('editor.tokenColorCustomizations') || event.affectsConfiguration('workbench.colorTheme')) loadHighlighter();
+    }),
+  );
   const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('localReview').get('mockPullRequests', false);
   const checkouts = new Checkouts(root, context.globalStorageUri.fsPath, {
-    discover: async () => mockPullRequests() ? [] : await gitRepositoryRoots(),
+    discover: async () => mockPullRequests() ? [] : await nestedRepositoryRoots(root),
     create: (checkoutRoot, storageRoot) => {
       const connect = async (): Promise<PullRequestProvider> => mockPullRequests() ? mockPullRequestProvider : await GitHubCliProvider.connect(checkoutRoot);
       return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect), fileReviews: new FileReviews(storageRoot) };
@@ -115,7 +132,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         readFiles,
         readContext: async (path) => {
           if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
-          return highlightSource(await readFile(join(folder, path), 'utf8'), path);
+          const text = await readFile(join(folder, path), 'utf8');
+          await prepareHighlighting([path]);
+          return highlightSource(text, path);
         },
         readPreview: async (path) => {
           if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
@@ -126,6 +145,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if ('peek' in at) return definitions.find(definitions.location(at.peek).uri, line, column);
           if (!diffPaths.includes(at.path)) throw new Error(`${at.path} is not part of this PR's changes.`);
           return definitions.find(vscode.Uri.file(join(folder, at.path)), line, column);
+        },
+        hasDefinition: async (at, line, column) => {
+          if ('peek' in at) return definitions.has(definitions.location(at.peek).uri, line, column);
+          if (!diffPaths.includes(at.path)) return false;
+          return definitions.has(vscode.Uri.file(join(folder, at.path)), line, column);
         },
         openDefinition: async (peek) => {
           const { uri, range } = definitions.location(peek);
@@ -196,11 +220,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
-        forget: () => { fileReviews.forget(); },
+        forget: () => { fileReviews.forget(); GitHubCliProvider.forgetSearches(); },
         showOverview: (provider, repository, pullRequest, role) => showOverview(checkout, provider, repository, pullRequest, role),
       };
     };
-    await createReviewController(store, context, getHeadRevision, checkouts);
     context.subscriptions.push(
       registerPullRequestView(
         async () => (await checkouts.list()).map((checkout) => ({
@@ -208,12 +231,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         })),
         (listener) => vscode.Disposable.from(checkouts.onDidChangeState(listener), checkouts.onDidChangeReviewedFiles(listener)),
         context.globalState,
+        context.workspaceState,
       ),
       reportClaudeFailures(checkouts),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('localReview.mockPullRequests')) void vscode.commands.executeCommand('localReview.refreshPullRequests');
       }),
     );
+    await createReviewController(store, context, getHeadRevision, checkouts);
     context.subscriptions.push(registerReviewAppearance(context));
     context.subscriptions.push(registerPrExport(context, store));
     const bridge = await createReviewBridge(store, join(storage.fsPath, 'selected-session.json'));

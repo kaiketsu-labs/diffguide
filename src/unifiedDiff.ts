@@ -1,4 +1,4 @@
-import { codePreviewHtml } from './codePreview.js';
+import { codePreviewHtml, prepareHighlighting } from './codePreview.js';
 import { git } from './worktrees.js';
 
 export interface DiffLine {
@@ -31,6 +31,7 @@ interface RawFile { path: string; oldPath?: string; change: FileDiff['change']; 
 export async function readPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
   const output = await git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv',
     '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3', base, '--']);
+  await prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
   return parseUnifiedDiff(output);
 }
 

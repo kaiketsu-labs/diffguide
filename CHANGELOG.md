@@ -3,7 +3,11 @@
 ## Unreleased
 
 - Clicking an element in an HTML preview to comment keeps the page where it is instead of jumping to the top of the file.
-- The PR sidebar lists every Git repository inside the workspace folder, such as a folder of service repositories. Repositories with open PRs start expanded, the rest collapsed. A repository whose PRs cannot be loaded shows its error on one row without hiding the others.
+- The PR sidebar lists every Git repository inside the workspace folder, such as a folder of service repositories. Repositories without open PRs are left out. A repository whose PRs cannot be loaded shows its error on one row without hiding the others.
+- The PR sidebar groups by role by default: Review requested and Mine on top, repositories under them. Switch to Group by repository in the view's ... menu. Role and repository rows have their own icons and PR counts.
+- The PR sidebar loads much faster with many repositories: two GitHub searches list the PRs of every repository at once, instead of two `gh pr list` calls per repository, and repository names come from git remotes instead of `gh repo view`. The lists from the last load show right away while fresh ones load.
+- The PR sidebar fills as soon as it opens: Local Review starts when the view is shown, registers the view before its other setup, and finds nested repositories by scanning the workspace folder (honoring `git.repositoryScanMaxDepth` and `git.repositoryScanIgnoredFolders`) instead of waiting for the Git extension's scan.
+- Choose repositories... in the PR sidebar's ... menu picks which repositories it lists, and Hide repository on a repository's right-click menu hides one. Hidden repositories are not queried, the choice is kept per workspace, and the view title shows how many are hidden.
 - Support Node.js 20, the runtime SageMaker Code Editor uses for extensions and Claude hooks. Node.js 22 is no longer required.
 - The PR overview became a review page: overview cards on top, every changed file below with syntax colors, a unified or split layout, a Viewed checkbox that collapses the file, and Open in editor for the native diff.
 - Comment on the review page: click a line number, Shift-click to extend the range, and send a question or change request to Claude. Threads show inline under their lines with your messages, Claude's answers and status, plus Reply, Resolve and Publish to GitHub. Drafts survive redraws and reloads. Comments on lines the diff hides appear at the top of their file.
@@ -12,6 +16,10 @@
 - Clicking a PR or file in the sidebar opens the review page, scrolled to that file. The old all-files diff tab, its Viewed and unified/split buttons, and the proposed API they needed are gone.
 - The review page has GitHub-style context: expand 20 lines up or down around each change, or Full file per file. Cmd/Ctrl-click a name to see its definition in a side panel, with Back, Open in editor and Escape to close.
 - Claude's answers render as Markdown, GitHub comments as GitHub renders them. Pending GitHub comments are marked as only visible to you, and Post now is off while your review is in progress, since GitHub refuses single comments then.
+- Code on the review page uses the same grammars and color theme as the editor, including grammars from installed language extensions and `editor.tokenColorCustomizations`. Files without an installed grammar, and a theme that is not plain JSON, fall back to the built-in colors.
+- The definition panel shows up to 100 lines above and 400 below the definition to scroll through, marks the defined name, keeps strings and comments colored when the definition starts inside one, and has icon buttons for Back, Forward, Open in editor and Close.
+- Holding Cmd or Ctrl on the review page underlines a name only when VS Code knows its definition.
+- Added and removed lines on the review page line up with unchanged lines; the + or - sign no longer pushes the code to the right.
 - GitHub comments show the author's profile picture and a Pending badge per comment, like GitHub. Code blocks in comments have their own background and border.
 - Opening a PR no longer fails when its branch is checked out in another worktree. The review worktree now checks out the PR detached.
 - Drag across line numbers to comment on several lines. Once you expand all hidden lines between two changes, the `@@` header between them goes away.

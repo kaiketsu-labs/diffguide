@@ -3,6 +3,7 @@
 !README.md
 !CHANGELOG.md
 !dist/*.cjs
+!dist/onig.wasm
 !resources/icon.png
 !resources/review.svg
 !resources/reviewer.svg

@@ -95,8 +95,8 @@ function safeMarkup(html: string, code: string): boolean {
       depth -= 1;
       if (depth < 0) return false;
     } else if (part.startsWith('<')) {
-      const classes = /^<span class="([a-z_ -]+)">$/u.exec(part)?.[1]?.split(' ');
-      if (classes === undefined || classes.some((token) => !tokenClasses.has(token))) return false;
+      const classes = /^<span class="([a-z0-9_ -]+)">$/u.exec(part)?.[1]?.split(' ');
+      if (classes === undefined || classes.some((token) => !tokenClasses.has(token) && !/^tm-(?:[0-9a-f]{6}|[0-9a-f]{8}|[ibu])$/u.test(token))) return false;
       depth += 1;
     } else {
       if (part.replace(/&(?:amp|lt|gt|quot|#x27);/gu, '').includes('&')) return false;
@@ -106,8 +106,33 @@ function safeMarkup(html: string, code: string): boolean {
   return offset === html.length && depth === 0 && source === code;
 }
 
+/** Colors code the way the editor does; highlight.js covers files it cannot color yet. */
+export interface EditorHighlighter {
+  prepare(filePaths: readonly string[]): Promise<void>;
+  highlight(code: string, filePath: string): string | undefined;
+  styles(): string;
+}
+
+let editorHighlighter: EditorHighlighter | undefined;
+
+export function useEditorHighlighter(highlighter: EditorHighlighter | undefined): void {
+  editorHighlighter = highlighter;
+}
+
+/** Load what `codePreviewHtml` needs to color these files like the editor. */
+export async function prepareHighlighting(filePaths: readonly string[]): Promise<void> {
+  await editorHighlighter?.prepare(filePaths).catch(() => undefined);
+}
+
 /** Highlight bounded, known source languages using escaped, allowlisted markup only. */
 export function codePreviewHtml(code: string, filePath: string): string {
+  if (code.length > 200_000) return escapeCode(code);
+  try {
+    const editor = editorHighlighter?.highlight(code, filePath);
+    if (editor !== undefined && safeMarkup(editor, code)) return editor;
+  } catch {
+    // highlight.js below still colors the file.
+  }
   const language = languages[path.extname(filePath).toLowerCase()];
   if (language === undefined || code.length > 20_000) return escapeCode(code);
   try {
@@ -119,7 +144,7 @@ export function codePreviewHtml(code: string, filePath: string): string {
 }
 
 /** Editor-like palettes follow VS Code's current light, dark and contrast webview classes. */
-export const codePreviewStyles = `
+const fallbackStyles = `
 body { --review-code-keyword: #569cd6; --review-code-string: #ce9178; --review-code-comment: #6a9955; --review-code-number: #b5cea8; --review-code-type: #4ec9b0; --review-code-function: #dcdcaa; --review-code-variable: #9cdcfe; --review-code-meta: #c586c0; }
 body.vscode-light, body.vscode-high-contrast-light { --review-code-keyword: #0000ff; --review-code-string: #a31515; --review-code-comment: #008000; --review-code-number: #098658; --review-code-type: #267f99; --review-code-function: #795e26; --review-code-variable: #001080; --review-code-meta: #800000; }
 body.vscode-high-contrast { --review-code-keyword: #569cd6; --review-code-string: #ce9178; --review-code-comment: #7ca668; --review-code-number: #b5cea8; --review-code-type: #4ec9b0; --review-code-function: #dcdcaa; --review-code-variable: #9cdcfe; --review-code-meta: #d78fde; }
@@ -142,3 +167,8 @@ body.vscode-high-contrast { --review-code-keyword: #569cd6; --review-code-string
 .hljs-addition { color: var(--vscode-gitDecoration-addedResourceForeground); }
 .hljs-deletion { color: var(--vscode-gitDecoration-deletedResourceForeground); }
 `;
+
+/** Styles for highlighted code: the editor theme's colors when known, else the built-in palettes. */
+export function codePreviewStyles(): string {
+  return `${fallbackStyles}\n${editorHighlighter?.styles() ?? ''}`;
+}

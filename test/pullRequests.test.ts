@@ -5,6 +5,7 @@ import type * as vscode from 'vscode';
 import { apiErrorDetail, parseDetails, parsePullRequestFiles, parsePullRequestList, parseRepository, parseReviewThreads } from '../src/pullRequests.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
 import { fileTree, registerPullRequestView } from '../src/pullRequestView.js';
+import { groupSearchResults, parseGitRemote, pickGitHubRemote } from '../src/pullRequests.js';
 import type { FileFolder, PullRequestWorktrees } from '../src/pullRequestView.js';
 import { FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
 
@@ -146,17 +147,17 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
   await settings.update('localReview.fileView', 'list');
-  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings);
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
-  const [repository] = await level(tree);
-  assert.equal(repository?.item.label, 'acme/app');
-  const sections = await level(tree, repository?.node);
-  assert.deepEqual(sections.map(({ item }) => [item.label, item.description]), [['Mine', '0'], ['Review requested', '1']]);
-  const [empty] = await level(tree, sections[0]?.node);
+  const roleRows = await level(tree);
+  assert.deepEqual(roleRows.map(({ item }) => [item.label, item.description]), [['REVIEW REQUESTED', '1'], ['MINE', '0']]);
+  const [empty] = await level(tree, roleRows[1]?.node);
   assert.equal(empty?.item.label, 'No open PRs');
-  const [pr] = await level(tree, sections[1]?.node);
+  const [repository] = await level(tree, roleRows[0]?.node);
+  assert.deepEqual([repository?.item.label, repository?.item.description], ['acme/app', '1']);
+  const [pr] = await level(tree, repository?.node);
   assert.equal(pr?.item.label, '#7 Add review sidebar');
   assert.equal(pr?.item.description, 'octo · Draft');
 
@@ -165,7 +166,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const command = pr?.item.command as vscode.Command;
   await commands.executeCommand(command.command, ...(command.arguments ?? []));
   assert.deepEqual(worktrees.opened, ['acme/app#7:reviewer']);
-  const [reopened] = await level(tree, sections[1]?.node);
+  const [reopened] = await level(tree, repository?.node);
   assert.equal(reopened?.item.contextValue, 'localReview.pullRequest.checkedOut');
 
   await commands.executeCommand('localReview.openPullRequestInBrowser', pr?.node);
@@ -184,7 +185,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   window.trees.at(-1)?.checkboxes.fire({ items: [[files[1]?.node, 1]] });
   await settle();
   assert.deepEqual([...worktrees.reviewed], ['README.md']);
-  const [progressed] = await level(tree, sections[1]?.node);
+  const [progressed] = await level(tree, repository?.node);
   assert.equal(progressed?.item.description, 'octo · Draft · Worktree · 1/2 reviewed');
   assert.equal((await level(tree, pr?.node))[1]?.item.checkboxState, 1);
   const fileCommand = files[0]?.item.command as vscode.Command;
@@ -217,7 +218,7 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => {
     attempts += 1;
     throw new Error('GitHub CLI wurde nicht gefunden.');
-  }, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento());
+  }, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
@@ -230,9 +231,10 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
   assert.equal(attempts, 2);
 });
 
-test('lists every repository, collapses those without PRs and routes actions to the PR\'s own repository', async (t) => {
+test('lists repositories with PRs, routes actions to the PR\'s own repository and hides unticked repositories', async (t) => {
   window.trees.length = 0;
   const listed: string[] = [];
+  const connected: string[] = [];
   const provider = (name: string, pullRequests: readonly PullRequestSummary[]): PullRequestProvider => ({
     readRepository: async () => ({ name, url: `https://github.com/${name}` }),
     listMine: async () => pullRequests,
@@ -249,24 +251,29 @@ test('lists every repository, collapses those without PRs and routes actions to 
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
   });
+  const connect = (name: string, pullRequests: readonly PullRequestSummary[]) => async () => { connected.push(name); return provider(name, pullRequests); };
   const serviceA = recordingWorktrees();
   const serviceB = recordingWorktrees();
+  const settings = new FakeMemento();
+  await settings.update('localReview.groupBy', 'repository');
   const view = registerPullRequestView(async () => [
-    { folder: 'service-a', connect: async () => provider('acme/service-a', [summary]), worktrees: serviceA },
-    { folder: 'service-b', connect: async () => provider('acme/service-b', [summary]), worktrees: serviceB },
-    { folder: 'service-c', connect: async () => provider('acme/service-c', []), worktrees: recordingWorktrees() },
+    { folder: 'service-a', connect: connect('acme/service-a', [summary]), worktrees: serviceA },
+    { folder: 'service-b', connect: connect('acme/service-b', [summary]), worktrees: serviceB },
+    { folder: 'service-c', connect: connect('acme/service-c', []), worktrees: recordingWorktrees() },
     { folder: 'scratch', connect: async () => { throw new Error('no GitHub remote'); }, worktrees: recordingWorktrees() },
-  ], noStatusChanges, new FakeMemento());
+  ], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+  const labels = async (): Promise<unknown[]> => (await level(tree)).map(({ item }) => item.label);
 
   const rows = await level(tree);
-  assert.deepEqual(rows.map(({ item }) => [item.label, item.collapsibleState]), [
-    ['acme/service-a', 2], ['acme/service-b', 2], ['acme/service-c', 1], ['scratch: no GitHub remote', 0],
+  assert.deepEqual(rows.map(({ item }) => [item.label, item.description]), [
+    ['acme/service-a', '1 mine'], ['acme/service-b', '1 mine'], ['scratch: no GitHub remote', undefined],
   ]);
   const pullRequestIn = async (row: number): Promise<{ node: unknown; item: vscode.TreeItem } | undefined> => {
-    const [mine] = await level(tree, rows[row]?.node);
-    return (await level(tree, mine?.node))[0];
+    const sections = await level(tree, rows[row]?.node);
+    assert.deepEqual(sections.map(({ item }) => item.label), ['Mine']);
+    return (await level(tree, sections[0]?.node))[0];
   };
   const firstPr = await pullRequestIn(0);
   const secondPr = await pullRequestIn(1);
@@ -278,4 +285,76 @@ test('lists every repository, collapses those without PRs and routes actions to 
   await commands.executeCommand(command.command, ...(command.arguments ?? []));
   assert.deepEqual(serviceB.opened, ['acme/service-b#7:author']);
   assert.deepEqual(serviceA.opened, []);
+
+  assert.equal(rows[0]?.item.contextValue, 'localReview.repository');
+  await commands.executeCommand('localReview.hideRepository', rows[0]?.node);
+  assert.deepEqual(await labels(), ['acme/service-b', 'scratch: no GitHub remote']);
+  assert.equal(window.trees.at(-1)?.description, '1 hidden');
+
+  window.quickPickIndex = 0;
+  await commands.executeCommand('localReview.chooseRepositories');
+  assert.deepEqual(window.quickPicks.at(-1)?.map(({ label, picked }) => [label, picked]), [
+    ['service-a', false], ['service-b', true], ['service-c', true], ['scratch', true],
+  ]);
+  assert.deepEqual(await labels(), ['acme/service-a']);
+  assert.equal(window.trees.at(-1)?.description, '3 hidden');
+  assert.deepEqual(connected, ['acme/service-a', 'acme/service-b', 'acme/service-c']);
+
+  await commands.executeCommand('localReview.groupByRole');
+  assert.deepEqual(await labels(), ['REVIEW REQUESTED', 'MINE']);
+});
+
+test('reads GitHub repositories from remote URLs and picks the remote GitHub CLI would use', () => {
+  assert.deepEqual(parseGitRemote('git@github.com:acme/app.git'), { host: 'github.com', owner: 'acme', name: 'app' });
+  assert.deepEqual(parseGitRemote('https://github.com/acme/app'), { host: 'github.com', owner: 'acme', name: 'app' });
+  assert.deepEqual(parseGitRemote('https://token@GitHub.example.com/acme/app.git/'), { host: 'github.example.com', owner: 'acme', name: 'app' });
+  assert.deepEqual(parseGitRemote('ssh://git@github.com:22/acme/app.git'), { host: 'github.com', owner: 'acme', name: 'app' });
+  assert.equal(parseGitRemote('/srv/git/app.git'), undefined);
+  assert.equal(parseGitRemote('https://github.com/acme/app/extra'), undefined);
+
+  const remotes = 'remote.origin.url git@github.com:me/app.git\nremote.upstream.url https://github.com/acme/app.git\nremote.backup.url https://github.com/old/app.git';
+  assert.deepEqual(pickGitHubRemote(remotes), { host: 'github.com', owner: 'acme', name: 'app' });
+  assert.deepEqual(pickGitHubRemote(`${remotes}\nremote.origin.gh-resolved base`), { host: 'github.com', owner: 'me', name: 'app' });
+  assert.deepEqual(pickGitHubRemote('remote.origin.url /srv/git/app.git\nremote.mirror.url git@github.com:acme/mirror.git'), { host: 'github.com', owner: 'acme', name: 'mirror' });
+  assert.equal(pickGitHubRemote(''), undefined);
+});
+
+test('groups PR search hits by repository and reads their review verdicts', () => {
+  const hit = (repository: string, number: number, reviews: readonly string[] = []) => ({
+    number, title: `PR ${number}`, url: `https://github.com/${repository}/pull/${number}`, isDraft: false, headRefName: 'feature', baseRefName: 'main',
+    author: number === 3 ? null : { login: 'octo' }, repository: { nameWithOwner: repository }, latestReviews: { nodes: reviews.map((state) => ({ state })) },
+  });
+  const grouped = groupSearchResults([hit('Acme/App', 1, ['APPROVED']), hit('acme/other', 2)], [hit('acme/app', 3)]);
+  assert.deepEqual(grouped.get('acme/app')?.mine.map((pr) => [pr.number, pr.review]), [[1, 'approved']]);
+  assert.deepEqual(grouped.get('acme/app')?.reviewRequested.map((pr) => [pr.number, pr.author]), [[3, 'ghost']]);
+  assert.deepEqual(grouped.get('acme/other')?.reviewRequested, []);
+});
+
+test('shows the last loaded PR lists at once and replaces them when the fresh ones arrive', async (t) => {
+  window.trees.length = 0;
+  let release: () => void = () => undefined;
+  const slow = new Promise<void>((resolve) => { release = resolve; });
+  const provider: PullRequestProvider = {
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => { await slow; return [{ ...summary, number: 8, title: 'Fresh' }]; },
+    listReviewRequested: async () => [],
+  } as unknown as PullRequestProvider;
+  const workspace = new FakeMemento();
+  await workspace.update('localReview.pullRequestSnapshot', { app: { repository: { name: 'acme/app', url: 'https://github.com/acme/app' }, mine: [summary], reviewRequested: [] } });
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), workspace);
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+  const titles = async (): Promise<unknown[]> => {
+    const [mine] = (await level(tree)).slice(1);
+    const [repository] = await level(tree, mine?.node);
+    return (await level(tree, repository?.node)).map(({ item }) => item.label);
+  };
+
+  assert.deepEqual(await titles(), ['#7 Add review sidebar']);
+  assert.equal(window.trees.at(-1)?.message, 'Updating pull requests...');
+  release();
+  await settle();
+  assert.deepEqual(await titles(), ['#8 Fresh']);
+  assert.equal(window.trees.at(-1)?.message, '');
+  assert.deepEqual((workspace.get('localReview.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
 });

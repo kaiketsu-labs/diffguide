@@ -29,10 +29,8 @@
   "main": "./dist/extension.cjs",
   "activationEvents": [
     "onStartupFinished",
+    "onView:localReview.pullRequests",
     "onFileSystem:local-review-pr"
-  ],
-  "extensionDependencies": [
-    "vscode.git"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -54,8 +52,11 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "highlight.js": "11.12.0",
+    "jsonc-parser": "3.3.1",
     "markdown-it": "15.0.3",
-    "parse5": "8.0.1"
+    "parse5": "8.0.1",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -232,6 +233,28 @@
         "icon": "$(list-flat)"
       },
       {
+        "command": "localReview.groupByRole",
+        "title": "Group by role",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.groupByRepository",
+        "title": "Group by repository",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.chooseRepositories",
+        "title": "Choose repositories...",
+        "category": "Local Review",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "localReview.hideRepository",
+        "title": "Hide repository",
+        "category": "Local Review",
+        "icon": "$(eye-closed)"
+      },
+      {
         "command": "localReview.openPullRequestInBrowser",
         "title": "Open in browser",
         "category": "Local Review",
@@ -342,6 +365,21 @@
           "group": "navigation@2"
         },
         {
+          "command": "localReview.chooseRepositories",
+          "when": "view == localReview.pullRequests",
+          "group": "1_repositories@1"
+        },
+        {
+          "command": "localReview.groupByRepository",
+          "when": "view == localReview.pullRequests && localReview.groupByRole",
+          "group": "2_grouping@1"
+        },
+        {
+          "command": "localReview.groupByRole",
+          "when": "view == localReview.pullRequests && !localReview.groupByRole",
+          "group": "2_grouping@1"
+        },
+        {
           "command": "localReview.startClaude",
           "when": "view == localReview.threads",
           "group": "navigation@1"
@@ -388,6 +426,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "localReview.hideRepository",
+          "when": "view == localReview.pullRequests && viewItem == localReview.repository",
+          "group": "1_repository@1"
+        },
         {
           "command": "localReview.openPullRequestInBrowser",
           "when": "view == localReview.pullRequests && viewItem =~ /^localReview\\.pullRequest/",
@@ -542,6 +585,10 @@
         },
         {
           "command": "localReview.revealThread",
+          "when": "false"
+        },
+        {
+          "command": "localReview.hideRepository",
           "when": "false"
         }
       ]
