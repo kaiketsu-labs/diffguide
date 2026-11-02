@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Support Node.js 20, the runtime SageMaker Code Editor uses for extensions and Claude hooks. Node.js 22 is no longer required.
 - The PR overview became a review page: overview cards on top, every changed file below with syntax colors, a unified or split layout, a Viewed checkbox that collapses the file, and Open in editor for the native diff.
 - Comment on the review page: click a line number, Shift-click to extend the range, and send a question or change request to Claude. Threads show inline under their lines with your messages, Claude's answers and status, plus Reply, Resolve and Publish to GitHub. Drafts survive redraws and reloads. Comments on lines the diff hides appear at the top of their file.
 - The review page also shows GitHub comment threads from everyone, with Reply (posted on GitHub right away), Resolve and Open on GitHub. Each thread has a colored header: orange **Local** (only you and Claude see it) or blue **GitHub** (everyone on the PR sees it). A new comment has a dashed border so a draft never looks like a posted thread.

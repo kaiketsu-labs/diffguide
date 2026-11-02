@@ -86,7 +86,7 @@ test('bounds diagnostic paths and removes embedded control characters', async ()
 });
 
 test('keeps the existing actionable message for unsupported Node versions', async (t) => {
-  const executable = await runtime(t, "process.stdout.write('v20.19.0\\n');");
+  const executable = await runtime(t, "process.stdout.write('v18.20.0\\n');");
 
-  await assert.rejects(requireNodeRuntime(executable), /Node\.js 22 oder neuer; gefunden wurde v20\.19\.0/u);
+  await assert.rejects(requireNodeRuntime(executable), /Node\.js 20 oder neuer; gefunden wurde v18\.20\.0/u);
 });
