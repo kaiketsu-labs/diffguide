@@ -23,12 +23,18 @@ test('Python preview highlights decorators, strings, definitions and types witho
 
 test('source that resembles active HTML remains escaped inside every highlighted language', () => {
   const code = 'value = "</code><img src=x onerror=alert(1)><script>bad()</script>&amp;"\r\n';
-  for (const extension of ['py', 'js', 'ts', 'json', 'sh']) {
+  for (const extension of ['py', 'js', 'ts', 'json', 'sh', 'swift', 'html', 'md', 'go', 'rs', 'css']) {
     const html = codePreviewHtml(code, `example.${extension}`);
     assert.doesNotMatch(html, /<(?!\/?span\b)/u);
     assert.doesNotMatch(html, /<span[^>]*(?:onerror|style|src)=/u);
     assert.equal(sourceText(html), code);
   }
+});
+
+test('Swift, HTML and Markdown get highlighted instead of falling back to plain text', () => {
+  assert.match(codePreviewHtml('static func make(_ name: String) -> String {}', 'Note.swift'), /class="hljs-keyword">static/u);
+  assert.match(codePreviewHtml('<div class="a">Hi</div>', 'index.html'), /class="hljs-name">div/u);
+  assert.match(codePreviewHtml('# Title\n- item', 'README.md'), /class="hljs-section">/u);
 });
 
 test('known filename variants select a grammar and unsupported files remain plain source', () => {

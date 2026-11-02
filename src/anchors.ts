@@ -63,3 +63,22 @@ export function capturedCodeContext(anchor: CodeAnchor): CapturedContext {
     endLine: startLine + selected.split('\n').length - 1,
   };
 }
+
+/** Capture lines of a whole file the way an editor selection would, so page comments match editor comments. */
+export function anchorFromText(
+  text: string, target: Pick<CodeAnchor, 'path' | 'startLine' | 'endLine' | 'side' | 'baseRevision'>,
+): CodeAnchor {
+  const lines = text.split('\n');
+  const { path, startLine, endLine } = target;
+  if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || startLine < 1 || endLine < startLine || endLine > lines.length) {
+    throw new Error(`Lines ${startLine}–${endLine} are outside ${path}.`);
+  }
+  const start = startLine - 1;
+  return {
+    ...target,
+    selectedText: lines.slice(start, endLine).join('\n'),
+    contextBefore: lines.slice(Math.max(0, start - 3), start).map((line) => `${line}\n`).join(''),
+    contextAfter: lines.slice(endLine, endLine + 3).join('\n'),
+    documentHash: hashDocumentText(text),
+  };
+}

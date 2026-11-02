@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { claudeStatus } from '../src/claudeStatus.js';
+
+const idle = { running: false, threads: new Set<string>(), skipped: 0 };
+
+test('shows the current step while Claude runs', () => {
+  assert.deepEqual(claudeStatus({ ...idle, running: true, step: 'Reading src/app.ts' }), { text: 'Claude · Reading src/app.ts', icon: 'sync~spin', retry: false });
+});
+
+test('offers a retry after a failure or skipped comments, and is idle otherwise', () => {
+  assert.equal(claudeStatus({ ...idle, error: 'boom' }).retry, true);
+  assert.equal(claudeStatus({ ...idle, skipped: 2 }).text, 'Claude skipped 2');
+  assert.deepEqual(claudeStatus(idle), { text: 'Claude idle', icon: 'comment-discussion', retry: false });
+});

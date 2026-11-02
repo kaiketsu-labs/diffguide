@@ -1,0 +1,39 @@
+import type { PullRequestProvider, PullRequestSummary, ReviewVerdict } from './pullRequests.js';
+
+/** Build a sample PR whose link points at a placeholder repository. */
+function sample(number: number, title: string, author: string, draft: boolean, headBranch: string, review?: ReviewVerdict): PullRequestSummary {
+  return { number, title, url: `https://github.com/mock/sample-repo/pull/${number}`, author, draft, headBranch, baseBranch: 'main', ...(review === undefined ? {} : { review }) };
+}
+
+/** Fixed sample data that fills every sidebar section without contacting a code host. */
+export const mockPullRequestProvider: PullRequestProvider = {
+  readRepository: async () => ({ name: 'mock/sample-repo', url: 'https://github.com/mock/sample-repo' }),
+  listMine: async () => [
+    sample(101, 'Add pull request sidebar', 'you', false, 'feature/pr-sidebar', 'approved'),
+    sample(102, 'Track reviewed files per PR', 'you', true, 'feature/reviewed-files'),
+  ],
+  listReviewRequested: async () => [
+    sample(201, 'Migrate auth to OAuth device flow', 'alice', false, 'refactor/auth-migration', 'changes'),
+    sample(202, 'Cache diff results per commit', 'bob', false, 'perf/diff-cache', 'commented'),
+    sample(203, 'Draft: new settings page', 'carol', true, 'ui/settings-page'),
+  ],
+  listFiles: async () => [
+    { path: 'src/sidebar.ts', additions: 42, deletions: 3, change: 'modified' },
+    { path: 'src/reviewed.ts', additions: 18, deletions: 0, change: 'added' },
+    { path: 'docs/legacy.md', additions: 0, deletions: 12, change: 'deleted' },
+  ],
+  checkout: async () => { throw new Error('Sample pull requests cannot be checked out. Turn off localReview.mockPullRequests to open real PRs.'); },
+  viewedFiles: async () => new Set(),
+  setViewed: async () => undefined,
+  publishComment: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
+  details: async () => ({
+    bodyHtml: '<p>Sample description.</p>', open: true, mergeable: 'yes', viewerIsAuthor: false, mergeMethods: ['squash', 'merge'],
+    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }],
+    checks: [{ name: 'build', state: 'success' }, { name: 'lint', state: 'pending' }],
+  }),
+  threads: async () => [],
+  replyToThread: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
+  resolveThread: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
+  submitReview: async () => { throw new Error('Sample pull requests cannot be reviewed.'); },
+  merge: async () => { throw new Error('Sample pull requests cannot be merged.'); },
+};

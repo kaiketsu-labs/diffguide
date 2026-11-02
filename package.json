@@ -4,21 +4,44 @@
   "description": "Review local changes with Claude Code using native inline comments and automatic feedback delivery.",
   "version": "0.4.12",
   "icon": "resources/icon.png",
-  "galleryBanner": { "color": "#101B29", "theme": "dark" },
+  "galleryBanner": {
+    "color": "#101B29",
+    "theme": "dark"
+  },
   "publisher": "local-review-dev",
   "private": true,
   "license": "UNLICENSED",
-  "repository": { "type": "git", "url": "https://github.com/kaiketsu-labs/local-review.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kaiketsu-labs/local-review.git"
+  },
   "homepage": "https://github.com/kaiketsu-labs/local-review#readme",
-  "bugs": { "url": "https://github.com/kaiketsu-labs/local-review/issues" },
-  "engines": { "vscode": "^1.100.0", "node": ">=22" },
-  "categories": ["Other"],
+  "bugs": {
+    "url": "https://github.com/kaiketsu-labs/local-review/issues"
+  },
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=22"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.cjs",
-  "activationEvents": ["onStartupFinished"],
-  "extensionDependencies": ["vscode.git"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onFileSystem:local-review-pr"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
   "capabilities": {
-    "untrustedWorkspaces": { "supported": false, "description": "Local Review connects to a coding agent that can edit workspace files." },
-    "virtualWorkspaces": { "supported": false }
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Local Review connects to a coding agent that can edit workspace files."
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",
@@ -28,7 +51,12 @@
     "test": "node scripts/test.mjs",
     "package": "node scripts/package.mjs"
   },
-  "dependencies": { "@modelcontextprotocol/sdk": "1.32.1", "highlight.js": "11.12.0" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "highlight.js": "11.12.0",
+    "markdown-it": "15.0.3",
+    "parse5": "8.0.1"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/vscode": "1.100.0",
@@ -41,93 +69,520 @@
       {
         "id": "localReview.selectionBackground",
         "description": "Hintergrund der fixierten Codeauswahl für den aktiven Review-Kommentar.",
-        "defaults": { "dark": "#5DB9C326", "light": "#087D8B1F", "highContrast": "#00000000", "highContrastLight": "#00000000" }
+        "defaults": {
+          "dark": "#5DB9C326",
+          "light": "#087D8B1F",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
       },
       {
         "id": "localReview.selectionBorder",
         "description": "Rahmen der fixierten Codeauswahl für den aktiven Review-Kommentar.",
-        "defaults": { "dark": "#83D6D8AA", "light": "#247D8FAA", "highContrast": "#FFFFFF", "highContrastLight": "#000000" }
+        "defaults": {
+          "dark": "#83D6D8AA",
+          "light": "#247D8FAA",
+          "highContrast": "#FFFFFF",
+          "highContrastLight": "#000000"
+        }
       }
     ],
     "commands": [
-      { "command": "localReview.startClaude", "title": "Mit Claude verbinden", "category": "Local Review", "icon": "$(plug)" },
-      { "command": "localReview.copyClaudeCommand", "title": "Verbindungsbefehl kopieren", "category": "Local Review", "icon": "$(terminal)" },
-      { "command": "localReview.connectRunningClaude", "title": "Laufende Unterhaltung verbinden", "category": "Local Review", "icon": "$(plug)" },
-      { "command": "localReview.addComment", "title": "Kommentar hinzufügen", "category": "Local Review", "icon": "$(comment-add)" },
-      { "command": "localReview.openComposer", "title": "Feedback in Seitenansicht schreiben", "category": "Local Review", "icon": "$(open-preview)" },
-      { "command": "localReview.openCode", "title": "Code im Editor öffnen", "category": "Local Review", "icon": "$(go-to-file)" },
-      { "command": "localReview.openCommentCode", "title": "Code im Editor öffnen", "category": "Local Review", "icon": "$(go-to-file)" },
-      { "command": "localReview.submitInline", "title": "Senden", "category": "Local Review", "enablement": "!commentIsEmpty" },
-      { "command": "localReview.cancelDraft", "title": "Entwurf verwerfen", "category": "Local Review", "icon": "$(close)" },
-      { "command": "localReview.openChanges", "title": "Änderungen reviewen", "category": "Local Review", "icon": "$(git-compare)" },
-      { "command": "localReview.revealThread", "title": "Zum Kommentar springen", "category": "Local Review" },
-      { "command": "localReview.composeReply", "title": "In Seitenansicht antworten", "category": "Local Review", "icon": "$(open-preview)" },
-      { "command": "localReview.resumeDraft", "title": "Entwurf fortsetzen", "category": "Local Review", "icon": "$(edit)" },
-      { "command": "localReview.exportToPr", "title": "An GitHub-PR übergeben", "category": "Local Review", "icon": "$(git-pull-request)" },
-      { "command": "localReview.resolve", "title": "Als erledigt markieren", "category": "Local Review", "icon": "$(check)" },
-      { "command": "localReview.showResolved", "title": "Erledigte anzeigen", "category": "Local Review", "icon": "$(eye)" },
-      { "command": "localReview.hideResolved", "title": "Erledigte ausblenden", "category": "Local Review", "icon": "$(eye-closed)" },
-      { "command": "localReview.enhanceContrast", "title": "Kommentarfenster hervorheben", "category": "Local Review", "icon": "$(color-mode)" },
-      { "command": "localReview.toggleCenteredLayout", "title": "Zentrierte Ansicht", "category": "Local Review", "icon": "$(layout-centered)" },
-      { "command": "localReview.resetContrast", "title": "Standarddarstellung wiederherstellen", "category": "Local Review", "icon": "$(discard)" },
-      { "command": "localReview.reopen", "title": "Wieder öffnen", "category": "Local Review", "icon": "$(debug-restart)" }
+      {
+        "command": "localReview.startClaude",
+        "title": "Mit Claude verbinden",
+        "category": "Local Review",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "localReview.copyClaudeCommand",
+        "title": "Verbindungsbefehl kopieren",
+        "category": "Local Review",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "localReview.connectRunningClaude",
+        "title": "Laufende Unterhaltung verbinden",
+        "category": "Local Review",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "localReview.addComment",
+        "title": "Kommentar hinzufügen",
+        "category": "Local Review",
+        "icon": "$(comment-add)"
+      },
+      {
+        "command": "localReview.openComposer",
+        "title": "Feedback in Seitenansicht schreiben",
+        "category": "Local Review",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "localReview.openCode",
+        "title": "Code im Editor öffnen",
+        "category": "Local Review",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "localReview.openCommentCode",
+        "title": "Code im Editor öffnen",
+        "category": "Local Review",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "localReview.submitInline",
+        "title": "Senden",
+        "category": "Local Review",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "localReview.cancelDraft",
+        "title": "Entwurf verwerfen",
+        "category": "Local Review",
+        "icon": "$(close)"
+      },
+      {
+        "command": "localReview.openChanges",
+        "title": "Änderungen reviewen",
+        "category": "Local Review",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "localReview.revealThread",
+        "title": "Zum Kommentar springen",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.composeReply",
+        "title": "In Seitenansicht antworten",
+        "category": "Local Review",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "localReview.resumeDraft",
+        "title": "Entwurf fortsetzen",
+        "category": "Local Review",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "localReview.exportToPr",
+        "title": "An GitHub-PR übergeben",
+        "category": "Local Review",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "localReview.resolve",
+        "title": "Als erledigt markieren",
+        "category": "Local Review",
+        "icon": "$(check)"
+      },
+      {
+        "command": "localReview.showResolved",
+        "title": "Erledigte anzeigen",
+        "category": "Local Review",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "localReview.hideResolved",
+        "title": "Erledigte ausblenden",
+        "category": "Local Review",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "localReview.enhanceContrast",
+        "title": "Kommentarfenster hervorheben",
+        "category": "Local Review",
+        "icon": "$(color-mode)"
+      },
+      {
+        "command": "localReview.toggleCenteredLayout",
+        "title": "Zentrierte Ansicht",
+        "category": "Local Review",
+        "icon": "$(layout-centered)"
+      },
+      {
+        "command": "localReview.resetContrast",
+        "title": "Standarddarstellung wiederherstellen",
+        "category": "Local Review",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "localReview.reopen",
+        "title": "Wieder öffnen",
+        "category": "Local Review",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "localReview.refreshPullRequests",
+        "title": "Refresh pull requests",
+        "category": "Local Review",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "localReview.viewFilesAsTree",
+        "title": "View as tree",
+        "category": "Local Review",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "localReview.viewFilesAsList",
+        "title": "View as list",
+        "category": "Local Review",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "localReview.openPullRequestInBrowser",
+        "title": "Open in browser",
+        "category": "Local Review",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "localReview.openPullRequest",
+        "title": "Open review page",
+        "category": "Local Review",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "localReview.removePullRequestWorktree",
+        "title": "Remove worktree",
+        "category": "Local Review",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "localReview.showPullRequestClaude",
+        "title": "Show Claude activity",
+        "category": "Local Review",
+        "icon": "$(output)"
+      },
+      {
+        "command": "localReview.showPullRequestOverview",
+        "title": "Open review page",
+        "category": "Local Review",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "localReview.publishThread",
+        "title": "Publish to GitHub",
+        "category": "Local Review",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "localReview.openPublishedThread",
+        "title": "Open on GitHub",
+        "category": "Local Review",
+        "icon": "$(github)"
+      }
     ],
-    "views": { "scm": [{ "id": "localReview.threads", "name": "Review", "icon": "resources/review.svg" }] },
-    "viewsWelcome": [{
-      "view": "localReview.threads",
-      "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:localReview.startClaude)\n[Änderungen reviewen](command:localReview.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
-    }],
-    "menus": {
-      "editor/context": [{ "command": "localReview.addComment", "when": "(resourceScheme == file || resourceScheme == local-review-base) && isWorkspaceTrusted", "group": "navigation@20" }],
-      "editor/title": [{ "command": "localReview.addComment", "when": "(resourceScheme == file || resourceScheme == local-review-base) && isWorkspaceTrusted", "group": "navigation@20" }],
-      "scm/title": [{ "command": "localReview.openChanges", "when": "scmProvider == git", "group": "navigation@20" }],
-      "view/title": [
-        { "command": "localReview.startClaude", "when": "view == localReview.threads", "group": "navigation@1" },
-        { "command": "localReview.copyClaudeCommand", "when": "view == localReview.threads", "group": "connection@1" },
-        { "command": "localReview.openChanges", "when": "view == localReview.threads", "group": "navigation@2" },
-        { "command": "localReview.exportToPr", "when": "view == localReview.threads", "group": "navigation@3" },
-        { "command": "localReview.showResolved", "when": "view == localReview.threads && !localReview.showResolved", "group": "navigation@4" },
-        { "command": "localReview.hideResolved", "when": "view == localReview.threads && localReview.showResolved", "group": "navigation@4" },
-        { "command": "localReview.enhanceContrast", "when": "view == localReview.threads", "group": "navigation@5" },
-        { "command": "localReview.toggleCenteredLayout", "when": "view == localReview.threads", "group": "appearance@1" },
-        { "command": "localReview.resetContrast", "when": "view == localReview.threads", "group": "appearance@2" }
-      ],
-      "view/item/context": [
-        { "command": "localReview.resolve", "when": "view == localReview.threads && viewItem == localReview.open", "group": "inline@1" },
-        { "command": "localReview.reopen", "when": "view == localReview.threads && viewItem == localReview.resolved", "group": "inline@1" }
-      ],
-      "comments/commentThread/context": [
-        { "command": "localReview.submitInline", "when": "commentController == localReview", "group": "inline@1" }
-      ],
-      "comments/comment/title": [
-        { "command": "localReview.openCommentCode", "when": "commentController == localReview && comment == localReview.code", "group": "inline@1" }
-      ],
-      "comments/commentThread/title": [
-        { "command": "localReview.cancelDraft", "when": "commentController == localReview && commentThreadIsEmpty", "group": "inline@1" },
-        { "command": "localReview.composeReply", "when": "commentController == localReview && commentThread == localReview.open", "group": "navigation@1" },
-        { "command": "localReview.resolve", "when": "commentController == localReview && commentThread == localReview.open", "group": "inline@2" },
-        { "command": "localReview.reopen", "when": "commentController == localReview && commentThread == localReview.resolved", "group": "inline@1" }
-      ],
-      "commandPalette": [
-        { "command": "localReview.openCode", "when": "false" },
-        { "command": "localReview.openCommentCode", "when": "false" },
-        { "command": "localReview.submitInline", "when": "false" },
-        { "command": "localReview.cancelDraft", "when": "false" },
-        { "command": "localReview.composeReply", "when": "false" },
-        { "command": "localReview.showResolved", "when": "!localReview.showResolved" },
-        { "command": "localReview.hideResolved", "when": "localReview.showResolved" },
-        { "command": "localReview.resolve", "when": "false" },
-        { "command": "localReview.reopen", "when": "false" },
-        { "command": "localReview.revealThread", "when": "false" }
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localReview",
+          "title": "Local Review",
+          "icon": "resources/review.svg"
+        }
       ]
     },
-    "keybindings": [{ "command": "localReview.addComment", "key": "ctrl+alt+m", "mac": "cmd+alt+m", "when": "editorTextFocus && (resourceScheme == file || resourceScheme == local-review-base)" }],
+    "views": {
+      "localReview": [
+        {
+          "id": "localReview.pullRequests",
+          "name": "Pull Requests",
+          "icon": "resources/review.svg"
+        },
+        {
+          "id": "localReview.threads",
+          "name": "Review",
+          "icon": "resources/review.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "localReview.threads",
+        "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:localReview.startClaude)\n[Änderungen reviewen](command:localReview.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "localReview.addComment",
+          "when": "(resourceScheme == file || resourceScheme == local-review-base || resourceScheme == local-review-pr) && isWorkspaceTrusted",
+          "group": "navigation@20"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "localReview.addComment",
+          "when": "(resourceScheme == file || resourceScheme == local-review-base || resourceScheme == local-review-pr) && isWorkspaceTrusted",
+          "group": "navigation@20"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "localReview.openChanges",
+          "when": "scmProvider == git",
+          "group": "navigation@20"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "localReview.refreshPullRequests",
+          "when": "view == localReview.pullRequests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localReview.viewFilesAsTree",
+          "when": "view == localReview.pullRequests && !localReview.filesAsTree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localReview.viewFilesAsList",
+          "when": "view == localReview.pullRequests && localReview.filesAsTree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localReview.startClaude",
+          "when": "view == localReview.threads",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localReview.copyClaudeCommand",
+          "when": "view == localReview.threads",
+          "group": "connection@1"
+        },
+        {
+          "command": "localReview.openChanges",
+          "when": "view == localReview.threads",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localReview.exportToPr",
+          "when": "view == localReview.threads",
+          "group": "navigation@3"
+        },
+        {
+          "command": "localReview.showResolved",
+          "when": "view == localReview.threads && !localReview.showResolved",
+          "group": "navigation@4"
+        },
+        {
+          "command": "localReview.hideResolved",
+          "when": "view == localReview.threads && localReview.showResolved",
+          "group": "navigation@4"
+        },
+        {
+          "command": "localReview.enhanceContrast",
+          "when": "view == localReview.threads",
+          "group": "navigation@5"
+        },
+        {
+          "command": "localReview.toggleCenteredLayout",
+          "when": "view == localReview.threads",
+          "group": "appearance@1"
+        },
+        {
+          "command": "localReview.resetContrast",
+          "when": "view == localReview.threads",
+          "group": "appearance@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "localReview.openPullRequestInBrowser",
+          "when": "view == localReview.pullRequests && viewItem =~ /^localReview\\.pullRequest/",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.showPullRequestClaude",
+          "when": "view == localReview.pullRequests && viewItem == localReview.pullRequest.checkedOut",
+          "group": "inline@0"
+        },
+        {
+          "command": "localReview.removePullRequestWorktree",
+          "when": "view == localReview.pullRequests && viewItem == localReview.pullRequest.checkedOut",
+          "group": "inline@2"
+        },
+        {
+          "command": "localReview.showPullRequestOverview",
+          "when": "view == localReview.pullRequests && viewItem == localReview.pullRequest.checkedOut",
+          "group": "inline@0"
+        },
+        {
+          "command": "localReview.resolve",
+          "when": "view == localReview.threads && viewItem =~ /^localReview\\.open/",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.reopen",
+          "when": "view == localReview.threads && viewItem =~ /^localReview\\.resolved/",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.publishThread",
+          "when": "view == localReview.threads && viewItem =~ /\\.publishable$/",
+          "group": "inline@0"
+        },
+        {
+          "command": "localReview.openPublishedThread",
+          "when": "view == localReview.threads && viewItem =~ /\\.published$/",
+          "group": "inline@0"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "localReview.submitInline",
+          "when": "commentController == localReview",
+          "group": "inline@1"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "localReview.openCommentCode",
+          "when": "commentController == localReview && comment == localReview.code",
+          "group": "inline@1"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "localReview.cancelDraft",
+          "when": "commentController == localReview && commentThreadIsEmpty",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.composeReply",
+          "when": "commentController == localReview && commentThread =~ /^localReview\\.open/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localReview.publishThread",
+          "when": "commentController == localReview && commentThread =~ /\\.publishable$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.openPublishedThread",
+          "when": "commentController == localReview && commentThread =~ /\\.published$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.resolve",
+          "when": "commentController == localReview && commentThread =~ /^localReview\\.open/",
+          "group": "inline@2"
+        },
+        {
+          "command": "localReview.reopen",
+          "when": "commentController == localReview && commentThread =~ /^localReview\\.resolved/",
+          "group": "inline@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "localReview.openPullRequestInBrowser",
+          "when": "false"
+        },
+        {
+          "command": "localReview.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "localReview.removePullRequestWorktree",
+          "when": "false"
+        },
+        {
+          "command": "localReview.showPullRequestClaude",
+          "when": "false"
+        },
+        {
+          "command": "localReview.showPullRequestOverview",
+          "when": "false"
+        },
+        {
+          "command": "localReview.publishThread",
+          "when": "false"
+        },
+        {
+          "command": "localReview.openPublishedThread",
+          "when": "false"
+        },
+        {
+          "command": "localReview.openCode",
+          "when": "false"
+        },
+        {
+          "command": "localReview.openCommentCode",
+          "when": "false"
+        },
+        {
+          "command": "localReview.submitInline",
+          "when": "false"
+        },
+        {
+          "command": "localReview.cancelDraft",
+          "when": "false"
+        },
+        {
+          "command": "localReview.composeReply",
+          "when": "false"
+        },
+        {
+          "command": "localReview.showResolved",
+          "when": "!localReview.showResolved"
+        },
+        {
+          "command": "localReview.hideResolved",
+          "when": "localReview.showResolved"
+        },
+        {
+          "command": "localReview.resolve",
+          "when": "false"
+        },
+        {
+          "command": "localReview.reopen",
+          "when": "false"
+        },
+        {
+          "command": "localReview.revealThread",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "localReview.addComment",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus && (resourceScheme == file || resourceScheme == local-review-base)"
+      }
+    ],
     "configuration": {
       "title": "Local Review",
       "properties": {
-        "localReview.claudePath": { "type": "string", "default": "claude", "scope": "machine-overridable", "description": "Pfad zur Claude-Code-Anwendung. In vertrauenswürdigen Projekten überschreibbar." },
-        "localReview.nodePath": { "type": "string", "default": "node", "scope": "machine-overridable", "description": "Pfad zu Node.js 22 oder neuer. In vertrauenswürdigen Projekten überschreibbar." },
-        "localReview.transport": { "type": "string", "enum": ["hooks", "channels"], "default": "hooks", "description": "Automatische Zustellung im Hintergrund (Standard: hooks). channels ist eine experimentelle Alternative mit zusätzlichen Voraussetzungen." }
+        "localReview.claudePath": {
+          "type": "string",
+          "default": "claude",
+          "scope": "machine-overridable",
+          "description": "Pfad zur Claude-Code-Anwendung. In vertrauenswürdigen Projekten überschreibbar."
+        },
+        "localReview.nodePath": {
+          "type": "string",
+          "default": "node",
+          "scope": "machine-overridable",
+          "description": "Pfad zu Node.js 22 oder neuer. In vertrauenswürdigen Projekten überschreibbar."
+        },
+        "localReview.transport": {
+          "type": "string",
+          "enum": [
+            "hooks",
+            "channels"
+          ],
+          "default": "hooks",
+          "description": "Automatische Zustellung im Hintergrund (Standard: hooks). channels ist eine experimentelle Alternative mit zusätzlichen Voraussetzungen."
+        },
+        "localReview.mockPullRequests": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show sample pull requests instead of querying GitHub. For development and testing only."
+        }
       }
     }
   }

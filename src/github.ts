@@ -34,20 +34,25 @@ export interface GitHubHandoffResult {
   readonly changed: boolean;
 }
 
+/** Locate GitHub CLI even when a desktop editor has a minimal executable search path. */
+export async function findGitHubCli(workspaceRoot: string): Promise<string> {
+  for (const executable of ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']) {
+    try {
+      return await resolveExecutable(executable, workspaceRoot);
+    } catch {
+      // A standard installation path may still provide GitHub CLI.
+    }
+  }
+  throw new Error('GitHub CLI wurde nicht gefunden. Installiere gh über cli.github.com und melde dich einmal mit „gh auth login“ an.');
+}
+
 /** Use the user's existing GitHub CLI login without collecting account credentials. */
 export class GitHubReviewClient {
   private constructor(private readonly executable: string, private readonly workspaceRoot: string) {}
 
-  /** Locate GitHub CLI even when a desktop editor has a minimal executable search path. */
+  /** Connect through the user's GitHub CLI installation. */
   static async connect(workspaceRoot: string): Promise<GitHubReviewClient> {
-    for (const executable of ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']) {
-      try {
-        return new GitHubReviewClient(await resolveExecutable(executable, workspaceRoot), workspaceRoot);
-      } catch {
-        // A standard installation path may still provide GitHub CLI.
-      }
-    }
-    throw new Error('GitHub CLI wurde nicht gefunden. Installiere gh über cli.github.com und melde dich einmal mit „gh auth login“ an.');
+    return new GitHubReviewClient(await findGitHubCli(workspaceRoot), workspaceRoot);
   }
 
   /** Detect one open PR and the current user's existing managed handoff comment. */

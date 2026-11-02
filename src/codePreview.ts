@@ -1,12 +1,52 @@
 import * as path from 'node:path';
 import highlight from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
+import c from 'highlight.js/lib/languages/c';
+import cpp from 'highlight.js/lib/languages/cpp';
+import csharp from 'highlight.js/lib/languages/csharp';
+import css from 'highlight.js/lib/languages/css';
+import dart from 'highlight.js/lib/languages/dart';
+import go from 'highlight.js/lib/languages/go';
+import ini from 'highlight.js/lib/languages/ini';
+import java from 'highlight.js/lib/languages/java';
+import kotlin from 'highlight.js/lib/languages/kotlin';
+import markdown from 'highlight.js/lib/languages/markdown';
+import objectivec from 'highlight.js/lib/languages/objectivec';
+import php from 'highlight.js/lib/languages/php';
+import ruby from 'highlight.js/lib/languages/ruby';
+import rust from 'highlight.js/lib/languages/rust';
+import scala from 'highlight.js/lib/languages/scala';
+import scss from 'highlight.js/lib/languages/scss';
+import sql from 'highlight.js/lib/languages/sql';
+import swift from 'highlight.js/lib/languages/swift';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import javascript from 'highlight.js/lib/languages/javascript';
 import json from 'highlight.js/lib/languages/json';
 import python from 'highlight.js/lib/languages/python';
 import typescript from 'highlight.js/lib/languages/typescript';
 
 highlight.registerLanguage('bash', bash);
+highlight.registerLanguage('c', c);
+highlight.registerLanguage('cpp', cpp);
+highlight.registerLanguage('csharp', csharp);
+highlight.registerLanguage('css', css);
+highlight.registerLanguage('dart', dart);
+highlight.registerLanguage('go', go);
+highlight.registerLanguage('ini', ini);
+highlight.registerLanguage('java', java);
+highlight.registerLanguage('kotlin', kotlin);
+highlight.registerLanguage('markdown', markdown);
+highlight.registerLanguage('objectivec', objectivec);
+highlight.registerLanguage('php', php);
+highlight.registerLanguage('ruby', ruby);
+highlight.registerLanguage('rust', rust);
+highlight.registerLanguage('scala', scala);
+highlight.registerLanguage('scss', scss);
+highlight.registerLanguage('sql', sql);
+highlight.registerLanguage('swift', swift);
+highlight.registerLanguage('xml', xml);
+highlight.registerLanguage('yaml', yaml);
 highlight.registerLanguage('javascript', javascript);
 highlight.registerLanguage('json', json);
 highlight.registerLanguage('python', python);
@@ -18,18 +58,26 @@ const languages: Readonly<Record<string, string>> = {
   '.json': 'json', '.jsonc': 'json',
   '.py': 'python', '.pyi': 'python', '.pyw': 'python',
   '.cts': 'typescript', '.mts': 'typescript', '.ts': 'typescript', '.tsx': 'typescript',
+  '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hh': 'cpp', '.hpp': 'cpp', '.cs': 'csharp',
+  '.css': 'css', '.scss': 'scss', '.dart': 'dart', '.go': 'go', '.ini': 'ini', '.toml': 'ini', '.java': 'java',
+  '.kt': 'kotlin', '.kts': 'kotlin', '.md': 'markdown', '.markdown': 'markdown', '.m': 'objectivec', '.mm': 'objectivec',
+  '.php': 'php', '.rb': 'ruby', '.rs': 'rust', '.scala': 'scala', '.sql': 'sql', '.swift': 'swift',
+  '.htm': 'xml', '.html': 'xml', '.plist': 'xml', '.svg': 'xml', '.xml': 'xml', '.yaml': 'yaml', '.yml': 'yaml',
 };
 const tokenClasses = new Set([
   'hljs-attr', 'hljs-built_in', 'hljs-char', 'hljs-code', 'hljs-comment', 'hljs-doctag',
   'hljs-keyword', 'hljs-literal', 'hljs-meta', 'hljs-number', 'hljs-operator', 'hljs-params',
   'hljs-property', 'hljs-punctuation', 'hljs-regexp', 'hljs-string', 'hljs-subst', 'hljs-symbol',
   'hljs-title', 'hljs-type', 'hljs-variable',
+  'hljs-addition', 'hljs-attribute', 'hljs-bullet', 'hljs-deletion', 'hljs-emphasis', 'hljs-link', 'hljs-name', 'hljs-quote',
+  'hljs-section', 'hljs-selector-attr', 'hljs-selector-class', 'hljs-selector-id', 'hljs-selector-pseudo', 'hljs-selector-tag',
+  'hljs-strong', 'hljs-tag', 'hljs-template-tag', 'hljs-template-variable',
   'class_', 'constant_', 'escape_', 'function_', 'inherited__', 'invoke__', 'language_', 'prompt_',
 ]);
 const entities: Readonly<Record<string, string>> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#x27;': "'" };
 
 /** Escape source bytes before they become generated preview markup. */
-function escapeCode(code: string): string {
+export function escapeCode(code: string): string {
   return code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#x27;');
 }
@@ -84,4 +132,13 @@ body.vscode-high-contrast { --review-code-keyword: #569cd6; --review-code-string
 .hljs-property, .hljs-variable, .hljs-attr { color: var(--review-code-variable); }
 .hljs-meta { color: var(--review-code-meta); }
 .hljs-subst, .hljs-params, .hljs-punctuation, .hljs-operator { color: var(--vscode-editor-foreground); }
+.hljs-name, .hljs-selector-tag, .hljs-bullet, .hljs-template-tag { color: var(--review-code-keyword); }
+.hljs-attribute, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id, .hljs-selector-pseudo, .hljs-template-variable { color: var(--review-code-variable); }
+.hljs-section { color: var(--review-code-function); font-weight: 600; }
+.hljs-link { color: var(--vscode-debugTokenExpression-string, var(--review-code-string)); }
+.hljs-quote { color: var(--review-code-comment); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+.hljs-addition { color: var(--vscode-gitDecoration-addedResourceForeground); }
+.hljs-deletion { color: var(--vscode-gitDecoration-deletedResourceForeground); }
 `;

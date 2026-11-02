@@ -322,7 +322,12 @@ export class Disposable {
 
 /** Theme-aware values remain opaque in controller tests. */
 export class ThemeColor { constructor(readonly id: string) {} }
-export class ThemeIcon { constructor(readonly id: string) {} }
+export class ThemeIcon {
+  static readonly File = new ThemeIcon('file');
+  static readonly Folder = new ThemeIcon('folder');
+  constructor(readonly id: string, readonly color?: ThemeColor) {}
+}
+export class FileDecoration { constructor(readonly badge?: string, readonly tooltip?: string, readonly color?: ThemeColor) {} }
 
 /** Sidebar entry supporting the metadata created by the real controller. */
 export class TreeItem {
@@ -332,6 +337,8 @@ export class TreeItem {
   iconPath?: unknown;
   command?: unknown;
   tooltip?: unknown;
+  checkboxState?: number;
+  resourceUri?: unknown;
   constructor(readonly label: string, readonly collapsibleState: number) {}
 }
 
@@ -377,7 +384,18 @@ export const comments = {
 export const CommentMode = { Preview: 0, Editing: 1 } as const;
 export const CommentThreadState = { Unresolved: 0, Resolved: 1 } as const;
 export const CommentThreadCollapsibleState = { Collapsed: 0, Expanded: 1 } as const;
-export const TreeItemCollapsibleState = { None: 0 } as const;
+export const TreeItemCollapsibleState = { None: 0, Collapsed: 1, Expanded: 2 } as const;
+export const TreeItemCheckboxState = { Unchecked: 0, Checked: 1 } as const;
+export const FileType = { File: 1 } as const;
+export const FilePermission = { Readonly: 1 } as const;
+export const FileChangeType = { Changed: 1 } as const;
+
+/** Named file system failures, matching the real factory methods. */
+export class FileSystemError extends Error {
+  static FileNotFound(uri?: unknown): FileSystemError { return new FileSystemError(`FileNotFound ${String(uri)}`); }
+  static NoPermissions(uri?: unknown): FileSystemError { return new FileSystemError(`NoPermissions ${String(uri)}`); }
+  static Unavailable(uri?: unknown): FileSystemError { return new FileSystemError(`Unavailable ${String(uri)}`); }
+}
 export const OverviewRulerLane = { Center: 2 } as const;
 export const DecorationRangeBehavior = { ClosedClosed: 1 } as const;
 export const TextEditorRevealType = { InCenterIfOutsideViewport: 2 } as const;
@@ -482,6 +500,11 @@ export const workspace = {
   },
 
   /** Keep provider lifecycle observable when the extension is recreated. */
+  fileSystems: new Map<string, vscode.FileSystemProvider>(),
+  registerFileSystemProvider(scheme: string, provider: vscode.FileSystemProvider): vscode.Disposable {
+    this.fileSystems.set(scheme, provider);
+    return { dispose: (): void => { this.fileSystems.delete(scheme); } };
+  },
   registerTextDocumentContentProvider(scheme: string, provider: FakeContentProvider): vscode.Disposable {
     this.providers.set(scheme, provider);
     return { dispose: (): void => { if (this.providers.get(scheme) === provider) this.providers.delete(scheme); } };
@@ -501,6 +524,7 @@ export const commands = {
   /** Await all navigation work returned by the real command handler. */
   async executeCommand<T = unknown>(id: string, ...arguments_: unknown[]): Promise<T> {
     const handler = this.handlers.get(id);
+    if (id === 'setContext' && handler === undefined) return undefined as T;
     if (handler === undefined) throw new Error(`No registered command: ${id}`);
     return await handler(...arguments_) as T;
   },
@@ -534,6 +558,8 @@ interface FakeTreeView {
   description: string;
   message: string;
   readonly provider: vscode.TreeDataProvider<vscode.TreeItem>;
+  readonly checkboxes: EventEmitter<{ readonly items: readonly [unknown, number][] }>;
+  readonly onDidChangeCheckboxState: vscode.Event<{ readonly items: readonly [unknown, number][] }>;
   dispose(): void;
 }
 export const window = {
@@ -557,11 +583,23 @@ export const window = {
   onDidChangeTextEditorSelection: editorEvents.selection.event,
   onDidChangeWindowState: editorEvents.focus.event,
   createTreeView(_id: string, options: { readonly treeDataProvider: vscode.TreeDataProvider<vscode.TreeItem> }): FakeTreeView {
-    const tree = { title: '', description: '', message: '', provider: options.treeDataProvider, dispose(): void {} };
+    const checkboxes = new EventEmitter<{ readonly items: readonly [unknown, number][] }>();
+    const tree = { title: '', description: '', message: '', provider: options.treeDataProvider, checkboxes, onDidChangeCheckboxState: checkboxes.event, dispose(): void {} };
     this.trees.push(tree);
     return tree;
   },
   createTextEditorDecorationType(): Disposable { return new Disposable(() => undefined); },
+  fileDecorations: [] as vscode.FileDecorationProvider[],
+  registerFileDecorationProvider(provider: vscode.FileDecorationProvider): Disposable {
+    this.fileDecorations.push(provider);
+    return new Disposable(() => { this.fileDecorations.splice(this.fileDecorations.indexOf(provider), 1); });
+  },
+  outputs: [] as { readonly name: string; readonly lines: string[]; shown: boolean }[],
+  createOutputChannel(name: string): { appendLine(line: string): void; show(): void; dispose(): void } {
+    const output = { name, lines: [] as string[], shown: false };
+    this.outputs.push(output);
+    return { appendLine: (line) => { output.lines.push(line); }, show: () => { output.shown = true; }, dispose: () => undefined };
+  },
   shownDocuments: [] as { readonly document: FakeTextDocument; readonly options: vscode.TextDocumentShowOptions | undefined }[],
   statusMessages: [] as string[],
   quickPicks: [] as (readonly vscode.QuickPickItem[])[],
