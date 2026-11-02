@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="VS Code 1.100+" src="https://img.shields.io/badge/VS%20Code-1.100%2B-3794ff">
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-terminal-cc785c">
-  <img alt="Node.js 22+" src="https://img.shields.io/badge/Node.js-22%2B-5f9e71">
+  <img alt="Node.js 20+" src="https://img.shields.io/badge/Node.js-20%2B-5f9e71">
   <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-d4aa67">
 </p>
 
@@ -103,7 +103,7 @@ For a separate terminal app, the same running-conversation commands apply. To st
 
 Open **Local Review: Änderungen reviewen**, click the gutter **+**, or select code and press **⌘⌥M** on macOS / **Ctrl+Alt+M** on Linux. Write `/a` or `/i` followed by your feedback and choose **Senden**. Continue in the thread's reply field.
 
-Requires **VS Code 1.100+**, **Node.js 22+**, **Git**, and authenticated **Claude Code with `asyncRewake` support**. macOS is the verified primary platform; Linux is unverified, and automatic Windows connection is not supported yet. [Setup and troubleshooting →](docs/INSTALL.md)
+Requires **VS Code 1.100+**, **Node.js 20+**, **Git**, and authenticated **Claude Code with `asyncRewake` support**. macOS is the verified primary platform; Linux is unverified, and automatic Windows connection is not supported yet. [Setup and troubleshooting →](docs/INSTALL.md)
 
 ## How it works
 
@@ -135,7 +135,7 @@ Threads and private connection files live in VS Code's workspace storage. The la
 | **Zentrierte Ansicht** | Narrow the source editor and its inline conversations together. VS Code controls native comment width. |
 | **Feedback in Seitenansicht schreiben** | Open the optional compact composer with mode buttons, saved drafts and selection following. |
 | `localReview.claudePath` | Choose your Claude executable when multiple installations exist. |
-| `localReview.nodePath` | Choose the Node.js 22+ executable used by the integration. |
+| `localReview.nodePath` | Choose the Node.js 20+ executable used by the integration. |
 | `localReview.transport` | `hooks` is the default. `channels` is an experimental alternative with additional prerequisites. |
 
 The interface currently uses German labels. Code previews provide display colors; use the editor icon for hover, references and language-server navigation. [Full usage guide →](docs/USAGE.md)

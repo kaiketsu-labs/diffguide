@@ -60,7 +60,7 @@ export async function requireNodeRuntime(executable: string): Promise<void> {
     throw error;
   });
   const major = /^v(\d+)\./u.exec(version)?.[1];
-  if (major === undefined || Number(major) < 22) {
-    throw new Error(`Local Review benötigt Node.js 22 oder neuer; gefunden wurde ${version || 'keine gültige Version'}.`);
+  if (major === undefined || Number(major) < 20) {
+    throw new Error(`Local Review benötigt Node.js 20 oder neuer; gefunden wurde ${version || 'keine gültige Version'}.`);
   }
 }

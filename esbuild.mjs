@@ -6,7 +6,7 @@ await build({
   outExtension: { '.js': '.cjs' },
   bundle: true,
   platform: 'node',
-  target: 'node22',
+  target: 'node20',
   format: 'cjs',
   external: ['vscode'],
   sourcemap: true,

@@ -21,7 +21,7 @@
   },
   "engines": {
     "vscode": "^1.100.0",
-    "node": ">=22"
+    "node": ">=20"
   },
   "categories": [
     "Other"
@@ -567,7 +567,7 @@
           "type": "string",
           "default": "node",
           "scope": "machine-overridable",
-          "description": "Pfad zu Node.js 22 oder neuer. In vertrauenswürdigen Projekten überschreibbar."
+          "description": "Pfad zu Node.js 20 oder neuer. In vertrauenswürdigen Projekten überschreibbar."
         },
         "localReview.transport": {
           "type": "string",
