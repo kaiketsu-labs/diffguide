@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Review overview</title>
+  <style>
+    :root {
+      --ink: #1f2328;
+      --muted: #59636e;
+      --line: #d1d9e0;
+      --accent: #0969da;
+      --good: #1a7f37;
+      --warn: #9a6700;
+      --bad: #cf222e;
+      --panel: #f6f8fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    header {
+      padding: 32px 40px 24px;
+      color: #fff;
+      background: linear-gradient(135deg, #0b3d91, #0969da);
+    }
+    header h1 { margin: 0 0 4px; font-size: 28px; }
+    header p { margin: 0; opacity: .85; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 40px 48px; }
+    h2 { margin: 32px 0 12px; font-size: 20px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .stat { padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .stat strong { display: block; font-size: 26px; }
+    .stat span { color: var(--muted); font-size: 13px; }
+    .progress { height: 10px; margin: 16px 0 4px; border-radius: 5px; background: var(--line); overflow: hidden; }
+    .progress div { height: 100%; background: var(--good); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); font-size: 13px; font-weight: 600; }
+    td code { padding: 1px 6px; border-radius: 4px; background: var(--panel); font-size: 13px; }
+    .tag { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+    .tag.added { color: var(--good); background: #dafbe1; }
+    .tag.modified { color: var(--warn); background: #fff8c5; }
+    .tag.deleted { color: var(--bad); background: #ffebe9; }
+    .threads { display: grid; gap: 12px; }
+    .thread { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 10px 14px; }
+    .thread.local { border-left-color: #d18616; }
+    .thread .who { font-weight: 600; }
+    .thread .where { color: var(--muted); font-size: 13px; }
+    blockquote { margin: 16px 0; padding: 8px 16px; border-left: 4px solid var(--line); color: var(--muted); }
+    details { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; }
+    summary { cursor: pointer; font-weight: 600; }
+    form { display: grid; gap: 10px; max-width: 520px; }
+    label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+    input, select, textarea { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; color: var(--ink); }
+    button { justify-self: start; padding: 6px 16px; border: 0; border-radius: 6px; color: #fff; background: var(--good); font: inherit; font-weight: 600; }
+    footer { margin-top: 40px; color: var(--muted); font-size: 13px; text-align: center; }
+    #script-check { display: none; padding: 8px 12px; color: #fff; background: var(--bad); border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Review overview</h1>
+    <p>Mock data for PR #3. Static page to try the HTML preview.</p>
+  </header>
+
+  <main>
+    <p id="script-check">This line only shows if scripts run. In the review page preview it should stay hidden.</p>
+
+    <h2>Progress</h2>
+    <div class="stats">
+      <div class="stat"><strong>2</strong><span>files reviewed</span></div>
+      <div class="stat"><strong>3</strong><span>files pending</span></div>
+      <div class="stat"><strong>4</strong><span>open threads</span></div>
+      <div class="stat"><strong>1</strong><span>pending comment</span></div>
+    </div>
+    <div class="progress"><div style="width: 40%"></div></div>
+    <p style="margin: 0; color: var(--muted); font-size: 13px;">2 of 5 review items done (40%).</p>
+
+    <h2>Changed files</h2>
+    <table>
+      <thead>
+        <tr><th>File</th><th>Change</th><th>Lines</th><th>Viewed</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>mock/state.json</code></td><td><span class="tag added">Added</span></td><td>+3 −0</td><td>Yes</td></tr>
+        <tr><td><code>mock/files.ts</code></td><td><span class="tag added">Added</span></td><td>+12 −0</td><td>Yes</td></tr>
+        <tr><td><code>mock/overview.ts</code></td><td><span class="tag added">Added</span></td><td>+8 −0</td><td>No</td></tr>
+        <tr><td><code>mock/overview.html</code></td><td><span class="tag added">Added</span></td><td>+152 −0</td><td>No</td></tr>
+        <tr><td><code>src/legacy.ts</code></td><td><span class="tag deleted">Deleted</span></td><td>+0 −41</td><td>No</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Threads</h2>
+    <div class="threads">
+      <div class="thread">
+        <div class="who">alice <span class="where">on mock/overview.ts, line 3</span></div>
+        <p>Should <code>total</code> come from <code>state.json</code> instead of being hardcoded?</p>
+      </div>
+      <div class="thread local">
+        <div class="who">You and Claude <span class="where">on mock/files.ts, lines 4 to 9</span></div>
+        <p>Claude: the list holds two files, but the overview counts five items. They don't describe the same thing.</p>
+      </div>
+      <div class="thread">
+        <div class="who">bob <span class="where">on mock/state.json, line 2</span></div>
+        <p>Is <code>pending</code> meant to include comments, or only files?</p>
+      </div>
+    </div>
+
+    <h2>Notes</h2>
+    <blockquote>
+      Review the data shape first. The panel only renders what these files describe, so a wrong count here shows up as a wrong progress bar.
+    </blockquote>
+    <ol>
+      <li>Check that every count has one source.</li>
+      <li>Check that file paths match the diff.</li>
+      <li>Check that pending comments are counted once.</li>
+    </ol>
+    <details>
+      <summary>Why mock data?</summary>
+      <p>The overview panel needs a PR with files, threads and a pending review. A fixture keeps that stable while the UI changes.</p>
+    </details>
+    <details>
+      <summary>What the preview cannot show</summary>
+      <p>Scripts are off, and linked stylesheets or images by relative path do not load. Inline styles like the ones on this page do.</p>
+    </details>
+
+    <h2>Feedback</h2>
+    <form>
+      <label>Name <input type="text" placeholder="Your name"></label>
+      <label>Verdict
+        <select>
+          <option>Approve</option>
+          <option>Comment</option>
+          <option>Request changes</option>
+        </select>
+      </label>
+      <label>Comment <textarea rows="4" placeholder="What should change?"></textarea></label>
+      <button type="button">Send</button>
+    </form>
+  </main>
+
+  <footer>Local Review mock fixture · not a real page</footer>
+
+  <script>
+    document.getElementById('script-check').style.display = 'block';
+  </script>
+</body>
+</html>
