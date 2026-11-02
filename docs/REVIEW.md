@@ -141,7 +141,7 @@ Native apply and focus/blur passed with the unchanged palette. The corrected res
 
 - Repeat relevant checks after future changes. Automated coverage does not replace native extension-host or authenticated integration validation.
 - Continue the native walkthrough beyond the verified installation, shortcut, gutter-plus, resolve/show/reopen and input checks. Exercise live side-composer mode switching, `/index` text, local draft recovery, failed submission, all three submitted actions, empty-thread summary, reply, original-side commenting and sidebar navigation.
-- Exercise PR handoff with no PR, missing CLI/authentication, selected summaries/questions, stale summaries, unpushed code, editable preview, successful publication, managed updates, changed destination/account, retry after uncertain publication and duplicate managed comments. Confirm publication does not change local delivery or resolution.
+- Exercise PR handoff with no PR, signed out of GitHub, selected summaries/questions, stale summaries, unpushed code, editable preview, successful publication, managed updates, changed destination/account, retry after uncertain publication and duplicate managed comments. Confirm publication does not change local delivery or resolution.
 - Connect an authenticated Claude terminal. Confirm idle wake-up, a second comment during ongoing work, explicit acknowledgment, progress, and a reply in the correct thread.
 - Reload the extension, move code, rename and delete files, and confirm safe thread recovery. Verify that a stalled or exited session can reconnect.
 - Exercise Linux before claiming support. Windows connection requires implementation and a dedicated walkthrough.
@@ -151,7 +151,7 @@ Native apply and focus/blur passed with the unchanged palette. The corrected res
 | Area | Limit |
 | --- | --- |
 | Session | First local workspace folder and one intended Claude session. Remote and concurrent agent sessions are unsupported. |
-| Pull requests | The PR sidebar lists the workspace folder and Git repositories VS Code finds inside it (`git.repositoryScanMaxDepth`, default one level). Two separate clones of the same GitHub repository in one workspace are not told apart. |
+| Pull requests | The PR sidebar lists the workspace folder and Git repositories VS Code finds inside it (`git.repositoryScanMaxDepth`, default one level). Two separate clones of the same GitHub repository in one workspace are not told apart. It signs in through VS Code's GitHub account: github.com plus the one enterprise host set in `github-enterprise.uri`. |
 | Platform | macOS is primary. Linux is unverified. Automatic connection is blocked on Windows. |
 | Idle watcher | 24-hour timeout. Reconnect or send Claude a prompt afterward. |
 | Agent context | Up to 20 recent conversation messages and 100,000 quoted characters. Individual review fields are bounded at 200,000 characters; replies at 20,000. |

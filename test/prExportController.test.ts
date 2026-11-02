@@ -6,7 +6,7 @@ import test, { afterEach, mock } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 import type { CodeAnchor } from '../src/contracts.js';
-import { GitHubReviewClient, type GitHubHandoffTarget } from '../src/github.js';
+import { GitHubReviewClient, branchHead, type GitHubHandoffTarget } from '../src/github.js';
 import { previewHtml, registerPrExport } from '../src/prExportController.js';
 import { createReviewStore } from '../src/store.js';
 import { commands, env, extensionContext, FakeElement, resetFakeEditor, resetFakeWindow, settle, window } from './fakes/vscode.js';
@@ -77,6 +77,12 @@ class PreviewBrowser {
 function decodeHtml(value: string): string {
   return value.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#39;', "'").replaceAll('&amp;', '&');
 }
+
+test('finds the PR head from the branch upstream, including a fork owner', () => {
+  const config = 'remote.origin.url git@github.com:me/app.git\nremote.upstream.url https://github.com/acme/app.git\nbranch.fix.remote origin\nbranch.fix.merge refs/heads/fix-login';
+  assert.deepEqual(branchHead(config, 'fix'), { branch: 'fix-login', owner: 'me' });
+  assert.deepEqual(branchHead(config, 'local-only'), { branch: 'local-only' });
+});
 
 test('publishing immediately locks the preview and subsequent edits clearly become unpublished', () => {
   const browser = new PreviewBrowser();

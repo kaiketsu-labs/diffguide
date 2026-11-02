@@ -4,7 +4,7 @@ PR handoff is a separate action. `/r` continues to ask Claude for a local conver
 
 ## Preview and publish
 
-Install the [GitHub CLI](https://cli.github.com/) and sign in with `gh auth login`. Open the local branch that already has an open PR. In VS Code's Review toolbar choose **Local Review: An GitHub-PR übergeben**.
+The first handoff asks you to sign in to GitHub in VS Code. GitHub Enterprise works for the one host set in `github-enterprise.uri`. Open the local branch that already has an open PR. In VS Code's Review toolbar choose **Local Review: An GitHub-PR übergeben**.
 
 Choose the available summaries and unresolved questions to include. The preview identifies the destination repository and PR and lets you edit the Markdown before publishing. It is a snapshot: later Claude replies or local comments do not silently change what you are about to send.
 
@@ -23,7 +23,7 @@ Captured file paths, line numbers and Git revisions describe local context. They
 ## If handoff needs attention
 
 - No open PR: open the branch with the intended PR, or create the PR through your normal workflow first.
-- Missing CLI or authentication: install GitHub CLI and sign in from your terminal, then reopen the action.
+- Not signed in: run **Local Review: Sign in to GitHub**, then reopen the action.
 - Branch or destination changed: close the preview, reopen the action and choose **Neue Momentaufnahme** if offered.
 - Comment too long: remove sections or shorten the preview; content is not silently truncated.
 - Publishing failed: the text remains editable; retry after checking the error, or close and resume it in the same editor session. Existing managed comments are checked before creating another.

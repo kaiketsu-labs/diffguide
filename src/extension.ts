@@ -7,7 +7,8 @@ import { createReviewController } from './reviewController.js';
 import { prepareConnection, registerClaudeLauncher } from './setup.js';
 import { registerPrExport } from './prExportController.js';
 import { registerReviewAppearance } from './reviewAppearance.js';
-import { GitHubCliProvider } from './pullRequests.js';
+import { GitHubApiProvider } from './pullRequests.js';
+import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { type PullRequestRole, ensureWorktree, hasWorktree, readPullRequestBase, removeWorktree, worktreePath } from './worktrees.js';
@@ -57,7 +58,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const checkouts = new Checkouts(root, context.globalStorageUri.fsPath, {
     discover: async () => mockPullRequests() ? [] : await nestedRepositoryRoots(root),
     create: (checkoutRoot, storageRoot) => {
-      const connect = async (): Promise<PullRequestProvider> => mockPullRequests() ? mockPullRequestProvider : await GitHubCliProvider.connect(checkoutRoot);
+      const connect = async (): Promise<PullRequestProvider> => mockPullRequests() ? mockPullRequestProvider : await GitHubApiProvider.connect(checkoutRoot);
       return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect), fileReviews: new FileReviews(storageRoot) };
     },
     onRestoreError: (error) => {
@@ -220,7 +221,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
-        forget: () => { fileReviews.forget(); GitHubCliProvider.forgetSearches(); },
+        forget: () => { fileReviews.forget(); GitHubApiProvider.forgetSearches(); },
         showOverview: (provider, repository, pullRequest, role) => showOverview(checkout, provider, repository, pullRequest, role),
       };
     };
@@ -233,9 +234,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.globalState,
         context.workspaceState,
       ),
+      watchGitHubSessions(() => { void vscode.commands.executeCommand('localReview.refreshPullRequests'); }),
+      vscode.commands.registerCommand('localReview.signInToGitHub', async (provider: unknown) => {
+        try {
+          await signInToGitHub(provider === 'github' || provider === 'github-enterprise' ? provider : undefined);
+          await vscode.commands.executeCommand('localReview.refreshPullRequests');
+        } catch (error: unknown) {
+          void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+        }
+      }),
       reportClaudeFailures(checkouts),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('localReview.mockPullRequests')) void vscode.commands.executeCommand('localReview.refreshPullRequests');
+        if (event.affectsConfiguration('localReview.mockPullRequests') || event.affectsConfiguration('github-enterprise.uri')) void vscode.commands.executeCommand('localReview.refreshPullRequests');
       }),
     );
     await createReviewController(store, context, getHeadRevision, checkouts);

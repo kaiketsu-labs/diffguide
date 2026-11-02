@@ -1,5 +1,4 @@
-import { execFile } from 'node:child_process';
-import { findGitHubCli } from './github.js';
+import { endpointsFor, githubRequest } from './githubApi.js';
 import { git } from './worktrees.js';
 
 /** Open pull request shown in the sidebar, validated from provider output. */
@@ -184,31 +183,31 @@ export function groupSearchResults(mine: readonly unknown[], reviewRequested: re
   return new Map([...grouped].map(([key, entry]) => [key, { mine: parsePullRequestList(entry.mine), reviewRequested: parsePullRequestList(entry.reviewRequested) }]));
 }
 
-/** Query pull requests through the user's existing GitHub CLI login. */
-export class GitHubCliProvider implements PullRequestProvider {
-  /** One search per GitHub host serves every repository's PR lists, instead of two `gh pr list` calls each. */
+/** Query pull requests through the user's GitHub sign-in in VS Code. */
+export class GitHubApiProvider implements PullRequestProvider {
+  /** One search per GitHub host serves every repository's PR lists. */
   static readonly #searches = new Map<string, Promise<SearchResults>>();
   #repository: Promise<{ readonly owner: string; readonly name: string; readonly host: string }> | undefined;
+  #remotes: Promise<string> | undefined;
   readonly #ids = new Map<number, Promise<string>>();
 
-  private constructor(private readonly executable: string, private readonly workspaceRoot: string) {}
+  private constructor(private readonly workspaceRoot: string) {}
 
-  /** Connect to the repository GitHub CLI selects for this workspace. */
-  static async connect(workspaceRoot: string): Promise<GitHubCliProvider> {
-    return new GitHubCliProvider(await findGitHubCli(workspaceRoot), workspaceRoot);
+  /** Connect to the repository the workspace's git remotes point to. */
+  static async connect(workspaceRoot: string): Promise<GitHubApiProvider> {
+    return new GitHubApiProvider(workspaceRoot);
   }
 
   /** Search again on the next listing. */
   static forgetSearches(): void {
-    GitHubCliProvider.#searches.clear();
+    GitHubApiProvider.#searches.clear();
   }
 
-  /** Read from git remotes like GitHub CLI does, falling back to `gh repo view` for remotes it cannot parse. */
+  /** Read from git remotes the way GitHub CLI picks its repository. */
   async readRepository(): Promise<PullRequestRepository> {
-    const config = await git(this.workspaceRoot, ['config', '--get-regexp', '^remote\\.']).catch(() => '');
-    const remote = pickGitHubRemote(config);
-    if (remote !== undefined) return { name: `${remote.owner}/${remote.name}`, url: `https://${remote.host}/${remote.owner}/${remote.name}` };
-    return parseRepository(await this.#json(['repo', 'view', '--json', 'nameWithOwner,url']));
+    const remote = pickGitHubRemote(await this.#remoteConfig());
+    if (remote === undefined) throw new Error('No GitHub remote found in this repository.');
+    return { name: `${remote.owner}/${remote.name}`, url: `https://${remote.host}/${remote.owner}/${remote.name}` };
   }
 
   async listMine(): Promise<readonly PullRequestSummary[]> {
@@ -221,12 +220,11 @@ export class GitHubCliProvider implements PullRequestProvider {
 
   async #listed(): Promise<{ readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }> {
     const { owner, name, host } = await this.#repo();
-    const key = `${this.executable}\n${host}`;
-    let search = GitHubCliProvider.#searches.get(key);
+    let search = GitHubApiProvider.#searches.get(host);
     if (search === undefined) {
       search = this.#search(host);
-      search.catch(() => { GitHubCliProvider.#searches.delete(key); });
-      GitHubCliProvider.#searches.set(key, search);
+      search.catch(() => { GitHubApiProvider.#searches.delete(host); });
+      GitHubApiProvider.#searches.set(host, search);
     }
     return (await search).get(`${owner}/${name}`.toLowerCase()) ?? { mine: [], reviewRequested: [] };
   }
@@ -254,11 +252,26 @@ export class GitHubCliProvider implements PullRequestProvider {
   }
 
   async listFiles(number: number): Promise<readonly PullRequestFile[]> {
-    return parsePullRequestFiles(await this.#json(['pr', 'view', String(number), '--json', 'files']));
+    const files: unknown[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < 30; page++) {
+      const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){
+        files(first:100,after:$after){nodes{path additions deletions changeType} pageInfo{hasNextPage endCursor}}}}}`, { number, after });
+      const connection = object(object(object(data['repository'])['pullRequest'])['files']);
+      files.push(...list(connection['nodes']));
+      const info = object(connection['pageInfo']);
+      if (info['hasNextPage'] !== true) break;
+      after = text(info['endCursor']);
+    }
+    return parsePullRequestFiles({ files });
   }
 
+  /** Fetch GitHub's `pull/<n>/head` ref, which also covers PRs from forks, through the user's git credentials. */
   async checkout(number: number, worktree: string): Promise<void> {
-    await this.#run(['pr', 'checkout', String(number), '--detach'], worktree);
+    const { owner, name, host } = await this.#repo();
+    const remote = remoteNameFor(await this.#remoteConfig(), { host, owner, name }) ?? `https://${host}/${owner}/${name}.git`;
+    await git(worktree, ['fetch', '--quiet', remote, `pull/${number}/head`]);
+    await git(worktree, ['checkout', '--quiet', '--detach', 'FETCH_HEAD']);
   }
 
   async viewedFiles(number: number): Promise<ReadonlySet<string>> {
@@ -289,12 +302,13 @@ export class GitHubCliProvider implements PullRequestProvider {
     const { lines } = comment;
     const startLine = lines !== undefined && lines.start < lines.end ? lines.start : null;
     if (!pending) {
-      const { owner, name } = await this.#repo();
+      const { owner, name, host } = await this.#repo();
       const body = {
         body: comment.body, commit_id: comment.commitId, path: comment.path,
         ...(lines === undefined ? { subject_type: 'file' } : { side: comment.side, line: lines.end, ...(startLine === null ? {} : { start_line: startLine, start_side: comment.side }) }),
       };
-      const created = object(await this.#json(['api', '--hostname', (await this.#repo()).host, '--method', 'POST', `repos/${owner}/${name}/pulls/${number}/comments`, '--input', '-'], JSON.stringify(body)));
+      const endpoints = endpointsFor(host);
+      const created = object(await githubRequest(endpoints, `${endpoints.rest}/repos/${owner}/${name}/pulls/${number}/comments`, 'POST', body));
       return httpsUrl(created['html_url']);
     }
     const review = await this.#pendingReview(number, comment.commitId);
@@ -358,7 +372,9 @@ export class GitHubCliProvider implements PullRequestProvider {
   }
 
   async merge(number: number, method: MergeMethod): Promise<void> {
-    await this.#run(['pr', 'merge', String(number), `--${method}`], this.workspaceRoot);
+    const methods: Record<MergeMethod, string> = { merge: 'MERGE', squash: 'SQUASH', rebase: 'REBASE' };
+    await this.#graphql('mutation($id:ID!,$method:PullRequestMergeMethod!){mergePullRequest(input:{pullRequestId:$id,mergeMethod:$method}){clientMutationId}}',
+      { id: await this.#pullRequestId(number), method: methods[method] });
   }
 
   /** The user's pending review on a PR, started at `commitId` when there is none yet. */
@@ -397,14 +413,21 @@ export class GitHubCliProvider implements PullRequestProvider {
     return this.#repository;
   }
 
-  /** Run a GraphQL request for this repository, with the body kept off the command line. */
+  /** Remote lines from git config, read once per provider. */
+  #remoteConfig(): Promise<string> {
+    this.#remotes ??= git(this.workspaceRoot, ['config', '--get-regexp', '^remote\\.']).catch(() => '');
+    return this.#remotes;
+  }
+
+  /** Run a GraphQL request for this repository. */
   async #graphql(query: string, variables: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
     const { owner, name, host } = await this.#repo();
     return await this.#graphqlOn(host, query, { owner, name, ...variables });
   }
 
   async #graphqlOn(host: string, query: string, variables: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-    const response = object(await this.#json(['api', '--hostname', host, 'graphql', '--input', '-'], JSON.stringify({ query, variables })));
+    const endpoints = endpointsFor(host);
+    const response = object(await githubRequest(endpoints, endpoints.graphql, 'POST', { query, variables }));
     const errors = response['errors'];
     if (Array.isArray(errors) && errors.length > 0) {
       const message = (errors as unknown[]).map((error) => (typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined))
@@ -413,65 +436,28 @@ export class GitHubCliProvider implements PullRequestProvider {
     }
     return object(response['data']);
   }
-
-  /** Parse GitHub CLI output as untrusted JSON. */
-  async #json(args: readonly string[], input?: string): Promise<unknown> {
-    const output = await this.#run(args, this.workspaceRoot, input);
-    try {
-      return JSON.parse(output) as unknown;
-    } catch {
-      throw new Error('GitHub CLI returned invalid data.');
-    }
-  }
-
-  /** Run GitHub CLI without a shell or prompts. */
-  #run(args: readonly string[], cwd: string, input?: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const environment: NodeJS.ProcessEnv = { ...process.env, GH_PROMPT_DISABLED: '1' };
-      delete environment['GH_REPO'];
-      const child = execFile(this.executable, [...args], {
-        cwd, env: environment, encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024,
-      }, (error, stdout, stderr) => {
-        if (error !== null) {
-          const detail = [stderr.trim(), apiErrorDetail(stdout)].filter(Boolean).join(' ').slice(0, 600).replaceAll(/(?:gh[pousr]_[A-Za-z\d_]+|github_pat_[A-Za-z\d_]+)/gu, '[credential]');
-          reject(new Error(`GitHub CLI failed (gh ${args.slice(0, 2).join(' ')}). Check "gh auth status".${detail ? ` ${detail}` : ''}`));
-          return;
-        }
-        resolve(stdout);
-      });
-      child.stdin?.on('error', () => undefined);
-      child.stdin?.end(input);
-    });
-  }
 }
 
-/** GitHub's reasons from a failed `gh api` call, which `gh` prints as JSON on stdout. */
-export function apiErrorDetail(stdout: string): string {
-  try {
-    const errors = (JSON.parse(stdout) as { errors?: unknown }).errors;
-    if (!Array.isArray(errors)) return '';
-    return errors.map((error: unknown) => typeof error === 'string' ? error
-      : typeof error === 'object' && error !== null && typeof (error as { message?: unknown }).message === 'string' ? (error as { message: string }).message : '')
-      .filter(Boolean).join(' ');
-  } catch {
-    return '';
+/** The git remote that points at `repository`, usable as a fetch source; undefined when none does. */
+export function remoteNameFor(config: string, repository: GitHubRemote): string | undefined {
+  for (const line of config.split('\n')) {
+    const match = /^remote\.(.+)\.url (.+)$/u.exec(line.trim());
+    const remote = match?.[2] === undefined ? undefined : parseGitRemote(match[2]);
+    if (match?.[1] === undefined || match[1].startsWith('-') || remote === undefined) continue;
+    if (remote.host === repository.host && remote.owner.toLowerCase() === repository.owner.toLowerCase()
+      && remote.name.toLowerCase() === repository.name.toLowerCase()) return match[1];
   }
+  return undefined;
 }
 
-/** Validate a repository description from `gh repo view`. */
-export function parseRepository(value: unknown): PullRequestRepository {
-  const record = object(value);
-  return { name: text(record['nameWithOwner']), url: httpsUrl(record['url']) };
-}
-
-/** Validate a PR list from `gh pr list`, rejecting the whole response on any malformed entry. */
+/** Validate a PR list from a GitHub search, rejecting the whole response on any malformed entry. */
 export function parsePullRequestList(value: unknown): readonly PullRequestSummary[] {
-  if (!Array.isArray(value)) throw new Error('GitHub CLI returned an invalid PR list.');
+  if (!Array.isArray(value)) throw new Error('GitHub returned an invalid PR list.');
   return (value as readonly unknown[]).map((entry) => {
     const record = object(entry);
     const number = record['number'];
     if (typeof number !== 'number' || !Number.isSafeInteger(number) || number <= 0) {
-      throw new Error('GitHub CLI returned an invalid PR number.');
+      throw new Error('GitHub returned an invalid PR number.');
     }
     const reviews = Array.isArray(record['latestReviews']) ? record['latestReviews'] as readonly unknown[] : [];
     const review = strongestVerdict(reviews.map((entry) => String(typeof entry === 'object' && entry !== null ? (entry as { state?: unknown }).state : '')));
@@ -492,10 +478,10 @@ const changeTypes: Record<string, PullRequestFile['change']> = {
   ADDED: 'added', MODIFIED: 'modified', DELETED: 'deleted', RENAMED: 'renamed', CHANGED: 'modified', COPIED: 'added',
 };
 
-/** Validate the file list from `gh pr view --json files`, rejecting paths that leave the repository. */
+/** Validate a PR's changed files, rejecting paths that leave the repository. */
 export function parsePullRequestFiles(value: unknown): readonly PullRequestFile[] {
   const files = object(value)['files'];
-  if (!Array.isArray(files)) throw new Error('GitHub CLI returned an invalid file list.');
+  if (!Array.isArray(files)) throw new Error('GitHub returned an invalid file list.');
   return (files as readonly unknown[]).map((entry) => {
     const record = object(entry);
     const path = text(record['path']);
@@ -504,7 +490,7 @@ export function parsePullRequestFiles(value: unknown): readonly PullRequestFile[
     const change = changeTypes[String(record['changeType'])] ?? 'modified';
     if (path.startsWith('/') || path.includes('\0') || path.split('/').includes('..')
       || typeof additions !== 'number' || typeof deletions !== 'number') {
-      throw new Error('GitHub CLI returned an invalid file entry.');
+      throw new Error('GitHub returned an invalid file entry.');
     }
     return { path, additions, deletions, change };
   });
@@ -605,19 +591,19 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
 
 /** Narrow an untrusted CLI value to a plain object. */
 function object(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('GitHub CLI returned incomplete data.');
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('GitHub returned incomplete data.');
   return value as Record<string, unknown>;
 }
 
 /** Narrow an untrusted CLI value to an array. */
 function list(value: unknown): readonly unknown[] {
-  if (!Array.isArray(value)) throw new Error('GitHub CLI returned incomplete data.');
+  if (!Array.isArray(value)) throw new Error('GitHub returned incomplete data.');
   return value as readonly unknown[];
 }
 
 /** Require a non-empty string without coercion. */
 function text(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error('GitHub CLI returned incomplete data.');
+  if (typeof value !== 'string' || !value.trim()) throw new Error('GitHub returned incomplete data.');
   return value;
 }
 
@@ -633,6 +619,6 @@ function optionalHttpsUrl(value: unknown): string {
 
 function httpsUrl(value: unknown): string {
   const url = new URL(text(value));
-  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('GitHub CLI returned an invalid link.');
+  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('GitHub returned an invalid link.');
   return url.toString();
 }
