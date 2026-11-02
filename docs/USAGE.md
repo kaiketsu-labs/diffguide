@@ -100,3 +100,7 @@ The [daily-workflow audit](https://github.com/flucas96/local-review/issues/4) tr
 The manual GitHub workflows can validate and package the extension or prepare a draft release. They require explicit approval to run checks and never publish to the Marketplace.
 
 Built on the [VS Code Comments API](https://code.visualstudio.com/api/references/vscode-api#CommentController), [Claude hooks](https://code.claude.com/docs/en/hooks), and [MCP](https://code.claude.com/docs/en/mcp).
+
+## Pull request sidebar
+
+The activity bar view lists your open PRs and review requests per repository.
