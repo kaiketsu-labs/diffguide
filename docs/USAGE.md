@@ -46,7 +46,7 @@ Use the **An GitHub-PR übergeben** action in the Review toolbar. Local Review f
 
 Edited or failed handoffs can be resumed after closing the preview during the same VS Code session. **Entwurf fortsetzen** keeps the original snapshot; **Neue Momentaufnahme** prepares current content. This recovery ends when VS Code reloads. Editing published text clearly marks it as unpublished again.
 
-`/r` still summarizes a local conversation; it never publishes to GitHub. The first handoff uses a PR discussion comment with captured code locations, because local changes may not match the pushed PR's diff lines. Publishing requires the [GitHub CLI](https://cli.github.com/) installed and signed in. [PR handoff guide →](PR-HANDOFF.md)
+`/r` still summarizes a local conversation; it never publishes to GitHub. The first handoff uses a PR discussion comment with captured code locations, because local changes may not match the pushed PR's diff lines. Publishing uses your GitHub sign-in in VS Code. [PR handoff guide →](PR-HANDOFF.md)
 
 ## Start in a minute
 

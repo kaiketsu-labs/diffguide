@@ -1,8 +1,9 @@
-import { execFile } from 'node:child_process';
-import { resolveExecutable } from './executables.js';
+import { endpointsFor, githubRequest } from './githubApi.js';
+import { parseGitRemote, pickGitHubRemote } from './pullRequests.js';
+import { git } from './worktrees.js';
 import { prExportEnd, prExportStart, readManagedPrContent, replaceManagedPrContent } from './prExport.js';
 
-/** Open PR selected by GitHub CLI from the current workspace branch. */
+/** Open PR whose head is the current workspace branch. */
 export interface GitHubPullRequest {
   readonly host: string;
   readonly owner: string;
@@ -34,40 +35,29 @@ export interface GitHubHandoffResult {
   readonly changed: boolean;
 }
 
-/** Locate GitHub CLI even when a desktop editor has a minimal executable search path. */
-export async function findGitHubCli(workspaceRoot: string): Promise<string> {
-  for (const executable of ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']) {
-    try {
-      return await resolveExecutable(executable, workspaceRoot);
-    } catch {
-      // A standard installation path may still provide GitHub CLI.
-    }
-  }
-  throw new Error('GitHub CLI wurde nicht gefunden. Installiere gh über cli.github.com und melde dich einmal mit „gh auth login“ an.');
-}
+/** Upper bound for reading a PR's conversation, 100 comments per page. */
+const maxCommentPages = 100;
 
-/** Use the user's existing GitHub CLI login without collecting account credentials. */
+/** Use the user's GitHub sign-in in VS Code without collecting account credentials. */
 export class GitHubReviewClient {
-  private constructor(private readonly executable: string, private readonly workspaceRoot: string) {}
+  private constructor(private readonly workspaceRoot: string) {}
 
-  /** Connect through the user's GitHub CLI installation. */
+  /** Connect to the GitHub repository the workspace's git remotes point to. */
   static async connect(workspaceRoot: string): Promise<GitHubReviewClient> {
-    return new GitHubReviewClient(await findGitHubCli(workspaceRoot), workspaceRoot);
+    return new GitHubReviewClient(workspaceRoot);
   }
 
   /** Detect one open PR and the current user's existing managed handoff comment. */
   async readTarget(): Promise<GitHubHandoffTarget> {
-    const pullRequest = parsePullRequest(await this.#json(['pr', 'view', '--json', 'number,url,title,state,headRefName']));
-    const user = object(await this.#api(pullRequest.host, ['user']));
+    const pullRequest = await this.#currentPullRequest();
+    const user = object(await this.#api(pullRequest.host, 'GET', 'user'));
     const viewerLogin = text(user['login'], 'GitHub-Konto');
-    const pages = await this.#api(pullRequest.host, [
-      '--paginate', '--slurp', `repos/${pullRequest.owner}/${pullRequest.repository}/issues/${pullRequest.number}/comments?per_page=100`,
-    ]);
-    if (!Array.isArray(pages)) throw new Error('GitHub hat keine gültige Kommentarliste geliefert.');
     const matches: GitHubHandoffComment[] = [];
-    for (const page of pages as readonly unknown[]) {
-      if (!Array.isArray(page)) throw new Error('GitHub hat eine unvollständige Kommentarliste geliefert.');
-      for (const value of page as readonly unknown[]) {
+    for (let page = 1; page <= maxCommentPages; page++) {
+      const comments = await this.#api(pullRequest.host, 'GET',
+        `repos/${pullRequest.owner}/${pullRequest.repository}/issues/${pullRequest.number}/comments?per_page=100&page=${page}`);
+      if (!Array.isArray(comments)) throw new Error('GitHub hat keine gültige Kommentarliste geliefert.');
+      for (const value of comments as readonly unknown[]) {
         const record = object(value);
         const author = optionalObject(record['user']);
         if (typeof author?.['login'] !== 'string' || author['login'].toLowerCase() !== viewerLogin.toLowerCase()) continue;
@@ -76,6 +66,7 @@ export class GitHubReviewClient {
         readManagedPrContent(body);
         matches.push(parseComment(record));
       }
+      if (comments.length < 100) break;
     }
     if (matches.length > 1) {
       throw new Error('Dieser PR enthält mehrere Local-Review-Übergaben von deinem Konto. Kläre die doppelten Kommentare auf GitHub, bevor du aktualisierst.');
@@ -109,49 +100,69 @@ export class GitHubReviewClient {
     const endpoint = existing === undefined
       ? `repos/${pr.owner}/${pr.repository}/issues/${pr.number}/comments`
       : `repos/${pr.owner}/${pr.repository}/issues/comments/${existing.id}`;
-    const comment = parseComment(await this.#api(pr.host, [
-      '--method', existing === undefined ? 'POST' : 'PATCH', endpoint, '--input', '-',
-    ], JSON.stringify({ body })));
+    const comment = parseComment(await this.#api(pr.host, existing === undefined ? 'POST' : 'PATCH', endpoint, { body }));
     return { target: { ...current, comment }, comment, changed: true };
   }
 
-  /** Read or write one API response while keeping request bodies out of command arguments. */
-  #api(host: string, args: readonly string[], input?: string): Promise<unknown> {
-    return this.#json(['api', '--hostname', host, ...args], input);
+  /** The open PR whose head is the checked-out branch, in the repository GitHub CLI would pick from the remotes. */
+  async #currentPullRequest(): Promise<GitHubPullRequest> {
+    const [config, branch] = await Promise.all([
+      git(this.workspaceRoot, ['config', '--get-regexp', '^(remote|branch)\\.']).catch(() => ''),
+      git(this.workspaceRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']).then((name) => name.trim(), () => ''),
+    ]);
+    const base = pickGitHubRemote(config);
+    if (base === undefined) throw new Error('Dieses Repository hat kein GitHub-Remote.');
+    if (branch === '') throw new Error('Kein Branch ausgecheckt. Wechsle auf den Branch deines PRs.');
+    const head = branchHead(config, branch);
+    const data = object(await this.#api(base.host, 'POST', 'graphql', {
+      query: 'query($owner:String!,$name:String!,$head:String!){repository(owner:$owner,name:$name){pullRequests(headRefName:$head,states:OPEN,first:20){nodes{number url title state headRefName headRepositoryOwner{login}}}}}',
+      variables: { owner: base.owner, name: base.name, head: head.branch },
+    }));
+    const nodes = Array.isArray(data['errors']) ? undefined
+      : optionalObject(optionalObject(optionalObject(data['data'])?.['repository'])?.['pullRequests'])?.['nodes'];
+    if (!Array.isArray(nodes)) throw new Error('GitHub hat keine gültige PR-Liste geliefert.');
+    const open = (nodes as readonly unknown[]).map(object);
+    const owned = head.owner === undefined ? open
+      : open.filter((node) => String(optionalObject(node['headRepositoryOwner'])?.['login']).toLowerCase() === head.owner);
+    const candidates = owned.length > 0 ? owned : open;
+    if (candidates.length === 0) throw new Error('Der aktuelle Branch hat keinen offenen GitHub-PR. Öffne oder erstelle zuerst einen PR für diesen Branch.');
+    if (candidates.length > 1) throw new Error('Für diesen Branch gibt es mehrere offene PRs. Schließe die überzähligen PRs auf GitHub.');
+    return parsePullRequest(candidates[0], base.host);
   }
 
-  /** Parse the CLI response as untrusted JSON, retaining actionable network and account errors. */
-  async #json(args: readonly string[], input?: string): Promise<unknown> {
-    const output = await this.#run(args, input);
+  /** Call the GitHub API, keeping the reason and warning that a failed write may still have happened. */
+  async #api(host: string, method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown): Promise<unknown> {
+    const endpoints = endpointsFor(host);
+    const url = path === 'graphql' ? endpoints.graphql : `${endpoints.rest}/${path}`;
     try {
-      return JSON.parse(output) as unknown;
-    } catch {
-      throw new Error('GitHub CLI hat keine gültigen Daten geliefert. Prüfe deine Anmeldung und versuche es erneut.');
+      return await githubRequest(endpoints, url, method, body, true);
+    } catch (error: unknown) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const write = method !== 'GET' && path !== 'graphql';
+      throw new Error(`GitHub konnte die PR-Übergabe nicht abschließen. ${reason}${write ? '\n\nDer Schreibvorgang kann bereits erfolgt sein. „Erneut versuchen“ gleicht den vorhandenen Kommentar ab.' : ''}`);
     }
-  }
-
-  /** Invoke GitHub CLI without a shell, terminal prompts, or repository environment overrides. */
-  #run(args: readonly string[], input?: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const environment: NodeJS.ProcessEnv = { ...process.env, GH_PROMPT_DISABLED: '1' };
-      delete environment['GH_REPO'];
-      const child = execFile(this.executable, [...args], {
-        cwd: this.workspaceRoot, env: environment, encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024,
-      }, (error, stdout, stderr) => {
-        if (error === null) resolve(stdout);
-        else {
-          const detail = stderr.trim().slice(0, 900).replaceAll(/(?:gh[pousr]_[A-Za-z\d_]+|github_pat_[A-Za-z\d_]+)/gu, '[credential]');
-          reject(new Error(`GitHub konnte die PR-Übergabe nicht abschließen. Prüfe „gh auth status“ und ob der aktuelle Branch einen offenen PR hat.${detail ? `\n\n${detail}` : ''}${input === undefined ? '' : '\n\nDer Schreibvorgang kann bereits erfolgt sein. „Erneut versuchen“ gleicht den vorhandenen Kommentar ab.'}`));
-        }
-      });
-      child.stdin?.on('error', () => undefined);
-      child.stdin?.end(input);
-    });
   }
 }
 
-/** Validate the CLI's selected PR and derive API routing from its canonical URL. */
-function parsePullRequest(value: unknown): GitHubPullRequest {
+/** The branch name a local branch pushes to and, when its upstream remote is a GitHub repository, that repository's owner. */
+export function branchHead(config: string, branch: string): { readonly branch: string; readonly owner?: string } {
+  const value = (key: string): string | undefined => {
+    for (const line of config.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith(`${key} `)) return trimmed.slice(key.length + 1);
+    }
+    return undefined;
+  };
+  const merge = value(`branch.${branch}.merge`);
+  const remote = value(`branch.${branch}.remote`);
+  const url = remote === undefined ? undefined : value(`remote.${remote}.url`);
+  const owner = url === undefined ? undefined : parseGitRemote(url)?.owner.toLowerCase();
+  const name = merge?.startsWith('refs/heads/') === true ? merge.slice('refs/heads/'.length) : branch;
+  return owner === undefined ? { branch: name } : { branch: name, owner };
+}
+
+/** Validate the selected PR and require its link to stay on the repository's GitHub host. */
+function parsePullRequest(value: unknown, host: string): GitHubPullRequest {
   const record = object(value);
   if (record['state'] !== 'OPEN') throw new Error('Der aktuelle Branch hat keinen offenen GitHub-PR. Öffne oder erstelle zuerst einen PR für diesen Branch.');
   const url = new URL(text(record['url'], 'PR-Adresse'));
@@ -159,15 +170,15 @@ function parsePullRequest(value: unknown): GitHubPullRequest {
   const [owner, repository, kind, numberText] = parts;
   const number = Number(numberText);
   if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash
-    || !/^[a-z\d](?:[a-z\d.-]*[a-z\d])?$/iu.test(url.hostname)
+    || url.hostname.toLowerCase() !== host
     || parts.length !== 4 || owner === undefined || repository === undefined || kind !== 'pull'
     || !/^[a-z\d_.-]+$/iu.test(owner) || !/^[a-z\d_.-]+$/iu.test(repository)
     || owner === '.' || owner === '..' || repository === '.' || repository === '..'
     || !Number.isSafeInteger(number) || number <= 0 || record['number'] !== number) {
-    throw new Error('GitHub CLI hat keine eindeutige PR-Adresse geliefert.');
+    throw new Error('GitHub hat keine eindeutige PR-Adresse geliefert.');
   }
   return {
-    host: url.hostname, owner, repository, number, url: url.toString(),
+    host, owner, repository, number, url: url.toString(),
     title: text(record['title'], 'PR-Titel'), branch: text(record['headRefName'], 'PR-Branch'),
   };
 }

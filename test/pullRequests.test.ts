@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type * as vscode from 'vscode';
 
-import { apiErrorDetail, parseDetails, parsePullRequestFiles, parsePullRequestList, parseRepository, parseReviewThreads } from '../src/pullRequests.js';
+import { parseDetails, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
+import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githubApi.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
 import { fileTree, registerPullRequestView } from '../src/pullRequestView.js';
 import { groupSearchResults, parseGitRemote, pickGitHubRemote } from '../src/pullRequests.js';
@@ -47,9 +48,19 @@ test('parses PR files and rejects paths outside the repository', () => {
   assert.throws(() => parsePullRequestFiles([]));
 });
 
-test('parses the repository and rejects credentials in its link', () => {
-  assert.deepEqual(parseRepository({ nameWithOwner: 'acme/app', url: 'https://github.com/acme/app' }), { name: 'acme/app', url: 'https://github.com/acme/app' });
-  assert.throws(() => parseRepository({ nameWithOwner: 'acme/app', url: 'https://user:token@github.com/acme/app' }));
+test('sends github.com to its API and only the configured enterprise host to its own', () => {
+  assert.deepEqual(githubEndpoints('github.com', undefined), { rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql', authProvider: 'github' });
+  assert.deepEqual(githubEndpoints('git.acme.dev', 'https://Git.Acme.dev/'), { rest: 'https://git.acme.dev/api/v3', graphql: 'https://git.acme.dev/api/graphql', authProvider: 'github-enterprise' });
+  assert.deepEqual(githubEndpoints('acme.ghe.com', 'https://acme.ghe.com'), { rest: 'https://api.acme.ghe.com', graphql: 'https://api.acme.ghe.com/graphql', authProvider: 'github-enterprise' });
+  assert.throws(() => githubEndpoints('git.acme.dev', undefined), /github-enterprise\.uri/u);
+  assert.throws(() => githubEndpoints('git.acme.dev', 'https://other.example.com'), /github-enterprise\.uri/u);
+});
+
+test('fetches a PR from the remote that points at its repository', () => {
+  const config = 'remote.origin.url git@github.com:me/app.git\nremote.upstream.url https://github.com/Acme/App.git\nremote.-x.url https://github.com/acme/app';
+  assert.equal(remoteNameFor(config, { host: 'github.com', owner: 'acme', name: 'app' }), 'upstream');
+  assert.equal(remoteNameFor(config, { host: 'github.com', owner: 'acme', name: 'other' }), undefined);
+  assert.equal(remoteNameFor('remote.-x.url https://github.com/acme/app', { host: 'github.com', owner: 'acme', name: 'app' }), undefined);
 });
 
 /** Record worktree requests instead of touching Git. */
@@ -120,9 +131,9 @@ test('reads GitHub review threads, using original lines for outdated ones and sk
 });
 
 test('keeps the reasons GitHub gives from a failed API call', () => {
-  assert.equal(apiErrorDetail('{"message":"Validation Failed","errors":[{"message":"one pending review per pull request"},"line must be part of the diff"]}'),
-    'one pending review per pull request line must be part of the diff');
-  assert.equal(apiErrorDetail('not json'), '');
+  assert.equal(errorDetail('{"message":"Validation Failed","errors":[{"message":"one pending review per pull request"},"line must be part of the diff"]}'),
+    'Validation Failed one pending review per pull request line must be part of the diff');
+  assert.equal(errorDetail('not json'), '');
 });
 
 test('groups PRs by role, opens a worktree on click and the browser from the inline action', async (t) => {
@@ -229,6 +240,27 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
   await commands.executeCommand('localReview.refreshPullRequests');
   await level(tree);
   assert.equal(attempts, 2);
+});
+
+test('offers GitHub sign-in as the welcome button, or on the repository row when other repositories loaded', async (t) => {
+  window.trees.length = 0;
+  const signedOut = async (): Promise<PullRequestProvider> => { throw new GitHubSignInRequired('github'); };
+  const loaded = async (): Promise<PullRequestProvider> => ({
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }), listMine: async () => [summary], listReviewRequested: async () => [],
+  } as unknown as PullRequestProvider);
+  let checkouts = [{ folder: 'app', connect: signedOut, worktrees: recordingWorktrees() }];
+  const settings = new FakeMemento();
+  await settings.update('localReview.groupBy', 'repository');
+  const view = registerPullRequestView(async () => checkouts, noStatusChanges, settings, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+
+  assert.deepEqual(await level(tree), []);
+  checkouts = [{ folder: 'app', connect: loaded, worktrees: recordingWorktrees() }, { folder: 'enterprise', connect: signedOut, worktrees: recordingWorktrees() }];
+  await commands.executeCommand('localReview.refreshPullRequests');
+  const row = (await level(tree)).at(-1)?.item;
+  assert.equal(row?.label, 'enterprise: Sign in to GitHub to load pull requests.');
+  assert.deepEqual(row?.command, { command: 'localReview.signInToGitHub', title: 'Sign in to GitHub', arguments: ['github'] });
 });
 
 test('lists repositories with PRs, routes actions to the PR\'s own repository and hides unticked repositories', async (t) => {

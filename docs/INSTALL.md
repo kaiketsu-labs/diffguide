@@ -60,7 +60,7 @@ For clearer unfocused comment windows, choose the **half-filled circle · Kommen
 
 ## Share selected feedback with an open PR
 
-Install the GitHub CLI and sign in with `gh auth login` if you want PR handoffs. In the Review toolbar choose **An GitHub-PR übergeben**, select summaries and unresolved questions, review/edit the preview, and explicitly publish. This action does not acknowledge or resolve local feedback. See [PR handoff](PR-HANDOFF.md).
+PR handoffs use your GitHub sign-in in VS Code and ask for it the first time. In the Review toolbar choose **An GitHub-PR übergeben**, select summaries and unresolved questions, review/edit the preview, and explicitly publish. This action does not acknowledge or resolve local feedback. See [PR handoff](PR-HANDOFF.md).
 
 ## If the connection needs attention
 

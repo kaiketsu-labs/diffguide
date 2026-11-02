@@ -221,6 +221,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "localReview.signInToGitHub",
+        "title": "Sign in to GitHub",
+        "category": "Local Review",
+        "icon": "$(account)"
+      },
+      {
         "command": "localReview.viewFilesAsTree",
         "title": "View as tree",
         "category": "Local Review",
@@ -324,6 +330,16 @@
       {
         "view": "localReview.threads",
         "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:localReview.startClaude)\n[Änderungen reviewen](command:localReview.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
+      },
+      {
+        "view": "localReview.pullRequests",
+        "contents": "Sign in to GitHub to see your pull requests.\n[Sign in to GitHub](command:localReview.signInToGitHub)",
+        "when": "localReview.gitHubSignIn == github"
+      },
+      {
+        "view": "localReview.pullRequests",
+        "contents": "Sign in to your GitHub Enterprise host to see your pull requests.\n[Sign in to GitHub Enterprise](command:localReview.signInToGitHub)",
+        "when": "localReview.gitHubSignIn == github-enterprise"
       }
     ],
     "menus": {

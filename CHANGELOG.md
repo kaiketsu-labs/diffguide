@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Local Review no longer needs the GitHub CLI. The PR sidebar, review page and PR handoff sign in with your GitHub account in VS Code. When you are signed out, the Pull Requests view shows a **Sign in to GitHub** button (also **Local Review: Sign in to GitHub** in the Command Palette), and PR handoff asks you to sign in. The sidebar reloads after sign-in. GitHub Enterprise works for the one host set in `github-enterprise.uri`.
 - Clicking an element in an HTML preview to comment keeps the page where it is instead of jumping to the top of the file.
 - The PR sidebar lists every Git repository inside the workspace folder, such as a folder of service repositories. Repositories without open PRs are left out. A repository whose PRs cannot be loaded shows its error on one row without hiding the others.
 - The PR sidebar groups by role by default: Review requested and Mine on top, repositories under them. Switch to Group by repository in the view's ... menu. Role and repository rows have their own icons and PR counts.

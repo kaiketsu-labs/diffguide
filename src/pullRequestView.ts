@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import type { PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, ReviewVerdict } from './pullRequests.js';
 import type { PullRequestRole } from './worktrees.js';
+import { GitHubSignInRequired } from './githubApi.js';
 
 type Listing =
   | { readonly kind: 'ready'; readonly folder: string; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
-  | { readonly kind: 'failed'; readonly folder: string; readonly message: string };
+  | { readonly kind: 'failed'; readonly folder: string; readonly message: string; readonly signIn?: GitHubSignInRequired['provider'] };
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
 
@@ -20,7 +21,7 @@ type Node =
   | PullRequestNode
   | FileNode
   | FolderNode
-  | { readonly kind: 'message'; readonly text: string; readonly icon: string };
+  | { readonly kind: 'message'; readonly text: string; readonly icon: string; readonly command?: vscode.Command };
 
 type FileNode = { readonly kind: 'file'; readonly parent: PullRequestNode; readonly file: PullRequestFile; readonly inTree: boolean };
 type FolderNode = { readonly kind: 'folder'; readonly parent: PullRequestNode; readonly folder: FileFolder };
@@ -124,7 +125,7 @@ export interface PullRequestCheckout {
   readonly worktrees: PullRequestWorktrees;
 }
 
-/** Repositories listed at once, so a folder of many repositories does not start dozens of GitHub CLI calls together. */
+/** Repositories listed at once, so a folder of many repositories does not start dozens of GitHub requests together. */
 const parallelListings = 4;
 
 /** Sidebar icon and label for each review verdict. */
@@ -330,6 +331,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'message': {
         const item = new vscode.TreeItem(node.text, vscode.TreeItemCollapsibleState.None);
         item.iconPath = new vscode.ThemeIcon(node.icon);
+        if (node.command !== undefined) item.command = node.command;
         return item;
       }
     }
@@ -393,9 +395,13 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       void loading.then(() => { this.#changed.fire(undefined); });
     }
     const failed = listings.flatMap((listing): Node[] => listing.kind === 'failed'
-      ? [{ kind: 'message', text: shown.length === 1 ? listing.message : `${listing.folder}: ${listing.message}`, icon: 'warning' }]
+      ? [{ kind: 'message', text: shown.length === 1 ? listing.message : `${listing.folder}: ${listing.message}`, ...listing.signIn === undefined
+        ? { icon: 'warning' } : { icon: 'account', command: { command: 'localReview.signInToGitHub', title: 'Sign in to GitHub', arguments: [listing.signIn] } } }]
       : []);
     const ready = listings.filter((listing): listing is Ready => listing.kind === 'ready');
+    const signIn = ready.length === 0 ? listings.find((listing) => listing.kind === 'failed' && listing.signIn !== undefined) : undefined;
+    void vscode.commands.executeCommand('setContext', 'localReview.gitHubSignIn', signIn?.kind === 'failed' ? signIn.signIn : undefined);
+    if (signIn !== undefined) return [];
     if (ready.length === 0) return failed;
     if (this.byRole) {
       return [...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => pullRequestsOf(listing, role).length > 0) })), ...failed];
@@ -457,7 +463,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       ]);
       return { kind: 'ready', folder, provider, worktrees, repository, mine, reviewRequested };
     } catch (error: unknown) {
-      return { kind: 'failed', folder, message: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof Error ? error.message : String(error);
+      return error instanceof GitHubSignInRequired ? { kind: 'failed', folder, message, signIn: error.provider } : { kind: 'failed', folder, message };
     }
   }
 }
