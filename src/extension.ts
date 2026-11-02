@@ -1,5 +1,5 @@
 import { mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
 import { createReviewStore } from './store.js';
@@ -9,8 +9,8 @@ import { registerPrExport } from './prExportController.js';
 import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubCliProvider } from './pullRequests.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
-import { registerPullRequestView } from './pullRequestView.js';
-import { type PullRequestRole, ensureWorktree, hasWorktree, readPullRequestBase, removeWorktree, repositoryStorage, worktreePath } from './worktrees.js';
+import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
+import { type PullRequestRole, ensureWorktree, hasWorktree, readPullRequestBase, removeWorktree, worktreePath } from './worktrees.js';
 import { highlightSource, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
 import { markdownBlocks } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
@@ -20,6 +20,7 @@ import { buildOverviewState, showPullRequestOverview, type PageComment } from '.
 import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
 import { openPullRequestFile, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
+import { Checkouts, gitRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
 import { getHeadRevision, readGitBase } from './git.js';
 import { anchorFromText } from './anchors.js';
@@ -28,30 +29,35 @@ import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './cont
 
 let activeStore: ReviewStore | undefined;
 let activeBridge: ReviewBridge | undefined;
-let activePullRequests: PullRequestSessions | undefined;
+let activePullRequests: Checkouts | undefined;
 
 /** Initialize one workspace-scoped review and its private local connection. */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (folder === undefined || folder.uri.scheme !== 'file' || !vscode.workspace.isTrusted) return;
-  const pullRequestStorage = repositoryStorage(folder.uri.fsPath).then((found) => found ?? context.globalStorageUri.fsPath);
-  context.subscriptions.push(registerPullRequestDiffs(pullRequestStorage));
+  const root = folder.uri.fsPath;
+  const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('localReview').get('mockPullRequests', false);
+  const checkouts = new Checkouts(root, context.globalStorageUri.fsPath, {
+    discover: async () => mockPullRequests() ? [] : await gitRepositoryRoots(),
+    create: (checkoutRoot, storageRoot) => {
+      const connect = async (): Promise<PullRequestProvider> => mockPullRequests() ? mockPullRequestProvider : await GitHubCliProvider.connect(checkoutRoot);
+      return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect), fileReviews: new FileReviews(storageRoot) };
+    },
+    onRestoreError: (error) => {
+      void vscode.window.showErrorMessage(`Local Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  });
+  context.subscriptions.push(checkouts, registerPullRequestDiffs(async (repository, number) => (await checkouts.locate(repository, number))?.storageRoot));
   const storage = context.storageUri;
   if (storage === undefined) return;
   try {
     await mkdir(storage.fsPath, { recursive: true, mode: 0o700 });
     const store = await createReviewStore(join(storage.fsPath, 'review.json'), folder.uri.fsPath);
     activeStore = store;
-    const root = folder.uri.fsPath;
-    const storageRoot = await pullRequestStorage;
-    const connect = async (): Promise<PullRequestProvider> => vscode.workspace.getConfiguration('localReview').get('mockPullRequests', false)
-      ? mockPullRequestProvider : await GitHubCliProvider.connect(root);
-    const pullRequestSessions = new PullRequestSessions(context, storageRoot, root, connect);
-    activePullRequests = pullRequestSessions;
-    const fileReviews = new FileReviews(storageRoot);
-    context.subscriptions.push(pullRequestSessions, fileReviews);
-    const showOverview = async (provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, revealPath?: string): Promise<void> => {
-      await ensureWorktree(root, storageRoot, provider, repository, pullRequest, role);
+    activePullRequests = checkouts;
+    const showOverview = async (checkout: Checkout, provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, revealPath?: string): Promise<void> => {
+      const { storageRoot, sessions: pullRequestSessions, fileReviews } = checkout;
+      await ensureWorktree(checkout.root, storageRoot, provider, repository, pullRequest, role);
       const opened = await pullRequestSessions.open(repository, pullRequest.number);
       const folder = worktreePath(storageRoot, repository, pullRequest.number);
       const listed = provider.listFiles(pullRequest.number).then((files) => files.map((file) => file.path), () => undefined);
@@ -171,30 +177,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         refresh: () => { void loadDetails(); void loadThreads(); },
       }, context.extensionUri, revealPath);
     };
-    await createReviewController(store, context, getHeadRevision, pullRequestSessions);
-    context.subscriptions.push(
-      registerPullRequestView(connect, {
+    const worktreesOf = (checkout: Checkout): PullRequestWorktrees => {
+      const { root: checkoutRoot, storageRoot, sessions, fileReviews } = checkout;
+      return {
         exists: (repository, number) => hasWorktree(storageRoot, repository, number),
-        open: showOverview,
+        open: (...arguments_) => showOverview(checkout, ...arguments_),
         showClaude: async (provider, repository, pullRequest, role) => {
-          await ensureWorktree(root, storageRoot, provider, repository, pullRequest, role);
-          showClaude(await pullRequestSessions.open(repository, pullRequest.number));
+          await ensureWorktree(checkoutRoot, storageRoot, provider, repository, pullRequest, role);
+          showClaude(await sessions.open(repository, pullRequest.number));
         },
         remove: async (repository, number) => {
-          await pullRequestSessions.close(repository, number);
-          await removeWorktree(root, storageRoot, repository, number);
+          await sessions.close(repository, number);
+          await removeWorktree(checkoutRoot, storageRoot, repository, number);
         },
         claudeStatus: (repository, number) => {
-          const opened = pullRequestSessions.get(repository, number);
+          const opened = sessions.get(repository, number);
           return opened === undefined ? undefined : claudeStatus(opened.runner.activity).text;
         },
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
         forget: () => { fileReviews.forget(); },
-        showOverview: (provider, repository, pullRequest, role) => showOverview(provider, repository, pullRequest, role),
-        onDidChangeStatus: (listener) => vscode.Disposable.from(pullRequestSessions.onDidChangeState(listener), fileReviews.onDidChange(listener)),
-      }, context.globalState),
-      reportClaudeFailures(pullRequestSessions),
+        showOverview: (provider, repository, pullRequest, role) => showOverview(checkout, provider, repository, pullRequest, role),
+      };
+    };
+    await createReviewController(store, context, getHeadRevision, checkouts);
+    context.subscriptions.push(
+      registerPullRequestView(
+        async () => (await checkouts.list()).map((checkout) => ({
+          folder: relative(root, checkout.root) || basename(root), connect: checkout.connect, worktrees: worktreesOf(checkout),
+        })),
+        (listener) => vscode.Disposable.from(checkouts.onDidChangeState(listener), checkouts.onDidChangeReviewedFiles(listener)),
+        context.globalState,
+      ),
+      reportClaudeFailures(checkouts),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('localReview.mockPullRequests')) void vscode.commands.executeCommand('localReview.refreshPullRequests');
       }),
@@ -205,10 +220,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     activeBridge = bridge;
     context.subscriptions.push(bridge, registerClaudeLauncher(context, bridge, storage.fsPath), vscode.commands.registerCommand('localReview.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
-      const focused = document === undefined ? undefined : pullRequestSessions.forUri(document.uri);
+      const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
       if (focused !== undefined) showClaude(focused);
     }));
-    void pullRequestSessions.restore().catch((error: unknown) => {
+    void checkouts.list().catch((error: unknown) => {
       void vscode.window.showErrorMessage(`Local Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
     });
     await prepareConnection(context, bridge, storage.fsPath);
@@ -216,7 +231,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     status.command = 'localReview.startClaude';
     const updateStatus = (): void => {
       const document = vscode.window.activeTextEditor?.document;
-      const focused = document === undefined ? undefined : pullRequestSessions.forUri(document.uri);
+      const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
       if (focused !== undefined) {
         const current = claudeStatus(focused.runner.activity);
         status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
@@ -239,7 +254,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
     context.subscriptions.push(
       status, store.onChange(updateStatus), bridge.onChange(updateStatus),
-      pullRequestSessions.onDidChangeState(updateStatus), vscode.window.onDidChangeActiveTextEditor(updateStatus),
+      checkouts.onDidChangeState(updateStatus), vscode.window.onDidChangeActiveTextEditor(updateStatus),
     );
     updateStatus();
   } catch (error: unknown) {
@@ -265,7 +280,7 @@ function showClaude({ runner, output }: PullRequestSession): void {
 }
 
 /** Tell the user once per failed run why Claude did not answer, instead of leaving comments waiting silently. */
-function reportClaudeFailures(sessions: PullRequestSessions): vscode.Disposable {
+function reportClaudeFailures(sessions: Pick<Checkouts, 'onDidChangeState'>): vscode.Disposable {
   const reported = new WeakMap<PullRequestSession, string>();
   return sessions.onDidChangeState((opened) => {
     const { running, error } = opened.runner.activity;

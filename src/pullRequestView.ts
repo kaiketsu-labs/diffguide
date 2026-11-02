@@ -4,15 +4,15 @@ import type { PullRequestFile, PullRequestProvider, PullRequestRepository, PullR
 import type { PullRequestRole } from './worktrees.js';
 
 type Listing =
-  | { readonly kind: 'ready'; readonly provider: PullRequestProvider; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
-  | { readonly kind: 'failed'; readonly message: string };
+  | { readonly kind: 'ready'; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
+  | { readonly kind: 'failed'; readonly folder: string; readonly message: string };
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
 
 type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary };
 
 type Node =
-  | { readonly kind: 'repository'; readonly listing: Ready }
+  | { readonly kind: 'repository'; readonly listing: Ready; readonly expanded: boolean }
   | { readonly kind: 'section'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequests: readonly PullRequestSummary[] }
   | PullRequestNode
   | FileNode
@@ -105,8 +105,18 @@ export interface PullRequestWorktrees {
   showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole): Promise<void>;
   /** Drop cached code host state so the next read is fresh. */
   forget(): void;
-  readonly onDidChangeStatus: vscode.Event<unknown>;
 }
+
+/** A local repository the sidebar lists PRs for. */
+export interface PullRequestCheckout {
+  /** Folder named when its PRs cannot be listed. */
+  readonly folder: string;
+  connect(): Promise<PullRequestProvider>;
+  readonly worktrees: PullRequestWorktrees;
+}
+
+/** Repositories listed at once, so a folder of many repositories does not start dozens of GitHub CLI calls together. */
+const parallelListings = 4;
 
 /** Sidebar icon and label for each review verdict. */
 const verdicts: Record<ReviewVerdict, { readonly icon: string; readonly color: string; readonly label: string }> = {
@@ -117,16 +127,16 @@ const verdicts: Record<ReviewVerdict, { readonly icon: string; readonly color: s
 
 const sectionLabels: Record<PullRequestRole, string> = { author: 'Mine', reviewer: 'Review requested' };
 
-/** List the current repository's open pull requests by the user's role in them. */
+/** List each repository's open pull requests by the user's role in them. */
 class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #changed = new vscode.EventEmitter<undefined>();
   readonly onDidChangeTreeData = this.#changed.event;
-  #listing: Promise<Listing> | undefined;
-  readonly #files = new Map<number, Promise<readonly PullRequestFile[]>>();
+  #listings: Promise<readonly Listing[]> | undefined;
+  #listed: readonly PullRequestCheckout[] = [];
+  readonly #files = new Map<string, Promise<readonly PullRequestFile[]>>();
 
   constructor(
-    private readonly connect: () => Promise<PullRequestProvider>,
-    private readonly worktrees: PullRequestWorktrees,
+    private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
     private readonly settings: vscode.Memento,
   ) {}
 
@@ -140,9 +150,9 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   }
 
   refresh(): void {
-    this.#listing = undefined;
+    this.#listings = undefined;
     this.#files.clear();
-    this.worktrees.forget();
+    for (const checkout of this.#listed) checkout.worktrees.forget();
     this.#changed.fire(undefined);
   }
 
@@ -153,9 +163,12 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
   async getChildren(node?: Node): Promise<Node[]> {
     if (node === undefined) {
-      this.#listing ??= this.#load();
-      const listing = await this.#listing;
-      return listing.kind === 'failed' ? [{ kind: 'message', text: listing.message, icon: 'warning' }] : [{ kind: 'repository', listing }];
+      this.#listings ??= this.#load();
+      const listings = await this.#listings;
+      const single = listings.length === 1;
+      return listings.map((listing): Node => listing.kind === 'failed'
+        ? { kind: 'message', text: single ? listing.message : `${listing.folder}: ${listing.message}`, icon: 'warning' }
+        : { kind: 'repository', listing, expanded: single || listing.mine.length + listing.reviewRequested.length > 0 });
     }
     if (node.kind === 'repository') {
       return [
@@ -185,7 +198,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   async getTreeItem(node: Node): Promise<vscode.TreeItem> {
     switch (node.kind) {
       case 'repository': {
-        const item = new vscode.TreeItem(node.listing.repository.name, vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem(node.listing.repository.name, node.expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
         item.iconPath = new vscode.ThemeIcon('repo');
         return item;
       }
@@ -196,9 +209,9 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'pullRequest': {
         const pr = node.pullRequest;
-        const checkedOut = await this.worktrees.exists(node.listing.repository.name, pr.number);
+        const checkedOut = await node.listing.worktrees.exists(node.listing.repository.name, pr.number);
         const item = new vscode.TreeItem(`#${pr.number} ${pr.title}`, vscode.TreeItemCollapsibleState.Collapsed);
-        const claude = checkedOut ? this.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
+        const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
         const verdict = pr.review === undefined ? undefined : verdicts[pr.review];
         item.description = [verdict?.label, pr.author, pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress].filter(Boolean).join(' · ');
@@ -218,9 +231,9 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         item.tooltip = `${file.path} · +${file.additions} −${file.deletions}`;
         item.resourceUri = fileRowUri(node.parent.pullRequest.number, file);
         item.iconPath = vscode.ThemeIcon.File;
-        const { repository } = node.parent.listing;
-        if (await this.worktrees.exists(repository.name, node.parent.pullRequest.number)) {
-          const reviewed = await this.worktrees.reviewedFiles(node.parent.listing.provider, repository.name, node.parent.pullRequest.number, [file.path]);
+        const { repository, worktrees } = node.parent.listing;
+        if (await worktrees.exists(repository.name, node.parent.pullRequest.number)) {
+          const reviewed = await worktrees.reviewedFiles(node.parent.listing.provider, repository.name, node.parent.pullRequest.number, [file.path]);
           item.checkboxState = reviewed.has(file.path) ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
         }
         item.command = { command: 'localReview.openPullRequest', title: 'Open changes', arguments: [node.parent, file.path] };
@@ -245,7 +258,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   async setReviewed(node: Node, state: vscode.TreeItemCheckboxState): Promise<void> {
     if (node.kind !== 'file') return;
     const { pullRequest, listing } = node.parent;
-    await this.worktrees.setReviewed(listing.provider, listing.repository.name, pullRequest.number, node.file.path, state === vscode.TreeItemCheckboxState.Checked);
+    await listing.worktrees.setReviewed(listing.provider, listing.repository.name, pullRequest.number, node.file.path, state === vscode.TreeItemCheckboxState.Checked);
   }
 
   #folderChildren(parent: PullRequestNode, folder: FileFolder): Node[] {
@@ -257,11 +270,12 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
   #filesOf(node: PullRequestNode): Promise<readonly PullRequestFile[]> {
     const { number } = node.pullRequest;
-    let files = this.#files.get(number);
+    const key = `${node.listing.repository.name}#${number}`;
+    let files = this.#files.get(key);
     if (files === undefined) {
       files = node.listing.provider.listFiles(number);
-      files.catch(() => { this.#files.delete(number); });
-      this.#files.set(number, files);
+      files.catch(() => { this.#files.delete(key); });
+      this.#files.set(key, files);
     }
     return files;
   }
@@ -270,26 +284,47 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   async #progress(node: PullRequestNode): Promise<string | undefined> {
     const files = await this.#filesOf(node).catch(() => undefined);
     if (files === undefined || files.length === 0) return undefined;
-    const reviewed = await this.worktrees.reviewedFiles(node.listing.provider, node.listing.repository.name, node.pullRequest.number, files.map((file) => file.path));
+    const reviewed = await node.listing.worktrees.reviewedFiles(node.listing.provider, node.listing.repository.name, node.pullRequest.number, files.map((file) => file.path));
     return `${reviewed.size}/${files.length} reviewed`;
   }
 
-  async #load(): Promise<Listing> {
+  async #load(): Promise<readonly Listing[]> {
     try {
-      const provider = await this.connect();
+      this.#listed = await this.checkouts();
+    } catch (error: unknown) {
+      return [{ kind: 'failed', folder: '', message: error instanceof Error ? error.message : String(error) }];
+    }
+    const checkouts = this.#listed;
+    const listings: Listing[] = [];
+    let next = 0;
+    const work = async (): Promise<void> => {
+      for (let index = next++; index < checkouts.length; index = next++) {
+        const checkout = checkouts[index];
+        if (checkout !== undefined) listings[index] = await this.#loadOne(checkout);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(parallelListings, checkouts.length) }, work));
+    return listings;
+  }
+
+  async #loadOne({ folder, connect, worktrees }: PullRequestCheckout): Promise<Listing> {
+    try {
+      const provider = await connect();
       const [repository, mine, reviewRequested] = await Promise.all([
         provider.readRepository(), provider.listMine(), provider.listReviewRequested(),
       ]);
-      return { kind: 'ready', provider, repository, mine, reviewRequested };
+      return { kind: 'ready', provider, worktrees, repository, mine, reviewRequested };
     } catch (error: unknown) {
-      return { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
+      return { kind: 'failed', folder, message: error instanceof Error ? error.message : String(error) };
     }
   }
 }
 
 /** Register the pull request sidebar and its commands. */
-export function registerPullRequestView(connect: () => Promise<PullRequestProvider>, worktrees: PullRequestWorktrees, settings: vscode.Memento): vscode.Disposable {
-  const tree = new PullRequestTree(connect, worktrees, settings);
+export function registerPullRequestView(
+  checkouts: () => Promise<readonly PullRequestCheckout[]>, onDidChangeStatus: vscode.Event<unknown>, settings: vscode.Memento,
+): vscode.Disposable {
+  const tree = new PullRequestTree(checkouts, settings);
   const showMode = (): void => { void vscode.commands.executeCommand('setContext', 'localReview.filesAsTree', tree.asTree); };
   showMode();
   const report = (error: unknown): void => {
@@ -307,7 +342,7 @@ export function registerPullRequestView(connect: () => Promise<PullRequestProvid
       }
       tree.redraw();
     }),
-    worktrees.onDidChangeStatus(() => { tree.redraw(); }),
+    onDidChangeStatus(() => { tree.redraw(); }),
     vscode.commands.registerCommand('localReview.refreshPullRequests', () => { tree.refresh(); }),
     vscode.commands.registerCommand('localReview.viewFilesAsTree', async () => { await tree.setAsTree(true); showMode(); }),
     vscode.commands.registerCommand('localReview.viewFilesAsList', async () => { await tree.setAsTree(false); showMode(); }),
@@ -320,7 +355,7 @@ export function registerPullRequestView(connect: () => Promise<PullRequestProvid
       try {
         await vscode.window.withProgress(
           { location: vscode.ProgressLocation.Notification, title: `Opening #${node.pullRequest.number}` },
-          () => worktrees.open(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, reveal),
+          () => node.listing.worktrees.open(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, reveal),
         );
       } catch (error: unknown) {
         report(error);
@@ -330,7 +365,7 @@ export function registerPullRequestView(connect: () => Promise<PullRequestProvid
     vscode.commands.registerCommand('localReview.showPullRequestClaude', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
       try {
-        await worktrees.showClaude(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role);
+        await node.listing.worktrees.showClaude(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role);
       } catch (error: unknown) {
         report(error);
       }
@@ -339,7 +374,7 @@ export function registerPullRequestView(connect: () => Promise<PullRequestProvid
     vscode.commands.registerCommand('localReview.showPullRequestOverview', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
       try {
-        await worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role);
+        await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role);
       } catch (error: unknown) {
         report(error);
       }
@@ -354,7 +389,7 @@ export function registerPullRequestView(connect: () => Promise<PullRequestProvid
       );
       if (answer !== confirm) return;
       try {
-        await worktrees.remove(node.listing.repository.name, node.pullRequest.number);
+        await node.listing.worktrees.remove(node.listing.repository.name, node.pullRequest.number);
       } catch (error: unknown) {
         report(error);
       }
@@ -366,5 +401,6 @@ export function registerPullRequestView(connect: () => Promise<PullRequestProvid
 /** Accept only tree nodes this view created; command arguments are otherwise untrusted. */
 function isPullRequestNode(value: unknown): value is PullRequestNode {
   return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'pullRequest'
-    && typeof (value as { listing?: { provider?: unknown } }).listing?.provider === 'object';
+    && typeof (value as { listing?: { provider?: unknown } }).listing?.provider === 'object'
+    && typeof (value as { listing?: { worktrees?: unknown } }).listing?.worktrees === 'object';
 }
