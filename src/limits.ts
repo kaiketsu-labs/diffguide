@@ -7,3 +7,6 @@ export const maximumIdentifierLength = 256;
 /** Keep quoted discussion bounded while the current event carries the full request. */
 export const maximumConversationMessages = 20;
 export const maximumConversationTextLength = 100_000;
+
+/** Mock fixture: no behavior change. */
+export const reviewBaseFixture = true;
