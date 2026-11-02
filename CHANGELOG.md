@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clicking an element in an HTML preview to comment keeps the page where it is instead of jumping to the top of the file.
 - The PR sidebar lists every Git repository inside the workspace folder, such as a folder of service repositories. Repositories with open PRs start expanded, the rest collapsed. A repository whose PRs cannot be loaded shows its error on one row without hiding the others.
 - Support Node.js 20, the runtime SageMaker Code Editor uses for extensions and Claude hooks. Node.js 22 is no longer required.
 - The PR overview became a review page: overview cards on top, every changed file below with syntax colors, a unified or split layout, a Viewed checkbox that collapses the file, and Open in editor for the native diff.

@@ -360,7 +360,7 @@ const api=acquireVsCodeApi();
 const $=(id)=>document.getElementById(id);
 const saved=api.getState()||{};
 let layout=saved.layout||'unified';
-const collapsed=new Map(Object.entries(saved.collapsed||{}));const previewing=new Set(saved.previewing||[]);const previews=new Map();const frameHeight=new Map();const frameAnchors=new Map();const nonce=document.currentScript.nonce;
+const collapsed=new Map(Object.entries(saved.collapsed||{}));const previewing=new Set(saved.previewing||[]);const previews=new Map();const frameHeight=new Map();const frameTops=new Map();const frameAnchors=new Map();const nonce=document.currentScript.nonce;
 /** Runs inside the HTML preview frame: reports clicks as source lines, and where commented elements sit. */
 function frameMain(){
   const lines=(node)=>node.dataset.lrLines.split('-').map(Number);
@@ -388,7 +388,7 @@ function frameMain(){
   addEventListener('load',schedule);
   addEventListener('mouseover',(event)=>{const at=target(event);if(hover)hover.removeAttribute('data-lr-hover');hover=at;if(at)at.setAttribute('data-lr-hover','');});
   addEventListener('click',(event)=>{event.preventDefault();event.stopPropagation();const at=target(event);if(!at)return;
-    const [start,end]=lines(at);parent.postMessage({lrPick:{start,end,extend:event.shiftKey}},'*');},true);
+    const [start,end]=lines(at);parent.postMessage({lrPick:{start,end,extend:event.shiftKey,top:at.getBoundingClientRect().top+scrollY}},'*');},true);
   addEventListener('submit',(event)=>event.preventDefault(),true);
   addEventListener('message',(event)=>{if(event.source!==parent)return;const data=event.data||{};
     if(Array.isArray(data.anchors)){anchors=data.anchors;schedule();}
@@ -607,9 +607,10 @@ function frameMessage(frame,data){const path=frame.dataset.path;if(!data||typeof
   if(data.lrReady){const drafting=composer&&composer.path===path&&composer.side==='new';
     frame.contentWindow.postMessage({anchors:(frameAnchors.get(path)||[]).map(({key,start,end,source})=>({key,start,end,source})),select:drafting?[composer.start,composer.end]:null},'*');}
   else if(Number.isFinite(data.lrHeight)){const height=Math.min(Math.max(data.lrHeight,100),20000);frameHeight.set(path,height);frame.style.height=height+'px';
-    if(data.lrAnchors&&typeof data.lrAnchors==='object')layoutMargin(frame,data.lrAnchors);}
+    if(data.lrAnchors&&typeof data.lrAnchors==='object'){frameTops.set(path,data.lrAnchors);layoutMargin(frame,data.lrAnchors);}}
   else if(data.lrPick&&Number.isSafeInteger(data.lrPick.start)&&Number.isSafeInteger(data.lrPick.end)&&data.lrPick.start>0&&data.lrPick.start<=data.lrPick.end){
-    const {start,end,extend}=data.lrPick;
+    const {start,end,extend,top}=data.lrPick;const tops={...frameTops.get(path)};
+    if(Number.isFinite(top))tops.composer=extend&&Number.isFinite(tops.composer)?Math.min(tops.composer,top):top;frameTops.set(path,tops);
     if(extend&&composer&&composer.path===path&&composer.side==='new'){composer.start=Math.min(composer.start,start);composer.end=Math.max(composer.end,end);focusNext='composer';save();renderFiles();}
     else{pick(path,'new',start,false);composer.end=end;save();renderFiles();}}}
 /** Line each margin card up with its element, pushing cards down so they never overlap. */
@@ -709,6 +710,7 @@ function renderFiles(){
     if(outside.length){const block=el('div','outside');block.append(el('div','muted','Comments on lines this diff does not show'),...outside.map(threadBox));diff.prepend(block);}
     box.append(diff);container.append(box);
   }
+  for(const frame of container.querySelectorAll('iframe.html-preview'))layoutMargin(frame,frameTops.get(frame.dataset.path)||{});
   if(focus){const area=container.querySelector('[data-draft="'+CSS.escape(focus.key)+'"]');if(area){area.focus({preventScroll:true});area.setSelectionRange(focus.start,focus.end);}}
   window.scrollTo(0,scroll);
   if(focusNext){const area=container.querySelector('[data-draft="'+CSS.escape(focusNext)+'"]');focusNext=undefined;if(area)area.focus();}
