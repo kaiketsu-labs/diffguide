@@ -47,7 +47,10 @@ function commentFor(navigator: ReviewCodeNavigation, thread: ReviewThread, messa
 
 /** Dispose every real navigator even when an assertion fails. */
 async function navigation(store: ReviewStore): Promise<ReviewCodeNavigation> {
-  const result = await createCodeNavigation(store);
+  const result = await createCodeNavigation({
+    get threads() { return store.threads; },
+    workingUri: (anchor) => Uri.file(`${store.workspaceRoot}/${anchor.path}`) as unknown as vscode.Uri,
+  });
   navigators.push(result);
   return result;
 }

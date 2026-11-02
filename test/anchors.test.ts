@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { capturedCodeContext, hashDocumentText, locateCodeAnchor } from '../src/anchors.js';
+import { anchorFromText, capturedCodeContext, hashDocumentText, locateCodeAnchor } from '../src/anchors.js';
 import type { CodeAnchor } from '../src/contracts.js';
 
 /** Capture a full-line review selection with neighboring code for restoration tests. */
@@ -74,4 +74,12 @@ test('keeps the saved selection inside a correctly positioned read-only excerpt'
   assert.equal(snapshot.text, 'line 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13');
   assert.deepEqual({ startLine: snapshot.startLine, endLine: snapshot.endLine }, { startLine: 4, endLine: 5 });
   assert.equal(captured.startLine, 9);
+});
+
+test('captures page comments like editor selections, and refuses lines past the end of the file', () => {
+  const text = 'one\ntwo\nthree\nfour\nfive\nsix\nseven\n';
+  const captured = anchorFromText(text, { path: 'src/example.ts', startLine: 4, endLine: 5, side: 'working', baseRevision: 'a'.repeat(40) });
+  assert.deepEqual(captured, anchor(text, 4, 5));
+  assert.deepEqual(locateCodeAnchor(text, captured), { startLine: 4, endLine: 5 });
+  assert.throws(() => anchorFromText(text, { ...captured, startLine: 9, endLine: 9 }), /outside src\/example\.ts/u);
 });

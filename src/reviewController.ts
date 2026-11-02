@@ -10,6 +10,7 @@ import type { CodeAnchor, ReviewIntent, ReviewMessage, ReviewStore, ReviewThread
 import { getHeadRevision, isWorkspaceRelativePath, listChangedFiles, readGitBase } from './git';
 import { SubmissionGate } from './submissionGate.js';
 import { resolvedVisibilityKey, ReviewVisibility } from './reviewVisibility.js';
+import { anchorDocumentUri, type ReviewSession, type ReviewSessionSource, type SessionLocation } from './reviewSession.js';
 
 const controllerId = 'localReview';
 const baseScheme = 'local-review-base';
@@ -95,16 +96,18 @@ function baseUri(relativePath: string, revision: string, emptyWorking = false): 
   });
 }
 
-/** Limit comments to local files and snapshots belonging to this workspace. */
-function workspacePath(uri: vscode.Uri, workspaceRoot: string): string | undefined {
+/** Locate local files and snapshots belonging to this workspace. */
+function localLocation(uri: vscode.Uri, workspaceRoot: string): SessionLocation | undefined {
   if (uri.scheme === baseScheme) {
-    return baseReference(uri)?.relativePath;
+    const reference = baseReference(uri);
+    return reference === undefined ? undefined
+      : { path: reference.relativePath, original: !reference.emptyWorking, revision: reference.revision };
   }
   if (uri.scheme !== 'file') {
     return undefined;
   }
   const relativePath = path.relative(workspaceRoot, uri.fsPath);
-  return isWorkspaceRelativePath(relativePath) ? relativePath.split(path.sep).join('/') : undefined;
+  return isWorkspaceRelativePath(relativePath) ? { path: relativePath.split(path.sep).join('/'), original: false } : undefined;
 }
 
 /** Keep a full line selection so gutter comments retain useful code context. */
@@ -117,10 +120,13 @@ function lineRange(document: vscode.TextDocument, range: vscode.Range): vscode.R
 }
 
 /** Render review text while allowing only the host's validated code-navigation actions. */
-function nativeComment(message: ReviewMessage, author: vscode.CommentAuthorInformation, body: vscode.MarkdownString): vscode.Comment {
+function nativeComment(
+  message: ReviewMessage, first: boolean, author: vscode.CommentAuthorInformation, body: vscode.MarkdownString,
+): vscode.Comment {
   return {
     body,
     author,
+    label: message.author === 'claude' ? 'Answer' : first ? 'Comment' : 'Reply',
     mode: vscode.CommentMode.Preview,
     timestamp: new Date(message.createdAt),
   };
@@ -138,19 +144,33 @@ function mapOffset(offset: number, change: vscode.TextDocumentContentChangeEvent
   return change.rangeOffset + (endBoundary ? change.text.length : 0);
 }
 
+/** Thread context value; PR threads also say whether they can be posted or are already on the code host. */
+function threadContext(session: ReviewSession, thread: ReviewThread): string {
+  const base = thread.resolved ? 'localReview.resolved' : 'localReview.open';
+  if (session.publish === undefined) return base;
+  return `${base}.${session.publication?.(thread.id) === undefined ? 'publishable' : 'published'}`;
+}
+
+/** " · On GitHub" for a posted thread. */
+function publicationLabel(session: ReviewSession, thread: ReviewThread): string {
+  const publication = session.publication?.(thread.id);
+  return publication === undefined ? '' : publication.pending ? ' · On GitHub (pending)' : ' · On GitHub';
+}
+
 /** Compact native sidebar entry linked to its original review conversation. */
 class ReviewItem extends vscode.TreeItem {
   readonly threadId: string;
 
-  constructor(thread: ReviewThread) {
+  constructor(thread: ReviewThread, session: ReviewSession, activity: string | undefined) {
+    const sessionLabel = session.label;
     const firstMessage = thread.messages[0]?.text.replaceAll(/\s+/gu, ' ') ?? 'Review-Kommentar';
     super(`${path.basename(thread.anchor.path)}:${thread.anchor.startLine} · ${firstMessage.slice(0, 90)}`, vscode.TreeItemCollapsibleState.None);
     this.threadId = thread.id;
     this.id = thread.id;
-    const status = thread.resolved ? 'Erledigt' : `${statusLabels[thread.status]}${thread.outdated ? ' · Kontext geändert' : ''}`;
-    this.description = `${intentLabels[thread.intent]} · ${status}`;
-    this.contextValue = thread.resolved ? 'localReview.resolved' : 'localReview.open';
-    this.iconPath = new vscode.ThemeIcon(thread.resolved ? 'pass' : thread.outdated ? 'warning' : thread.status === 'working' ? 'sync~spin' : 'comment-discussion');
+    const status = `${thread.resolved ? 'Erledigt' : `${activity ?? statusLabels[thread.status]}${thread.outdated ? ' · Kontext geändert' : ''}`}${publicationLabel(session, thread)}`;
+    this.description = `${sessionLabel ? `${sessionLabel} · ` : ''}${intentLabels[thread.intent]} · ${status}`;
+    this.contextValue = threadContext(session, thread);
+    this.iconPath = new vscode.ThemeIcon(thread.resolved ? 'pass' : thread.outdated ? 'warning' : thread.status === 'working' || activity !== undefined ? 'sync~spin' : 'comment-discussion');
     this.command = { command: 'localReview.revealThread', title: 'Zum Kommentar springen', arguments: [thread.id] };
     this.tooltip = new vscode.MarkdownString()
       .appendText(`${thread.anchor.path}:${thread.anchor.startLine}\n${intentLabels[thread.intent]} · ${status}\n\n${firstMessage}`);
@@ -162,7 +182,7 @@ class ReviewTree implements vscode.TreeDataProvider<ReviewItem>, vscode.Disposab
   private readonly changes = new vscode.EventEmitter<ReviewItem | undefined>();
   readonly onDidChangeTreeData = this.changes.event;
 
-  constructor(private readonly store: ReviewStore, private readonly visibility: ReviewVisibility) {}
+  constructor(private readonly sessions: () => readonly ReviewSession[], private readonly visibility: ReviewVisibility) {}
 
   /** Invalidate the native list after review storage changes. */
   refresh(): void {
@@ -176,10 +196,10 @@ class ReviewTree implements vscode.TreeDataProvider<ReviewItem>, vscode.Disposab
 
   /** Keep completed conversations out of the way until the reviewer shows them. */
   getChildren(): ReviewItem[] {
-    return [...this.store.threads]
-      .filter((thread) => this.visibility.includes(thread))
-      .sort((left, right) => Number(left.resolved) - Number(right.resolved))
-      .map((thread) => new ReviewItem(thread));
+    return this.sessions().flatMap((session) => session.store.threads.map((thread) => ({ session, thread })))
+      .filter(({ thread }) => this.visibility.includes(thread))
+      .sort((left, right) => Number(left.thread.resolved) - Number(right.thread.resolved))
+      .map(({ session, thread }) => new ReviewItem(thread, session, thread.resolved ? undefined : session.activity?.(thread.id)));
   }
 
   /** Release the tree's event emitter. */
@@ -192,21 +212,50 @@ class ReviewTree implements vscode.TreeDataProvider<ReviewItem>, vscode.Disposab
 export async function createReviewController(
   store: ReviewStore,
   context: vscode.ExtensionContext,
+  resolveBase: (workspaceRoot: string) => Promise<string | undefined> = getHeadRevision,
+  pullRequests?: ReviewSessionSource,
 ): Promise<vscode.Disposable> {
+  const local: ReviewSession = {
+    key: 'local', label: '', store,
+    resolveBase: () => resolveBase(store.workspaceRoot),
+    locate: (uri) => localLocation(uri, store.workspaceRoot),
+    workingUri: (relativePath) => vscode.Uri.file(path.join(store.workspaceRoot, relativePath)),
+    originalUri: (relativePath, revision) => baseUri(relativePath, revision),
+  };
+  const sessions = (): readonly ReviewSession[] => [local, ...(pullRequests?.sessions ?? [])];
+  /** Find the session that owns a document. */
+  function sessionFor(uri: vscode.Uri): { readonly session: ReviewSession; readonly location: SessionLocation } | undefined {
+    for (const session of sessions()) {
+      const location = session.locate(uri);
+      if (location !== undefined) return { session, location };
+    }
+    return undefined;
+  }
+  /** Find a thread and its session; thread IDs are unique across sessions. */
+  function findThread(id: string | undefined): { readonly session: ReviewSession; readonly thread: ReviewThread } | undefined {
+    for (const session of sessions()) {
+      const thread = session.store.threads.find((candidate) => candidate.id === id);
+      if (thread !== undefined) return { session, thread };
+    }
+    return undefined;
+  }
   const controller = vscode.comments.createCommentController(controllerId, 'Lokales Review');
   controller.options = { prompt: 'Antworten …', placeHolder: '/a fragen · /i umsetzen · /r zusammenfassen' };
   const authors: Record<ReviewMessage['author'], vscode.CommentAuthorInformation> = {
     human: { name: 'Du', iconPath: vscode.Uri.joinPath(context.extensionUri, 'resources', 'reviewer.svg') },
-    claude: { name: 'Claude', iconPath: vscode.Uri.joinPath(context.extensionUri, 'resources', 'assistant.svg') },
+    claude: { name: 'Claude', iconPath: vscode.Uri.joinPath(context.extensionUri, 'resources', 'claude-mark.svg') },
   };
   const bindings = new Map<string, ThreadBinding>();
   const renderedComments = new WeakMap<vscode.CommentThread, RenderedComments>();
   const visibility = new ReviewVisibility(context.workspaceState);
   await vscode.commands.executeCommand('setContext', resolvedVisibilityKey, visibility.showResolved);
-  const tree = new ReviewTree(store, visibility);
+  const tree = new ReviewTree(sessions, visibility);
   const view = vscode.window.createTreeView('localReview.threads', { treeDataProvider: tree, showCollapseAll: false });
   const disposables: vscode.Disposable[] = [controller, tree, view];
-  const codeNavigation = await createCodeNavigation(store);
+  const codeNavigation = await createCodeNavigation({
+    get threads() { return sessions().flatMap((session) => session.store.threads); },
+    workingUri: (anchor) => (sessions().find((session) => session.store.threads.some((thread) => thread.anchor === anchor)) ?? local).workingUri(anchor.path),
+  });
   disposables.push(codeNavigation);
   const nativeDrafts = new Map<vscode.CommentThread, CodeAnchor>();
   const inlineSubmissions = new SubmissionGate<vscode.CommentThread>();
@@ -229,8 +278,10 @@ export async function createReviewController(
   });
   disposables.push(selectionDecoration);
   /** Persist either native or side-composer feedback through the same validation path. */
-  async function commitFeedback(submission: Pick<ComposerSubmission, 'anchor' | 'text' | 'intent' | 'threadId'>): Promise<ReviewThread> {
-    const existing = store.threads.find((thread) => thread.id === submission.threadId);
+  async function commitFeedback(
+    session: ReviewSession, submission: Pick<ComposerSubmission, 'anchor' | 'text' | 'intent' | 'threadId'>,
+  ): Promise<ReviewThread> {
+    const existing = session.store.threads.find((thread) => thread.id === submission.threadId);
     if (submission.threadId !== undefined && existing === undefined) {
       throw new Error('Diese Unterhaltung wurde nicht gefunden. Dein Entwurf bleibt gespeichert.');
     }
@@ -245,12 +296,12 @@ export async function createReviewController(
       || (submission.intent === 'summarize' && existing !== undefined
         ? 'Fasse diese Unterhaltung und ihren aktuellen Stand zusammen.' : '');
     if (text.length === 0) throw new Error('Schreibe dein Feedback, bevor du es sendest.');
-    const thread = await store.submit(anchor, text, submission.intent, submission.threadId);
+    const thread = await session.store.submit(anchor, text, submission.intent, submission.threadId);
     scheduleSync();
     return thread;
   }
   const composer = createComposer(context, async (submission) => {
-    const thread = await commitFeedback(submission);
+    const thread = await commitFeedback(findThread(submission.threadId)?.session ?? local, submission);
     await syncPending;
     const native = bindings.get(thread.id)?.native;
     if (native !== undefined) native.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
@@ -270,7 +321,8 @@ export async function createReviewController(
   function refreshSelectionDecoration(): void {
     const target = activeComposerTarget;
     const anchor = target?.anchor;
-    const uri = anchor === undefined ? undefined : anchorUri(anchor).toString();
+    const session = findThread(target?.threadId)?.session ?? local;
+    const uri = anchor === undefined ? undefined : anchorDocumentUri(session, anchor).toString();
     for (const editor of vscode.window.visibleTextEditors) {
       if (anchor === undefined || editor.document.uri.toString() !== uri) {
         editor.setDecorations(selectionDecoration, []);
@@ -289,7 +341,7 @@ export async function createReviewController(
 
   /** Use the same captured context for explicit commenting and automatic selection following. */
   async function feedbackRequest(editor: vscode.TextEditor, range: vscode.Range): Promise<ComposerRequest> {
-    const anchor = await captureAnchor(editor.document.uri, range);
+    const anchor = await captureAnchor(local, editor.document.uri, range);
     return {
       id: `new:${hashDocumentText(JSON.stringify(anchor))}`,
       title: 'Feedback schreiben',
@@ -310,7 +362,7 @@ export async function createReviewController(
     const selection = event.selections[0];
     if (!composer.isOpen() || selection === undefined || selection.isEmpty || event.selections.length !== 1
       || (event.kind !== vscode.TextEditorSelectionChangeKind.Mouse && event.kind !== vscode.TextEditorSelectionChangeKind.Keyboard)
-      || workspacePath(event.textEditor.document.uri, store.workspaceRoot) === undefined) return;
+      || local.locate(event.textEditor.document.uri) === undefined) return;
     cancelSelectionCapture();
     const generation = selectionGeneration;
     const editor = event.textEditor;
@@ -332,17 +384,10 @@ export async function createReviewController(
     void vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Das Review konnte nicht aktualisiert werden.');
   }
 
-  /** Reconstruct the document associated with a persisted immutable anchor. */
-  function anchorUri(anchor: CodeAnchor): vscode.Uri {
-    return anchor.side === 'original'
-      ? baseUri(anchor.path, anchor.baseRevision)
-      : vscode.Uri.file(path.join(store.workspaceRoot, anchor.path));
-  }
-
   /** Restore a thread on confirmed current code, or on its immutable captured excerpt. */
-  async function openAnchorDocument(thread: ReviewThread): Promise<LocatedDocument> {
+  async function openAnchorDocument(session: ReviewSession, thread: ReviewThread): Promise<LocatedDocument> {
     try {
-      const uri = anchorUri(thread.anchor);
+      const uri = anchorDocumentUri(session, thread.anchor);
       if (uri.scheme === 'file') {
         await vscode.workspace.fs.stat(uri);
       }
@@ -363,24 +408,27 @@ export async function createReviewController(
     const previous = renderedComments.get(native);
     if (previous?.messages !== thread.messages) {
       const reusable = new Map(previous?.messages.map((message, index) => [message, previous.comments[index]]));
-      const comments = thread.messages.map((message) => {
+      const comments = thread.messages.map((message, index) => {
         const existing = reusable.get(message);
         if (existing !== undefined) return existing;
-        const comment = nativeComment(message, authors[message.author], codeNavigation.markdown(thread, message));
+        const comment = nativeComment(message, index === 0, authors[message.author], codeNavigation.markdown(thread, message));
         codeNavigation.bindComment(thread, message, comment);
         return comment;
       });
       native.comments = comments;
       renderedComments.set(native, { messages: thread.messages, comments });
     }
-    const contextValue = thread.resolved ? 'localReview.resolved' : 'localReview.open';
+    const owner = findThread(thread.id)?.session;
+    const contextValue = owner === undefined ? (thread.resolved ? 'localReview.resolved' : 'localReview.open') : threadContext(owner, thread);
     const state = thread.resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
     const canReply = thread.resolved ? false : authors.human;
     if (native.contextValue !== contextValue) native.contextValue = contextValue;
     if (native.state !== state) native.state = state;
     if (native.canReply !== canReply) native.canReply = canReply;
     const contextLabel = native.uri.scheme === contextScheme ? ' · Gespeicherter Kontext' : thread.outdated ? ' · Kontext geändert' : '';
-    const label = `${intentLabels[thread.intent]} · ${thread.resolved ? 'Erledigt' : statusLabels[thread.status]}${contextLabel}`;
+    const activity = thread.resolved ? undefined : owner?.activity?.(thread.id);
+    const published = owner === undefined ? '' : publicationLabel(owner, thread);
+    const label = `${intentLabels[thread.intent]} · ${thread.resolved ? 'Erledigt' : activity ?? statusLabels[thread.status]}${published}${contextLabel}`;
     if (native.label !== label) native.label = label;
   }
 
@@ -403,13 +451,15 @@ export async function createReviewController(
       return;
     }
     tree.refresh();
-    const queued = store.pendingEvents.length;
+    const all = sessions().flatMap((session) => session.store.threads.map((thread) => ({ session, thread })));
+    const queued = sessions().reduce((count, session) => count + session.store.pendingEvents.length, 0);
     view.title = queued === 0 ? 'Review' : `Review · ${queued} wartend`;
-    const completed = store.threads.filter((thread) => thread.resolved).length;
+    const completed = all.filter(({ thread }) => thread.resolved).length;
     view.description = completed === 0 ? '' : `${completed} erledigt${visibility.showResolved ? '' : ' ausgeblendet'}`;
-    view.message = completed > 0 && completed === store.threads.length && !visibility.showResolved
+    view.message = completed > 0 && completed === all.length && !visibility.showResolved
       ? 'Alle Kommentare erledigt. Mit „Erledigte anzeigen“ kannst du sie wieder öffnen.' : '';
-    for (const thread of store.threads) {
+    for (const { session, thread } of all) {
+      const store = session.store;
       const binding = bindings.get(thread.id);
       if (!visibility.includes(thread)) {
         binding?.native.dispose();
@@ -422,7 +472,7 @@ export async function createReviewController(
         continue;
       }
       try {
-        const located = await openAnchorDocument(thread);
+        const located = await openAnchorDocument(session, thread);
         const current = store.threads.find((candidate) => candidate.id === thread.id);
         if (disposed || bindings.has(thread.id) || current === undefined || !visibility.includes(current)) {
           continue;
@@ -441,6 +491,16 @@ export async function createReviewController(
     refreshSelectionDecoration();
   }
 
+  /** Show Claude's current step on open threads without restoring documents. */
+  function refreshActivity(): void {
+    if (disposed) return;
+    for (const [id, binding] of bindings) {
+      const found = findThread(id);
+      if (found !== undefined) updateNative(found.thread, binding.native);
+    }
+    tree.refresh();
+  }
+
   /** Serialize refreshes because restoring native documents is asynchronous. */
   function scheduleSync(): void {
     syncPending = syncPending.then(synchronize).catch(reportError);
@@ -456,7 +516,7 @@ export async function createReviewController(
 
   /** Reconfirm an anchor when edits occurred outside the known live document history. */
   function reconcileBinding(id: string, binding: ThreadBinding, document: vscode.TextDocument): void {
-    const thread = store.threads.find((candidate) => candidate.id === id);
+    const thread = findThread(id)?.thread;
     const location = thread === undefined ? undefined : locateCodeAnchor(document.getText(), thread.anchor);
     if (location === undefined) {
       binding.native.dispose();
@@ -471,34 +531,36 @@ export async function createReviewController(
       binding.currentHash = documentHash(document);
     }
     if (thread !== undefined && !thread.outdated) {
-      void store.setOutdated(id, true).catch(reportError);
+      void findThread(id)?.session.store.setOutdated(id, true).catch(reportError);
     }
   }
 
   /** Mark contexts as uncertain when their Git base has changed. */
   async function validateRevisions(): Promise<void> {
-    const revision = await getHeadRevision(store.workspaceRoot) ?? 'unborn';
-    for (const thread of store.threads) {
-      if (!thread.outdated && thread.anchor.baseRevision !== revision) {
-        await store.setOutdated(thread.id, true);
+    for (const session of sessions()) {
+      const revision = await session.resolveBase() ?? 'unborn';
+      for (const thread of session.store.threads) {
+        if (!thread.outdated && thread.anchor.baseRevision !== revision) {
+          await session.store.setOutdated(thread.id, true);
+        }
       }
     }
   }
 
   /** Capture an immutable code snapshot rather than trusting mutable line numbers. */
-  async function captureAnchor(uri: vscode.Uri, selection: vscode.Range): Promise<CodeAnchor> {
-    const relativePath = workspacePath(uri, store.workspaceRoot);
-    if (relativePath === undefined) {
+  async function captureAnchor(session: ReviewSession, uri: vscode.Uri, selection: vscode.Range): Promise<CodeAnchor> {
+    const location = session.locate(uri);
+    if (location === undefined) {
       throw new Error('Wähle eine Datei in diesem Arbeitsbereich, um Feedback hinzuzufügen.');
     }
+    const relativePath = location.path;
     const document = await vscode.workspace.openTextDocument(uri);
     const range = lineRange(document, selection);
-    const reference = baseReference(uri);
     const selectedText = document.getText(range);
     const contextBefore = document.getText(new vscode.Range(Math.max(0, range.start.line - 3), 0, range.start.line, 0));
     const contextAfter = range.end.line + 1 >= document.lineCount ? '' : document.getText(new vscode.Range(range.end.line + 1, 0, Math.min(document.lineCount - 1, range.end.line + 3), Number.MAX_SAFE_INTEGER));
     const hash = documentHash(document);
-    const revision = reference?.revision ?? await getHeadRevision(store.workspaceRoot) ?? 'unborn';
+    const revision = location.revision ?? await session.resolveBase() ?? 'unborn';
     return {
       path: relativePath,
       startLine: range.start.line + 1,
@@ -507,7 +569,7 @@ export async function createReviewController(
       contextBefore,
       contextAfter,
       documentHash: hash,
-      side: reference !== undefined && !reference.emptyWorking ? 'original' : 'working',
+      side: location.original ? 'original' : 'working',
       baseRevision: revision,
     };
   }
@@ -515,7 +577,7 @@ export async function createReviewController(
   /** Find a persisted thread from either a native control or a sidebar action. */
   function threadId(argument: unknown): string | undefined {
     if (typeof argument === 'string') {
-      return store.threads.some((thread) => thread.id === argument) ? argument : undefined;
+      return findThread(argument) === undefined ? undefined : argument;
     }
     if (argument instanceof ReviewItem) {
       return argument.threadId;
@@ -538,7 +600,7 @@ export async function createReviewController(
   /** Reuse the review comparison instead of replacing it with a standalone file. */
   async function openReviewDiff(relativePath: string, revision: string): Promise<void> {
     const original = baseUri(relativePath, revision);
-    const current = vscode.Uri.file(path.join(store.workspaceRoot, relativePath));
+    const current = local.workingUri(relativePath);
     let modified = current;
     try {
       await vscode.workspace.fs.stat(current);
@@ -570,10 +632,13 @@ export async function createReviewController(
   /** Reveal the conversation while retaining its comparison and confirmed code context. */
   async function reveal(argument: unknown): Promise<void> {
     const id = threadId(argument);
-    let thread = store.threads.find((candidate) => candidate.id === id);
-    if (thread === undefined) {
+    const owner = findThread(id);
+    if (owner === undefined) {
       return;
     }
+    const { session } = owner;
+    const store = session.store;
+    let thread: ReviewThread | undefined = owner.thread;
     if (!visibility.includes(thread)) await showResolved(true);
     let binding = bindings.get(thread.id);
     if (binding?.native.uri.scheme === 'file') {
@@ -589,7 +654,7 @@ export async function createReviewController(
     if (disposed || thread === undefined || !visibility.includes(thread)) return;
     binding = bindings.get(thread.id);
     if (binding === undefined) {
-      const located = await openAnchorDocument(thread);
+      const located = await openAnchorDocument(session, thread);
       thread = store.threads.find((candidate) => candidate.id === id);
       if (disposed || thread === undefined || !visibility.includes(thread)) return;
       if (!bindings.has(thread.id)) {
@@ -609,7 +674,7 @@ export async function createReviewController(
     const current = store.threads.find((candidate) => candidate.id === id);
     if (disposed || current === undefined || !visibility.includes(current) || bindings.get(current.id) !== binding) return;
     binding.native.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    await openReviewDiff(thread.anchor.path, thread.anchor.baseRevision);
+    if (session === local) await openReviewDiff(thread.anchor.path, thread.anchor.baseRevision);
     const revealed = store.threads.find((candidate) => candidate.id === id);
     if (disposed || revealed === undefined || !visibility.includes(revealed) || bindings.get(revealed.id) !== binding) return;
     const visible = vscode.window.visibleTextEditors.filter((candidate) => candidate.document.uri.toString() === document.uri.toString());
@@ -623,12 +688,13 @@ export async function createReviewController(
     }
   }
 
-  /** Open one local file against its immutable HEAD version, including new files. */
+  /** Open one local file against its immutable review base, including new files. */
   async function openChanges(argument: unknown): Promise<void> {
     await validateRevisions();
-    let relativePath = argument instanceof vscode.Uri ? workspacePath(argument, store.workspaceRoot) : undefined;
+    const base = await local.resolveBase();
+    let relativePath = argument instanceof vscode.Uri ? local.locate(argument)?.path : undefined;
     if (relativePath === undefined) {
-      const files = await listChangedFiles(store.workspaceRoot);
+      const files = await listChangedFiles(store.workspaceRoot, base);
       if (files.length === 0) {
         void vscode.window.showInformationMessage('Es gibt keine lokalen Änderungen zum Prüfen.');
         return;
@@ -638,8 +704,7 @@ export async function createReviewController(
     if (relativePath === undefined) {
       return;
     }
-    const revision = await getHeadRevision(store.workspaceRoot) ?? 'unborn';
-    await openReviewDiff(relativePath, revision);
+    await openReviewDiff(relativePath, base ?? 'unborn');
   }
 
   disposables.push(vscode.workspace.registerTextDocumentContentProvider(baseScheme, {
@@ -654,7 +719,7 @@ export async function createReviewController(
   disposables.push(vscode.workspace.registerTextDocumentContentProvider(contextScheme, {
     provideTextDocumentContent: (uri) => {
       const id = new URLSearchParams(uri.query).get('thread');
-      const thread = store.threads.find((candidate) => candidate.id === id);
+      const thread = findThread(id ?? undefined)?.thread;
       if (thread === undefined) {
         throw new Error('Der gespeicherte Review-Kontext wurde nicht gefunden.');
       }
@@ -662,7 +727,7 @@ export async function createReviewController(
     },
   }));
   controller.commentingRangeProvider = {
-    provideCommentingRanges: (document) => workspacePath(document.uri, store.workspaceRoot) === undefined
+    provideCommentingRanges: (document) => sessionFor(document.uri) === undefined
       ? [] : [new vscode.Range(0, 0, document.lineCount - 1, 0)],
   };
   const register = (id: string, callback: (argument: unknown) => Promise<void>): void => {
@@ -672,27 +737,32 @@ export async function createReviewController(
     cancelSelectionCapture();
     const generation = selectionGeneration;
     const editor = vscode.window.activeTextEditor;
-    if (editor === undefined || workspacePath(editor.document.uri, store.workspaceRoot) === undefined) {
+    const owner = editor === undefined ? undefined : sessionFor(editor.document.uri);
+    if (editor === undefined || owner === undefined) {
       void vscode.window.showInformationMessage('Markiere Code in diesem Arbeitsbereich, um einen Review-Kommentar hinzuzufügen.');
       return;
     }
     const range = lineRange(editor.document, editor.selection);
-    const request = await feedbackRequest(editor, range);
-    if (disposed || generation !== selectionGeneration || request.anchor === undefined) return;
+    const request = owner.session === local ? await feedbackRequest(editor, range) : undefined;
+    const anchor = request?.anchor ?? await captureAnchor(owner.session, editor.document.uri, range);
+    if (disposed || generation !== selectionGeneration) return;
     const draft = controller.createCommentThread(editor.document.uri, range, []);
     draft.contextValue = 'localReview.draft';
     draft.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     draft.canReply = authors.human;
     draft.label = 'Neuer Kommentar';
-    nativeDrafts.set(draft, request.anchor);
-    activeComposerTarget = request;
+    nativeDrafts.set(draft, anchor);
+    if (request !== undefined) activeComposerTarget = request;
     refreshSelectionDecoration();
   });
   register('openComposer', async () => {
     cancelSelectionCapture();
     const generation = selectionGeneration;
     const editor = vscode.window.activeTextEditor;
-    if (editor === undefined || workspacePath(editor.document.uri, store.workspaceRoot) === undefined) {
+    if (editor !== undefined && local.locate(editor.document.uri) === undefined && sessionFor(editor.document.uri) !== undefined) {
+      throw new Error('The side composer is not available for pull requests yet. Comment inline instead.');
+    }
+    if (editor === undefined || local.locate(editor.document.uri) === undefined) {
       throw new Error('Markiere Code in diesem Arbeitsbereich, um die Seitenansicht zu öffnen.');
     }
     const request = await feedbackRequest(editor, lineRange(editor.document, editor.selection));
@@ -709,19 +779,22 @@ export async function createReviewController(
     return inlineSubmissions.run(reply.thread, async () => {
       try {
         const id = threadId(reply.thread);
-        const existing = store.threads.find((thread) => thread.id === id);
-        if (existing === undefined && workspacePath(reply.thread.uri, store.workspaceRoot) === undefined) {
+        const owner = findThread(id);
+        const existing = owner?.thread;
+        const session = owner?.session ?? sessionFor(reply.thread.uri)?.session;
+        if (session === undefined) {
           throw new Error('Dieser Kommentar gehört nicht zu diesem Arbeitsbereich. Dein Text bleibt erhalten.');
         }
+        const store = session.store;
         const parsed = parseComposerInput(reply.text, existing?.intent ?? 'ask', true);
         const document = await vscode.workspace.openTextDocument(reply.thread.uri);
         const draftAnchor = nativeDrafts.get(reply.thread);
-        const anchor = existing?.anchor ?? draftAnchor ?? await captureAnchor(reply.thread.uri, reply.thread.range ?? new vscode.Range(0, 0, 0, 0));
-        const thread = await commitFeedback({
+        const anchor = existing?.anchor ?? draftAnchor ?? await captureAnchor(session, reply.thread.uri, reply.thread.range ?? new vscode.Range(0, 0, 0, 0));
+        const thread = await commitFeedback(session, {
           anchor, text: parsed.text, intent: parsed.intent, ...(id === undefined ? {} : { threadId: id }),
         });
         try {
-          const located = draftAnchor === undefined ? undefined : await openAnchorDocument(thread);
+          const located = draftAnchor === undefined ? undefined : await openAnchorDocument(session, thread);
           const native = located?.captured === true
             ? controller.createCommentThread(located.document.uri, located.range, []) : reply.thread;
           if (located !== undefined) native.range = located.range;
@@ -753,7 +826,7 @@ export async function createReviewController(
   register('cancelDraft', async (argument) => {
     const candidate = (normalizeInlineReply(argument) ?? normalizeInlineReply({ thread: argument, text: '' }))?.thread;
     if (candidate === undefined || candidate.comments.length !== 0
-      || workspacePath(candidate.uri, store.workspaceRoot) === undefined
+      || sessionFor(candidate.uri) === undefined
       || threadId(candidate) !== undefined || inlineSubmissions.isPending(candidate)) return;
     candidate.dispose();
     nativeDrafts.delete(candidate);
@@ -766,8 +839,7 @@ export async function createReviewController(
   });
   register('composeReply', async (argument) => {
     cancelSelectionCapture();
-    const id = threadId(argument);
-    const thread = store.threads.find((candidate) => candidate.id === id);
+    const thread = findThread(threadId(argument))?.thread;
     if (thread === undefined) throw new Error('Öffne eine Review-Unterhaltung, um zu antworten.');
     if (thread.resolved) throw new Error('Öffne diese Unterhaltung zuerst wieder.');
     await composer.open({
@@ -780,6 +852,12 @@ export async function createReviewController(
       anchor: thread.anchor,
     });
   });
+  for (const command of ['publishThread', 'openPublishedThread']) {
+    register(command, async (argument) => {
+      const found = findThread(threadId(argument));
+      await found?.session.publish?.(found.thread.id);
+    });
+  }
   register('openChanges', openChanges);
   register('revealThread', reveal);
   register('showResolved', async () => { await showResolved(true); });
@@ -792,12 +870,32 @@ export async function createReviewController(
         if (resolved && binding !== undefined && inlineSubmissions.isPending(binding.native)) {
           throw new Error('Dein Kommentar wird noch gespeichert. Markiere die Unterhaltung danach als erledigt.');
         }
-        await store.resolve(id, resolved);
+        await findThread(id)?.session.store.resolve(id, resolved);
         await syncPending;
       }
     });
   }
-  disposables.push(store.onChange(scheduleSync));
+  const storeSubscriptions = new Map<ReviewStore, vscode.Disposable>();
+  /** Follow every session's store, including PR sessions added later. */
+  function subscribeStores(): void {
+    const current = new Set(sessions().map((session) => session.store));
+    for (const [candidate, subscription] of storeSubscriptions) {
+      if (!current.has(candidate)) { subscription.dispose(); storeSubscriptions.delete(candidate); }
+    }
+    for (const candidate of current) {
+      if (!storeSubscriptions.has(candidate)) storeSubscriptions.set(candidate, candidate.onChange(scheduleSync));
+    }
+  }
+  subscribeStores();
+  disposables.push({ dispose: () => { for (const subscription of storeSubscriptions.values()) subscription.dispose(); } });
+  if (pullRequests !== undefined) {
+    disposables.push(pullRequests.onDidChange(() => {
+      subscribeStores();
+      scheduleSync();
+      void validateRevisions().catch(reportError);
+    }));
+    if (pullRequests.onDidChangeActivity !== undefined) disposables.push(pullRequests.onDidChangeActivity(refreshActivity));
+  }
   disposables.push(vscode.window.onDidChangeWindowState((state) => {
     if (state.focused) {
       void validateRevisions().catch(reportError);
@@ -852,8 +950,9 @@ export async function createReviewController(
       binding.native.range = new vscode.Range(event.document.positionAt(binding.startOffset), event.document.positionAt(binding.endOffset));
       binding.documentVersion = event.document.version;
       binding.currentHash = currentHash;
-      if (outdated && !store.threads.find((thread) => thread.id === id)?.outdated) {
-        void store.setOutdated(id, true).catch(reportError);
+      const owner = findThread(id);
+      if (outdated && owner !== undefined && !owner.thread.outdated) {
+        void owner.session.store.setOutdated(id, true).catch(reportError);
       }
     }
   }));

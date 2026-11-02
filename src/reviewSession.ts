@@ -1,0 +1,41 @@
+import type * as vscode from 'vscode';
+import type { CodeAnchor, ReviewStore } from './contracts.js';
+import type { Publication } from './pullRequestComments.js';
+
+/** Where a document sits inside a review: its path, and whether it shows the original side at `revision`. */
+export interface SessionLocation {
+  readonly path: string;
+  readonly original: boolean;
+  readonly revision?: string;
+}
+
+/** One reviewable checkout, local changes or a PR worktree, with its own store and Claude connection. */
+export interface ReviewSession {
+  readonly key: string;
+  /** Short prefix shown beside the session's threads; empty for local changes. */
+  readonly label: string;
+  readonly store: ReviewStore;
+  resolveBase(): Promise<string | undefined>;
+  locate(uri: vscode.Uri): SessionLocation | undefined;
+  workingUri(path: string): vscode.Uri;
+  originalUri(path: string, revision: string): vscode.Uri;
+  /** What Claude is doing on a thread right now, if anything. */
+  activity?(threadId: string): string | undefined;
+  /** Where the thread was posted on the code host, if it was. */
+  publication?(threadId: string): Publication | undefined;
+  /** Let the user edit the thread's comment and post it to the code host. */
+  publish?(threadId: string): Promise<void>;
+}
+
+/** PR sessions that join the review UI next to local changes. */
+export interface ReviewSessionSource {
+  readonly sessions: readonly ReviewSession[];
+  readonly onDidChange: vscode.Event<void>;
+  /** Fires when a session's Claude moves to another step. */
+  readonly onDidChangeActivity?: vscode.Event<unknown>;
+}
+
+/** Document for an anchor's captured side within its session. */
+export function anchorDocumentUri(session: ReviewSession, anchor: CodeAnchor): vscode.Uri {
+  return anchor.side === 'original' ? session.originalUri(anchor.path, anchor.baseRevision) : session.workingUri(anchor.path);
+}

@@ -5,7 +5,7 @@ import { hashDocumentText } from './anchors.js';
 import { readCodeBlocks, withDetectedCodeBlocks } from './codeBlocks.js';
 import { locateCodeBlock } from './codeLocation.js';
 import { CodeReferences, openCodeCommand, type CodeAction } from './codeReferences.js';
-import type { CodeAnchor, ReviewMessage, ReviewStore, ReviewThread } from './contracts.js';
+import type { CodeAnchor, ReviewMessage, ReviewThread } from './contracts.js';
 import { isWorkspaceRelativePath } from './git.js';
 
 const snippetScheme = 'local-review-snippet';
@@ -29,8 +29,14 @@ export interface ReviewCodeNavigation extends vscode.Disposable {
   openAnchor(anchor: CodeAnchor): Promise<void>;
 }
 
+/** Threads whose code links can be opened, and where each anchor's current code lives. */
+export interface CodeNavigationSource {
+  readonly threads: readonly ReviewThread[];
+  workingUri(anchor: CodeAnchor): vscode.Uri;
+}
+
 /** Connect review-owned code links to the real editor without accepting paths from Markdown. */
-export async function createCodeNavigation(store: ReviewStore): Promise<ReviewCodeNavigation> {
+export async function createCodeNavigation(source: CodeNavigationSource): Promise<ReviewCodeNavigation> {
   const references = new CodeReferences();
   const commentActions = new WeakMap<object, readonly CodeAction[]>();
   const snippets = new Map<string, Snippet>();
@@ -45,7 +51,7 @@ export async function createCodeNavigation(store: ReviewStore): Promise<ReviewCo
 
   /** Respect an open document's language override before falling back to its file extension. */
   function anchorLanguage(anchor: CodeAnchor): string {
-    const uri = vscode.Uri.file(path.join(store.workspaceRoot, anchor.path)).toString();
+    const uri = source.workingUri(anchor).toString();
     return vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.languageId
       ?? languageId(path.extname(anchor.path).slice(1));
   }
@@ -92,7 +98,7 @@ export async function createCodeNavigation(store: ReviewStore): Promise<ReviewCo
   /** Match current in-memory source by content so stale line numbers cannot redirect a click. */
   async function openCode(anchor: CodeAnchor, code: string, language: string, fromComposer = false): Promise<void> {
     if (!isWorkspaceRelativePath(anchor.path)) throw new Error('Der gespeicherte Codepfad gehört nicht zu diesem Arbeitsbereich.');
-    const uri = vscode.Uri.file(path.join(store.workspaceRoot, anchor.path));
+    const uri = source.workingUri(anchor);
     let document: vscode.TextDocument | undefined;
     try {
       document = await vscode.workspace.openTextDocument(uri);
@@ -114,7 +120,7 @@ export async function createCodeNavigation(store: ReviewStore): Promise<ReviewCo
       if (id === null || !/^[a-f\d]{64}$/u.test(id)) throw new Error('Der Verweis auf diese Codevorschau ist ungültig.');
       const snippet = snippets.get(id);
       if (snippet !== undefined) return snippet.code;
-      for (const thread of store.threads) {
+      for (const thread of source.threads) {
         const candidates = [thread.anchor.selectedText, ...thread.messages.flatMap((message) =>
           readCodeBlocks(withDetectedCodeBlocks(message.text, anchorLanguage(thread.anchor))).map((block) => block.code))];
         const code = candidates.find((candidate) => hashDocumentText(JSON.stringify([thread.anchor.path, candidate])) === id);
@@ -129,7 +135,7 @@ export async function createCodeNavigation(store: ReviewStore): Promise<ReviewCo
   const command = vscode.commands.registerCommand(openCodeCommand, (handle: unknown) => {
     return (async () => {
       const reference = references.resolve(handle);
-      const thread = reference === undefined ? undefined : store.threads.find((candidate) => candidate.id === reference.threadId);
+      const thread = reference === undefined ? undefined : source.threads.find((candidate) => candidate.id === reference.threadId);
       const message = thread?.messages.find((candidate) => candidate.id === reference?.messageId);
       if (reference === undefined || thread === undefined || message === undefined) {
         throw new Error('Dieser Code-Link ist nicht mehr gültig. Öffne die aktuelle Unterhaltung erneut.');

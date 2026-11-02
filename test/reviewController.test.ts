@@ -23,7 +23,10 @@ afterEach(async () => {
 });
 
 /** Start the production controller with actual durable storage and a native editor surface. */
-async function fixture(projectThreads?: (threads: readonly ReviewThread[]) => readonly ReviewThread[]): Promise<{
+async function fixture(
+  projectThreads?: (threads: readonly ReviewThread[]) => readonly ReviewThread[],
+  resolveBase?: (workspaceRoot: string) => Promise<string | undefined>,
+): Promise<{
   readonly store: ReviewStore;
   readonly document: FakeTextDocument;
   readonly editor: FakeInteractiveEditor;
@@ -50,7 +53,7 @@ async function fixture(projectThreads?: (threads: readonly ReviewThread[]) => re
     resolve: store.resolve.bind(store), setOutdated: store.setOutdated.bind(store),
     onChange: store.onChange.bind(store), flush: store.flush.bind(store),
   };
-  const registered = await createReviewController(presentedStore, context);
+  const registered = await createReviewController(presentedStore, context, ...(resolveBase === undefined ? [] : [resolveBase]));
   cleanup.push(async () => {
     registered.dispose();
     await store.flush();
@@ -77,6 +80,17 @@ async function addDraft(controller: FakeCommentController): Promise<FakeCommentT
   assert.equal(draft.comments.length, 0);
   return draft;
 }
+
+test('anchors new comments to the review base the window resolves, such as a PR merge base', async () => {
+  const prBase = 'a'.repeat(40);
+  const { store, controller } = await fixture(undefined, async () => prBase);
+  const draft = await addDraft(controller);
+  await commands.executeCommand('localReview.submitInline', { thread: draft, text: '/a Explain this code' });
+  await refresh(store);
+
+  assert.equal(store.threads[0]?.anchor.baseRevision, prBase);
+  assert.equal(store.threads[0]?.outdated, false);
+});
 
 test('native progress updates preserve existing comment objects and appending a reply only renders the new message', async () => {
   const { store, controller } = await fixture();
@@ -106,6 +120,7 @@ test('native progress updates preserve existing comment objects and appending a 
   assert.equal(draft.comments.length, 2);
   assert.strictEqual(draft.comments[0], first);
   assert.match(String((draft.comments[1]?.body as vscode.MarkdownString).value), /The original function is called\./u);
+  assert.deepEqual(draft.comments.map((comment) => comment.label), ['Comment', 'Answer']);
   assert.equal(draft.commentsWrites, writes + 1);
   const answer = draft.comments[1];
   assert.ok(answer);

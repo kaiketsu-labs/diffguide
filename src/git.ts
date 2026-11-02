@@ -52,15 +52,18 @@ export async function readGitBase(
   return await runGit(workspaceRoot, ['show', `${revision}:./${relativePath}`]) ?? '';
 }
 
-/** List local changes relative to the workspace, exposing renames as a deletion and addition. */
-export async function listChangedFiles(workspaceRoot: string): Promise<readonly string[]> {
-  const revision = await getHeadRevision(workspaceRoot);
+/** List working-tree changes against a base commit (HEAD by default), exposing renames as a deletion and addition; untracked files only when asked. */
+export async function listChangedFiles(workspaceRoot: string, base?: string, includeUntracked = true): Promise<readonly string[]> {
+  if (base !== undefined && !/^[a-f\d]{40,64}$/u.test(base)) {
+    throw new Error('Die Vergleichsbasis muss auf einen festen Git-Commit verweisen.');
+  }
+  const revision = base ?? await getHeadRevision(workspaceRoot);
   const trackedArgs = revision === undefined
     ? ['ls-files', '--cached', '-z', '--', '.']
     : ['diff', '--no-renames', '--name-only', '-z', '--relative', revision, '--', '.'];
   const [tracked, untracked] = await Promise.all([
     runGit(workspaceRoot, trackedArgs),
-    runGit(workspaceRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.']),
+    includeUntracked ? runGit(workspaceRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.']) : '',
   ]);
   return [...new Set(`${tracked ?? ''}${untracked ?? ''}`.split('\0'))]
     .filter(isWorkspaceRelativePath)

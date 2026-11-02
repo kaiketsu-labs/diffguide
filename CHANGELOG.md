@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+- The PR overview became a review page: overview cards on top, every changed file below with syntax colors, a unified or split layout, a Viewed checkbox that collapses the file, and Open in editor for the native diff.
+- Comment on the review page: click a line number, Shift-click to extend the range, and send a question or change request to Claude. Threads show inline under their lines with your messages, Claude's answers and status, plus Reply, Resolve and Publish to GitHub. Drafts survive redraws and reloads. Comments on lines the diff hides appear at the top of their file.
+- The review page also shows GitHub comment threads from everyone, with Reply (posted on GitHub right away), Resolve and Open on GitHub. Each thread has a colored header: orange **Local** (only you and Claude see it) or blue **GitHub** (everyone on the PR sees it). A new comment has a dashed border so a draft never looks like a posted thread.
+- Comment straight on GitHub from the review page: switch the new-comment box from Claude to GitHub, then choose Add to review (pending until you submit the review) or Post now. GitHub only takes lines inside its diff, and the file must have no uncommitted changes.
+- Clicking a PR or file in the sidebar opens the review page, scrolled to that file. The old all-files diff tab, its Viewed and unified/split buttons, and the proposed API they needed are gone.
+- The review page has GitHub-style context: expand 20 lines up or down around each change, or Full file per file. Cmd/Ctrl-click a name to see its definition in a side panel, with Back, Open in editor and Escape to close.
+- Claude's answers render as Markdown, GitHub comments as GitHub renders them. Pending GitHub comments are marked as only visible to you, and Post now is off while your review is in progress, since GitHub refuses single comments then.
+- GitHub comments show the author's profile picture and a Pending badge per comment, like GitHub. Code blocks in comments have their own background and border.
+- Opening a PR no longer fails when its branch is checked out in another worktree. The review worktree now checks out the PR detached.
+- Drag across line numbers to comment on several lines. Once you expand all hidden lines between two changes, the `@@` header between them goes away.
+- Syntax colors for Swift, Go, Rust, Kotlin, Java, C, C++, C#, Objective-C, Ruby, PHP, Dart, Scala, SQL, HTML, XML, CSS, SCSS, Markdown, YAML and TOML.
+- Markdown and HTML files get a Diff | Preview switch. In a Markdown preview, click a block to comment on its source lines, and threads show under their block. In an HTML preview, click an element to comment on its source lines. Its threads sit in a margin next to the element, which gets an outline. The file's own scripts stay off.
+- The sidebar shows a PR's files as a folder tree, with single-folder chains folded into one row. The view's title bar switches between tree and list, like Source Control.
+- Review page layout: description and threads on the left, reviewers, checks, finish review and merge in a right rail. The files toolbar has a Unified/Split toggle and Collapse/Expand for files and for comments.
+- Open in editor on the review page opens that one file in VS Code's diff editor, and the button matches the Viewed checkbox size.
+- The sidebar shows each PR's review state (Approved, Changes requested, Commented) as a colored icon and label. The overview shows it as a badge with reviewer names.
+- On your own PRs, the overview shows Approve and Request changes disabled with the reason, instead of hiding them.
+- The PR overview shows the description, reviewers, CI checks, a form to comment, approve or request changes, and a merge button.
+- Comment threads show the Claude logo as avatar and label each message (Comment, Reply, Answer).
+- Move the Review view out of Source Control into its own **Local Review** icon in the activity bar.
+- Add a **Pull Requests** view that lists the repository's open PRs under **Mine** and **Review requested** through the existing `gh` login. Clicking a PR opens it in the browser for now.
+- Expand a pull request in the sidebar to list its changed files. Clicking the PR or a file opens all of the PR's changes in one scrollable diff tab, scrolled to that file. Each PR is checked out into its own Git worktree in the background, and the diff compares against the point where the PR branched off its target. Diff headers show short `pr-<n>/<path>` names and mark added and deleted files like Git diffs. **Remove worktree** deletes a checkout and refuses while it has uncommitted changes.
+- Comment inline on pull request diffs with `/a`, `/i` and `/r`. Each PR keeps its own comments and its own Claude conversation. PR comments show in the Review view with their PR number and return after a reload. The side composer is not available for PRs yet.
+- Answer PR comments automatically: sending a comment starts Claude in the background in the PR's worktree with your `claude` login, and later comments resume the same conversation. Thread labels, the sidebar and the status bar show Claude's current step, such as "Reading src/app.ts". **Show Claude activity** on a PR opens the full log and sends failed or skipped comments again. On someone else's PR, Claude cannot edit files or run commands and proposes changes as diffs.
+- Start a PR's Claude through your login shell, so your own `claude` setup (such as per-folder accounts) applies, and keep PR worktrees in the repository's `.git/local-review` folder. When a run fails, the thread says why (for example "Claude failed · Not logged in") and a notification offers Retry and the log. Thread labels also show "Thinking" and "Writing".
+- Fix PR diff tabs restored after a reload showing "Resource not found": VS Code now starts Local Review as soon as it needs a PR file.
+- Tick files as reviewed in a checked-out PR's file list. The PR row shows progress, such as "1/3 reviewed". Ticks sync both ways with GitHub's per-file "Viewed" checkbox, and a local tick clears itself when the file changes afterwards.
+- Show PR files like Source Control: file-type icons and colored A, M, D and R letters.
+- Publish a PR thread to GitHub from its thread or Review view action. An editable preview starts from Claude's last answer; post it into your pending review or as a comment right away. Comments outside the PR diff go on the whole file. Published threads show "On GitHub" and link to the comment.
+- Add a PR overview tab, opened from the PR row: reviewed progress, Claude's current step with its log and retry, and every thread with its status and GitHub link.
+- Leave untracked files out of PR diffs, so files tools create in a worktree (such as `.ui-review/`) no longer show up as PR changes.
+- Add the `localReview.mockPullRequests` setting, which fills the Pull Requests view with sample data for testing.
+- Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
+
 ## 0.4.12
 
 - Search this project's recent Claude conversations by name or branch in VS Code; show which ones are running and retain Claude's own picker as a fallback.
