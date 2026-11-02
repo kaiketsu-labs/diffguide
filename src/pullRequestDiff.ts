@@ -42,16 +42,16 @@ class PullRequestFileSystem implements vscode.FileSystemProvider {
   readonly #changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.#changed.event;
 
-  /** Resolves once activation knows where this repository keeps its PR worktrees. */
-  constructor(private readonly storageRoot: Promise<string>) {}
+  /** `storageRoot` finds where the repository that holds a PR keeps its worktrees. */
+  constructor(private readonly storageRoot: (repository: string, number: number) => Promise<string | undefined>) {}
 
   watch(uri: vscode.Uri): vscode.Disposable {
     const address = parsePullRequestFileUri(uri);
     if (address === undefined || address.revision !== undefined) return new vscode.Disposable(() => undefined);
     let watcher: ReturnType<typeof watch> | undefined;
     let disposed = false;
-    void this.storageRoot.then((root) => {
-      if (disposed) return;
+    void this.storageRoot(address.repository, address.number).then((root) => {
+      if (disposed || root === undefined) return;
       const file = path.join(worktreePath(root, address.repository, address.number), address.relativePath);
       watcher = watch(file, () => { this.#changed.fire([{ type: vscode.FileChangeType.Changed, uri }]); });
     }).catch(() => undefined);
@@ -90,7 +90,8 @@ class PullRequestFileSystem implements vscode.FileSystemProvider {
   async #resolve(uri: vscode.Uri): Promise<{ folder: string; file: string; relativePath: string; revision?: string }> {
     const address = parsePullRequestFileUri(uri);
     if (address === undefined) throw vscode.FileSystemError.FileNotFound(uri);
-    const root = await this.storageRoot;
+    const root = await this.storageRoot(address.repository, address.number);
+    if (root === undefined) throw vscode.FileSystemError.Unavailable(uri);
     const folder = worktreePath(root, address.repository, address.number);
     if (await readWorktree(root, folder) === undefined) throw vscode.FileSystemError.Unavailable(uri);
     return { folder, file: path.join(folder, address.relativePath), ...address };
@@ -98,7 +99,7 @@ class PullRequestFileSystem implements vscode.FileSystemProvider {
 }
 
 /** Register the file system that backs PR diffs. */
-export function registerPullRequestDiffs(storageRoot: Promise<string>): vscode.Disposable {
+export function registerPullRequestDiffs(storageRoot: (repository: string, number: number) => Promise<string | undefined>): vscode.Disposable {
   return vscode.workspace.registerFileSystemProvider(scheme, new PullRequestFileSystem(storageRoot), { isCaseSensitive: true });
 }
 

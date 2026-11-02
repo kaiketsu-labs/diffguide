@@ -124,7 +124,7 @@ test('serves both sides of a PR file from the worktree under short addresses', a
   const folder = await ensureWorktree(source, storage, provider([]), 'acme/app', pullRequest, 'reviewer');
   const base = await readPullRequestBase(folder, pullRequest.baseBranch);
   assert.ok(base !== undefined);
-  const diffs = registerPullRequestDiffs(Promise.resolve(storage));
+  const diffs = registerPullRequestDiffs(async () => storage);
   t.after(() => { diffs.dispose(); });
   const deleted = { originalUri: pullRequestFileUri({ repository: 'acme/app', number: 5, relativePath: 'base.ts', revision: base }) };
   const added = { modifiedUri: pullRequestFileUri({ repository: 'acme/app', number: 5, relativePath: 'feature.ts' }) };

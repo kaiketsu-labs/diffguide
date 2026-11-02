@@ -67,9 +67,10 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
     setReviewed: async (_provider, _repository, _number, file, done) => { if (done) reviewed.add(file); else reviewed.delete(file); },
     showOverview: async () => undefined,
     forget: () => undefined,
-    onDidChangeStatus: () => ({ dispose: () => undefined }),
   };
 }
+
+const noStatusChanges: vscode.Event<unknown> = () => ({ dispose: () => undefined });
 
 /** Expand a tree level and render its items. */
 async function level(provider: vscode.TreeDataProvider<unknown>, node?: unknown): Promise<{ node: unknown; item: vscode.TreeItem }[]> {
@@ -145,7 +146,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
   await settings.update('localReview.fileView', 'list');
-  const view = registerPullRequestView(async () => provider, worktrees, settings);
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings);
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
@@ -213,10 +214,10 @@ test('groups changed files into folders and folds single-folder chains into one 
 test('shows the CLI error instead of the tree and reloads on refresh', async (t) => {
   window.trees.length = 0;
   let attempts = 0;
-  const view = registerPullRequestView(async () => {
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => {
     attempts += 1;
     throw new Error('GitHub CLI wurde nicht gefunden.');
-  }, recordingWorktrees(), new FakeMemento());
+  }, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
@@ -227,4 +228,54 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
   await commands.executeCommand('localReview.refreshPullRequests');
   await level(tree);
   assert.equal(attempts, 2);
+});
+
+test('lists every repository, collapses those without PRs and routes actions to the PR\'s own repository', async (t) => {
+  window.trees.length = 0;
+  const listed: string[] = [];
+  const provider = (name: string, pullRequests: readonly PullRequestSummary[]): PullRequestProvider => ({
+    readRepository: async () => ({ name, url: `https://github.com/${name}` }),
+    listMine: async () => pullRequests,
+    listReviewRequested: async () => [],
+    listFiles: async () => { listed.push(name); return [{ path: `${name.split('/')[1]}.ts`, additions: 1, deletions: 0, change: 'added' }]; },
+    checkout: async () => undefined,
+    viewedFiles: async () => new Set(),
+    setViewed: async () => undefined,
+    publishComment: async () => { throw new Error('not used'); },
+    details: async () => { throw new Error('not used'); },
+    threads: async () => [],
+    replyToThread: async () => { throw new Error('not used'); },
+    resolveThread: async () => { throw new Error('not used'); },
+    submitReview: async () => { throw new Error('not used'); },
+    merge: async () => { throw new Error('not used'); },
+  });
+  const serviceA = recordingWorktrees();
+  const serviceB = recordingWorktrees();
+  const view = registerPullRequestView(async () => [
+    { folder: 'service-a', connect: async () => provider('acme/service-a', [summary]), worktrees: serviceA },
+    { folder: 'service-b', connect: async () => provider('acme/service-b', [summary]), worktrees: serviceB },
+    { folder: 'service-c', connect: async () => provider('acme/service-c', []), worktrees: recordingWorktrees() },
+    { folder: 'scratch', connect: async () => { throw new Error('no GitHub remote'); }, worktrees: recordingWorktrees() },
+  ], noStatusChanges, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+
+  const rows = await level(tree);
+  assert.deepEqual(rows.map(({ item }) => [item.label, item.collapsibleState]), [
+    ['acme/service-a', 2], ['acme/service-b', 2], ['acme/service-c', 1], ['scratch: no GitHub remote', 0],
+  ]);
+  const pullRequestIn = async (row: number): Promise<{ node: unknown; item: vscode.TreeItem } | undefined> => {
+    const [mine] = await level(tree, rows[row]?.node);
+    return (await level(tree, mine?.node))[0];
+  };
+  const firstPr = await pullRequestIn(0);
+  const secondPr = await pullRequestIn(1);
+  assert.deepEqual((await level(tree, firstPr?.node)).map(({ item }) => item.label), ['service-a.ts']);
+  assert.deepEqual((await level(tree, secondPr?.node)).map(({ item }) => item.label), ['service-b.ts']);
+  assert.deepEqual(listed, ['acme/service-a', 'acme/service-b']);
+
+  const command = secondPr?.item.command as vscode.Command;
+  await commands.executeCommand(command.command, ...(command.arguments ?? []));
+  assert.deepEqual(serviceB.opened, ['acme/service-b#7:author']);
+  assert.deepEqual(serviceA.opened, []);
 });
