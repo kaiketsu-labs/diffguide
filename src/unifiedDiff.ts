@@ -27,16 +27,25 @@ export interface FileDiff {
 interface RawLine { readonly kind: DiffLine['kind']; readonly oldLine?: number; readonly newLine?: number; readonly text: string }
 interface RawFile { path: string; oldPath?: string; change: FileDiff['change']; binary: boolean; hunks: { header: string; lines: RawLine[] }[] }
 
-/** A PR worktree's tracked changes against its base, highlighted per line. */
+/** A PR worktree's tracked changes against its base, highlighted per line; yields between files so a large PR does not block the extension host. */
 export async function readPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
   const output = await git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv',
     '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3', base, '--']);
   await prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
-  return parseUnifiedDiff(output);
+  const files: FileDiff[] = [];
+  for (const file of parseRawDiff(output)) {
+    files.push(highlightFile(file));
+    await new Promise((resolve) => { setImmediate(resolve); });
+  }
+  return files;
 }
 
 /** Parse `git diff` output; lines are highlighted per side so tokens spanning lines stay correct. */
 export function parseUnifiedDiff(output: string): readonly FileDiff[] {
+  return parseRawDiff(output).map(highlightFile);
+}
+
+function parseRawDiff(output: string): readonly RawFile[] {
   const files: RawFile[] = [];
   let file: RawFile | undefined;
   let hunk: RawFile['hunks'][number] | undefined;
@@ -90,7 +99,7 @@ export function parseUnifiedDiff(output: string): readonly FileDiff[] {
       file.binary = true;
     }
   }
-  return files.filter((entry) => entry.path !== '').map(highlightFile);
+  return files.filter((entry) => entry.path !== '');
 }
 
 function highlightFile(file: RawFile): FileDiff {

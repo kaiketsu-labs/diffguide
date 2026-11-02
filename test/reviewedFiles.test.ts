@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -26,6 +26,20 @@ test('keeps a file reviewed until its content changes, and clears it on untick',
   assert.deepEqual([...await readReviewedFiles(worktree, ['src/a.ts', 'b.ts', 'gone.ts'])], ['gone.ts']);
 
   await assert.rejects(setFileReviewed(worktree, '../outside.ts', true));
+});
+
+test('notices a same-size edit that keeps the old modification time', async (t) => {
+  const worktree = await mkdtemp(path.join(tmpdir(), 'local-review-reviewed-'));
+  t.after(async () => { await rm(worktree, { recursive: true, force: true }); });
+  const file = path.join(worktree, 'a.ts');
+  await writeFile(file, 'one');
+  await setFileReviewed(worktree, 'a.ts', true);
+  assert.deepEqual([...await readReviewedFiles(worktree, ['a.ts'])], ['a.ts']);
+  const { atime, mtime } = await stat(file);
+
+  await writeFile(file, 'two');
+  await utimes(file, atime, mtime);
+  assert.deepEqual([...await readReviewedFiles(worktree, ['a.ts'])], []);
 });
 
 test('merges local ticks with the code host\'s Viewed flags and sends ticks to it', async (t) => {

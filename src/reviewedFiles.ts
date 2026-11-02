@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { isWorkspaceRelativePath } from './git.js';
@@ -7,10 +7,23 @@ import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 import type { PullRequestProvider } from './pullRequests.js';
 import { reviewDataPath, worktreePath } from './worktrees.js';
 
+/** Hashes by file, reused while size, inode and change times match; any write changes the change time. */
+const fingerprints = new Map<string, { readonly version: string; readonly hash: string }>();
+const maxFingerprints = 10_000;
+
 /** Content hash of a worktree file, so a mark lapses once the file changes. */
 async function fingerprint(worktree: string, relativePath: string): Promise<string> {
-  const content = await readFile(join(worktree, relativePath)).catch(() => undefined);
-  return content === undefined ? 'deleted' : createHash('sha256').update(content).digest('hex').slice(0, 16);
+  const file = join(worktree, relativePath);
+  const info = await stat(file, { bigint: true }).catch(() => undefined);
+  if (info === undefined) return 'deleted';
+  const version = `${info.size}:${info.ino}:${info.mtimeNs}:${info.ctimeNs}`;
+  const known = fingerprints.get(file);
+  if (known?.version === version) return known.hash;
+  const content = await readFile(file).catch(() => undefined);
+  const hash = content === undefined ? 'deleted' : createHash('sha256').update(content).digest('hex').slice(0, 16);
+  if (fingerprints.size >= maxFingerprints) fingerprints.clear();
+  fingerprints.set(file, { version, hash });
+  return hash;
 }
 
 function marksPath(worktree: string): string {
@@ -43,7 +56,8 @@ export async function setFileReviewed(worktree: string, relativePath: string, re
 
 /** Reviewed files per PR: local ticks merged with the code host's "Viewed" flags, which are cached until `forget`. */
 export class FileReviews implements vscode.Disposable {
-  readonly #changed = new vscode.EventEmitter<void>();
+  readonly #changed = new vscode.EventEmitter<string>();
+  /** Fires with `owner/name#number` of the PR whose files were ticked or unticked. */
   readonly onDidChange = this.#changed.event;
   readonly #viewed = new Map<string, Promise<Set<string>>>();
 
@@ -64,7 +78,7 @@ export class FileReviews implements vscode.Disposable {
     const viewed = await this.#viewedOn(provider, repository, number).catch(() => undefined);
     if (reviewed) viewed?.add(path);
     else viewed?.delete(path);
-    this.#changed.fire();
+    this.#changed.fire(`${repository}#${number}`);
     await provider.setViewed(number, path, reviewed);
   }
 

@@ -19,11 +19,11 @@ import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
 import { buildOverviewState, showPullRequestOverview, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
-import { openPullRequestFile, registerPullRequestDiffs } from './pullRequestDiff.js';
+import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
-import { getHeadRevision, readGitBase } from './git.js';
+import { getHeadRevision } from './git.js';
 import { anchorFromText } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
@@ -94,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const pageAnchor = async ({ path, side, startLine, endLine }: Omit<PageComment, 'text' | 'intent'>): Promise<{ anchor: CodeAnchor; base: string }> => {
         if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
         const base = await readBase();
-        const content = side === 'old' ? await readGitBase(folder, path, base) : await readFile(join(folder, path), 'utf8');
+        const content = side === 'old' ? await readBaseContent(folder, path, base) : await readFile(join(folder, path), 'utf8');
         const anchor = anchorFromText(content, { path, startLine, endLine, side: side === 'old' ? 'original' : 'working', baseRevision: base });
         return { anchor, base };
       };
@@ -117,7 +117,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void remote.then(() => { detailsChanged.fire(); });
         return remote;
       };
+      /** Details and threads in one request on first load; a failed combined request falls back to separate ones. */
+      const loadOverview = (): void => {
+        const both = provider.overview(pullRequest.number);
+        details = both.then(({ details: loaded }) => loaded, () => provider.details(pullRequest.number)).catch(asError);
+        remote = both.then(({ threads }) => threads, () => provider.threads(pullRequest.number)).catch(asError);
+        void details.then(() => { detailsChanged.fire(); });
+        void remote.then(() => { detailsChanged.fire(); });
+      };
       const read = async (): Promise<ReturnType<typeof buildOverviewState>> => {
+        if (details === undefined && remote === undefined) loadOverview();
         const paths = await listed;
         const all = [...new Set([...(paths ?? []), ...diffPaths])];
         const viewed = await fileReviews.reviewed(provider, repository, pullRequest.number, all);
@@ -126,7 +135,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
-        fileReviews.onDidChange(listener),
+        fileReviews.onDidChange((changed) => { if (changed === `${repository}#${pullRequest.number}`) listener(changed); }),
         detailsChanged.event(listener),
       );
       await showPullRequestOverview(`${repository}#${pullRequest.number}`, read, changed, {
@@ -221,7 +230,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
-        forget: () => { fileReviews.forget(); GitHubApiProvider.forgetSearches(); },
+        forget: () => { fileReviews.forget(); GitHubApiProvider.forget(); checkouts.rescan(); },
         showOverview: (provider, repository, pullRequest, role) => showOverview(checkout, provider, repository, pullRequest, role),
       };
     };
@@ -230,7 +239,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         async () => (await checkouts.list()).map((checkout) => ({
           folder: relative(root, checkout.root) || basename(root), connect: checkout.connect, worktrees: worktreesOf(checkout),
         })),
-        (listener) => vscode.Disposable.from(checkouts.onDidChangeState(listener), checkouts.onDidChangeReviewedFiles(listener)),
+        (listener) => vscode.Disposable.from(
+          checkouts.onDidChangeState((changed) => { listener(changed.session.key); }),
+          checkouts.onDidChangeReviewedFiles(listener),
+        ),
         context.globalState,
         context.workspaceState,
       ),

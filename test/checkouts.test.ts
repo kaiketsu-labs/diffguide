@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from '../src/checkouts.js';
 import type { FileReviews } from '../src/reviewedFiles.js';
 import type { PullRequestSessions } from '../src/pullRequestSessions.js';
+import { worktreePath } from '../src/worktrees.js';
 import { EventEmitter } from './fakes/vscode.js';
 
 /** Checkouts with sessions that only count restores. */
@@ -51,4 +52,38 @@ test('finds repositories one folder deep, including dot folders and worktree fil
   await mkdir(join(root, 'linked'));
   await writeFile(join(root, 'linked', '.git'), 'gitdir: ../.git/worktrees/linked');
   assert.deepEqual([...await nestedRepositoryRoots(root)].sort(), ['.github-organization', 'api', 'linked'].map((name) => join(root, name)));
+});
+
+test('finds a PR\'s checkout without rescanning the folder, and rescans once for a repository it has not seen', async (t) => {
+  const storage = await mkdtemp(join(tmpdir(), 'local-review-locate-'));
+  t.after(async () => { await rm(storage, { recursive: true, force: true }); });
+  const addWorktree = async (storageRoot: string, number: number): Promise<void> => {
+    const folder = worktreePath(storageRoot, 'acme/app', number);
+    await mkdir(folder, { recursive: true });
+    await writeFile(`${folder}.json`, JSON.stringify({ version: 1, repository: 'acme/app', role: 'reviewer', pullRequest: { number, baseBranch: 'main' } }));
+  };
+  const roots = ['/work/a'];
+  let scans = 0;
+  const checkouts = new Checkouts('/work', join(storage, 'global'), {
+    discover: async () => { scans += 1; return [...roots]; },
+    storage: async (root) => root === '/work' ? undefined : join(storage, root.slice('/work/'.length)),
+    create: (root, storageRoot): Checkout => ({
+      root, storageRoot, connect: async () => { throw new Error('not used'); },
+      sessions: { sessions: [], onDidChange: new EventEmitter<void>().event, onDidChangeState: new EventEmitter<never>().event, restore: async () => undefined, dispose: () => undefined } as unknown as PullRequestSessions,
+      fileReviews: { onDidChange: new EventEmitter<string>().event, dispose: () => undefined } as unknown as FileReviews,
+    }),
+    onRestoreError: (error) => { throw error; },
+  });
+  t.after(() => { checkouts.dispose(); });
+  await addWorktree(join(storage, 'a'), 1);
+
+  assert.equal((await checkouts.locate('acme/app', 1))?.root, '/work/a');
+  assert.equal((await checkouts.locate('acme/app', 1))?.root, '/work/a');
+  assert.equal(scans, 1);
+
+  roots.push('/work/b');
+  await addWorktree(join(storage, 'b'), 2);
+  assert.equal((await checkouts.locate('acme/app', 2))?.root, '/work/b');
+  assert.equal(scans, 2);
+  assert.equal(await checkouts.locate('acme/app', 3), undefined);
 });

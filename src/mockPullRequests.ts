@@ -32,6 +32,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
     checks: [{ name: 'build', state: 'success' }, { name: 'lint', state: 'pending' }],
   }),
   threads: async () => [],
+  overview: async (number) => ({ details: await mockPullRequestProvider.details(number), threads: await mockPullRequestProvider.threads(number) }),
   replyToThread: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   resolveThread: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   submitReview: async () => { throw new Error('Sample pull requests cannot be reviewed.'); },

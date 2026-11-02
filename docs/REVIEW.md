@@ -151,7 +151,7 @@ Native apply and focus/blur passed with the unchanged palette. The corrected res
 | Area | Limit |
 | --- | --- |
 | Session | First local workspace folder and one intended Claude session. Remote and concurrent agent sessions are unsupported. |
-| Pull requests | The PR sidebar lists the workspace folder and Git repositories VS Code finds inside it (`git.repositoryScanMaxDepth`, default one level). Two separate clones of the same GitHub repository in one workspace are not told apart. It signs in through VS Code's GitHub account: github.com plus the one enterprise host set in `github-enterprise.uri`. |
+| Pull requests | The PR sidebar lists the workspace folder and Git repositories VS Code finds inside it (`git.repositoryScanMaxDepth`, default one level). Two separate clones of the same GitHub repository in one workspace are not told apart. It signs in through VS Code's GitHub account: github.com plus the one enterprise host set in `github-enterprise.uri`. Git remotes, PR lists and GitHub's Viewed flags are kept until Refresh, so a changed remote or a file marked Viewed on github.com shows after Refresh. |
 | Platform | macOS is primary. Linux is unverified. Automatic connection is blocked on Windows. |
 | Idle watcher | 24-hour timeout. Reconnect or send Claude a prompt afterward. |
 | Agent context | Up to 20 recent conversation messages and 100,000 quoted characters. Individual review fields are bounded at 200,000 characters; replies at 20,000. |
