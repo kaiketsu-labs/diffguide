@@ -34,11 +34,14 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
   /** Fires when a PR's comments or Claude activity change, in any checkout. */
   readonly onDidChangeState = this.#stateChanged.event;
   readonly onDidChangeActivity = this.#stateChanged.event;
-  readonly #reviewsChanged = new vscode.EventEmitter<void>();
-  /** Fires when a file is ticked or unticked as reviewed, in any checkout. */
+  readonly #reviewsChanged = new vscode.EventEmitter<string>();
+  /** Fires with `owner/name#number` when a file is ticked or unticked as reviewed, in any checkout. */
   readonly onDidChangeReviewedFiles = this.#reviewsChanged.event;
   readonly #byStorage = new Map<string, Checkout>();
   readonly #storage = new Map<string, Promise<string | undefined>>();
+  #discovered: Promise<readonly string[]> | undefined;
+  /** Checkout that held each PR's worktree when last looked up. */
+  readonly #located = new Map<string, Checkout>();
   readonly #subscriptions: vscode.Disposable[] = [];
 
   /** `fallbackStorage` keeps PR worktrees when the workspace folder itself is not a Git repository. */
@@ -50,7 +53,7 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
 
   /** The workspace folder first, then nested repositories by path; worktrees of one repository count once. */
   async list(): Promise<readonly Checkout[]> {
-    const nested = (await this.options.discover()).filter((root) => isNested(this.workspaceRoot, root)).sort();
+    const nested = (await this.#discover()).filter((root) => isNested(this.workspaceRoot, root)).sort();
     const candidates = await Promise.all([this.workspaceRoot, ...nested].map(async (root) => ({
       root, storageRoot: await this.#storageOf(root) ?? (root === this.workspaceRoot ? this.fallbackStorage : undefined),
     })));
@@ -62,12 +65,24 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
     return [...listed.values()];
   }
 
-  /** The checkout that holds a PR's worktree, if any. */
+  /** Scan the workspace folder for repositories again on the next `list`. */
+  rescan(): void {
+    this.#discovered = undefined;
+  }
+
+  /** The checkout that holds a PR's worktree, if any; looks again in every repository, rescanning once, when the last answer no longer holds. */
   async locate(repository: string, number: number): Promise<Checkout | undefined> {
-    for (const checkout of await this.list()) {
-      if (await hasWorktree(checkout.storageRoot, repository, number)) return checkout;
+    const key = `${repository}#${number}`;
+    const known = this.#located.get(key);
+    if (known !== undefined && await hasWorktree(known.storageRoot, repository, number)) return known;
+    this.#located.delete(key);
+    let found = await this.#find(await this.list(), repository, number);
+    if (found === undefined) {
+      this.rescan();
+      found = await this.#find(await this.list(), repository, number);
     }
-    return undefined;
+    if (found !== undefined) this.#located.set(key, found);
+    return found;
   }
 
   /** Session that owns a PR file document, if it is open. */
@@ -96,6 +111,19 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
     this.#reviewsChanged.dispose();
   }
 
+  async #find(checkouts: readonly Checkout[], repository: string, number: number): Promise<Checkout | undefined> {
+    const held = await Promise.all(checkouts.map((checkout) => hasWorktree(checkout.storageRoot, repository, number)));
+    return checkouts.find((_checkout, index) => held[index]);
+  }
+
+  #discover(): Promise<readonly string[]> {
+    if (this.#discovered === undefined) {
+      const discovered = this.#discovered = this.options.discover();
+      discovered.catch(() => { if (this.#discovered === discovered) this.#discovered = undefined; });
+    }
+    return this.#discovered;
+  }
+
   #storageOf(root: string): Promise<string | undefined> {
     let found = this.#storage.get(root);
     if (found === undefined) {
@@ -114,7 +142,7 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
     this.#subscriptions.push(
       checkout.sessions.onDidChange(() => { this.#changed.fire(); }),
       checkout.sessions.onDidChangeState((session) => { this.#stateChanged.fire(session); }),
-      checkout.fileReviews.onDidChange(() => { this.#reviewsChanged.fire(); }),
+      checkout.fileReviews.onDidChange((pullRequest) => { this.#reviewsChanged.fire(pullRequest); }),
     );
     void checkout.sessions.restore().catch(this.options.onRestoreError);
     return checkout;

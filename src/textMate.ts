@@ -41,6 +41,8 @@ export class TextMateHighlighter {
   readonly #grammars = new Map<string, Promise<IGrammar | null>>();
   readonly #loaded = new Map<string, IGrammar | null>();
   readonly #colors: readonly string[];
+  /** Class names per token attribute value; this theme's colors only, so it goes with the highlighter. */
+  readonly #classNames = new Map<number, string>();
 
   constructor(private readonly contributions: TextMateContributions, theme: TextMateTheme, wasmPath: string) {
     wasm ??= readFile(wasmPath).then((data) => loadWASM({ data }));
@@ -100,6 +102,12 @@ export class TextMateHighlighter {
 
   /** Classes for one token; the default foreground stays the page's editor color. */
   #classes(attributes: number): string {
+    let classes = this.#classNames.get(attributes);
+    if (classes === undefined) this.#classNames.set(attributes, classes = this.#buildClasses(attributes));
+    return classes;
+  }
+
+  #buildClasses(attributes: number): string {
     const foreground = (attributes & foregroundMask) >>> foregroundOffset;
     const fontStyle = (attributes & fontStyleMask) >>> fontStyleOffset;
     const color = foreground > 1 ? this.#colors[foreground] : undefined;

@@ -59,6 +59,7 @@ const provider: PullRequestProvider = {
   publishComment: async (number, comment, pending) => { published.push({ number, comment, pending }); return 'https://github.com/acme/app/pull/5#discussion_r1'; },
   details: async () => { throw new Error('not used'); },
   threads: async () => [],
+  overview: async () => { throw new Error('not used'); },
   replyToThread: async () => { throw new Error('not used'); },
   resolveThread: async () => { throw new Error('not used'); },
   submitReview: async () => { throw new Error('not used'); },

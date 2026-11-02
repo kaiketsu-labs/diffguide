@@ -8,7 +8,7 @@ import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequest
 import { fileTree, registerPullRequestView } from '../src/pullRequestView.js';
 import { groupSearchResults, parseGitRemote, pickGitHubRemote } from '../src/pullRequests.js';
 import type { FileFolder, PullRequestWorktrees } from '../src/pullRequestView.js';
-import { FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
+import { EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
 
 const ghEntry = {
   author: { id: 'MDQ', is_bot: false, login: 'octo', name: 'Octo' },
@@ -82,7 +82,7 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
   };
 }
 
-const noStatusChanges: vscode.Event<unknown> = () => ({ dispose: () => undefined });
+const noStatusChanges: vscode.Event<string | undefined> = () => ({ dispose: () => undefined });
 
 /** Expand a tree level and render its items. */
 async function level(provider: vscode.TreeDataProvider<unknown>, node?: unknown): Promise<{ node: unknown; item: vscode.TreeItem }[]> {
@@ -150,6 +150,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
     publishComment: async () => { throw new Error('not used'); },
     details: async () => { throw new Error('not used'); },
     threads: async () => [],
+    overview: async () => { throw new Error('not used'); },
     replyToThread: async () => { throw new Error('not used'); },
     resolveThread: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
@@ -278,6 +279,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
     publishComment: async () => { throw new Error('not used'); },
     details: async () => { throw new Error('not used'); },
     threads: async () => [],
+    overview: async () => { throw new Error('not used'); },
     replyToThread: async () => { throw new Error('not used'); },
     resolveThread: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
@@ -389,4 +391,44 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   assert.deepEqual(await titles(), ['#8 Fresh']);
   assert.equal(window.trees.at(-1)?.message, '');
   assert.deepEqual((workspace.get('localReview.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
+});
+
+test('reads a PR\'s reviewed files once for its row and file rows, and redraws only that PR when its status changes', async (t) => {
+  window.trees.length = 0;
+  const provider = {
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [summary],
+    listReviewRequested: async () => [],
+    listFiles: async () => [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }, { path: 'b.ts', additions: 1, deletions: 0, change: 'added' }],
+  } as unknown as PullRequestProvider;
+  const worktrees = recordingWorktrees();
+  worktrees.checkedOut.add(7);
+  let reads = 0;
+  const reviewedFiles = worktrees.reviewedFiles;
+  worktrees.reviewedFiles = async (...arguments_) => { reads += 1; return await reviewedFiles(...arguments_); };
+  const status = new EventEmitter<string | undefined>();
+  const settings = new FakeMemento();
+  await settings.update('localReview.groupBy', 'repository');
+  await settings.update('localReview.fileView', 'list');
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], status.event, settings, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+  const redrawn: unknown[] = [];
+  tree.onDidChangeTreeData?.((node) => { redrawn.push(node); });
+
+  const [repository] = await level(tree);
+  const [section] = await level(tree, repository?.node);
+  const [pr] = await level(tree, section?.node);
+  assert.equal(pr?.item.description, 'octo · Draft · Worktree · 0/2 reviewed');
+  assert.deepEqual((await level(tree, pr?.node)).map(({ item }) => item.checkboxState), [0, 0]);
+  assert.equal(reads, 1);
+
+  worktrees.reviewed.add('a.ts');
+  status.fire('acme/app#7');
+  assert.deepEqual(redrawn, [pr?.node]);
+  assert.equal((await tree.getTreeItem(pr?.node))?.description, 'octo · Draft · Worktree · 1/2 reviewed');
+  assert.equal(reads, 2);
+
+  status.fire('acme/other#1');
+  assert.deepEqual(redrawn, [pr?.node, undefined]);
 });

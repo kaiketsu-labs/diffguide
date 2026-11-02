@@ -60,6 +60,7 @@ const provider = (checkouts: string[]): PullRequestProvider => ({
   publishComment: async () => { throw new Error('not used'); },
   details: async () => { throw new Error('not used'); },
   threads: async () => [],
+  overview: async () => { throw new Error('not used'); },
   replyToThread: async () => { throw new Error('not used'); },
   resolveThread: async () => { throw new Error('not used'); },
   submitReview: async () => { throw new Error('not used'); },

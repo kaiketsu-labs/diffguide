@@ -96,6 +96,8 @@ export interface PullRequestProvider {
   publishComment(number: number, comment: PullRequestComment, pending: boolean): Promise<string>;
   details(number: number): Promise<PullRequestDetails>;
   threads(number: number): Promise<readonly RemoteThread[]>;
+  /** Details and review threads together, in as few requests as the code host allows. */
+  overview(number: number): Promise<{ readonly details: PullRequestDetails; readonly threads: readonly RemoteThread[] }>;
   /** Post a reply to a code host thread right away, visible to everyone. */
   replyToThread(threadId: string, body: string): Promise<void>;
   resolveThread(threadId: string, resolved: boolean): Promise<void>;
@@ -161,6 +163,15 @@ type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSu
 
 const searchFields = 'number title url isDraft headRefName baseRefName author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
 const searchPages = 10;
+const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed';
+const detailsFields = `bodyHTML state mergeable viewerDidAuthor
+  reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
+  reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name} ... on Bot{login}}}}
+  latestOpinionatedReviews(first:30){nodes{state author{login}}}
+  commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
+    ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
+const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
+  comments(first:100){nodes{url bodyHTML state author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
 
 /** Group search hits by repository, in the shape `parsePullRequestList` reads. */
 export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
@@ -187,20 +198,27 @@ export function groupSearchResults(mine: readonly unknown[], reviewRequested: re
 export class GitHubApiProvider implements PullRequestProvider {
   /** One search per GitHub host serves every repository's PR lists. */
   static readonly #searches = new Map<string, Promise<SearchResults>>();
+  /** One provider per repository keeps its remotes, PR ids and Viewed flags until `forget`. */
+  static readonly #providers = new Map<string, GitHubApiProvider>();
   #repository: Promise<{ readonly owner: string; readonly name: string; readonly host: string }> | undefined;
   #remotes: Promise<string> | undefined;
   readonly #ids = new Map<number, Promise<string>>();
+  /** Viewed flags from the latest file list of each PR, so reading them needs no second request. */
+  readonly #viewed = new Map<number, ReadonlySet<string>>();
 
   private constructor(private readonly workspaceRoot: string) {}
 
   /** Connect to the repository the workspace's git remotes point to. */
   static async connect(workspaceRoot: string): Promise<GitHubApiProvider> {
-    return new GitHubApiProvider(workspaceRoot);
+    let provider = GitHubApiProvider.#providers.get(workspaceRoot);
+    if (provider === undefined) GitHubApiProvider.#providers.set(workspaceRoot, provider = new GitHubApiProvider(workspaceRoot));
+    return provider;
   }
 
-  /** Search again on the next listing. */
-  static forgetSearches(): void {
+  /** Search again and re-read remotes on the next listing. */
+  static forget(): void {
     GitHubApiProvider.#searches.clear();
+    GitHubApiProvider.#providers.clear();
   }
 
   /** Read from git remotes the way GitHub CLI picks its repository. */
@@ -256,14 +274,16 @@ export class GitHubApiProvider implements PullRequestProvider {
     let after: string | null = null;
     for (let page = 0; page < 30; page++) {
       const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){
-        files(first:100,after:$after){nodes{path additions deletions changeType} pageInfo{hasNextPage endCursor}}}}}`, { number, after });
+        files(first:100,after:$after){nodes{path additions deletions changeType viewerViewedState} pageInfo{hasNextPage endCursor}}}}}`, { number, after });
       const connection = object(object(object(data['repository'])['pullRequest'])['files']);
       files.push(...list(connection['nodes']));
       const info = object(connection['pageInfo']);
       if (info['hasNextPage'] !== true) break;
       after = text(info['endCursor']);
     }
-    return parsePullRequestFiles({ files });
+    const parsed = parsePullRequestFiles({ files });
+    this.#viewed.set(number, new Set(files.map(object).filter((file) => file['viewerViewedState'] === 'VIEWED').map((file) => text(file['path']))));
+    return parsed;
   }
 
   /** Fetch GitHub's `pull/<n>/head` ref, which also covers PRs from forks, through the user's git credentials. */
@@ -275,6 +295,8 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   async viewedFiles(number: number): Promise<ReadonlySet<string>> {
+    const listed = this.#viewed.get(number);
+    if (listed !== undefined) return listed;
     const viewed = new Set<string>();
     let after: string | null = null;
     for (let page = 0; page < 30; page++) {
@@ -294,6 +316,7 @@ export class GitHubApiProvider implements PullRequestProvider {
 
   async setViewed(number: number, path: string, viewed: boolean): Promise<void> {
     const mutation = viewed ? 'markFileAsViewed' : 'unmarkFileAsViewed';
+    this.#viewed.delete(number);
     await this.#graphql(`mutation($id:ID!,$path:String!){${mutation}(input:{pullRequestId:$id,path:$path}){clientMutationId}}`,
       { id: await this.#pullRequestId(number), path });
   }
@@ -323,28 +346,37 @@ export class GitHubApiProvider implements PullRequestProvider {
 
   async details(number: number): Promise<PullRequestDetails> {
     const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-      mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
-      pullRequest(number:$number){bodyHTML state mergeable viewerDidAuthor
-        reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
-        reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name} ... on Bot{login}}}}
-        latestOpinionatedReviews(first:30){nodes{state author{login}}}
-        commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
-          ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}}}}`, { number });
+      ${mergeMethodFields} pullRequest(number:$number){${detailsFields}}}}`, { number });
     return parseDetails(object(data['repository']));
   }
 
   async threads(number: number): Promise<readonly RemoteThread[]> {
+    return await this.#threads(number);
+  }
+
+  async overview(number: number): Promise<{ readonly details: PullRequestDetails; readonly threads: readonly RemoteThread[] }> {
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+      ${mergeMethodFields} pullRequest(number:$number){id ${detailsFields} ${threadsField}}}}`, { number, after: null });
+    const repository = object(data['repository']);
+    const id = object(repository['pullRequest'])['id'];
+    if (typeof id === 'string' && id !== '') this.#ids.set(number, Promise.resolve(id));
+    return { details: parseDetails(repository), threads: await this.#threads(number, data) };
+  }
+
+  /** All review threads, continuing from an already fetched first page when given. */
+  async #threads(number: number, firstPage?: Record<string, unknown>): Promise<readonly RemoteThread[]> {
     const threads: RemoteThread[] = [];
     let after: string | null = null;
+    let data = firstPage;
     for (let page = 0; page < 30; page++) {
-      const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){
-        reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
-          comments(first:100){nodes{url bodyHTML state author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}}}}`, { number, after });
+      data ??= await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){
+        ${threadsField}}}}`, { number, after });
       const connection = object(object(object(data['repository'])['pullRequest'])['reviewThreads']);
       threads.push(...parseReviewThreads(connection['nodes']));
       const info = object(connection['pageInfo']);
       if (info['hasNextPage'] !== true) break;
       after = text(info['endCursor']);
+      data = undefined;
     }
     return threads;
   }

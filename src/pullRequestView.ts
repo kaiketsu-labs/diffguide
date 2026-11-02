@@ -143,6 +143,11 @@ function pullRequestsOf(listing: Ready, role: PullRequestRole): readonly PullReq
   return role === 'author' ? listing.mine : listing.reviewRequested;
 }
 
+/** `owner/name#number`, the key change events name a PR by. */
+function pullRequestKey(node: PullRequestNode): string {
+  return `${node.listing.repository.name}#${node.pullRequest.number}`;
+}
+
 /** Run at most `count` tasks at once, starting the rest in call order. */
 function limited(count: number): <T>(task: () => Promise<T>) => Promise<T> {
   let running = 0;
@@ -162,7 +167,7 @@ function limited(count: number): <T>(task: () => Promise<T>) => Promise<T> {
 
 /** List each repository's open pull requests by the user's role in them. */
 class PullRequestTree implements vscode.TreeDataProvider<Node> {
-  readonly #changed = new vscode.EventEmitter<undefined>();
+  readonly #changed = new vscode.EventEmitter<Node | undefined>();
   readonly onDidChangeTreeData = this.#changed.event;
   #checkouts: Promise<readonly PullRequestCheckout[]> | undefined;
   #listed: readonly PullRequestCheckout[] = [];
@@ -171,6 +176,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   #saving: Promise<void> = Promise.resolve();
   readonly #queue = limited(parallelListings);
   readonly #files = new Map<string, Promise<readonly PullRequestFile[]>>();
+  /** The row shown for each PR, so a change to one PR redraws only that row. */
+  readonly #rows = new Map<string, PullRequestNode>();
+  /** Worktree and reviewed state per PR, read once per redraw and shared by the PR's row and its file rows. */
+  readonly #checkedOut = new Map<string, Promise<boolean>>();
+  readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
 
   constructor(
     private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
@@ -227,13 +237,27 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#listings.clear();
     this.#done.clear();
     this.#files.clear();
+    this.#rows.clear();
+    this.#forgetState();
     for (const checkout of this.#listed) checkout.worktrees.forget();
     this.#changed.fire(undefined);
   }
 
-  /** Redraw checkout state without querying the code host again. */
-  redraw(): void {
-    this.#changed.fire(undefined);
+  /** Redraw checkout state without querying the code host again: one PR's row when it is shown, else the whole tree. */
+  redraw(pullRequest?: string): void {
+    const row = pullRequest === undefined ? undefined : this.#rows.get(pullRequest);
+    this.#forgetState(row === undefined ? undefined : pullRequest);
+    this.#changed.fire(row);
+  }
+
+  #forgetState(pullRequest?: string): void {
+    if (pullRequest === undefined) {
+      this.#checkedOut.clear();
+      this.#reviewed.clear();
+    } else {
+      this.#checkedOut.delete(pullRequest);
+      this.#reviewed.delete(pullRequest);
+    }
   }
 
   async getChildren(node?: Node): Promise<Node[]> {
@@ -248,7 +272,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === 'repository' || node.kind === 'section') {
       const role = node.role as PullRequestRole;
-      return pullRequestsOf(node.listing, role).map((pullRequest) => ({ kind: 'pullRequest', listing: node.listing, role, pullRequest }));
+      return pullRequestsOf(node.listing, role).map((pullRequest) => {
+        const row: PullRequestNode = { kind: 'pullRequest', listing: node.listing, role, pullRequest };
+        this.#rows.set(pullRequestKey(row), row);
+        return row;
+      });
     }
     if (node.kind === 'folder') return this.#folderChildren(node.parent, node.folder);
     if (node.kind === 'pullRequest') {
@@ -291,7 +319,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'pullRequest': {
         const pr = node.pullRequest;
-        const checkedOut = await node.listing.worktrees.exists(node.listing.repository.name, pr.number);
+        const checkedOut = await this.#isCheckedOut(node);
         const item = new vscode.TreeItem(`#${pr.number} ${pr.title}`, vscode.TreeItemCollapsibleState.Collapsed);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
@@ -313,9 +341,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         item.tooltip = `${file.path} · +${file.additions} −${file.deletions}`;
         item.resourceUri = fileRowUri(node.parent.pullRequest.number, file);
         item.iconPath = vscode.ThemeIcon.File;
-        const { repository, worktrees } = node.parent.listing;
-        if (await worktrees.exists(repository.name, node.parent.pullRequest.number)) {
-          const reviewed = await worktrees.reviewedFiles(node.parent.listing.provider, repository.name, node.parent.pullRequest.number, [file.path]);
+        if (await this.#isCheckedOut(node.parent)) {
+          const reviewed = await this.#reviewedOf(node.parent).catch(() => new Set<string>());
           item.checkboxState = reviewed.has(file.path) ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
         }
         item.command = { command: 'localReview.openPullRequest', title: 'Open changes', arguments: [node.parent, file.path] };
@@ -367,8 +394,30 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   async #progress(node: PullRequestNode): Promise<string | undefined> {
     const files = await this.#filesOf(node).catch(() => undefined);
     if (files === undefined || files.length === 0) return undefined;
-    const reviewed = await node.listing.worktrees.reviewedFiles(node.listing.provider, node.listing.repository.name, node.pullRequest.number, files.map((file) => file.path));
-    return `${reviewed.size}/${files.length} reviewed`;
+    const reviewed = await this.#reviewedOf(node).catch(() => undefined);
+    return reviewed === undefined ? undefined : `${reviewed.size}/${files.length} reviewed`;
+  }
+
+  #isCheckedOut(node: PullRequestNode): Promise<boolean> {
+    const key = pullRequestKey(node);
+    let checkedOut = this.#checkedOut.get(key);
+    if (checkedOut === undefined) {
+      checkedOut = node.listing.worktrees.exists(node.listing.repository.name, node.pullRequest.number);
+      checkedOut.catch(() => { this.#checkedOut.delete(key); });
+      this.#checkedOut.set(key, checkedOut);
+    }
+    return checkedOut;
+  }
+
+  #reviewedOf(node: PullRequestNode): Promise<ReadonlySet<string>> {
+    const key = pullRequestKey(node);
+    let reviewed = this.#reviewed.get(key);
+    if (reviewed === undefined) {
+      reviewed = this.#filesOf(node).then((files) => node.listing.worktrees.reviewedFiles(node.listing.provider, node.listing.repository.name, node.pullRequest.number, files.map((file) => file.path)));
+      reviewed.catch(() => { this.#reviewed.delete(key); });
+      this.#reviewed.set(key, reviewed);
+    }
+    return reviewed;
   }
 
   async #rootChildren(): Promise<Node[]> {
@@ -471,7 +520,10 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
 /** Register the pull request sidebar and its commands. */
 export function registerPullRequestView(
-  checkouts: () => Promise<readonly PullRequestCheckout[]>, onDidChangeStatus: vscode.Event<unknown>, settings: vscode.Memento, workspace: vscode.Memento,
+  checkouts: () => Promise<readonly PullRequestCheckout[]>,
+  /** Fires with `owner/name#number` when that PR's Claude activity or reviewed files change, or undefined to redraw all. */
+  onDidChangeStatus: vscode.Event<string | undefined>,
+  settings: vscode.Memento, workspace: vscode.Memento,
 ): vscode.Disposable {
   const tree = new PullRequestTree(checkouts, settings, workspace,
     (text) => { view.description = text ?? ''; }, (message) => { view.message = message ?? ''; });
@@ -493,9 +545,9 @@ export function registerPullRequestView(
       } catch (error: unknown) {
         report(error);
       }
-      tree.redraw();
+      for (const [node] of event.items) tree.redraw(node.kind === 'file' ? pullRequestKey(node.parent) : undefined);
     }),
-    onDidChangeStatus(() => { tree.redraw(); }),
+    onDidChangeStatus((pullRequest) => { tree.redraw(pullRequest); }),
     vscode.commands.registerCommand('localReview.refreshPullRequests', () => { tree.refresh(); }),
     vscode.commands.registerCommand('localReview.viewFilesAsTree', async () => { await tree.setAsTree(true); showMode(); }),
     vscode.commands.registerCommand('localReview.viewFilesAsList', async () => { await tree.setAsTree(false); showMode(); }),
@@ -519,7 +571,7 @@ export function registerPullRequestView(
       } catch (error: unknown) {
         report(error);
       }
-      tree.redraw();
+      tree.redraw(pullRequestKey(node));
     }),
     vscode.commands.registerCommand('localReview.showPullRequestClaude', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
@@ -528,7 +580,7 @@ export function registerPullRequestView(
       } catch (error: unknown) {
         report(error);
       }
-      tree.redraw();
+      tree.redraw(pullRequestKey(node));
     }),
     vscode.commands.registerCommand('localReview.showPullRequestOverview', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
@@ -537,7 +589,7 @@ export function registerPullRequestView(
       } catch (error: unknown) {
         report(error);
       }
-      tree.redraw();
+      tree.redraw(pullRequestKey(node));
     }),
     vscode.commands.registerCommand('localReview.removePullRequestWorktree', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
@@ -552,7 +604,7 @@ export function registerPullRequestView(
       } catch (error: unknown) {
         report(error);
       }
-      tree.redraw();
+      tree.redraw(pullRequestKey(node));
     }),
   );
 }

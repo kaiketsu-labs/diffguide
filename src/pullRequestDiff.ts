@@ -8,6 +8,26 @@ import { readPullRequestBase, readWorktree, worktreePath } from './worktrees.js'
 
 const scheme = 'local-review-pr';
 
+/** Recently read files at a fixed commit; their content can never change. */
+const baseContents = new Map<string, Promise<string>>();
+const maxBaseContents = 64;
+
+/** A file's content at a commit, read once for the diff editor's size check, its read and the open check. */
+export function readBaseContent(folder: string, relativePath: string, revision: string): Promise<string> {
+  const key = `${folder}\0${revision}\0${relativePath}`;
+  let content = baseContents.get(key);
+  if (content === undefined) {
+    content = readGitBase(folder, relativePath, revision);
+    content.catch(() => { baseContents.delete(key); });
+  } else {
+    baseContents.delete(key);
+  }
+  baseContents.set(key, content);
+  const oldest = baseContents.keys().next().value;
+  if (baseContents.size > maxBaseContents && oldest !== undefined) baseContents.delete(oldest);
+  return content;
+}
+
 /** File in a PR worktree: the working copy, or its content at `revision` when given. */
 interface PullRequestFileAddress {
   readonly repository: string;
@@ -61,7 +81,7 @@ class PullRequestFileSystem implements vscode.FileSystemProvider {
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
     const target = await this.#resolve(uri);
     if (target.revision !== undefined) {
-      const size = Buffer.byteLength(await readGitBase(target.folder, target.relativePath, target.revision));
+      const size = Buffer.byteLength(await readBaseContent(target.folder, target.relativePath, target.revision));
       return { type: vscode.FileType.File, ctime: 0, mtime: 0, size, permissions: vscode.FilePermission.Readonly };
     }
     const info = await stat(target.file).catch(() => { throw vscode.FileSystemError.FileNotFound(uri); });
@@ -70,7 +90,7 @@ class PullRequestFileSystem implements vscode.FileSystemProvider {
 
   async readFile(uri: vscode.Uri): Promise<Uint8Array> {
     const target = await this.#resolve(uri);
-    if (target.revision !== undefined) return Buffer.from(await readGitBase(target.folder, target.relativePath, target.revision));
+    if (target.revision !== undefined) return Buffer.from(await readBaseContent(target.folder, target.relativePath, target.revision));
     return await readFile(target.file).catch(() => { throw vscode.FileSystemError.FileNotFound(uri); });
   }
 
@@ -105,7 +125,7 @@ export function registerPullRequestDiffs(storageRoot: (repository: string, numbe
 
 async function fileSides(folder: string, repository: string, number: number, relativePath: string, base: string) {
   const exists = await stat(path.join(folder, relativePath)).then(() => true, () => false);
-  const atBase = await readGitBase(folder, relativePath, base) !== '' || !exists;
+  const atBase = await readBaseContent(folder, relativePath, base) !== '' || !exists;
   return {
     originalUri: atBase ? pullRequestFileUri({ repository, number, relativePath, revision: base }) : undefined,
     modifiedUri: exists ? pullRequestFileUri({ repository, number, relativePath }) : undefined,
