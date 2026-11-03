@@ -8,7 +8,8 @@ import { webviewStyles } from './webviewStyles.js';
 import { codicons } from './codicons.js';
 import { codePreviewStyles } from './codePreview.js';
 import { type MarkdownBlock, markdownHtml } from './markdown.js';
-import type { FileDiff } from './unifiedDiff.js';
+import { parseSuggestions, withoutSuggestions } from './suggestions.js';
+import { type FileDiff, highlightSource } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
@@ -39,6 +40,8 @@ export interface OverviewState {
     readonly status: string;
     /** What Claude is doing with this thread right now, while it waits for or works on it. */
     readonly working?: string;
+    /** The suggestion option written to the worktree from this thread, while the page is open. */
+    readonly applied?: { readonly message: number; readonly option: number; readonly pushed: boolean };
     readonly url?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
@@ -48,8 +51,11 @@ export interface OverviewState {
     readonly resolved: boolean;
     /** Set when the thread holds a note from Claude's analysis. */
     readonly origin?: 'analysis';
-    /** Rendered from Markdown with escaped text only. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string }[];
+    /** The commented code, shown as the lines a suggestion replaces. */
+    /** The commented lines as highlighted HTML, sent when a message has suggestions. */
+    readonly original?: readonly string[];
+    /** Rendered from Markdown with escaped text only; `suggestions` holds each ```suggestion block's lines as highlighted HTML, shown as options. */
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly suggestions?: readonly (readonly string[])[] }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];
@@ -140,6 +146,12 @@ export interface OverviewActions {
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   merge(method: MergeMethod): Promise<void>;
+  /** Replace a local thread's lines in the worktree with one option of a message's suggestions. */
+  applySuggestion(threadId: string, message: number, option: number): Promise<void>;
+  /** Post one option of a message's suggestions on GitHub as a suggestion on the thread's lines, in the pending review. */
+  publishSuggestion(threadId: string, message: number, option: number): Promise<void>;
+  /** Put back the file an uncommitted suggestion changed. */
+  discardSuggestion(threadId: string): Promise<void>;
   /** Have the PR's Claude merge the base branch, resolve the conflicts and push; resolves when Claude is done. */
   fixConflicts(answer?: string): Promise<void>;
   /** Hide Claude's question about the conflicts. */
@@ -177,6 +189,8 @@ export type PageMessage =
   | { readonly action: 'reply' | 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
+  | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
+  | { readonly action: 'discard-suggestion'; readonly id: string }
   | { readonly action: 'viewed'; readonly path: string; readonly viewed: boolean }
   | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
@@ -280,7 +294,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -323,6 +337,13 @@ export async function showPullRequestOverview(
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
         else if (action === 'view' && (view === 'files' || view === 'guide')) {
           await vscode.commands.executeCommand(view === 'guide' ? 'pairReview.showGuideInTree' : 'pairReview.showFilesInTree');
+        } else if ((action === 'apply-suggestion' || action === 'publish-suggestion') && typeof id === 'string' && state.threads.some((thread) => thread.id === id)
+          && Number.isSafeInteger(message) && (message as number) >= 0 && Number.isSafeInteger(option) && (option as number) >= 0) {
+          await (action === 'apply-suggestion' ? actions.applySuggestion : actions.publishSuggestion)(id, message as number, option as number);
+          if (action === 'apply-suggestion') sendFiles();
+        } else if (action === 'discard-suggestion' && typeof id === 'string' && state.threads.some((thread) => thread.id === id)) {
+          await actions.discardSuggestion(id);
+          sendFiles();
         } else if (action === 'dismiss-conflict-question') actions.dismissConflictQuestion();
         else if (action === 'fix-conflicts' && (text === undefined || isText(text))) {
           void actions.fixConflicts(text?.trim()).catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
@@ -475,6 +496,11 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .claude-live{margin-top:var(--space-8)}
+.suggestion{margin-top:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
+.suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line-strong)}
+.suggestion-diff .add{background:var(--diff-add)}.suggestion-diff .del{background:var(--diff-del)}
+.suggestion-diff{margin:0;padding:var(--space-4) 0;font:12px/18px var(--font-code);overflow:auto}.suggestion-diff div{padding:0 var(--space-8);white-space:pre}.suggestion-diff .sign{display:inline-block;width:16px;color:var(--ink-muted);user-select:none}
+.suggestion .actions{margin:0;padding:var(--space-6) var(--space-8);border-top:1px solid var(--line-strong)}
 .media{display:flex;flex-wrap:wrap;gap:var(--space-12);padding:var(--space-12)}
 .media-side{flex:1 1 280px;min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-6)}
 .media-side figcaption{font-size:12px}
@@ -680,7 +706,11 @@ export function buildOverviewState(
         endLine: thread.anchor.endLine,
         resolved: thread.resolved,
         ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        messages: thread.messages.map(({ author, text, createdAt }) => ({ author, html: markdownHtml(text), createdAt })),
+        ...(thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
+        messages: thread.messages.map(({ author, text, createdAt }) => {
+          const suggestions = parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
+          return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
+        }),
         ...(publication === undefined ? {} : { url: publication.url }),
       };
     }),

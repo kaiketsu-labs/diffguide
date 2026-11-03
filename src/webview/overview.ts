@@ -520,8 +520,8 @@ function composerBox(draft: Composer): HTMLElement {
     option.setAttribute('aria-pressed', String(on));
     toggle.append(option);
   }
-  head.append(el('span', 'source', 'New comment'), toggle,
-    el('span', 'muted', (draft.side === 'old' ? 'Base · ' : '') + range(draft.start, draft.end)));
+  const lines = el('span', 'muted', (draft.side === 'old' ? 'Base · ' : '') + range(draft.start, draft.end));
+  head.append(el('span', 'source', 'New comment'), toggle, lines);
   box.append(head);
   const cancel = (): void => { composer = undefined; save(); renderFiles([draft.path]); };
   const send = (pending: boolean, intent: Intent = 'ask'): void => {
@@ -580,6 +580,17 @@ function composerBox(draft: Composer): HTMLElement {
     ask.disabled = busySending;
     ask.title = 'Claude answers without editing';
     row.append(hint('asks'), el('span', 'gap'), cancelLink, implement, ask);
+  }
+  const original = draft.side === 'new' ? selectedText(draft.path, draft.start, draft.end) : undefined;
+  if (original !== undefined) {
+    const suggest = button('Suggest change', () => {
+      draft.text = (draft.text.trim() ? draft.text.replace(/\s*$/u, '\n\n') : '') + '```suggestion\n' + original + '\n```\n';
+      focusNext = 'composer';
+      save();
+      renderFiles([draft.path]);
+    }, 'quiet small');
+    suggest.title = 'Start a suggestion from these lines. On GitHub it becomes a change the author can commit.';
+    lines.before(suggest);
   }
   head.append(read);
   box.append(area, row);
@@ -691,7 +702,12 @@ function threadBox(thread: Thread): HTMLElement {
   box.append(strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
     status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
-  for (const entry of thread.messages) box.append(message(entry));
+  thread.messages.forEach((entry, index) => {
+    const item = message(entry);
+    const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
+    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
+    box.append(item);
+  });
   const working = thread.source === 'local' ? thread.working : undefined;
   if (working) {
     const live = el('div', 'claude-live');
@@ -725,6 +741,65 @@ function threadBox(thread: Thread): HTMLElement {
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
   return box;
+}
+
+/** Option picked on each message's suggestions, by thread id and message index. */
+const pickedOptions = new Map<string, number>();
+
+/** A message's suggestions as a small diff against the commented lines; several suggestions are options to switch between. */
+function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: number, suggestions: readonly (readonly string[])[]): HTMLElement {
+  const key = thread.id + ':' + index;
+  const picked = Math.min(pickedOptions.get(key) ?? (thread.applied?.message === index ? thread.applied.option : 0), suggestions.length - 1);
+  const card = el('div', 'suggestion');
+  const head = el('div', 'row suggestion-head');
+  head.append(el('span', 'muted', suggestions.length > 1 ? suggestions.length + ' suggested options' : 'Suggested change'));
+  if (suggestions.length > 1) {
+    const tabs = el('span', 'seg');
+    suggestions.forEach((_, option) => {
+      const tab = button('Option ' + (option + 1), () => { pickedOptions.set(key, option); renderFiles([thread.path]); });
+      tab.setAttribute('aria-pressed', String(option === picked));
+      tabs.append(tab);
+    });
+    head.append(tabs);
+  }
+  const lines = el('pre', 'suggestion-diff');
+  const line = (kind: 'add' | 'del', html: string): HTMLElement => {
+    const row = el('div', kind);
+    row.innerHTML = html;
+    row.prepend(el('span', 'sign', kind === 'add' ? '+' : '-'));
+    return row;
+  };
+  for (const html of thread.original ?? []) lines.append(line('del', html));
+  for (const html of suggestions[picked] ?? []) lines.append(line('add', html));
+  const actions = el('div', 'row actions');
+  const where = { id: thread.id, message: index, option: picked };
+  const publish = button('Publish suggestion', () => post({ action: 'publish-suggestion', ...where }));
+  publish.title = 'Adds it to your pending review as a GitHub suggestion the author can commit.';
+  const canPush = current?.details?.canEdit === true;
+  const apply = button(canPush ? 'Commit suggestion' : 'Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
+  apply.title = canPush ? 'Commits the change to the PR branch and pushes it.' : 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.';
+  const done = thread.applied?.message === index ? thread.applied : undefined;
+  if (done === undefined) actions.append(el('span', 'gap'), publish, apply);
+  else if (done.pushed) actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed and pushed.'));
+  else actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' applied to the worktree, not committed.'), button('Discard', () => post({ action: 'discard-suggestion', id: thread.id })), publish);
+  card.append(head, lines, actions);
+  return card;
+}
+
+/** The selected lines as plain text, for a suggestion to start from. */
+function selectedText(path: string, start: number, end: number): string | undefined {
+  const full = contextLines.get(path);
+  const fromDiff = new Map((files?.find((file) => file.path === path)?.hunks ?? []).flatMap((hunk) => hunk.lines)
+    .flatMap((line) => line.kind !== 'del' && line.newLine !== undefined ? [[line.newLine, line.html] as const] : []));
+  const lines: string[] = [];
+  for (let number = start; number <= end; number += 1) {
+    const html = full?.[number - 1] ?? fromDiff.get(number);
+    if (html === undefined) return undefined;
+    const holder = el('div');
+    holder.innerHTML = html;
+    lines.push(holder.textContent ?? '');
+  }
+  return lines.join('\n');
 }
 
 function inline(content: HTMLElement, width: number): HTMLTableRowElement {

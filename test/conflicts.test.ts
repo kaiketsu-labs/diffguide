@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { conflictTask, prepareConflictFix } from '../src/conflicts.js';
+import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from '../src/conflicts.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
@@ -69,4 +69,26 @@ test('passes the user\'s answer on when Claude asked how to resolve the conflict
   const fix = { base: 'a'.repeat(40), baseBranch: 'main', headBranch: 'feat/retry', pushTo: 'origin' };
   assert.ok(!conflictTask(fix).prompt.includes('They answered'));
   assert.match(conflictTask({ ...fix, answer: '4 attempts, 200 ms' }).prompt, /They answered:\n\n4 attempts, 200 ms$/u);
+});
+
+test('commits one file and pushes it to the PR branch, and takes the commit back when the push fails', async (t) => {
+  const { origin, worktree, latest } = await fixture(t);
+  for (const [key, value] of [['user.name', 't'], ['user.email', 't@example.invalid'], ['commit.gpgSign', 'false']] as const) await git(worktree, 'config', key, value);
+  await syncToPullRequestHead(worktree, 7);
+  await writeFile(path.join(worktree, 'a.txt'), 'suggested\n');
+  await writeFile(path.join(worktree, 'b.txt'), 'unrelated edit\n');
+  const push = { path: 'a.txt', message: 'Apply suggestion from code review', pushTo: 'origin', headBranch: 'feature', hooksOff: true };
+  await commitAndPush(worktree, push);
+  assert.equal(await git(origin, 'log', '-1', '--format=%s', 'feature'), 'Apply suggestion from code review');
+  assert.equal(await git(origin, 'show', 'feature:a.txt'), 'suggested');
+  assert.equal(await git(origin, 'show', 'feature:b.txt'), 'more');
+  assert.equal(await git(origin, 'rev-parse', 'feature~1'), latest);
+
+  const pushed = await git(worktree, 'rev-parse', 'HEAD');
+  await git(worktree, 'remote', 'set-url', 'origin', path.join(origin, 'missing'));
+  await writeFile(path.join(worktree, 'a.txt'), 'second\n');
+  await assert.rejects(commitAndPush(worktree, push));
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), pushed);
+  assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'suggested\n');
+  await assert.rejects(commitAndPush(worktree, { ...push, headBranch: '--force' }), /Unsupported/u);
 });

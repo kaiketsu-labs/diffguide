@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -10,7 +10,7 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
-import { conflictTask, prepareConflictFix } from './conflicts.js';
+import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
@@ -28,7 +28,8 @@ import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from '
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
-import { getHeadRevision, readGitBaseBytes } from './git.js';
+import { getHeadRevision, readGitBase, readGitBaseBytes } from './git.js';
+import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
 import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
 import { anchorFromText } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
@@ -140,6 +141,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
       /** What Claude asked when it last stopped fixing conflicts without pushing. */
       let conflictQuestion: string | undefined;
+      /** Suggestion options written to the worktree while this page is open, by thread. */
+      const applied = new Map<string, { readonly message: number; readonly option: number; readonly pushed: boolean }>();
+      /** File contents around each suggestion applied without committing, so Discard can put the file back. */
+      const undo = new Map<string, { readonly path: string; readonly before: string; readonly after: string }>();
+      /** Where to push the PR's branch: `origin`, or the fork's URL when the branch lives in a fork. */
+      const pushTarget = (loaded: PullRequestDetails): string => loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
       const loadThreads = (): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
@@ -162,9 +169,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
         const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
-        await prepareHighlighting(opened.session.store.threads.flatMap((thread) => thread.messages.flatMap((entry) => fenceFilePaths(entry.text))));
+        await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
         const state = buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
-        return conflictQuestion === undefined ? state : { ...state, conflictQuestion: markdownHtml(conflictQuestion) };
+        const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
+        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }) };
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -270,13 +278,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
         },
+        applySuggestion: async (id, message, option) => {
+          const { anchor, messages } = findThread(id);
+          const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
+          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
+          if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Apply the suggestion when it is done.');
+          const loaded = await currentDetails();
+          const file = join(folder, anchor.path);
+          if (loaded.canEdit) {
+            if ((await git(folder, ['status', '--porcelain', '--', anchor.path])).trim() !== '') throw new Error(`${anchor.path} has uncommitted changes. Commit or discard them first.`);
+            await syncToPullRequestHead(folder, pullRequest.number);
+          }
+          const before = await readFile(file, 'utf8');
+          const after = applySuggestion(before, anchor, suggestion);
+          await writeFile(file, after);
+          if (loaded.canEdit) {
+            await commitAndPush(folder, { path: anchor.path, message: 'Apply suggestion from code review', pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer' });
+            changedOnGitHub();
+          } else undo.set(id, { path: anchor.path, before, after });
+          applied.set(id, { message, option, pushed: loaded.canEdit });
+          detailsChanged.fire();
+        },
+        discardSuggestion: async (id) => {
+          const change = undo.get(id);
+          if (change === undefined) throw new Error('There is no applied suggestion to discard.');
+          const file = join(folder, change.path);
+          if (await readFile(file, 'utf8') !== change.after) throw new Error(`${change.path} changed since the suggestion was applied, so it was not discarded.`);
+          await writeFile(file, change.before);
+          undo.delete(id);
+          applied.delete(id);
+          detailsChanged.fire();
+        },
+        publishSuggestion: async (id, message, option) => {
+          const { anchor, messages } = findThread(id);
+          const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
+          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (anchor.side !== 'working') throw new Error('GitHub takes suggestions only on the PR\'s version of a file.');
+          const head = await readHead();
+          const lines = suggestionLines(await readGitBase(folder, anchor.path, head), anchor);
+          await provider.publishComment(pullRequest.number, { path: anchor.path, body: suggestionMarkdown(suggestion), commitId: head, side: 'RIGHT', lines }, true);
+          void loadThreads();
+          void loadDetails();
+        },
         fixConflicts: async (answer) => {
           const loaded = await currentDetails();
           if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
           const base = await prepareConflictFix(folder, pullRequest.number, pullRequest.baseBranch);
           const head = (await git(folder, ['rev-parse', 'HEAD'])).trim();
           conflictQuestion = undefined;
-          const pushTo = loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
+          const pushTo = pushTarget(loaded);
           const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch: pullRequest.baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
           const pushedNothing = (await git(folder, ['rev-parse', 'HEAD'])).trim() === head;
           if (error === undefined && pushedNothing && reply !== undefined) conflictQuestion = reply;

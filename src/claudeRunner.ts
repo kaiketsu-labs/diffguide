@@ -51,7 +51,9 @@ export interface ClaudeRunnerOptions {
   readonly instructions?: () => Promise<string>;
 }
 
-const reviewerNote = 'This is someone else\'s pull request. You cannot edit files or run commands. For implement requests, reply with the proposed change as a diff code block instead.';
+const reviewerNote = 'This is someone else\'s pull request. You cannot edit files or run commands. For implement requests, reply with the proposed change as suggestion blocks instead.';
+/** How to propose code in a reply, so the review page can show, apply and publish it as on GitHub. */
+const suggestionNote = 'To propose new code for the commented lines without editing files, put the complete replacement lines in a fenced block whose language is `suggestion`, as on GitHub. It replaces exactly the commented lines, so include every line that stays. To offer alternatives, write up to three suggestion blocks, each after a short line naming the option, such as "Option 1: read the limit from config." The human picks one to apply or publish.';
 const reviewerBlockedTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash'];
 /** On someone else's PR the checkout is the author's: skip its CLAUDE.md, skills, hooks, settings and MCP servers. */
 export const untrustedCheckoutFlags = ['--setting-sources', 'user', '--strict-mcp-config'];
@@ -141,7 +143,7 @@ export class ClaudeRunner implements vscode.Disposable {
     try {
       const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
       error = await this.#spawn({
-        prompt: this.options.role === 'reviewer' ? `${reviewerNote}\n\n${prompt}` : prompt,
+        prompt: `${this.options.role === 'reviewer' ? `${reviewerNote}\n\n` : ''}${prompt}\n\n${suggestionNote}`,
         label: `${events.length} comment${events.length === 1 ? '' : 's'}`, allowedTools: [], edits: this.options.role === 'author', env: {},
       });
     } catch (failure: unknown) {
