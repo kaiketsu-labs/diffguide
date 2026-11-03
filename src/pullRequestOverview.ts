@@ -40,6 +40,8 @@ export interface OverviewState {
     readonly status: string;
     /** What Claude is doing with this thread right now, while it waits for or works on it. */
     readonly working?: string;
+    /** The suggestion option written to the worktree from this thread, while the page is open. */
+    readonly applied?: { readonly message: number; readonly option: number };
     readonly url?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
@@ -325,6 +327,7 @@ export async function showPullRequestOverview(
         } else if ((action === 'apply-suggestion' || action === 'publish-suggestion') && typeof id === 'string' && state.threads.some((thread) => thread.id === id)
           && Number.isSafeInteger(message) && (message as number) >= 0 && Number.isSafeInteger(option) && (option as number) >= 0) {
           await (action === 'apply-suggestion' ? actions.applySuggestion : actions.publishSuggestion)(id, message as number, option as number);
+          if (action === 'apply-suggestion') sendFiles();
         } else if (action === 'dismiss-conflict-question') actions.dismissConflictQuestion();
         else if (action === 'fix-conflicts' && (text === undefined || isText(text))) {
           void actions.fixConflicts(text?.trim()).catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });

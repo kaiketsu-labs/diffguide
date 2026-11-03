@@ -140,6 +140,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
       /** What Claude asked when it last stopped fixing conflicts without pushing. */
       let conflictQuestion: string | undefined;
+      /** Suggestion options written to the worktree while this page is open, by thread. */
+      const applied = new Map<string, { readonly message: number; readonly option: number }>();
       const loadThreads = (): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
@@ -164,7 +166,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
         const state = buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
-        return conflictQuestion === undefined ? state : { ...state, conflictQuestion: markdownHtml(conflictQuestion) };
+        const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
+        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }) };
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -273,7 +276,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
           const file = join(folder, anchor.path);
           await writeFile(file, applySuggestion(await readFile(file, 'utf8'), anchor, suggestion));
-          void vscode.window.showInformationMessage(`Applied the suggestion to ${anchor.path}. It is an uncommitted change in the PR worktree.`);
+          applied.set(id, { message, option });
+          detailsChanged.fire();
         },
         publishSuggestion: async (id, message, option) => {
           const { anchor, messages } = findThread(id);

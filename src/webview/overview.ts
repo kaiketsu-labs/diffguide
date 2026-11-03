@@ -749,7 +749,7 @@ const pickedOptions = new Map<string, number>();
 /** A message's suggestions as a small diff against the commented lines; several suggestions are options to switch between. */
 function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: number, suggestions: readonly (readonly string[])[]): HTMLElement {
   const key = thread.id + ':' + index;
-  const picked = Math.min(pickedOptions.get(key) ?? 0, suggestions.length - 1);
+  const picked = Math.min(pickedOptions.get(key) ?? (thread.applied?.message === index ? thread.applied.option : 0), suggestions.length - 1);
   const card = el('div', 'suggestion');
   const head = el('div', 'row suggestion-head');
   head.append(el('span', 'muted', suggestions.length > 1 ? suggestions.length + ' suggested options' : 'Suggested change'));
@@ -777,7 +777,9 @@ function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: num
   publish.title = 'Adds it to your pending review as a GitHub suggestion the author can commit.';
   const apply = button('Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
   apply.title = 'Changes the file in the PR worktree. Nothing is committed.';
-  actions.append(el('span', 'gap'), publish, apply);
+  const done = thread.applied?.message === index ? thread.applied.option : undefined;
+  if (done === undefined) actions.append(el('span', 'gap'), publish, apply);
+  else actions.append(el('span', 'muted gap', 'Option ' + (done + 1) + ' applied to the worktree, not committed yet.'), publish);
   card.append(head, lines, actions);
   return card;
 }
