@@ -14,7 +14,7 @@ import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
 import { createReviewStore } from './store.js';
-import { listWorktrees, readPullRequestBase, readWorktree, reviewDataPath, worktreePath } from './worktrees.js';
+import { listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 
 /** A PR's review: its comments, the bridge Claude replies through, and the background Claude that answers them. */
 export interface PullRequestSession {
@@ -89,6 +89,10 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
 
   /** Reopen sessions for worktrees this checkout created earlier, so their comments come back. */
   async restore(): Promise<void> {
+    const stuck = await migrateWorktrees(this.sourceRoot, this.storageRoot);
+    if (stuck.length > 0) {
+      void vscode.window.showWarningMessage(`Pair Review could not move ${stuck.length === 1 ? 'a PR worktree' : `${stuck.length} PR worktrees`} out of the Git folder, so Claude cannot edit there: ${stuck.join(', ')}`);
+    }
     for (const { metadata } of await listWorktrees(this.storageRoot, this.sourceRoot)) {
       await this.open(metadata.repository, metadata.pullRequest.number);
     }

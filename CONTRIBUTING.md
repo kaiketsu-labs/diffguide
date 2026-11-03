@@ -20,6 +20,8 @@ npm test
 npm run package
 ```
 
+`make check` runs the type check and tests, and `make install` packages the VSIX and installs it into VS Code. Run `make` for the full list.
+
 The automated tests use isolated storage, local Git repositories, and local hook processes. They do not call an LLM. A successful automated run does not replace a real VS Code + Claude walkthrough.
 
 ## Change guidelines
