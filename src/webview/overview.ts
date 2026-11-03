@@ -1669,7 +1669,7 @@ function renderPeek(): void {
   setHighlight('lr-name');
   const peek = peeks[peekAt];
   if (!peek) return;
-  $('peek-title').textContent = peek.location;
+  $('peek-title').textContent = peek.guessed ? peek.location + ' · same name in this file' : peek.location;
   $<HTMLButtonElement>('peek-back').disabled = peekAt < 1;
   $<HTMLButtonElement>('peek-forward').disabled = peekAt >= peeks.length - 1;
   const body = el('table');
@@ -1711,6 +1711,22 @@ function revealStep(key: string): void {
   document.querySelector('.step-wrap[data-key="' + CSS.escape(key) + '"]')?.scrollIntoView({ block: 'start' });
 }
 
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Show a hint that clears itself after a few seconds, on the next click, or on Escape. */
+function showNotice(notice: NonNullable<ExtensionMessage['notice']>): void {
+  const box = $('notice');
+  const { extension } = notice;
+  box.replaceChildren(el('span', '', notice.text), ...extension === undefined ? [] : [button('Find extension', () => { post({ action: 'find-extension', extension }); clearNotice(); }, 'small')]);
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(clearNotice, extension === undefined ? 4000 : 8000);
+}
+
+function clearNotice(): void {
+  clearTimeout(noticeTimer);
+  $('notice').replaceChildren();
+}
+
 function onExtensionMessage(data: ExtensionMessage): void {
   if (data.state) render(data.state);
   if (data.files) { files = data.files; guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
@@ -1727,6 +1743,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
     document.querySelector('[data-path="' + CSS.escape(data.reveal) + '"]')?.scrollIntoView({ block: 'start' });
   }
   if (data.filesError) $('files').replaceChildren(el('p', 'bad', 'Could not read the changes: ' + data.filesError));
+  if (data.notice) showNotice(data.notice);
   if (data.error) {
     loading.clear();
     $('error').textContent = data.error;
@@ -1752,6 +1769,8 @@ function onExtensionMessage(data: ExtensionMessage): void {
 
 for (const [id, action] of [['pr', 'pr'], ['log', 'log'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
 $('error').addEventListener('click', () => { $('error').textContent = ''; });
+document.addEventListener('pointerdown', (event) => { if (!(event.target instanceof Node && $('notice').contains(event.target))) clearNotice(); });
+window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });
 document.addEventListener('mousemove', (event) => {
   pointer = event;
   if (event.metaKey || event.ctrlKey) probeAt(event);

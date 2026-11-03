@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cmd or Ctrl-click on a name with no definition shows a short hint that clears itself after a few seconds, on the next click or on Escape, instead of an error that stayed until clicked. When VS Code has no language support for the file, the hint offers **Find extension**, which searches the Marketplace for that file type.
+- Definitions in the same file are found without a language extension's answer. Pair Review first asks the file's symbols, then looks for a declaration of the name (`def`, `class`, `function`, `const` and similar). The definition panel marks such a match as "same name in this file".
 - Filter the Pull Requests sidebar by author with the filter button in its title bar. The view's title shows the active author, and the filled filter icon clears it.
 - PR rows in the sidebar list either their files or their guide steps, not both. The map and files buttons in the title bar switch between them; a PR without a guide always lists its files.
 - PRs show their size and age. Sidebar rows end in lines added and removed, and their tooltip says when the PR was opened and last updated. The review page shows the same under the byline: Opened 3d ago · Updated 2h ago · +312 −48 in 14 files.

@@ -119,6 +119,8 @@ export interface OverviewActions {
   /** Whether the name at a position has a definition, to underline it while Cmd or Ctrl is held. */
   hasDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<boolean>;
   openDefinition(peek: string): Promise<void>;
+  /** The file extension to search language extensions for, when VS Code has no language support for the file. */
+  missingLanguage(at: { readonly path: string } | { readonly peek: string }): Promise<string | undefined>;
   setViewed(path: string, viewed: boolean): Promise<void>;
   /** Mark lines read; `fileDone` also marks the whole file reviewed. */
   markRead(range: LineRange, fileDone: boolean): Promise<void>;
@@ -166,6 +168,7 @@ export type PageMessage =
   | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
   | { readonly action: 'open-definition'; readonly peek: string }
+  | { readonly action: 'find-extension'; readonly extension: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
   | { readonly action: 'merge'; readonly method: MergeMethod }
   | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' }
@@ -186,6 +189,8 @@ export interface ExtensionMessage {
   readonly definition?: DefinitionPeek;
   readonly probe?: { readonly id: string; readonly found: boolean };
   readonly error?: string;
+  /** A passing hint that clears itself; `extension` offers to search language extensions for that file extension. */
+  readonly notice?: { readonly text: string; readonly extension?: string };
   /** The form whose send failed, so the page can enable it again. */
   readonly form?: string | undefined;
   /** The form whose send succeeded, or 'review'. */
@@ -259,7 +264,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, extension } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -287,13 +292,21 @@ export async function showPullRequestOverview(
         else if (action === 'context' && typeof path === 'string') post({ context: { path, lines: await actions.readContext(path) } });
         else if (action === 'preview' && typeof path === 'string') post({ preview: { path, ...await actions.readPreview(path) } });
         else if (action === 'definition' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0) {
-          const found = await actions.findDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number);
-          post(found === undefined ? { error: 'No definition found here. VS Code needs a language extension for this file type.' } : { definition: found });
+          const at = typeof peek === 'string' ? { peek } : { path: path as string };
+          const found = await actions.findDefinition(at, line, column as number);
+          if (found !== undefined) post({ definition: found });
+          else {
+            const missing = await actions.missingLanguage(at).catch(() => undefined);
+            post({ notice: missing === undefined ? { text: 'No definition found here.' } : { text: `No definition found. VS Code has no language support for .${missing} files.`, extension: missing } });
+          }
         } else if (action === 'probe' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0
           && typeof id === 'string' && id.length <= 400) {
           const found = await actions.hasDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number).catch(() => false);
           post({ probe: { id, found } });
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
+        else if (action === 'find-extension' && typeof extension === 'string' && /^[\w+-]{1,20}$/u.test(extension)) {
+          await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
+        }
         else if (action === 'log') actions.showLog();
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
@@ -394,6 +407,7 @@ textarea{width:100%;min-height:80px}
 .state-actions:not(:empty){margin-top:var(--space-8)}.state-actions .gap{flex:1}#body textarea{width:100%;min-height:120px}
 .verdict{display:inline-flex;align-items:center;height:24px;box-sizing:border-box;padding:0 var(--space-12);border:1px solid currentColor;border-radius:var(--radius-pill);font-size:12px;font-weight:600}
 .verdict.muted{color:var(--ink-muted)}
+#notice{position:fixed;left:var(--space-24);bottom:var(--space-16);z-index:5;display:flex;align-items:center;gap:var(--space-12);max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-lg);color:var(--ink);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}#notice:empty{display:none}
 #error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
 #files-bar{position:sticky;top:0;z-index:2;margin-top:var(--space-24);padding:var(--space-8) 0;background:var(--surface);border-bottom:1px solid var(--line)}
 #files-bar h2 .muted{font-weight:400}
@@ -511,6 +525,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <div id="facts" class="muted facts"></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
+<p id="notice" role="status"></p>
 <aside id="peek" hidden aria-label="Definition"><div class="peek-head">
 <button id="peek-back" title="Back" aria-label="Back"><svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg></button>
 <button id="peek-forward" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></svg></button>
