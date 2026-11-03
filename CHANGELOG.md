@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New look across Pair Review's webviews. One set of design tokens in `src/designTokens.ts` sets every color, font size, spacing step and corner radius. Surfaces, text and borders follow your VS Code theme. Three accents mark who is involved: teal for you (primary buttons, selections, review progress), clay for Claude, slate blue for GitHub. Corners follow VS Code's modern UI.
+- The review page shows the PR's branches as chips you click to copy. Claude's status is a chip that pulses while Claude works. Panel headings are sentence case. Approve is the last button in its row.
+- Threads say who can see them with an icon and a word: **Local**, **On GitHub** or **Pre-review** (Claude's notes from Analyze, shown in the Guided layout). The full sentence moved to the label's tooltip. Threads no longer have a thick colored left border.
+- The new-comment box sends with one click: Implement asks Claude for a change, Ask Claude asks a question. The dropdown is gone. The main button always sits at the bottom right, after Cancel.
+- The files bar uses VS Code icons for Unified, Split, Guided and Folders, collapse and expand all files, and one button that collapses or expands all comments. Hovering an icon button shows what it does. Folders stays in place in Guided, greyed out, so the toolbar no longer shifts when you switch layouts. While Claude's pre-review runs, a pulsing chip next to Analyze shows its progress.
+- New icon for the activity bar and the Marketplace: a comment bubble split into a removed and an added half.
 - Local Review is now Pair Review. The extension ID, settings (`pairReview.*`), commands, Claude plugin (`/pair-review:connect`) and PR worktree folder (`.git/pair-review`) use the new name. Settings, PR worktrees and PR handoff comments from Local Review are not carried over.
 - On someone else's PR, Claude no longer loads the checkout's `CLAUDE.md`, skills, hooks, settings or MCP servers, for both Analyze and answers to comments. The PR author controls those files. Your own user-level Claude setup still applies.
 - Add your own instructions for **Analyze** (`analysis.md`) and for answers to review comments (`ask.md`) in `.claude/pair-review/` folders: in Claude's config folder, parent folders of the project, the repository, or Claude's per-project folder. Claude gets them after the built-in instructions, most specific last. On someone else's PR, the repository's file is read from the base branch. See [Usage](docs/USAGE.md#your-own-instructions-for-claude).

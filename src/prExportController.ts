@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import type { ReviewStore, ReviewThread } from './contracts.js';
 import { GitHubReviewClient, type GitHubHandoffTarget } from './github.js';
 import { createPrExportDraft, maximumPrExportLength, type PrExportDraft } from './prExport.js';
-import { webviewFontStyles } from './webviewStyles.js';
+import { webviewStyles } from './webviewStyles.js';
 
 interface PreviewSession {
   readonly draft: PrExportDraft;
@@ -169,19 +169,19 @@ export function previewHtml(draft: PrExportDraft, target: GitHubHandoffTarget, b
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>Review an GitHub übergeben</title>
 <style nonce="${nonce}">
-${webviewFontStyles}
-body{margin:0;padding:28px 30px 20px;color:var(--vscode-foreground);background:var(--vscode-editor-background);font-family:var(--review-font-ui);font-size:var(--vscode-font-size);line-height:1.5}main{max-width:1020px;margin:auto}h1{font-size:24px;font-weight:600;margin:0 0 6px}.muted{color:var(--vscode-descriptionForeground)}.target{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0 18px;padding:12px 16px;border:1px solid var(--vscode-widget-border);border-radius:6px}.target strong{flex:1;min-width:180px}.badges{display:flex;gap:8px;margin:12px 0}.badge{background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);padding:3px 9px;border-radius:12px;font-size:12px}label{display:block;font-weight:600;margin:18px 0 8px}textarea{box-sizing:border-box;width:100%;height:53vh;min-height:270px;resize:vertical;border:1px solid var(--vscode-input-border,var(--vscode-widget-border));border-radius:5px;padding:14px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);font:13px/1.55 var(--review-font-code);tab-size:2}textarea:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 14px}.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{border:1px solid transparent;border-radius:3px;padding:7px 12px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);font:inherit;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}button.secondary{color:var(--vscode-button-secondaryForeground);background:var(--vscode-button-secondaryBackground)}button.secondary:hover{background:var(--vscode-button-secondaryHoverBackground)}button:disabled{opacity:.55;cursor:default}.status{min-height:22px;white-space:pre-wrap;margin:12px 0}.error{color:var(--vscode-errorForeground)}.success{color:var(--vscode-testing-iconPassed,var(--vscode-foreground))}.footnote{font-size:12px;margin:8px 0 0}.counter.over{color:var(--vscode-errorForeground)}
-.toolbar{flex-wrap:wrap}.target strong{overflow-wrap:anywhere}.target .muted{overflow-wrap:anywhere;min-width:0}textarea{min-height:200px;height:45vh}.vscode-high-contrast .target,.vscode-high-contrast-light .target{border-color:var(--vscode-contrastBorder)}@media(max-width:480px){body{padding:16px 14px}h1{font-size:20px}.target{padding:10px;gap:8px}.badges{flex-wrap:wrap}textarea{padding:10px;height:40vh}.actions{gap:8px}}
+${webviewStyles}
+body{margin:0;padding:28px 30px 20px}main{max-width:1020px;margin:auto}h1{font-size:18px;line-height:26px;font-weight:600;margin:0 0 var(--space-6)}.target{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;margin:var(--space-12) 0 var(--space-16);padding:var(--space-12) var(--space-16);border:1px solid var(--line);border-radius:var(--radius-md)}.target strong{flex:1;min-width:180px;overflow-wrap:anywhere}.target .muted{overflow-wrap:anywhere;min-width:0}.badges{display:flex;gap:var(--space-8);margin:var(--space-12) 0}.badge{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-8);border-radius:var(--radius-pill);font-size:12px;color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 8%,transparent)}label{display:block;font-weight:600;margin:var(--space-16) 0 var(--space-8)}textarea{width:100%;height:45vh;min-height:200px;max-height:none;field-sizing:fixed;padding:var(--space-12);font:12px/19px var(--font-code);tab-size:2}.toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-12);margin:var(--space-8) 0 var(--space-12)}.actions{display:flex;gap:var(--space-8);align-items:center;flex-wrap:wrap}.actions .muted{margin-right:auto}.status{min-height:22px;white-space:pre-wrap;margin:var(--space-12) 0}.error{color:var(--danger)}.success{color:var(--success)}.footnote{font-size:12px;margin:var(--space-8) 0 0}.counter.over{color:var(--danger)}
+@media(max-width:480px){body{padding:var(--space-16) var(--space-12)}.target{padding:10px;gap:var(--space-8)}.badges{flex-wrap:wrap}textarea{padding:10px;height:40vh}}
 </style></head><body><main>
 <h1>Review an GitHub übergeben</h1>
 <p class="muted">Entwurf prüfen und veröffentlichen.</p>
-<div class="target"><strong>#${target.pullRequest.number} · ${escapeHtml(target.pullRequest.title)}</strong><span class="muted">${escapeHtml(`${target.pullRequest.owner}/${target.pullRequest.repository} · ${target.pullRequest.branch}`)}</span><button class="secondary" id="open">PR öffnen</button></div>
+<div class="target"><strong>#${target.pullRequest.number} · ${escapeHtml(target.pullRequest.title)}</strong><span class="muted">${escapeHtml(`${target.pullRequest.owner}/${target.pullRequest.repository} · ${target.pullRequest.branch}`)}</span><button id="open">PR öffnen</button></div>
 <div class="badges"><span class="badge">${summaryLabel}</span><span class="badge">${questionLabel}</span></div>
 <p class="muted">${target.comment === undefined ? 'Neuer PR-Kommentar.' : 'Vorhandenen Kommentar aktualisieren · eigene Ergänzungen bleiben erhalten.'}</p>
 <label for="body">Inhalt der Übergabe · Markdown</label>
 <textarea id="body" spellcheck="false" aria-describedby="counter">${escapeHtml(body)}</textarea>
-<div class="toolbar"><button class="secondary" id="markdown">Markdown-Vorschau</button><span id="counter" class="muted counter"></span></div>
-<div class="actions"><button id="publish">${action}</button><span class="muted">${escapeHtml(target.viewerLogin)} · GitHub-Kommentar</span></div>
+<div class="toolbar"><button id="markdown">Markdown-Vorschau</button><span id="counter" class="muted counter"></span></div>
+<div class="actions"><span class="muted">${escapeHtml(target.viewerLogin)} · GitHub-Kommentar</span><button id="publish" class="primary">${action}</button></div>
 <p id="status" class="status muted" role="status" aria-live="polite">${body === draft.markdown ? '' : 'Ungesendeten Entwurf wiederhergestellt.'}</p>
 <p class="muted footnote">Momentaufnahme · Strg/⌘ + Enter veröffentlicht. Bearbeitete Entwürfe bleiben in dieser VS-Code-Sitzung erhalten.</p>
 </main><script nonce="${nonce}">
