@@ -284,6 +284,10 @@ function renderState(details: PullRequestDetails): void {
     : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
   $('conflict-row').hidden = !(details.open && details.mergeable === 'no' && details.canEdit);
   $<HTMLButtonElement>('fix-conflicts').disabled = current?.claude.running === true;
+  const fixing = current?.claude.fixingConflicts;
+  const note = $('conflict-note');
+  note.className = fixing === undefined ? 'muted' : 'chip claude working';
+  note.textContent = fixing ?? 'Claude merges the base branch, resolves the conflicts and pushes.';
   const actions: HTMLButtonElement[] = [];
   const add = (label: string, message: PageMessage, className = 'quiet'): void => {
     const node = button(label, () => changePullRequest(message), className);

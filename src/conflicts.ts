@@ -28,6 +28,9 @@ export interface ConflictFix {
   readonly pushTo: string;
 }
 
+/** The label of the conflict fix task, which the review page shows progress for. */
+export const conflictFixLabel = 'fixing merge conflicts';
+
 /** Ask Claude to merge the base, resolve the conflicts, commit and push; it may run only the Git commands this needs. */
 export function conflictTask({ base, baseBranch, headBranch, pushTo }: ConflictFix): ClaudeTask {
   if (!/^[a-f\d]{40,64}$/u.test(base) || [baseBranch, headBranch].some((branch) => !/^[\w./-]+$/u.test(branch) || branch.startsWith('-') || branch.includes('..'))
@@ -36,7 +39,7 @@ export function conflictTask({ base, baseBranch, headBranch, pushTo }: ConflictF
   }
   const push = `git push ${pushTo} HEAD:refs/heads/${headBranch}`;
   return {
-    label: 'fixing merge conflicts',
+    label: conflictFixLabel,
     prompt: [
       `GitHub reports merge conflicts between this pull request and its base branch ${baseBranch}. The worktree is at the PR's latest commit, on a detached HEAD.`,
       `Run \`git merge --no-edit ${base}\` to merge the base branch. Resolve every conflicted file so both sides' intent survives, then \`git add\` the files and \`git commit --no-edit\`.`,
