@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The review page shows the description, reviewers and checks again. GitHub refused that request because reading team reviewer names needs the `read:org` scope. Pair Review now asks for it, so VS Code asks you to sign in to GitHub once more.
 - New look across Pair Review's webviews. One set of design tokens in `src/designTokens.ts` sets every color, font size, spacing step and corner radius. Surfaces, text and borders follow your VS Code theme. Three accents mark who is involved: teal for you (primary buttons, selections, review progress), clay for Claude, slate blue for GitHub. Corners follow VS Code's modern UI.
 - The review page shows the PR's branches as chips you click to copy. Claude's status is a chip that pulses while Claude works. Panel headings are sentence case. Approve is the last button in its row.
 - Threads say who can see them with an icon and a word: **Local**, **On GitHub** or **Pre-review** (Claude's notes from Analyze, shown in the Guided layout). The full sentence moved to the label's tooltip. Threads no longer have a thick colored left border.
