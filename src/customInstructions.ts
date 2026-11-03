@@ -3,8 +3,8 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { git } from './worktrees.js';
 
-/** Which Claude run the instructions are for: the guided-review analysis, or answers to review comments. */
-export type InstructionKind = 'analysis' | 'ask';
+/** Which Claude run the instructions are for: building the guide, or work on review comments (answers and changes). */
+export type InstructionKind = 'guide' | 'comments';
 
 /** Where to look for a user's own instructions. */
 export interface InstructionSources {

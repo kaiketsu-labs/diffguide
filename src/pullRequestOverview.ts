@@ -4,7 +4,8 @@ import { claudeStatus } from './claudeStatus.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import type { MergeMethod, PullRequestDetails, PullRequestSummary, RemoteThread, ReviewEvent } from './pullRequests.js';
-import { webviewFontStyles } from './webviewStyles.js';
+import { webviewStyles } from './webviewStyles.js';
+import { codicons } from './codicons.js';
 import { codePreviewStyles } from './codePreview.js';
 import { type MarkdownBlock, markdownHtml } from './markdown.js';
 import type { FileDiff } from './unifiedDiff.js';
@@ -15,8 +16,9 @@ import type { Analysis } from './prAnalysis.js';
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
   readonly title: string;
-  /** Such as "alice · feature/mock → main". */
-  readonly subtitle: string;
+  readonly author: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
   readonly url: string;
   readonly reviewed?: { readonly done: number; readonly total: number };
   /** Paths of files marked reviewed. */
@@ -39,7 +41,7 @@ export interface OverviewState {
     /** Set when the thread holds a note from Claude's analysis. */
     readonly origin?: 'analysis';
     /** Rendered from Markdown with escaped text only. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string }[];
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];
@@ -77,7 +79,7 @@ export interface GitHubThreadView {
   /** In the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
   /** Bodies as GitHub rendered and sanitized them. */
-  readonly messages: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean }[];
+  readonly messages: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean; readonly createdAt: string }[];
 }
 export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string };
 type CommentIntent = Extract<ReviewIntent, 'ask' | 'implement'>;
@@ -124,17 +126,30 @@ export interface OverviewActions {
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   merge(method: MergeMethod): Promise<void>;
+  /** Ask for a new title in VS Code and save it. */
+  editTitle(): Promise<void>;
+  editBody(body: string): Promise<void>;
+  /** Pick from the repository's users, teams or labels in VS Code and save the choice. */
+  pick(what: PickTarget): Promise<void>;
+  setDraft(draft: boolean): Promise<void>;
+  setOpen(open: boolean): Promise<void>;
+  deleteBranch(): Promise<void>;
+  /** Remove the PR's local worktree after the user confirms; true when removed, so the page closes. */
+  removeWorktree(): Promise<boolean>;
   refresh(): void;
   analyze(): Promise<void>;
   stopAnalysis(): void;
 }
+
+export type PickTarget = 'reviewers' | 'assignees' | 'labels';
+const pickTargets: readonly unknown[] = ['reviewers', 'assignees', 'labels'] satisfies PickTarget[];
 
 export type DefinitionTarget = { readonly path: string } | { readonly peek: string };
 type PageRange = { readonly path: string; readonly side: DiffSide; readonly startLine: number; readonly endLine: number };
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' }
+  | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'editor'; readonly path: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
@@ -149,7 +164,11 @@ export type PageMessage =
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
   | { readonly action: 'open-definition'; readonly peek: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
-  | { readonly action: 'merge'; readonly method: MergeMethod };
+  | { readonly action: 'merge'; readonly method: MergeMethod }
+  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' }
+  | { readonly action: 'edit-body'; readonly body: string }
+  | { readonly action: 'pick'; readonly what: PickTarget }
+  | { readonly action: 'draft'; readonly draft: boolean };
 
 /** What the extension sends the page; each field is handled on its own. */
 export interface ExtensionMessage {
@@ -175,6 +194,8 @@ const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comme
 const mergeMethods: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
 const commentIntents: readonly unknown[] = ['ask', 'implement'] satisfies CommentIntent[];
 const maximumReviewLength = 60_000;
+/** Actions that change the PR on GitHub, one at a time. */
+const pullRequestActions = new Set(['review', 'merge', 'edit-title', 'edit-body', 'pick', 'draft', 'close', 'reopen', 'delete-branch']);
 const panels = new Map<string, vscode.WebviewPanel>();
 
 const isLine = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
@@ -201,7 +222,7 @@ export async function showPullRequestOverview(
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-mark.svg'));
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (): void => {
     void actions.readFiles().then((files) => {
@@ -235,7 +256,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -274,6 +295,7 @@ export async function showPullRequestOverview(
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
+        else if (action === 'remove-worktree') { if (await actions.removeWorktree()) panel.dispose(); }
         else if (action === 'refresh') {
           actions.refresh();
           sendFiles();
@@ -287,7 +309,7 @@ export async function showPullRequestOverview(
         else if (action === 'github' && typeof id === 'string') {
           const url = [...state.threads, ...state.github ?? []].find((thread) => thread.id === id)?.url;
           if (url !== undefined) await vscode.env.openExternal(vscode.Uri.parse(url));
-        } else if ((action === 'review' || action === 'merge') && !busy) {
+        } else if (typeof action === 'string' && pullRequestActions.has(action) && !busy) {
           busy = true;
           try {
             if (action === 'review' && reviewEvents.includes(event as ReviewEvent) && typeof body === 'string' && body.length <= maximumReviewLength) {
@@ -295,7 +317,14 @@ export async function showPullRequestOverview(
               post({ done: 'review' });
             } else if (action === 'merge' && mergeMethods.includes(method as MergeMethod)) {
               await actions.merge(method as MergeMethod);
-            }
+            } else if (action === 'edit-title') await actions.editTitle();
+            else if (action === 'edit-body' && typeof body === 'string' && body.length <= maximumReviewLength) {
+              await actions.editBody(body);
+              post({ done: 'body' });
+            } else if (action === 'pick' && pickTargets.includes(what)) await actions.pick(what as PickTarget);
+            else if (action === 'draft' && typeof draft === 'boolean') await actions.setDraft(draft);
+            else if (action === 'close' || action === 'reopen') await actions.setOpen(action === 'reopen');
+            else if (action === 'delete-branch') await actions.deleteBranch();
           } finally {
             busy = false;
             post({ idle: true });
@@ -322,140 +351,161 @@ export function overviewHtml(state: OverviewState, script: string, claudeIcon = 
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <title>Review</title>
 <style nonce="${nonce}">
-${webviewFontStyles}
+${webviewStyles}
 ${codePreviewStyles()}
-:root{--border:var(--vscode-panel-border,var(--vscode-widget-border,rgba(128,128,128,.35)));--local:var(--vscode-descriptionForeground);--analysis:#d97757;--github:var(--vscode-charts-blue,#3794ff)}
-body{margin:0;padding:20px 24px 48px;color:var(--vscode-foreground);background:var(--vscode-editor-background);font-family:var(--review-font-ui);font-size:var(--vscode-font-size);line-height:1.5}
-h1{font-size:18px;font-weight:600;margin:0;overflow-wrap:anywhere}
-.muted{color:var(--vscode-descriptionForeground)}.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.head{justify-content:space-between}
-.status{margin-top:10px;font-size:12px}
-.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;margin-top:16px;align-items:start}
+body{margin:0;padding:var(--space-24) var(--space-24) 48px}
+[hidden]{display:none!important}
+h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
+h2{font-size:14px;font-weight:600;margin:0}
+h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
+.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}.head{justify-content:space-between}
+.byline{margin-top:var(--space-6)}
+.status{margin-top:var(--space-12);font-size:12px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
 @media (max-width:760px){.layout{grid-template-columns:minmax(0,1fr)}}
-.main-col{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;min-width:0}
-.card{padding:10px 14px;border:1px solid var(--border);border-radius:6px}
-.rail{border:1px solid var(--border);border-radius:6px}.rail section{padding:10px 14px}.rail section+section{border-top:1px solid var(--border)}
-h3{margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--vscode-descriptionForeground)}
-.seg{display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden}.seg button{border-radius:0;padding:3px 12px;font-size:12px}.seg button+button{border-left:1px solid var(--border)}
-.seg button.on{outline:0;color:var(--vscode-button-foreground);background:var(--vscode-button-background)}
-.group{display:inline-flex;align-items:center;gap:6px;font-size:12px}
-.bar-wrap{flex:1 1 120px;max-width:220px;height:6px;border-radius:3px;background:rgba(128,128,128,.3);overflow:hidden}
-.bar-wrap span{display:block;height:100%;background:var(--vscode-progressBar-background,#0078d4)}
-button,select{border:1px solid transparent;border-radius:3px;padding:4px 10px;color:var(--vscode-button-secondaryForeground);background:var(--vscode-button-secondaryBackground);font:inherit;cursor:pointer}
-button:hover{background:var(--vscode-button-secondaryHoverBackground)}button.primary{color:var(--vscode-button-foreground);background:var(--vscode-button-background)}
-button.primary:hover{background:var(--vscode-button-hoverBackground)}button:disabled{opacity:.55;cursor:default}button.on{outline:1px solid var(--vscode-focusBorder)}
-select{color:var(--vscode-dropdown-foreground);background:var(--vscode-dropdown-background);border-color:var(--vscode-dropdown-border,transparent)}
-button:focus-visible,a:focus-visible,select:focus-visible,textarea:focus,summary:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}
-a{color:var(--vscode-textLink-foreground);cursor:pointer;text-decoration:none}a:hover{text-decoration:underline}
-ul{list-style:none;margin:0;padding:0}li{padding:5px 0}li+li{border-top:1px solid rgba(128,128,128,.2)}
-.where{font-family:var(--review-font-code);font-size:12px}.text{overflow-wrap:anywhere}.spin::before{content:'⟳ '}
-.ok{color:var(--vscode-testing-iconPassed,#3fb950)}.bad{color:var(--vscode-testing-iconFailed,#f85149)}.wait{color:var(--vscode-testing-iconQueued,#d29922)}
-#body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:8px;background:var(--vscode-textCodeBlock-background)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
-textarea{box-sizing:border-box;width:100%;min-height:80px;resize:vertical;padding:8px;border:1px solid var(--vscode-input-border,rgba(128,128,128,.35));border-radius:4px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);font:inherit}
-.actions,.spaced{margin-top:8px}
-.verdict{display:inline-block;margin:6px 0 0;padding:2px 10px;border-radius:12px;border:1px solid currentColor;font-weight:600}
-#error{position:fixed;left:24px;right:24px;bottom:16px;z-index:5;margin:0;padding:8px 12px;border:1px solid var(--vscode-inputValidation-errorBorder,#be1100);border-radius:4px;color:var(--vscode-foreground);background:var(--vscode-inputValidation-errorBackground,#5a1d1d);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
-#files-bar{position:sticky;top:0;z-index:2;margin-top:24px;padding:8px 0;background:var(--vscode-editor-background);border-bottom:1px solid var(--border)}
-#files-bar h2{font-size:14px;margin:0}
-.file{margin-top:12px;border:1px solid var(--border);border-radius:6px;scroll-margin-top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 10px)}
-.file-head{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px);z-index:1;box-shadow:0 -12px 0 var(--vscode-editor-background);display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--vscode-sideBarSectionHeader-background,var(--vscode-editorWidget-background));border-bottom:1px solid var(--border);border-radius:6px 6px 0 0}
-.file.collapsed .file-head{border-bottom:0;border-radius:6px}.file.collapsed .diff{display:none}
-.file-head .name{font-family:var(--review-font-code);font-size:12px;overflow-wrap:anywhere;flex:1;cursor:pointer}
-.chevron{cursor:pointer;width:14px;user-select:none}.badge{font-weight:700;font-size:11px}
-.badge.added{color:var(--vscode-gitDecoration-addedResourceForeground)}.badge.modified{color:var(--vscode-gitDecoration-modifiedResourceForeground)}
-.badge.deleted{color:var(--vscode-gitDecoration-deletedResourceForeground)}.badge.renamed{color:var(--vscode-gitDecoration-renamedResourceForeground)}
-.stat-add{color:var(--vscode-gitDecoration-addedResourceForeground)}.stat-del{color:var(--vscode-gitDecoration-deletedResourceForeground)}
-label.viewed{display:flex;align-items:center;gap:4px;cursor:pointer;padding:2px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px}
-.file-head button{padding:2px 8px;font-size:12px}
-table{border-collapse:collapse;width:100%;table-layout:fixed;font-family:var(--vscode-editor-font-family,var(--review-font-code));font-size:var(--vscode-editor-font-size,12px);line-height:1.6}
+.main-col{display:grid;gap:var(--space-16);min-width:0}
+.card{padding:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md)}
+.rail{border:1px solid var(--line);border-radius:var(--radius-md)}.rail section{padding:var(--space-12)}.rail section+section{border-top:1px solid var(--line)}
+.seg{display:inline-flex;gap:var(--space-2);padding:var(--space-2);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--ink) 7%,transparent)}
+.seg button{min-height:22px;height:22px;padding:0 var(--space-8);border:0;border-radius:3px;color:var(--ink-muted);background:none;font-size:12px}
+.seg button:hover{color:var(--ink);filter:none}
+.seg button[aria-pressed=true]{color:var(--ink);background:var(--surface);box-shadow:0 0 0 1px var(--line);font-weight:600}
+.seg.icons button{width:26px;padding:0}
+.toolbar{display:flex;align-items:center;gap:var(--space-4)}.toolbar .divider{width:1px;height:16px;margin:0 var(--space-4);background:var(--line)}
+.progress{display:inline-flex;align-items:center;gap:var(--space-8)}
+.bar{width:160px;height:6px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--ink) 16%,transparent);overflow:hidden}
+.bar span{display:block;height:100%;border-radius:inherit;background:var(--brand)}
+.ref{min-height:20px;height:20px;gap:var(--space-4);padding:0 var(--space-6);border:0;color:var(--github);background:var(--github-soft);font:12px/18px var(--font-code)}
+.ref:hover{filter:none}.ref svg{width:12px;height:12px;opacity:.55}.ref:hover svg,.ref:focus-visible svg{opacity:1}
+.ref .done,.ref.copied .copy{display:none}.ref.copied .done{display:block;opacity:1}
+ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px}li+li{border-top:1px solid var(--line)}
+.where{font-family:var(--font-code);font-size:12px}.text{overflow-wrap:anywhere}
+.ok{color:var(--success)}.bad{color:var(--danger)}.wait{color:var(--warning)}
+#body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
+textarea{width:100%;min-height:80px}
+.actions,.spaced{margin-top:var(--space-8)}
+.review-actions{justify-content:flex-end}
+.title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-8)}.section-head h3{margin:0}.section-head .icon-button{width:22px;height:22px;min-height:22px;margin:-2px 0}
+.labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}.label::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--label)}
+.state-actions:not(:empty){margin-top:var(--space-8)}.state-actions .gap{flex:1}#body textarea{width:100%;min-height:120px}
+.verdict{display:inline-flex;align-items:center;height:24px;box-sizing:border-box;padding:0 var(--space-12);border:1px solid currentColor;border-radius:var(--radius-pill);font-size:12px;font-weight:600}
+.verdict.muted{color:var(--ink-muted)}
+#error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
+#files-bar{position:sticky;top:0;z-index:2;margin-top:var(--space-24);padding:var(--space-8) 0;background:var(--surface);border-bottom:1px solid var(--line)}
+#files-bar h2 .muted{font-weight:400}
+.file{margin-top:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + 10px)}
+.file-head{position:sticky;top:var(--bar-height,46px);z-index:1;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-12);background:var(--surface-raised);border-bottom:1px solid var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
+.file.collapsed .file-head{border-bottom:0;border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
+.file-head .name{font-family:var(--font-code);font-size:12px;overflow-wrap:anywhere;flex:1;cursor:pointer}
+.chevron,.thread>summary::before{display:inline-block;flex-shrink:0;width:16px;height:16px;vertical-align:-3px;color:var(--ink-muted);background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;transition:transform .1s}.chevron{cursor:pointer}.chevron.closed,.thread:not([open])>summary::before{transform:rotate(-90deg)}.badge{width:14px;font:700 11px var(--font-code);text-align:center}
+.badge.added{color:var(--git-added)}.badge.modified{color:var(--git-modified)}.badge.deleted{color:var(--git-deleted)}.badge.renamed{color:var(--git-renamed)}
+.stats{font:12px var(--font-code)}.stat-add{color:var(--git-added)}.stat-del{color:var(--git-deleted)}
+label.viewed{display:inline-flex;align-items:center;gap:var(--space-4);height:22px;box-sizing:border-box;padding:0 var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-sm);font-size:12px;cursor:pointer}
+label.viewed:has(input:checked){color:var(--brand);font-weight:600;background:color-mix(in srgb,var(--ink) 6%,transparent)}
+label.viewed input,label.check input{margin:0;accent-color:var(--brand)}
+.file-head button{min-height:22px;padding:0 var(--space-8);font-size:12px}
+table{border-collapse:collapse;width:100%;table-layout:fixed;font-family:var(--vscode-editor-font-family,var(--font-code));font-size:var(--vscode-editor-font-size,12px);line-height:1.6}
 col.num{width:52px}td{vertical-align:top;padding:0}
-td.num{text-align:right;padding:0 8px;color:var(--vscode-editorLineNumber-foreground);user-select:none}
+td.num{text-align:right;padding:0 var(--space-8);color:var(--vscode-editorLineNumber-foreground,var(--ink-muted));user-select:none}
 td.code{white-space:pre-wrap;word-break:break-all;padding:0 10px 0 18px;text-indent:-10px}
-td.code::before{content:'';display:inline-block;width:10px;color:var(--vscode-descriptionForeground)}
+td.code::before{content:'';display:inline-block;width:10px;color:var(--ink-muted)}
 tr.add td.code::before{content:'+'}tr.del td.code::before{content:'-'}td.code.add::before{content:'+'}td.code.del::before{content:'-'}
-tr.add td,td.add{background:var(--vscode-diffEditor-insertedLineBackground,rgba(46,160,67,.18))}
-tr.del td,td.del{background:var(--vscode-diffEditor-removedLineBackground,rgba(248,81,73,.18))}
-td.empty{background:rgba(128,128,128,.08)}
-tr.hunk td{padding:2px 10px;color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.1);font-size:11px}
-tr.read-run td{padding:2px 10px;color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.05);font-family:var(--review-font-ui);font-size:11px}
-.composer-actions{gap:8px;margin-top:10px}.composer-actions button.quiet:last-child{padding-right:0}div.thread.draft{padding-bottom:12px}
-.thread.draft .switch{border-color:color-mix(in srgb,currentColor 25%,transparent)}.thread.draft .switch button.on{color:var(--vscode-editor-background);font-weight:600}.composer-actions .gap{flex:1}
-.composer-actions button,.composer-actions select{box-sizing:border-box;height:28px;padding:0 12px}.thread textarea:focus{outline-offset:-1px}
-.thread button.primary{color:var(--vscode-editor-background);background:var(--accent);font-weight:600}.thread button.primary:hover{background:color-mix(in srgb,var(--accent) 85%,white)}
-.composer-actions button:not(.primary):not(.quiet){border-color:var(--soft)}
-button.quiet{background:none;color:var(--vscode-descriptionForeground)}button.quiet:hover{background:none;color:var(--vscode-foreground);text-decoration:underline}
-.hint{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--vscode-descriptionForeground)}kbd{display:inline-flex;align-items:center;height:18px;box-sizing:border-box;line-height:1;padding:0 4px;border:1px solid var(--soft,var(--border));border-bottom-width:2px;border-radius:3px;font:11px var(--review-font-code);background:none}
-label.check{display:flex;align-items:center;gap:6px;padding-left:12px;border-left:1px solid var(--soft);cursor:pointer;font-size:12px}.strip label.check{padding-left:10px;margin-left:2px}.strip .muted:has(+label.check){margin-left:auto}
-tr.read-run .read-label{cursor:pointer;margin-right:10px}tr.read-run button{padding:0 8px;font-size:11px;line-height:1.6}
-.expand{display:inline-flex;gap:2px;margin-right:10px}.expand button{padding:0 8px;font-size:11px;line-height:1.6}
+tr.add td,td.add{background:var(--diff-add)}
+tr.del td,td.del{background:var(--diff-del)}
+td.empty{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+tr.hunk td{padding:var(--space-2) var(--space-12);color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 6%,transparent);font-size:11px}
+tr.read-run td{padding:var(--space-2) var(--space-12);color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 3%,transparent);box-shadow:inset 2px 0 0 var(--brand);font-family:var(--font-ui);font-size:11px}
+tr.read-run .read-label{cursor:pointer;margin-right:10px}
+tr.read-run button,.expand button{min-height:18px;padding:0 var(--space-8);font-size:11px;line-height:1.6}
+.expand{display:inline-flex;gap:var(--space-2);margin-right:10px}
+.composer-actions{gap:var(--space-8);margin-top:var(--space-8)}.composer-actions .gap,.actions .gap{flex:1}
+label.check{display:flex;align-items:center;gap:var(--space-6);padding-left:var(--space-12);border-left:1px solid var(--line);cursor:pointer;font-size:12px}.strip label.check{padding-left:10px;margin-left:2px}.strip .muted:has(+label.check){margin-left:auto}
 td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground));text-decoration:underline}
 ::highlight(lr-name){background-color:var(--vscode-editor-wordHighlightStrongBackground,rgba(255,213,0,.3))}
-#peek{position:fixed;top:0;right:0;bottom:0;z-index:6;width:min(560px,92vw);display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--vscode-editorWidget-background,var(--vscode-editor-background,Canvas));box-shadow:-6px 0 16px rgba(0,0,0,.25)}
-#peek[hidden]{display:none}.peek-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}.peek-head .where{flex:1;overflow-wrap:anywhere}
-.peek-head button{display:inline-flex;align-items:center;gap:5px;padding:3px 6px}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+#peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:min(560px,92vw);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
+.peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
+.peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 #peek-code{flex:1;overflow:auto}tr.focus td{background:var(--vscode-editor-rangeHighlightBackground,rgba(255,213,0,.12))}
 .note{padding:10px 14px}
-.preview.md{padding:8px 20px 12px;font-family:var(--review-font-ui);line-height:1.6;overflow-wrap:anywhere}
-.md-block{margin:0 -10px;padding:1px 10px;border-left:2px solid transparent;border-radius:3px;cursor:pointer}
-.md-block:hover{background:rgba(128,128,128,.08);border-left-color:var(--vscode-textLink-foreground)}
-.md-block.sel{background:var(--vscode-pairReview-selectionBackground,rgba(0,120,215,.18));border-left-color:var(--vscode-pairReview-selectionBorder,#0078d4)}
+.preview.md{padding:var(--space-8) 20px var(--space-12);font-family:var(--font-ui);line-height:1.6;overflow-wrap:anywhere}
+.md-block{margin:0 -10px;padding:1px 10px;border-left:2px solid transparent;border-radius:var(--radius-sm);cursor:pointer}
+.md-block:hover{background:color-mix(in srgb,var(--ink) 6%,transparent);border-left-color:var(--brand-line)}
+.md-block.sel{background:var(--brand-soft);border-left-color:var(--brand-line)}
 .preview.md>.thread{margin:4px 0 10px}
-.md-block h1,.md-block h2{padding-bottom:4px;border-bottom:1px solid var(--border)}.md-block h1{font-size:1.8em}.md-block h2{font-size:1.4em}.md-block h3{font-size:1.15em}
-.md-block code{font-family:var(--review-font-code);font-size:.9em;padding:1px 5px;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 12%,transparent)}
-.md-block pre{padding:10px 12px;border:1px solid var(--border);border-radius:6px;overflow:auto;background:var(--vscode-editor-background,Canvas)}.md-block pre code{padding:0;background:none}
-.md-block table{border-collapse:collapse}.md-block th,.md-block td{padding:4px 10px;border:1px solid var(--border)}
-.md-block blockquote{margin:8px 0;padding-left:12px;border-left:3px solid var(--border);color:var(--vscode-descriptionForeground)}.md-block img{max-width:100%}
-.md-block a{color:var(--vscode-textLink-foreground)}.md-block hr{border:0;border-top:1px solid var(--border)}
+.md-block h1,.md-block h2{padding-bottom:4px;border-bottom:1px solid var(--line)}.md-block h1{font-size:1.8em}.md-block h2{font-size:1.4em}.md-block h3{font-size:1.15em}
+.md-block code,.msg-text code{font-family:var(--font-code);font-size:.92em;padding:1px var(--space-4);border-radius:var(--radius-sm);background:var(--surface-sunken)}
+.md-block pre,.msg-text pre{padding:var(--space-8) 10px;border:1px solid var(--line);border-radius:var(--radius-md);overflow:auto;background:var(--surface-sunken)}.md-block pre code,.msg-text pre code{padding:0;background:none}
+.md-block table{border-collapse:collapse}.md-block th,.md-block td{padding:4px 10px;border:1px solid var(--line)}
+.md-block blockquote,.msg-text blockquote{margin:var(--space-8) 0;padding-left:var(--space-12);border-left:3px solid var(--line);color:var(--ink-muted)}.md-block img,.msg-text img{max-width:100%}
+.md-block hr{border:0;border-top:1px solid var(--line)}
 .html-preview{display:block;width:100%;border:0;background:#fff}
-.html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;padding:0 12px 12px 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
+.html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
-td.num.pick{cursor:pointer}td.num.pick:hover{color:var(--vscode-textLink-foreground);background:rgba(128,128,128,.18)}
-td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--vscode-pairReview-selectionBackground,rgba(0,120,215,.18))}
-td.sel-start{box-shadow:inset 2px 0 0 var(--vscode-pairReview-selectionBorder,#0078d4),inset 0 0 0 999px var(--vscode-pairReview-selectionBackground,rgba(0,120,215,.18))}
-tr.inline>td{padding:6px 10px 8px}
-.thread{--accent:var(--local);--soft:color-mix(in srgb,var(--vscode-foreground) 25%,transparent);max-width:860px;padding:0 12px 10px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--vscode-editorWidget-background,var(--vscode-editor-background));font-family:var(--review-font-ui);font-size:var(--vscode-font-size);line-height:1.5}
-.thread.github{--accent:var(--github)}.thread.pending{border-style:dashed}.thread.draft{border:1px dashed var(--accent)}
-.thread+.thread{margin-top:6px}
-.thread>summary,.thread>.strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 -12px;padding:5px 12px;font-size:12px;background:color-mix(in srgb,var(--vscode-foreground) 5%,transparent);border-bottom:1px solid var(--border)}.thread:not([open])>summary{border-bottom:0}.strip .kind{display:inline-flex;color:var(--accent)}.strip .kind svg{width:14px;height:14px}.strip .gap{flex:1}.pill.state{border-color:var(--soft);color:var(--vscode-descriptionForeground)}.who .delete{display:inline-flex;margin-left:auto;padding:2px}.who .delete svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}.who .delete:hover{color:var(--vscode-errorForeground)}.strip .kind img{width:14px;height:14px}details.thread .composer-actions button{height:24px;padding:0 10px;font-size:12px}.thread:not(.github):not(.analysis) button.primary{color:var(--vscode-foreground);background:color-mix(in srgb,var(--vscode-foreground) 18%,transparent)}.thread:not(.github):not(.analysis) button.primary:hover{background:color-mix(in srgb,var(--vscode-foreground) 26%,transparent)}
+td.num.pick{cursor:pointer}td.num.pick:hover{color:var(--brand);background:color-mix(in srgb,var(--ink) 10%,transparent)}
+td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--brand-soft)}
+td.sel-start{box-shadow:inset 2px 0 0 var(--brand-line),inset 0 0 0 999px var(--brand-soft)}
+tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
+.thread{--accent:var(--claude);--tint:var(--claude-soft);max-width:860px;box-sizing:border-box;padding:0 var(--space-12) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-raised);font:13px/20px var(--font-ui)}
+.thread.github{--accent:var(--github);--tint:var(--github-soft)}.thread.pending,.thread.draft{border:1px dashed var(--accent)}
+.thread+.thread{margin-top:var(--space-6)}
+.thread>summary,.thread>.strip{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;margin:0 calc(-1 * var(--space-12));padding:var(--space-4) var(--space-12);font-size:12px;line-height:18px;background:var(--tint);border-bottom:1px solid var(--line)}
+.thread:not([open])>summary{border-bottom:0}
 .thread>summary{cursor:pointer;list-style:none}.thread>summary::-webkit-details-marker{display:none}
-.thread>summary::before{content:'▸'}.thread[open]>summary::before{content:'▾'}.thread:not([open]){padding-bottom:0}
-.strip .tag{font-weight:600;color:var(--accent)}.strip .muted:last-child{margin-left:auto}
-.thread textarea{margin-top:8px}
-.switch{display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden}.switch button{border-radius:0;padding:1px 10px;font-size:12px}.switch button.on{outline:0;color:var(--vscode-button-foreground);background:var(--accent)}
-.msg{margin-top:8px}.msg+.msg{padding-top:8px;border-top:1px solid rgba(128,128,128,.2)}
-.who{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}.who img{width:16px;height:16px}.who img.avatar{width:20px;height:20px;border-radius:50%}
-.pill{padding:0 7px;border:1px solid var(--vscode-charts-yellow,#d29922);border-radius:10px;font-size:11px;font-weight:500;color:var(--vscode-charts-yellow,#d29922)}
-.msg-text{overflow-wrap:anywhere}.msg-text>:first-child{margin-top:2px}.msg-text>:last-child{margin-bottom:0}
-.msg-text p,.msg-text ul,.msg-text ol,.msg-text pre,.msg-text blockquote{margin:6px 0}.msg-text ul,.msg-text ol{padding-left:20px}.msg-text ul{list-style:disc}.msg-text li{padding:1px 0;border:0}
-.msg-text code{font-family:var(--review-font-code);font-size:.92em;padding:1px 5px;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 12%,transparent)}
-.msg-text pre{padding:8px 10px;border:1px solid var(--border);border-radius:6px;overflow:auto;background:var(--vscode-editor-background,Canvas)}.msg-text pre code{padding:0;background:none}
-.msg-text blockquote{padding-left:10px;border-left:3px solid var(--border);color:var(--vscode-descriptionForeground)}.msg-text img{max-width:100%}
-.outside{padding:8px 10px;border-bottom:1px solid var(--border)}.outside>.muted{margin-bottom:6px;font-size:12px}
+.thread>summary::before{content:''}details.thread:not([open]){padding-bottom:0}
+.source{display:inline-flex;align-items:center;gap:var(--space-4);font-weight:600;color:var(--accent)}.source svg{width:14px;height:14px;fill:currentColor}
+.strip .muted:last-child{margin-left:auto}
+.thread textarea{margin-top:var(--space-12);min-height:64px}
+.msg{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);margin-top:var(--space-8)}.msg+.msg{padding-top:var(--space-8);border-top:1px solid var(--line)}
+.msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.claude{box-sizing:border-box;padding:2px;border-radius:0}.msg .avatar svg{width:20px;height:20px;fill:currentColor}
+.msg-head{display:flex;align-items:center;gap:var(--space-6);min-height:20px}.msg-head b{font-weight:600}.msg-head .msg-meta{margin-left:auto}
+.msg-meta{display:flex;align-items:center;gap:var(--space-6)}.msg-main>.msg-meta{float:right;margin-left:var(--space-12)}.when{font-size:12px;color:var(--ink-muted)}
+.pill{padding:0 var(--space-6);border:1px solid var(--warning);border-radius:var(--radius-pill);font-size:11px;font-weight:500;color:var(--warning)}
+.msg-text{overflow-wrap:anywhere}.msg-text>:first-child{margin-top:0}.msg-text>:last-child{margin-bottom:0}
+.msg-text p,.msg-text ul,.msg-text ol,.msg-text pre,.msg-text blockquote{margin:var(--space-6) 0}.msg-text ul,.msg-text ol{padding-left:20px}.msg-text ul{list-style:disc}.msg-text li{padding:1px 0;border:0;font-size:inherit}
+.outside{padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.outside>.muted{margin-bottom:var(--space-6);font-size:12px}
 .comments{font-size:12px}
-.thread.analysis,.card-thread.analysis{--accent:var(--analysis)}
-.guide-intro{margin-top:12px}.guide-intro p{margin:6px 0}
-.tree-node{margin-top:12px}
-.node-head{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px);z-index:2;box-sizing:border-box;height:32px;display:flex;align-items:center;gap:8px;padding:0 10px;background:var(--vscode-editor-background);cursor:pointer;user-select:none}
-.folder-head .name{flex:1;font-family:var(--review-font-code);font-size:12px;overflow-wrap:anywhere}.node-head .progress{font-size:12px}
-.fold-rail{--rail:color-mix(in srgb,var(--vscode-foreground) 30%,transparent);position:relative;margin-left:17px}.fold-rail:has(>.fold-line:hover){--rail:var(--vscode-focusBorder)}
+.card-thread{--accent:var(--claude)}.card-thread.github{--accent:var(--github)}.card-thread .source{font-size:12px}
+.main-col{grid-template-columns:minmax(0,1fr)}
+.file{scroll-margin-top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 10px)}
+.file-head{top:calc(var(--bar-height,46px) + var(--depth,0) * 32px)}
+.thread.local,.card-thread.local,.thread-group.local{--accent:var(--ink-muted);--tint:color-mix(in srgb,var(--ink) 5%,transparent)}
+.thread.analysis,.card-thread.analysis,.thread-group.analysis{--accent:var(--claude);--tint:var(--claude-soft)}
+.thread.github,.card-thread.github,.thread-group.github{--accent:var(--github);--tint:var(--github-soft)}
+.strip .gap{flex:1}.pill.state{border-color:var(--line-strong);color:var(--ink-muted)}
+.msg .delete{min-height:20px;padding:0 var(--space-2)}.msg .delete svg{width:14px;height:14px}.msg .delete:hover{color:var(--danger);text-decoration:none}
+details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size:12px}
+.chip.bad{color:var(--danger);background:var(--danger-soft)}
+.guide-intro{margin-top:var(--space-12)}.guide-intro p{margin:var(--space-6) 0}
+.tree-node{margin-top:var(--space-12)}
+.node-head{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px);z-index:2;box-sizing:border-box;height:32px;display:flex;align-items:center;gap:var(--space-8);padding:0 10px;background:var(--surface);cursor:pointer;user-select:none}
+.folder-head .name{flex:1;font-family:var(--font-code);font-size:12px;overflow-wrap:anywhere}.node-head .progress{font-size:12px}
+.fold-rail{--rail:var(--line-strong);position:relative;margin-left:17px}.fold-rail:has(>.fold-line:hover){--rail:var(--focus)}
 .fold-line{position:absolute;left:-5px;top:0;bottom:0;width:12px;cursor:pointer;z-index:1}
-.rail-item{position:relative;display:flow-root;padding:8px 0 0 16px;overflow:clip}.fold-rail>.rail-item>*{margin-top:0}.step-wrap>.transition:first-child{margin-top:0}.step-wrap>.file:first-child{margin-top:0}
+.rail-item{position:relative;display:flow-root;padding:var(--space-8) 0 0 var(--space-16);overflow:clip}.fold-rail>.rail-item>*{margin-top:0}.step-wrap>.transition:first-child{margin-top:0}.step-wrap>.file:first-child{margin-top:0}
 .rail-item:not(:last-child)::after{content:'';position:absolute;left:0;top:0;bottom:0;border-left:2px solid var(--rail)}
-.rail-item:has(>.tree-node)::before,.rail-item>.file::before,.rail-item>.step-wrap>.file::before{content:'';position:absolute;left:0;top:0;width:12px;height:25px;border-left:2px solid var(--rail);border-bottom:2px solid var(--rail);border-bottom-left-radius:10px}
+.rail-item:has(>.tree-node)::before,.rail-item>.file::before,.rail-item>.step-wrap>.file::before{content:'';position:absolute;left:0;top:0;width:12px;height:25px;border-left:2px solid var(--rail);border-bottom:2px solid var(--rail);border-bottom-left-radius:var(--radius-lg)}
 .rail-item>.file,.rail-item>.step-wrap>.file{position:relative}.rail-item>.file::before,.rail-item>.step-wrap>.file::before{left:-17px;top:auto;bottom:calc(100% - 21px);height:400px}
-.fold-toggle{display:inline-flex;flex:none;width:16px;height:16px;color:color-mix(in srgb,var(--vscode-foreground) 55%,transparent)}.node-head:hover .fold-toggle{color:var(--vscode-focusBorder)}.fold-toggle svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round}
+.fold-toggle{display:inline-flex;flex:none;width:16px;height:16px;color:var(--ink-muted)}.node-head:hover .fold-toggle{color:var(--focus)}.fold-toggle svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round}
 .step-wrap{scroll-margin-top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 10px)}
-.step-title{font-family:var(--vscode-font-family,system-ui,sans-serif);font-size:13px;font-weight:600;margin-right:8px}.step-path{color:var(--vscode-descriptionForeground)}
-.guide-group{margin-top:20px;border-left:3px solid var(--sev);border-radius:4px;background:color-mix(in srgb,var(--sev) 12%,var(--vscode-editor-background))}
-.guide-group .sev{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sev)}.guide-group .title{flex:1;font-weight:600;overflow-wrap:anywhere}.guide-group .progress{font-size:12px}
-.sev-critical{--sev:var(--vscode-charts-red,#f14c4c)}.sev-significant{--sev:var(--vscode-charts-orange,#d18616)}.sev-routine{--sev:var(--vscode-charts-blue,#3794ff)}.sev-trivial,.sev-unclassified{--sev:var(--vscode-descriptionForeground,#8b949e)}
-.transition{margin:12px 0 0 14px;font-size:12px;color:var(--vscode-descriptionForeground)}.step-wrap>.transition+.file{margin-top:12px}
-.file-note,.step-note{padding:8px 12px;border-bottom:1px solid var(--border)}.file-note .tag{font-size:11px;font-weight:600;color:var(--analysis)}
-.step>.diff>.thread{max-width:none;margin:8px 10px}
-.thread-group{--accent:var(--local);padding:2px 0}.thread-group.github{--accent:var(--github)}.thread-group.analysis{--accent:var(--analysis)}.thread-group-head{display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;user-select:none}.thread-group-head .tag{font-size:11px;font-weight:600;color:var(--accent)}.card-thread{display:flex;align-items:baseline;gap:8px;padding:3px 0 3px 8px;border-left:3px solid var(--accent);font-size:12px}.card-thread+.card-thread{border-top:0}.card-thread .where{flex:none}.card-thread .state{flex:none}.card-thread .text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step-title{font-family:var(--font-ui);font-size:13px;font-weight:600;margin-right:var(--space-8)}.step-path{color:var(--ink-muted)}
+.guide-group{margin-top:var(--space-24)}
+.guide-group .sev{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-8);border-radius:var(--radius-pill);font-size:12px;font-weight:600;color:var(--sev);background:var(--sev-soft)}
+.guide-group .title{flex:1;font-weight:600;overflow-wrap:anywhere}.guide-group .progress{font-size:12px;color:var(--ink-muted)}
+.sev-critical{--sev:var(--danger);--sev-soft:var(--danger-soft)}.sev-significant{--sev:var(--warning);--sev-soft:color-mix(in srgb,var(--warning) 14%,transparent)}
+.sev-routine{--sev:var(--ink);--sev-soft:color-mix(in srgb,var(--ink) 9%,transparent)}.sev-trivial,.sev-unclassified{--sev:var(--ink-muted);--sev-soft:color-mix(in srgb,var(--ink) 5%,transparent)}
+.transition{margin:var(--space-12) 0 0 14px;font-size:12px;line-height:18px;color:var(--ink-muted)}.step-wrap>.transition+.file{margin-top:var(--space-12)}
+.file-note,.step-note{padding:var(--space-8) var(--space-12);border-bottom:1px solid var(--line)}.file-note .tag{font-size:12px;font-weight:600;color:var(--claude)}
+.step>.diff>.thread{max-width:none;margin:var(--space-8) 10px}
+.thread-group{padding:var(--space-2) 0}.thread-group-head{display:flex;align-items:center;gap:var(--space-6);padding:var(--space-4) 0;cursor:pointer;user-select:none}
+.card-thread{display:grid;grid-template-columns:minmax(0,11em) minmax(0,1fr) auto auto;align-items:baseline;column-gap:var(--space-12);padding:var(--space-2) var(--space-6) var(--space-2) var(--space-8);border-left:2px solid var(--accent);font-size:12px;cursor:pointer}.card-thread+.card-thread{border-top:0}.card-thread:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.card-thread .name,.card-thread .text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card-thread .where{display:flex;min-width:0;font-family:var(--font-code);color:var(--ink-muted)}.card-thread .state{color:var(--ink-muted)}
+.card-thread code{font-family:var(--font-code);font-size:.92em}
+.toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
 </style></head><body>
-<div class="row head"><h1 id="title"></h1><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a></span></div>
-<div class="row"><span id="subtitle" class="muted"></span><span id="verdict" class="verdict" hidden></span></div>
-<div class="row status"><div class="row" id="reviewed"></div><span id="claude"></span><a id="log">Show log</a><button id="retry">Retry</button></div>
+<div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
+<div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
+<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
 <aside id="peek" hidden aria-label="Definition"><div class="peek-head">
 <button id="peek-back" title="Back" aria-label="Back"><svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg></button>
@@ -465,26 +515,31 @@ tr.inline>td{padding:6px 10px 8px}
 <button id="peek-close" title="Close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div><div id="peek-code"></div></aside>
 <div class="layout">
 <div class="main-col">
-<section class="card"><h3>Description</h3><div id="body"></div></section>
+<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div></section>
 <section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
 </div>
 <aside class="rail">
-<section><h3>Reviewers</h3><ul id="reviewers"></ul></section>
+<section><div class="section-head"><h3>Reviewers</h3><button id="pick-reviewers" class="icon-button" data-pr-action data-tip="Request reviewers" aria-label="Request reviewers" hidden>${codicons.gear}</button></div><ul id="reviewers"></ul></section>
+<section><div class="section-head"><h3>Assignees</h3><button id="pick-assignees" class="icon-button" data-pr-action data-tip="Edit assignees" aria-label="Edit assignees" hidden>${codicons.gear}</button></div><ul id="assignees"></ul></section>
+<section><div class="section-head"><h3>Labels</h3><button id="pick-labels" class="icon-button" data-pr-action data-tip="Edit labels" aria-label="Edit labels" hidden>${codicons.gear}</button></div><div id="labels" class="labels"></div></section>
 <section><h3>Checks</h3><ul id="checks"></ul></section>
 <section id="review-box"><h3>Finish your review</h3>
 <p class="muted" id="pending-note"></p>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
-<div class="row actions"><button class="primary" data-event="approve" data-reviewer>Approve</button><button data-event="requestChanges" data-reviewer>Request changes</button><button data-event="comment">Comment</button></div>
+<div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
 <p class="muted" id="review-note"></p></section>
-<section id="merge-box"><h3>Merge</h3><div class="row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
-<div id="files-bar" class="row head"><h2 id="files-title">Files</h2><span class="row">
-<span class="group"><span id="analysis-status" class="muted"></span><button id="analyze">Analyze</button></span>
-<span class="seg" role="group" aria-label="Diff layout"><button id="unified">Unified</button><button id="split">Split</button><button id="guided">Guided</button></span>
-<button id="folders" title="Group files by folder">Folders</button>
-<span class="group"><span class="muted">Files</span><span class="seg"><button id="collapse">Collapse</button><button id="expand">Expand</button></span></span>
-<span class="group"><span class="muted">Comments</span><span class="seg"><button id="collapse-comments">Collapse</button><button id="expand-comments">Expand</button></span></span></span></div>
+<div id="files-bar" class="row head"><h2 id="files-title">Files</h2><span class="toolbar">
+<span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
+<span class="divider"></span>
+<span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button><button id="guided" data-tip="Guided: files in the order of Claude's guide" aria-label="Guided by Claude's guide">${codicons.map}</button></span>
+<button id="folders" class="icon-button" data-tip="Group files by folder" aria-label="Group files by folder">${codicons.listTree}</button>
+<span class="divider"></span>
+<button id="collapse" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
+<button id="expand" class="icon-button" data-tip="Expand all files" aria-label="Expand all files">${codicons.expandAll}</button>
+<button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button></span></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
 <script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
@@ -505,7 +560,7 @@ function githubThreadView(thread: RemoteThread): GitHubThreadView {
     outdated: thread.outdated,
     resolved: thread.resolved,
     pending: thread.pending,
-    messages: thread.comments.map(({ id, author, avatarUrl, pending, bodyHtml, canDelete }) => ({ id, author, avatarUrl, pending, html: bodyHtml, canDelete })),
+    messages: thread.comments.map(({ id, author, avatarUrl, pending, bodyHtml, canDelete, createdAt }) => ({ id, author, avatarUrl, pending, html: bodyHtml, canDelete, createdAt })),
   };
 }
 
@@ -529,7 +584,9 @@ export function buildOverviewState(
   const claude = claudeStatus(runner.activity);
   return {
     title: `#${pullRequest.number} ${pullRequest.title}`,
-    subtitle: `${pullRequest.author} · ${pullRequest.headBranch} → ${pullRequest.baseBranch}`,
+    author: pullRequest.author,
+    headBranch: pullRequest.headBranch,
+    baseBranch: pullRequest.baseBranch,
     url: pullRequest.url,
     viewed,
     read,
@@ -555,7 +612,7 @@ export function buildOverviewState(
         endLine: thread.anchor.endLine,
         resolved: thread.resolved,
         ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        messages: thread.messages.map(({ author, text }) => ({ author, html: markdownHtml(text) })),
+        messages: thread.messages.map(({ author, text, createdAt }) => ({ author, html: markdownHtml(text), createdAt })),
         ...(publication === undefined ? {} : { url: publication.url }),
       };
     }),

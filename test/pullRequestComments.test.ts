@@ -28,14 +28,14 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
     number: 3, title: 'Mock data', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'feature', baseBranch: 'main',
   }, opened, ['src/a.ts'], [], 3, undefined, [{
     id: 'PRRT_1', path: 'src/b.ts', side: 'LEFT', startLine: 4, endLine: 5, outdated: true, resolved: false, url: 'https://github.com/acme/app/pull/3#discussion_r9',
-    pending: true, comments: [{ id: 'C1', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Rename &amp; </p><script>x</script><u>', canDelete: true }],
+    pending: true, comments: [{ id: 'C1', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Rename &amp; </p><script>x</script><u>', canDelete: true, createdAt: '2026-01-01T00:00:00Z' }],
   }]);
   assert.deepEqual(state.github, [{ id: 'PRRT_1', location: 'src/b.ts:4', text: 'Rename & x', status: 'Pending · Outdated', url: 'https://github.com/acme/app/pull/3#discussion_r9',
-    path: 'src/b.ts', side: 'old', startLine: 4, endLine: 5, outdated: true, resolved: false, pending: true, messages: [{ id: 'C1', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, html: '<p>Rename &amp; </p><script>x</script><u>', canDelete: true }] }]);
-  assert.equal(state.subtitle, 'alice · feature → main');
+    path: 'src/b.ts', side: 'old', startLine: 4, endLine: 5, outdated: true, resolved: false, pending: true, messages: [{ id: 'C1', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, html: '<p>Rename &amp; </p><script>x</script><u>', canDelete: true, createdAt: '2026-01-01T00:00:00Z' }] }]);
+  assert.deepEqual([state.author, state.headBranch, state.baseBranch], ['alice', 'feature', 'main']);
   assert.deepEqual(state.claude, { text: 'Claude · Reading src/a.ts', running: true, retry: false });
   assert.deepEqual(state.threads, [{ id: 't1', location: 'src/a.ts:12', text: 'Why </script><b>?', status: 'Answered · On GitHub (pending)', url: 'https://github.com/acme/app/pull/3#r1',
-    path: 'src/a.ts', side: 'new', startLine: 12, endLine: 14, resolved: false, messages: [{ author: 'human', html: '<p>Why<br>&lt;/script&gt;&lt;b&gt;?</p>' }],
+    path: 'src/a.ts', side: 'new', startLine: 12, endLine: 14, resolved: false, messages: [{ author: 'human', html: '<p>Why<br>&lt;/script&gt;&lt;b&gt;?</p>', createdAt: '' }],
   }]);
   const html = overviewHtml(state, 'overview.js', 'https://example.test/</script><i>.svg');
   assert.ok(!html.includes('</script><b>') && !html.includes('</script><i>') );

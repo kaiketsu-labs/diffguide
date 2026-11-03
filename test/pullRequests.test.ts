@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type * as vscode from 'vscode';
 
-import { parseDetails, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
+import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
 import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githubApi.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
 import { fileTree, type FileFolder } from '../src/fileTree.js';
@@ -94,11 +94,13 @@ async function level(provider: vscode.TreeDataProvider<unknown>, node?: unknown)
 
 test('parses PR details into reviewers, checks and allowed merge methods', () => {
   const details = parseDetails({
-    squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: true,
+    squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: true, deleteBranchOnMerge: false,
     pullRequest: {
-      bodyHTML: '<p>Hi</p>', state: 'OPEN', mergeable: 'CONFLICTING', viewerDidAuthor: true,
+      bodyHTML: '<p>Hi</p>', body: 'Hi', title: 'Add search', state: 'OPEN', isDraft: true, mergeable: 'CONFLICTING', viewerDidAuthor: true,
+      viewerCanUpdate: true, isCrossRepository: false, headRef: { id: 'R1' },
+      labels: { nodes: [{ name: 'bug', color: 'd73a4a' }, { name: 'bad', color: 'red' }] }, assignees: { nodes: [{ login: 'alice' }, {}] },
       latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'alice' } }, { state: 'COMMENTED', author: null }] },
-      reviewRequests: { nodes: [{ requestedReviewer: { login: 'bob' } }, { requestedReviewer: { name: 'core' } }, { requestedReviewer: { login: 'alice' } }] },
+      reviewRequests: { nodes: [{ requestedReviewer: { login: 'bob' } }, { requestedReviewer: { name: 'core', slug: 'core-team' } }, { requestedReviewer: { login: 'alice' } }] },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
         { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://ci/1' },
         { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null, detailsUrl: 'javascript:alert(1)' },
@@ -107,14 +109,39 @@ test('parses PR details into reviewers, checks and allowed merge methods', () =>
     },
   });
   assert.deepEqual(details, {
-    bodyHtml: '<p>Hi</p>', open: true, mergeable: 'no', viewerIsAuthor: true, mergeMethods: ['squash', 'rebase'],
-    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested' }],
+    bodyHtml: '<p>Hi</p>', title: 'Add search', body: 'Hi', open: true, merged: false, draft: true, canEdit: true, branchDeletable: true,
+    labels: [{ name: 'bug', color: 'd73a4a' }], assignees: ['alice'],
+    mergeable: 'no', viewerIsAuthor: true, viewerAvatarUrl: '', mergeMethods: ['squash', 'rebase'],
+    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested', team: 'core-team' }],
     checks: [{ name: 'build', state: 'success', url: 'https://ci/1' }, { name: 'test', state: 'pending' }, { name: 'deploy', state: 'failure' }],
   });
 });
 
+test('offers no branch deletion for forks, deleted branches or repositories that delete on merge', () => {
+  const deletable = (repository: Record<string, unknown>, pullRequest: Record<string, unknown>) =>
+    parseDetails({ ...repository, pullRequest: { latestOpinionatedReviews: { nodes: [] }, reviewRequests: { nodes: [] }, commits: { nodes: [] }, labels: { nodes: [] }, assignees: { nodes: [] },
+      isCrossRepository: false, headRef: { id: 'R1' }, ...pullRequest } }).branchDeletable;
+  assert.equal(deletable({}, {}), true);
+  assert.equal(deletable({}, { isCrossRepository: true }), false);
+  assert.equal(deletable({}, { headRef: null }), false);
+  assert.equal(deletable({ deleteBranchOnMerge: true }, {}), false);
+});
+
+test('reads the viewer\'s avatar and drops links that are not https', () => {
+  const pullRequest = { latestOpinionatedReviews: { nodes: [] }, reviewRequests: { nodes: [] }, commits: { nodes: [] }, labels: { nodes: [] }, assignees: { nodes: [] } };
+  assert.equal(parseDetails({ pullRequest }, { avatarUrl: 'https://avatars.githubusercontent.com/u/1' }).viewerAvatarUrl, 'https://avatars.githubusercontent.com/u/1');
+  assert.equal(parseDetails({ pullRequest }, { avatarUrl: 'javascript:alert(1)' }).viewerAvatarUrl, '');
+});
+
+test('reads picker options, with teams only for organizations', () => {
+  const repository = { assignableUsers: { nodes: [{ login: 'alice' }] }, labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] } };
+  assert.deepEqual(parsePickerOptions({ ...repository, owner: { teams: { nodes: [{ name: 'Core', slug: 'core' }, { name: 'No slug' }] } } }),
+    { users: ['alice'], teams: [{ name: 'Core', slug: 'core' }], labels: [{ name: 'bug', color: 'd73a4a' }] });
+  assert.deepEqual(parsePickerOptions({ ...repository, owner: {} }).teams, []);
+});
+
 test('reads GitHub review threads, using original lines for outdated ones and skipping file-level threads', () => {
-  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
+  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, createdAt: login === null ? undefined : '2026-01-02T03:04:05Z', author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
   const threads = parseReviewThreads([
     { id: 'T1', path: 'src/a.ts', diffSide: 'RIGHT', line: 12, startLine: 10, originalLine: 3, originalStartLine: 1, isOutdated: false, isResolved: true,
       comments: { nodes: [comment('alice', 'Why?'), comment(null, 'Because.')] } },
@@ -125,9 +152,9 @@ test('reads GitHub review threads, using original lines for outdated ones and sk
   ]);
   assert.deepEqual(threads, [
     { id: 'T1', path: 'src/a.ts', side: 'RIGHT', startLine: 10, endLine: 12, outdated: false, resolved: true, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Why?', author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false }] },
+      comments: [{ id: 'C-Why?', author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z' }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '' }] },
     { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false }] },
+      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z' }] },
   ]);
   assert.throws(() => parseReviewThreads([{ id: 'T4', path: 'a', line: 1, isOutdated: false, comments: { nodes: [comment('x', 'y', 'javascript:alert(1)')] } }]), /invalid link/u);
 });
@@ -158,6 +185,12 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
     deleteComment: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
+    editPullRequest: async () => { throw new Error('not used'); },
+    setDraft: async () => { throw new Error('not used'); },
+    requestReviewers: async () => { throw new Error('not used'); },
+    removeReviewers: async () => { throw new Error('not used'); },
+    deleteBranch: async () => { throw new Error('not used'); },
+    pickerOptions: async () => { throw new Error('not used'); },
   };
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
@@ -171,10 +204,14 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const [empty] = await level(tree, roleRows[1]?.node);
   assert.equal(empty?.item.label, 'No open PRs');
   const [repository] = await level(tree, roleRows[0]?.node);
-  assert.deepEqual([repository?.item.label, repository?.item.description], ['acme/app', '1']);
+  assert.deepEqual([repository?.item.label, repository?.item.description], ['app', 'acme · 1']);
   const [pr] = await level(tree, repository?.node);
-  assert.equal(pr?.item.label, '#7 Add review sidebar');
-  assert.equal(pr?.item.description, 'octo · Draft');
+  assert.equal(pr?.item.label, 'Add review sidebar');
+  assert.equal(pr?.item.description, '#7 · octo · Draft');
+  const icon = pr?.item.iconPath as vscode.ThemeIcon;
+  assert.deepEqual([icon.id, icon.color?.id], ['git-pull-request-draft', 'descriptionForeground']);
+  const decoratePullRequest = (item: vscode.TreeItem | undefined) => window.fileDecorations.at(-1)?.provideFileDecoration(item?.resourceUri as vscode.Uri, undefined as never) as { badge?: string; color?: vscode.ThemeColor } | undefined;
+  assert.equal(decoratePullRequest(pr?.item), undefined);
 
   assert.equal(pr?.item.contextValue, 'pairReview.pullRequest');
 
@@ -183,6 +220,14 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.deepEqual(worktrees.opened, ['acme/app#7:reviewer']);
   const [reopened] = await level(tree, repository?.node);
   assert.equal(reopened?.item.contextValue, 'pairReview.pullRequest.checkedOut');
+  assert.deepEqual([decoratePullRequest(reopened?.item)?.badge, decoratePullRequest(reopened?.item)?.color], ['W', undefined]);
+
+  const legend = await level(window.trees.at(-2)?.provider as vscode.TreeDataProvider<unknown>);
+  assert.deepEqual(legend.map(({ item }) => [item.label, (item.iconPath as vscode.ThemeIcon).id]), [
+    ['Repository', 'repo'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'],
+    ['Approved', 'pass'], ['Changes requested', 'request-changes'], ['Commented', 'comment-discussion'], ['Checked out in a worktree', 'git-pull-request'],
+  ]);
+  assert.equal(decoratePullRequest(legend.at(-1)?.item)?.badge, 'W');
 
   await commands.executeCommand('pairReview.openPullRequestInBrowser', pr?.node);
   assert.deepEqual(env.opened.map(String), ['https://github.com/acme/app/pull/7']);
@@ -191,7 +236,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.equal(env.opened.length, 1);
   assert.equal(worktrees.opened.length, 1);
 
-  assert.equal(reopened?.item.description, 'octo · Draft · Worktree · 0/2 reviewed');
+  assert.equal(reopened?.item.description, '#7 · octo · Draft · Worktree · 0/2 reviewed');
 
   const files = await level(tree, pr?.node);
   assert.deepEqual(files.map(({ item }) => [item.label, item.description, item.checkboxState]), [['sidebar.ts', 'src', 0], ['README.md', '', 0]]);
@@ -201,7 +246,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   await settle();
   assert.deepEqual([...worktrees.reviewed], ['README.md']);
   const [progressed] = await level(tree, repository?.node);
-  assert.equal(progressed?.item.description, 'octo · Draft · Worktree · 1/2 reviewed');
+  assert.equal(progressed?.item.description, '#7 · octo · Draft · Worktree · 1/2 reviewed');
   assert.equal((await level(tree, pr?.node))[1]?.item.checkboxState, 1);
   const fileCommand = files[0]?.item.command as vscode.Command;
   await commands.executeCommand(fileCommand.command, ...(fileCommand.arguments ?? []));
@@ -288,6 +333,12 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
     deleteComment: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
+    editPullRequest: async () => { throw new Error('not used'); },
+    setDraft: async () => { throw new Error('not used'); },
+    requestReviewers: async () => { throw new Error('not used'); },
+    removeReviewers: async () => { throw new Error('not used'); },
+    deleteBranch: async () => { throw new Error('not used'); },
+    pickerOptions: async () => { throw new Error('not used'); },
   });
   const connect = (name: string, pullRequests: readonly PullRequestSummary[]) => async () => { connected.push(name); return provider(name, pullRequests); };
   const serviceA = recordingWorktrees();
@@ -306,7 +357,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
 
   const rows = await level(tree);
   assert.deepEqual(rows.map(({ item }) => [item.label, item.description]), [
-    ['acme/service-a', '1 mine'], ['acme/service-b', '1 mine'], ['scratch: no GitHub remote', undefined],
+    ['service-a', 'acme · 1 mine'], ['service-b', 'acme · 1 mine'], ['scratch: no GitHub remote', undefined],
   ]);
   const pullRequestIn = async (row: number): Promise<{ node: unknown; item: vscode.TreeItem } | undefined> => {
     const sections = await level(tree, rows[row]?.node);
@@ -326,7 +377,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
 
   assert.equal(rows[0]?.item.contextValue, 'pairReview.repository');
   await commands.executeCommand('pairReview.hideRepository', rows[0]?.node);
-  assert.deepEqual(await labels(), ['acme/service-b', 'scratch: no GitHub remote']);
+  assert.deepEqual(await labels(), ['service-b', 'scratch: no GitHub remote']);
   assert.equal(window.trees.at(-1)?.description, '1 hidden');
 
   window.quickPickIndex = 0;
@@ -334,7 +385,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   assert.deepEqual(window.quickPicks.at(-1)?.map(({ label, picked }) => [label, picked]), [
     ['service-a', false], ['service-b', true], ['service-c', true], ['scratch', true],
   ]);
-  assert.deepEqual(await labels(), ['acme/service-a']);
+  assert.deepEqual(await labels(), ['service-a']);
   assert.equal(window.trees.at(-1)?.description, '3 hidden');
   assert.deepEqual(connected, ['acme/service-a', 'acme/service-b', 'acme/service-c']);
 
@@ -374,7 +425,7 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   const slow = new Promise<void>((resolve) => { release = resolve; });
   const provider: PullRequestProvider = {
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
-    listMine: async () => { await slow; return [{ ...summary, number: 8, title: 'Fresh' }]; },
+    listMine: async () => { await slow; return [{ ...summary, number: 8, title: 'feat(ui): Fresh' }]; },
     listReviewRequested: async () => [],
   } as unknown as PullRequestProvider;
   const workspace = new FakeMemento();
@@ -385,14 +436,14 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   const titles = async (): Promise<unknown[]> => {
     const [mine] = (await level(tree)).slice(1);
     const [repository] = await level(tree, mine?.node);
-    return (await level(tree, repository?.node)).map(({ item }) => item.label);
+    return (await level(tree, repository?.node)).map(({ item }) => [item.label, item.description]);
   };
 
-  assert.deepEqual(await titles(), ['#7 Add review sidebar']);
+  assert.deepEqual(await titles(), [['Add review sidebar', '#7 · octo · Draft']]);
   assert.equal(window.trees.at(-1)?.message, 'Updating pull requests...');
   release();
   await settle();
-  assert.deepEqual(await titles(), ['#8 Fresh']);
+  assert.deepEqual(await titles(), [['Fresh', '#8 · feat(ui) · octo · Draft']]);
   assert.equal(window.trees.at(-1)?.message, '');
   assert.deepEqual((workspace.get('pairReview.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
 });
@@ -423,14 +474,14 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   const [repository] = await level(tree);
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
-  assert.equal(pr?.item.description, 'octo · Draft · Worktree · 0/2 reviewed');
+  assert.equal(pr?.item.description, '#7 · octo · Draft · Worktree · 0/2 reviewed');
   assert.deepEqual((await level(tree, pr?.node)).map(({ item }) => item.checkboxState), [0, 0]);
   assert.equal(reads, 1);
 
   worktrees.reviewed.add('a.ts');
   status.fire('acme/app#7');
   assert.deepEqual(redrawn, [pr?.node]);
-  assert.equal((await tree.getTreeItem(pr?.node))?.description, 'octo · Draft · Worktree · 1/2 reviewed');
+  assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · octo · Draft · Worktree · 1/2 reviewed');
   assert.equal(reads, 2);
 
   status.fire('acme/other#1');
@@ -464,7 +515,7 @@ test('lists a checked-out PR\'s guide steps above its files and opens the review
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
   const [guide, file] = await level(tree, pr?.node);
-  assert.deepEqual([guide?.item.label, guide?.item.description, file?.item.label], ['Guided review', '1/3 viewed', 'a.ts']);
+  assert.deepEqual([guide?.item.label, guide?.item.description, file?.item.label], ['Guide', '1/3 viewed', 'a.ts']);
   const groups = await level(tree, guide?.node);
   assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
   const steps = await level(tree, groups[0]?.node);

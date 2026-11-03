@@ -160,8 +160,8 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       if (metadata.role === 'reviewer' && revision === undefined) log('Skipping the repository\'s review instructions: could not find the base branch.');
       return readCustomInstructions(kind, { projectRoot: this.sourceRoot, repository: { cwd: worktree, ...(revision === undefined ? {} : { revision }) } });
     };
-    const runner = new ClaudeRunner({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('ask'), ...this.claude });
-    const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('analysis'), ...this.claude });
+    const runner = new ClaudeRunner({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('comments'), ...this.claude });
+    const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('guide'), ...this.claude });
     const session: ReviewSession = {
       key: key(repository, number),
       label: `#${number}`,

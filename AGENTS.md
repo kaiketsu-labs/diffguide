@@ -27,10 +27,13 @@ Pair Review is a VS Code extension for reviewing code with Claude: native inline
 
 ## UI
 
+- Webview colors, type sizes, spacing and corners come from `src/designTokens.ts` as CSS custom properties (`--brand`, `--ink`, `--radius-md`). Use only those properties in webview CSS; change a value there, not at the use site. `src/webviewStyles.ts` holds the shared buttons (`primary`, `claude`, `quiet`, `small`), inputs, key caps and chips.
+- Color names who is involved: `brand` is you and stays neutral (the theme's text color), `claude` clay is Claude, `github` slate blue is GitHub. Everything else follows the VS Code theme.
+- Webview icons are codicon SVGs from `src/codicons.ts`; add new ones there from microsoft/vscode-codicons.
 - Use clear system sans-serif fonts for extension UI and monospace fonts for code. Never use Comic Sans or handwritten novelty fonts.
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.
 - Name controls after existing ones that do the same thing; a checkbox that marks lines reviewed is "Viewed", like the file's.
-- Give each action a distinct weight: one filled primary button in the thread's accent color, bordered secondary buttons, text-only Cancel, keyboard hints as key caps. Align controls on one row height.
+- Give each action a distinct weight: one filled button per row (`claude` when it sends to Claude, `primary` otherwise), secondary buttons, text-only Cancel, keyboard hints as key caps. Put status text left and buttons right, Cancel first and the filled button last. Align controls on one row height.
 - Before building a new or rearranged surface, sketch it and confirm terms with the user; "checkbox", "button" and "window" have been misread before.
 - Repository illustrations use a neutral, clean style focused on reviewing code and collaborating with an agent, with concrete code and review examples.
 

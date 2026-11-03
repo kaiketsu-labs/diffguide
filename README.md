@@ -153,7 +153,7 @@ The interface currently uses German labels. Code previews provide display colors
 - [ ] VS Code Marketplace / Open VSX publication
 - [ ] Linux and Windows verification
 
-Analysis notes are stored as threads that start with Claude's message. Versions before guided review cannot load a PR's comments once it has been analyzed.
+Guide notes are stored as threads that start with Claude's message. Versions before guided review cannot load a PR's comments once it has a guide.
 
 The [running-conversation verification](docs/QA-2026-10-26.md) records an authenticated Claude session started before setup, unchanged process/session identity after connecting, and a real inline question and formatted reply. Strict TypeScript and **256 tests** pass. Busy-agent delivery, a full separate-terminal roundtrip and real remote PR publication remain separate verification tasks. [Earlier native review](docs/UX-REVIEW-2026-10-21.md) · [Review tracker](docs/REVIEW.md)
 

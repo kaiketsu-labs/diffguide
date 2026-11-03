@@ -15,10 +15,11 @@ import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequest
 import { buildGuide, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
 import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
-import { markdownBlocks } from './markdown.js';
+import { fenceFilePaths, markdownBlocks } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
+import { pickAndSave } from './pullRequestEdits.js';
 import { buildOverviewState, showPullRequestOverview, type AnalysisView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
@@ -115,6 +116,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const detailsChanged = new vscode.EventEmitter<void>();
       let details: Promise<PullRequestDetails | Error> | undefined;
       const asError = (error: unknown): Error => error instanceof Error ? error : new Error(String(error));
+      const currentDetails = async (): Promise<PullRequestDetails> => {
+        const loaded = await (details ?? loadDetails());
+        if (loaded instanceof Error) throw loaded;
+        return loaded;
+      };
+      /** Reload the page's details and the sidebar after a change it lists, such as title, draft or open state. */
+      const changedOnGitHub = (): void => {
+        void loadDetails();
+        void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+      };
       const loadDetails = (): Promise<PullRequestDetails | Error> => {
         details = provider.details(pullRequest.number).catch(asError);
         void details.then(() => { detailsChanged.fire(); });
@@ -143,6 +154,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
         const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
+        await prepareHighlighting(opened.session.store.threads.flatMap((thread) => thread.messages.flatMap((entry) => fenceFilePaths(entry.text))));
         return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
@@ -225,12 +237,60 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void loadDetails();
         },
         merge: async (method) => {
-          const confirm = 'Merge';
-          const answer = await vscode.window.showWarningMessage(`Merge #${pullRequest.number} into ${pullRequest.baseBranch}?`, { modal: true }, confirm);
-          if (answer !== confirm) return;
+          const merge = 'Merge';
+          const mergeAndDelete = 'Merge and delete branch';
+          const { branchDeletable } = await currentDetails();
+          const answer = await vscode.window.showWarningMessage(`Merge #${pullRequest.number} into ${pullRequest.baseBranch}?`, { modal: true },
+            ...branchDeletable ? [merge, mergeAndDelete] : [merge]);
+          if (answer === undefined) return;
           await provider.merge(pullRequest.number, method);
+          if (answer === mergeAndDelete) await provider.deleteBranch(pullRequest.headBranch);
+          changedOnGitHub();
+        },
+        editTitle: async () => {
+          const { title } = await currentDetails();
+          const next = await vscode.window.showInputBox({ title: 'Edit title', value: title, validateInput: (value) => value.trim() ? undefined : 'Enter a title.' });
+          if (next === undefined || next.trim() === title) return;
+          await provider.editPullRequest(pullRequest.number, { title: next.trim() });
+          changedOnGitHub();
+        },
+        editBody: async (body) => {
+          await provider.editPullRequest(pullRequest.number, { body });
           void loadDetails();
+        },
+        pick: async (what) => {
+          await pickAndSave(provider, pullRequest.number, await currentDetails(), what);
+          void loadDetails();
+        },
+        setDraft: async (draft) => {
+          await provider.setDraft(pullRequest.number, draft);
+          changedOnGitHub();
+        },
+        setOpen: async (open) => {
+          if (!open) {
+            const close = 'Close';
+            const answer = await vscode.window.showWarningMessage(`Close #${pullRequest.number} without merging?`, { modal: true, detail: 'You can reopen it later.' }, close);
+            if (answer !== close) return;
+          }
+          await provider.editPullRequest(pullRequest.number, { state: open ? 'open' : 'closed' });
+          changedOnGitHub();
+        },
+        deleteBranch: async () => {
+          const remove = 'Delete branch';
+          const answer = await vscode.window.showWarningMessage(`Delete the branch ${pullRequest.headBranch} on GitHub?`, { modal: true }, remove);
+          if (answer !== remove) return;
+          await provider.deleteBranch(pullRequest.headBranch);
+          void loadDetails();
+        },
+        removeWorktree: async () => {
+          const confirm = 'Remove worktree';
+          const answer = await vscode.window.showWarningMessage(
+            `Remove the worktree for #${pullRequest.number}? Its local comments are deleted too. Git refuses if it has uncommitted changes.`, { modal: true }, confirm);
+          if (answer !== confirm) return false;
+          await pullRequestSessions.close(repository, pullRequest.number);
+          await removeWorktree(checkout.root, storageRoot, repository, pullRequest.number);
           void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+          return true;
         },
         refresh: () => { void loadDetails(); void loadThreads(); },
         analyze: async () => {

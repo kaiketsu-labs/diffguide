@@ -71,8 +71,8 @@
         "id": "pairReview.selectionBackground",
         "description": "Hintergrund der fixierten Codeauswahl für den aktiven Review-Kommentar.",
         "defaults": {
-          "dark": "#5DB9C326",
-          "light": "#087D8B1F",
+          "dark": "#FFFFFF1A",
+          "light": "#0000000F",
           "highContrast": "#00000000",
           "highContrastLight": "#00000000"
         }
@@ -81,8 +81,8 @@
         "id": "pairReview.selectionBorder",
         "description": "Rahmen der fixierten Codeauswahl für den aktiven Review-Kommentar.",
         "defaults": {
-          "dark": "#83D6D8AA",
-          "light": "#247D8FAA",
+          "dark": "#FFFFFF66",
+          "light": "#00000059",
           "highContrast": "#FFFFFF",
           "highContrastLight": "#000000"
         }
@@ -323,6 +323,12 @@
           "id": "pairReview.threads",
           "name": "Review",
           "icon": "resources/review.svg"
+        },
+        {
+          "id": "pairReview.legend",
+          "name": "Legend",
+          "icon": "resources/review.svg",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -450,22 +456,22 @@
         {
           "command": "pairReview.openPullRequestInBrowser",
           "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest/",
-          "group": "inline@1"
+          "group": "1_pullRequest@2"
         },
         {
           "command": "pairReview.showPullRequestClaude",
           "when": "view == pairReview.pullRequests && viewItem == pairReview.pullRequest.checkedOut",
-          "group": "inline@0"
+          "group": "1_pullRequest@1"
         },
         {
           "command": "pairReview.removePullRequestWorktree",
           "when": "view == pairReview.pullRequests && viewItem == pairReview.pullRequest.checkedOut",
-          "group": "inline@2"
+          "group": "2_worktree@0"
         },
         {
           "command": "pairReview.showPullRequestOverview",
           "when": "view == pairReview.pullRequests && viewItem == pairReview.pullRequest.checkedOut",
-          "group": "inline@0"
+          "group": "1_pullRequest@0"
         },
         {
           "command": "pairReview.resolve",

@@ -27,7 +27,8 @@ export const mockPullRequestProvider: PullRequestProvider = {
   setViewed: async () => undefined,
   publishComment: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   details: async () => ({
-    bodyHtml: '<p>Sample description.</p>', open: true, mergeable: 'yes', viewerIsAuthor: false, mergeMethods: ['squash', 'merge'],
+    bodyHtml: '<p>Sample description.</p>', title: 'Sample pull request', body: 'Sample description.', open: true, merged: false, draft: false,
+    canEdit: false, branchDeletable: false, labels: [], assignees: [], mergeable: 'yes', viewerAvatarUrl: '', viewerIsAuthor: false, mergeMethods: ['squash', 'merge'],
     reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }],
     checks: [{ name: 'build', state: 'success' }, { name: 'lint', state: 'pending' }],
   }),
@@ -38,4 +39,10 @@ export const mockPullRequestProvider: PullRequestProvider = {
   deleteComment: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   submitReview: async () => { throw new Error('Sample pull requests cannot be reviewed.'); },
   merge: async () => { throw new Error('Sample pull requests cannot be merged.'); },
+  editPullRequest: async () => { throw new Error('Sample pull requests cannot be changed.'); },
+  setDraft: async () => { throw new Error('Sample pull requests cannot be changed.'); },
+  requestReviewers: async () => { throw new Error('Sample pull requests cannot be changed.'); },
+  removeReviewers: async () => { throw new Error('Sample pull requests cannot be changed.'); },
+  deleteBranch: async () => { throw new Error('Sample pull requests cannot be changed.'); },
+  pickerOptions: async () => ({ users: [], teams: [], labels: [] }),
 };

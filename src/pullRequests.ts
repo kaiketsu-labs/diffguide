@@ -51,13 +51,27 @@ export interface PullRequestComment {
 export interface PullRequestDetails {
   /** Description already rendered and sanitized by the code host. */
   readonly bodyHtml: string;
+  readonly title: string;
+  /** The description as Markdown, for editing. */
+  readonly body: string;
   readonly open: boolean;
+  readonly merged: boolean;
+  readonly draft: boolean;
+  /** The viewer may edit the PR: title, description, labels, assignees, reviewers, draft and open state. */
+  readonly canEdit: boolean;
+  /** The head branch lives in this repository, still exists and GitHub does not delete it on merge. */
+  readonly branchDeletable: boolean;
+  readonly labels: readonly Label[];
+  readonly assignees: readonly string[];
   readonly mergeable: 'yes' | 'no' | 'unknown';
   readonly viewerIsAuthor: boolean;
+  /** The signed-in user's GitHub avatar; empty when GitHub sent none. */
+  readonly viewerAvatarUrl: string;
   /** Comments in the viewer's unsubmitted review; undefined when there is no such review. */
   readonly pendingComments?: number;
   readonly mergeMethods: readonly MergeMethod[];
-  readonly reviewers: readonly { readonly name: string; readonly state: 'requested' | 'approved' | 'changes' | 'commented' | 'dismissed' }[];
+  /** `team` holds the team's slug for a requested team. */
+  readonly reviewers: readonly { readonly name: string; readonly state: 'requested' | 'approved' | 'changes' | 'commented' | 'dismissed'; readonly team?: string }[];
   readonly checks: readonly { readonly name: string; readonly state: 'success' | 'failure' | 'pending' | 'neutral'; readonly url?: string }[];
 }
 
@@ -76,7 +90,28 @@ export interface RemoteThread {
   readonly pending: boolean;
   /** Bodies come rendered and sanitized by GitHub. */
   /** `canDelete` when the viewer may delete the comment, usually because they wrote it. */
-  readonly comments: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean }[];
+  readonly comments: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean; readonly createdAt: string }[];
+}
+
+export interface Label { readonly name: string; readonly color: string }
+
+/** Who can be asked to review, assigned or labeled on this repository. */
+export interface PickerOptions {
+  readonly users: readonly string[];
+  readonly teams: readonly { readonly name: string; readonly slug: string }[];
+  readonly labels: readonly Label[];
+}
+
+/** Users by login and teams by slug. */
+export interface ReviewerSet { readonly users: readonly string[]; readonly teams: readonly string[] }
+
+/** Fields to change on a PR; `labels` and `assignees` replace the current lists. */
+export interface PullRequestEdit {
+  readonly title?: string;
+  readonly body?: string;
+  readonly state?: 'open' | 'closed';
+  readonly labels?: readonly string[];
+  readonly assignees?: readonly string[];
 }
 
 export type ReviewEvent = 'approve' | 'requestChanges' | 'comment';
@@ -107,6 +142,12 @@ export interface PullRequestProvider {
   /** Submit the user's review, including comments already in their pending review. */
   submitReview(number: number, event: ReviewEvent, body: string): Promise<void>;
   merge(number: number, method: MergeMethod): Promise<void>;
+  editPullRequest(number: number, edit: PullRequestEdit): Promise<void>;
+  setDraft(number: number, draft: boolean): Promise<void>;
+  requestReviewers(number: number, reviewers: ReviewerSet): Promise<void>;
+  removeReviewers(number: number, reviewers: ReviewerSet): Promise<void>;
+  deleteBranch(branch: string): Promise<void>;
+  pickerOptions(): Promise<PickerOptions>;
 }
 
 /** A repository on a GitHub host, as a git remote names it. */
@@ -166,15 +207,17 @@ type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSu
 
 const searchFields = 'number title url isDraft headRefName baseRefName author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
 const searchPages = 10;
-const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed';
-const detailsFields = `bodyHTML state mergeable viewerDidAuthor
+const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
+const viewerField = 'viewer{avatarUrl(size:40)}';
+const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id}
+  labels(first:50){nodes{name color}} assignees(first:20){nodes{login}}
   reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
-  reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name} ... on Bot{login}}}}
+  reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name slug} ... on Bot{login}}}}
   latestOpinionatedReviews(first:30){nodes{state author{login}}}
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
 const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
-  comments(first:100){nodes{id viewerCanDelete url bodyHTML state author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
+  comments(first:100){nodes{id viewerCanDelete url bodyHTML state createdAt author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
 
 /** Group search hits by repository, in the shape `parsePullRequestList` reads. */
 export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
@@ -348,9 +391,9 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   async details(number: number): Promise<PullRequestDetails> {
-    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){${viewerField} repository(owner:$owner,name:$name){
       ${mergeMethodFields} pullRequest(number:$number){${detailsFields}}}}`, { number });
-    return parseDetails(object(data['repository']));
+    return parseDetails(object(data['repository']), object(data['viewer']));
   }
 
   async threads(number: number): Promise<readonly RemoteThread[]> {
@@ -358,12 +401,12 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   async overview(number: number): Promise<{ readonly details: PullRequestDetails; readonly threads: readonly RemoteThread[] }> {
-    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){${viewerField} repository(owner:$owner,name:$name){
       ${mergeMethodFields} pullRequest(number:$number){id ${detailsFields} ${threadsField}}}}`, { number, after: null });
     const repository = object(data['repository']);
     const id = object(repository['pullRequest'])['id'];
     if (typeof id === 'string' && id !== '') this.#ids.set(number, Promise.resolve(id));
-    return { details: parseDetails(repository), threads: await this.#threads(number, data) };
+    return { details: parseDetails(repository, object(data['viewer'])), threads: await this.#threads(number, data) };
   }
 
   /** All review threads, continuing from an already fetched first page when given. */
@@ -414,6 +457,41 @@ export class GitHubApiProvider implements PullRequestProvider {
     const methods: Record<MergeMethod, string> = { merge: 'MERGE', squash: 'SQUASH', rebase: 'REBASE' };
     await this.#graphql('mutation($id:ID!,$method:PullRequestMergeMethod!){mergePullRequest(input:{pullRequestId:$id,mergeMethod:$method}){clientMutationId}}',
       { id: await this.#pullRequestId(number), method: methods[method] });
+  }
+
+  async editPullRequest(number: number, edit: PullRequestEdit): Promise<void> {
+    await this.#rest(`issues/${number}`, 'PATCH', edit);
+  }
+
+  async setDraft(number: number, draft: boolean): Promise<void> {
+    const mutation = draft ? 'convertPullRequestToDraft' : 'markPullRequestReadyForReview';
+    await this.#graphql(`mutation($id:ID!){${mutation}(input:{pullRequestId:$id}){clientMutationId}}`, { id: await this.#pullRequestId(number) });
+  }
+
+  async requestReviewers(number: number, reviewers: ReviewerSet): Promise<void> {
+    await this.#rest(`pulls/${number}/requested_reviewers`, 'POST', { reviewers: reviewers.users, team_reviewers: reviewers.teams });
+  }
+
+  async removeReviewers(number: number, reviewers: ReviewerSet): Promise<void> {
+    await this.#rest(`pulls/${number}/requested_reviewers`, 'DELETE', { reviewers: reviewers.users, team_reviewers: reviewers.teams });
+  }
+
+  async deleteBranch(branch: string): Promise<void> {
+    await this.#rest(`git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, 'DELETE');
+  }
+
+  async pickerOptions(): Promise<PickerOptions> {
+    const data = await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
+      assignableUsers(first:100){nodes{login}} labels(first:100){nodes{name color}}
+      owner{... on Organization{teams(first:100){nodes{name slug}}}}}}`, {});
+    return parsePickerOptions(object(data['repository']));
+  }
+
+  /** Call a REST endpoint under this repository. */
+  async #rest(path: string, method: 'POST' | 'PATCH' | 'DELETE', body?: unknown): Promise<unknown> {
+    const { owner, name, host } = await this.#repo();
+    const endpoints = endpointsFor(host);
+    return await githubRequest(endpoints, `${endpoints.rest}/repos/${owner}/${name}/${path}`, method, body);
   }
 
   /** The user's pending review on a PR, started at `commitId` when there is none yet. */
@@ -549,7 +627,7 @@ function checkState(raw: unknown): PullRequestDetails['checks'][number]['state']
 }
 
 /** Validate PR details from GraphQL; reviewers without an account and malformed checks are left out. */
-export function parseDetails(repository: Record<string, unknown>): PullRequestDetails {
+export function parseDetails(repository: Record<string, unknown>, viewer: Record<string, unknown> = {}): PullRequestDetails {
   const pullRequest = object(repository['pullRequest']);
   const methods: readonly [string, MergeMethod][] = [['squashMergeAllowed', 'squash'], ['mergeCommitAllowed', 'merge'], ['rebaseMergeAllowed', 'rebase']];
   const reviewers: PullRequestDetails['reviewers'][number][] = [];
@@ -561,9 +639,10 @@ export function parseDetails(repository: Record<string, unknown>): PullRequestDe
   }
   for (const node of list(object(pullRequest['reviewRequests'])['nodes'])) {
     const reviewer = object(node)['requestedReviewer'];
-    const record = typeof reviewer === 'object' && reviewer !== null ? reviewer as { login?: unknown; name?: unknown } : {};
+    const record = typeof reviewer === 'object' && reviewer !== null ? reviewer as { login?: unknown; name?: unknown; slug?: unknown } : {};
     const name = record.login ?? record.name;
-    if (typeof name === 'string' && !reviewers.some((entry) => entry.name === name)) reviewers.push({ name, state: 'requested' });
+    if (typeof name !== 'string' || reviewers.some((entry) => entry.name === name)) continue;
+    reviewers.push({ name, state: 'requested', ...(typeof record.slug === 'string' ? { team: record.slug } : {}) });
   }
   const commit = list(object(pullRequest['commits'])['nodes'])[0];
   const rollup = commit === undefined ? null : object(object(commit)['commit'])['statusCheckRollup'];
@@ -585,12 +664,44 @@ export function parseDetails(repository: Record<string, unknown>): PullRequestDe
   return {
     ...(typeof pendingComments === 'number' ? { pendingComments } : {}),
     bodyHtml: typeof pullRequest['bodyHTML'] === 'string' ? pullRequest['bodyHTML'] : '',
+    title: typeof pullRequest['title'] === 'string' ? pullRequest['title'] : '',
+    body: typeof pullRequest['body'] === 'string' ? pullRequest['body'] : '',
     open: pullRequest['state'] === 'OPEN',
+    merged: pullRequest['state'] === 'MERGED',
+    draft: pullRequest['isDraft'] === true,
+    canEdit: pullRequest['viewerCanUpdate'] === true,
+    branchDeletable: pullRequest['isCrossRepository'] === false && pullRequest['headRef'] !== null && pullRequest['headRef'] !== undefined && repository['deleteBranchOnMerge'] !== true,
+    labels: parseLabels(pullRequest['labels']),
+    assignees: logins(pullRequest['assignees']),
     mergeable: pullRequest['mergeable'] === 'MERGEABLE' ? 'yes' : pullRequest['mergeable'] === 'CONFLICTING' ? 'no' : 'unknown',
     viewerIsAuthor: pullRequest['viewerDidAuthor'] === true,
+    viewerAvatarUrl: optionalHttpsUrl(viewer['avatarUrl']),
     mergeMethods: methods.filter(([key]) => repository[key] === true).map(([, method]) => method),
     reviewers,
     checks,
+  };
+}
+
+function logins(connection: unknown): readonly string[] {
+  return list(object(connection)['nodes']).map((node) => object(node)['login']).filter((login): login is string => typeof login === 'string');
+}
+
+/** Labels with a six-digit hex color; others are left out. */
+function parseLabels(connection: unknown): readonly Label[] {
+  return list(object(connection)['nodes']).map(object).flatMap((label) => {
+    const { name, color } = label;
+    return typeof name === 'string' && typeof color === 'string' && /^[0-9a-f]{6}$/iu.test(color) ? [{ name, color }] : [];
+  });
+}
+
+/** Users, teams and labels for the reviewer, assignee and label pickers; a repository owned by a user has no teams. */
+export function parsePickerOptions(repository: Record<string, unknown>): PickerOptions {
+  const owner = repository['owner'];
+  const teams = typeof owner === 'object' && owner !== null && 'teams' in owner ? list(object((owner as Record<string, unknown>)['teams'])['nodes']).map(object) : [];
+  return {
+    users: logins(repository['assignableUsers']),
+    teams: teams.flatMap(({ name, slug }) => typeof name === 'string' && typeof slug === 'string' ? [{ name, slug }] : []),
+    labels: parseLabels(repository['labels']),
   };
 }
 
@@ -623,6 +734,7 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
           pending: comment['state'] === 'PENDING',
           bodyHtml: typeof comment['bodyHTML'] === 'string' ? comment['bodyHTML'] : '',
           canDelete: comment['viewerCanDelete'] === true,
+          createdAt: typeof comment['createdAt'] === 'string' ? comment['createdAt'] : '',
         };
       }),
     });

@@ -81,7 +81,7 @@ export function watchGitHubSessions(onChange: () => void): vscode.Disposable {
 }
 
 /** Call the GitHub API as the signed-in user; the token goes only to the host's own API and redirects are refused. */
-export async function githubRequest(endpoints: GitHubEndpoints, url: string, method: 'GET' | 'POST' | 'PATCH', body?: unknown, interactive = false): Promise<unknown> {
+export async function githubRequest(endpoints: GitHubEndpoints, url: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: unknown, interactive = false): Promise<unknown> {
   const response = await fetch(url, {
     method,
     headers: {
@@ -104,6 +104,7 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
     const detail = errorDetail(text).slice(0, 600).replaceAll(/(?:gh[pousr]_[A-Za-z\d_]+|github_pat_[A-Za-z\d_]+)/gu, '[credential]');
     throw new Error(`GitHub request failed (${response.status}).${detail ? ` ${detail}` : ''}`);
   }
+  if (text === '') return undefined;
   try {
     return JSON.parse(text) as unknown;
   } catch {

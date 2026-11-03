@@ -40,6 +40,7 @@ const snapshotKey = 'pairReview.pullRequestSnapshot';
 type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>>;
 
 const fileScheme = 'pair-review-pr-file';
+const pullRequestScheme = 'pair-review-pr';
 
 /** Source Control letters and colors for each kind of change. */
 const changeDecorations: Record<PullRequestFile['change'], { readonly badge: string; readonly color: string; readonly tooltip: string }> = {
@@ -54,9 +55,15 @@ function fileRowUri(number: number, file: PullRequestFile): vscode.Uri {
   return vscode.Uri.from({ scheme: fileScheme, authority: `pr-${number}`, path: `/${file.path}`, query: `change=${file.change}` });
 }
 
-/** Color PR file rows and add their change letter, like the Source Control view. */
-const changeDecorationProvider: vscode.FileDecorationProvider = {
+/** Address for a PR row, so the decoration can badge checked-out PRs. */
+function pullRequestRowUri(repository: string, number: number, checkedOut: boolean): vscode.Uri {
+  return vscode.Uri.from({ scheme: pullRequestScheme, path: `/${repository}/${number}`, query: checkedOut ? 'checkedOut' : '' });
+}
+
+/** Badge checked-out PR rows, and color PR file rows with their change letter like the Source Control view. */
+const rowDecorationProvider: vscode.FileDecorationProvider = {
   provideFileDecoration: (uri) => {
+    if (uri.scheme === pullRequestScheme) return uri.query === 'checkedOut' ? new vscode.FileDecoration('W', 'Checked out in a worktree') : undefined;
     if (uri.scheme !== fileScheme) return undefined;
     const change = new URLSearchParams(uri.query).get('change');
     const decoration = change !== null && Object.hasOwn(changeDecorations, change) ? changeDecorations[change as PullRequestFile['change']] : undefined;
@@ -112,9 +119,51 @@ const severityLooks: Record<OutlineGroup['severity'], { readonly label: string; 
   unclassified: { label: 'Unclassified', icon: 'question', color: 'descriptionForeground' },
 };
 
+const repositoryIcon = new vscode.ThemeIcon('repo', new vscode.ThemeColor('charts.purple'));
+
+function pullRequestIcon(draft: boolean, review?: ReviewVerdict): vscode.ThemeIcon {
+  if (review !== undefined) return new vscode.ThemeIcon(verdicts[review].icon, new vscode.ThemeColor(verdicts[review].color));
+  return draft
+    ? new vscode.ThemeIcon('git-pull-request-draft', new vscode.ThemeColor('descriptionForeground'))
+    : new vscode.ThemeIcon('git-pull-request', new vscode.ThemeColor('charts.green'));
+}
+
+/** Key to the Pull Requests icons and badge, drawn with the same icons as the rows. */
+const legendProvider: vscode.TreeDataProvider<vscode.TreeItem> = {
+  getTreeItem: (item) => item,
+  getChildren: (item) => {
+    if (item !== undefined) return [];
+    const row = (label: string, icon: vscode.ThemeIcon, resourceUri?: vscode.Uri): vscode.TreeItem => {
+      const each = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+      each.iconPath = icon;
+      if (resourceUri !== undefined) each.resourceUri = resourceUri;
+      return each;
+    };
+    return [
+      row('Repository', repositoryIcon),
+      row('Open', pullRequestIcon(false)),
+      row('Draft', pullRequestIcon(true)),
+      ...(['approved', 'changes', 'commented'] as const).map((review) => row(verdicts[review].label, pullRequestIcon(false, review))),
+      row('Checked out in a worktree', pullRequestIcon(false), pullRequestRowUri('legend', 0, true)),
+    ];
+  },
+};
+
 const sectionLabels: Record<PullRequestRole, string> = { author: 'Mine', reviewer: 'Review requested' };
 const roleIcons: Record<PullRequestRole, string> = { author: 'account', reviewer: 'eye' };
 const roles: readonly PullRequestRole[] = ['reviewer', 'author'];
+
+/** Split `owner/name` so the name can lead the row. */
+function splitRepository(fullName: string): { readonly owner: string; readonly name: string } {
+  const slash = fullName.indexOf('/');
+  return slash < 0 ? { owner: '', name: fullName } : { owner: fullName.slice(0, slash), name: fullName.slice(slash + 1) };
+}
+
+/** Split a Conventional Commits prefix such as `feat(scope):` off a PR title, so the subject leads the row. */
+function splitCommitType(title: string): { readonly type?: string; readonly subject: string } {
+  const match = /^([a-z]+(?:\([^)]*\))?!?):\s+(\S.*)$/iu.exec(title);
+  return match === null ? { subject: title } : { type: match[1] as string, subject: match[2] as string };
+}
 
 function pullRequestsOf(listing: Ready, role: PullRequestRole): readonly PullRequestSummary[] {
   return role === 'author' ? listing.mine : listing.reviewRequested;
@@ -286,11 +335,13 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'repository': {
         const { listing, role } = node;
-        const item = new vscode.TreeItem(listing.repository.name, vscode.TreeItemCollapsibleState.Expanded);
-        item.iconPath = new vscode.ThemeIcon('repo');
-        item.description = role === undefined
+        const { owner, name } = splitRepository(listing.repository.name);
+        const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Expanded);
+        item.iconPath = repositoryIcon;
+        const counts = role === undefined
           ? roles.filter((each) => pullRequestsOf(listing, each).length > 0).map((each) => `${pullRequestsOf(listing, each).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
           : String(pullRequestsOf(listing, role).length);
+        item.description = [owner, counts].filter(Boolean).join(' · ');
         item.tooltip = listing.folder;
         item.contextValue = 'pairReview.repository';
         return item;
@@ -304,15 +355,15 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'pullRequest': {
         const pr = node.pullRequest;
         const checkedOut = await this.#isCheckedOut(node);
-        const item = new vscode.TreeItem(`#${pr.number} ${pr.title}`, vscode.TreeItemCollapsibleState.Collapsed);
+        const { type, subject } = splitCommitType(pr.title);
+        const item = new vscode.TreeItem(subject, vscode.TreeItemCollapsibleState.Collapsed);
+        item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
         const verdict = pr.review === undefined ? undefined : verdicts[pr.review];
-        item.description = [verdict?.label, pr.author, pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress].filter(Boolean).join(' · ');
-        item.tooltip = `${pr.title}\n${pr.headBranch} → ${pr.baseBranch}${verdict === undefined ? '' : `\n${verdict.label}`}`;
-        item.iconPath = verdict === undefined
-          ? new vscode.ThemeIcon(pr.draft ? 'git-pull-request-draft' : 'git-pull-request')
-          : new vscode.ThemeIcon(verdict.icon, new vscode.ThemeColor(verdict.color));
+        item.description = [`#${pr.number}`, type, verdict?.label, pr.author, pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress].filter(Boolean).join(' · ');
+        item.tooltip = `#${pr.number} ${pr.title}\n${pr.headBranch} → ${pr.baseBranch}${verdict === undefined ? '' : `\n${verdict.label}`}`;
+        item.iconPath = pullRequestIcon(pr.draft, pr.review);
         item.contextValue = checkedOut ? 'pairReview.pullRequest.checkedOut' : 'pairReview.pullRequest';
         item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node] };
         return item;
@@ -339,8 +390,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'guide': {
         const steps = node.groups.flatMap((group) => group.steps);
-        const item = new vscode.TreeItem('Guided review', vscode.TreeItemCollapsibleState.Expanded);
-        item.iconPath = new vscode.ThemeIcon('compass');
+        const item = new vscode.TreeItem('Guide', vscode.TreeItemCollapsibleState.Expanded);
+        item.iconPath = new vscode.ThemeIcon('map');
         item.description = `${steps.filter((step) => step.viewed).length}/${steps.length} viewed`;
         return item;
       }
@@ -553,10 +604,12 @@ export function registerPullRequestView(
   const report = (error: unknown): void => {
     void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
   };
+  const legend = vscode.window.createTreeView('pairReview.legend', { treeDataProvider: legendProvider });
   const view = vscode.window.createTreeView('pairReview.pullRequests', { treeDataProvider: tree, manageCheckboxStateManually: true });
   return vscode.Disposable.from(
     view,
-    vscode.window.registerFileDecorationProvider(changeDecorationProvider),
+    legend,
+    vscode.window.registerFileDecorationProvider(rowDecorationProvider),
     view.onDidChangeCheckboxState(async (event) => {
       try {
         for (const [node, state] of event.items) await tree.setReviewed(node, state);

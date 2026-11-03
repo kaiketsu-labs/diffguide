@@ -65,6 +65,12 @@ const provider: PullRequestProvider = {
   deleteComment: async () => { throw new Error('not used'); },
   submitReview: async () => { throw new Error('not used'); },
   merge: async () => { throw new Error('not used'); },
+  editPullRequest: async () => { throw new Error('not used'); },
+  setDraft: async () => { throw new Error('not used'); },
+  requestReviewers: async () => { throw new Error('not used'); },
+  removeReviewers: async () => { throw new Error('not used'); },
+  deleteBranch: async () => { throw new Error('not used'); },
+  pickerOptions: async () => { throw new Error('not used'); },
 };
 const connect = async (): Promise<PullRequestProvider> => provider;
 

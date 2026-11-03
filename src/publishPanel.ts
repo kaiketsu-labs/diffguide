@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
-import { webviewFontStyles } from './webviewStyles.js';
+import { webviewStyles } from './webviewStyles.js';
 
 /** A thread's comment as it will be posted, before the user edits it. */
 export interface PublishDraft {
@@ -45,18 +45,17 @@ export function publishHtml(draft: PublishDraft): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>Publish to GitHub</title>
 <style nonce="${nonce}">
-${webviewFontStyles}
-body{margin:0;padding:24px;color:var(--vscode-foreground);background:var(--vscode-editor-background);font-family:var(--review-font-ui);font-size:var(--vscode-font-size);line-height:1.5}
-h1{font-size:18px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.muted{color:var(--vscode-descriptionForeground);margin:0 0 14px}
-textarea{box-sizing:border-box;width:100%;height:45vh;min-height:180px;resize:vertical;padding:12px;border:1px solid var(--vscode-input-border,var(--vscode-widget-border));border-radius:4px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);font:13px/1.55 var(--review-font-code)}
-.actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}button{border:1px solid transparent;border-radius:3px;padding:7px 12px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);font:inherit;cursor:pointer}
-button:hover{background:var(--vscode-button-hoverBackground)}button.secondary{color:var(--vscode-button-secondaryForeground);background:var(--vscode-button-secondaryBackground)}button:disabled{opacity:.55;cursor:default}
-textarea:focus,button:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}#status{min-height:20px;white-space:pre-wrap}.error{color:var(--vscode-errorForeground)}
+${webviewStyles}
+body{margin:0;padding:var(--space-24)}
+h1{font-size:18px;line-height:26px;font-weight:600;margin:0 0 var(--space-4);overflow-wrap:anywhere}.muted{margin:0 0 var(--space-16)}
+textarea{width:100%;height:45vh;min-height:180px;max-height:none;field-sizing:fixed;padding:var(--space-12);font:12px/19px var(--font-code)}
+.actions{display:flex;justify-content:flex-end;gap:var(--space-8);flex-wrap:wrap;margin:var(--space-12) 0}
+#status{min-height:20px;white-space:pre-wrap}.error{color:var(--danger)}
 </style></head><body>
 <h1>${escapeHtml(draft.title)}</h1>
 <p class="muted">${escapeHtml(draft.placement)} · Markdown</p>
 <textarea id="body" spellcheck="true" aria-label="Comment">${escapeHtml(draft.body)}</textarea>
-<div class="actions"><button id="pending">Add to pending review</button><button id="direct" class="secondary">Comment now</button></div>
+<div class="actions"><button id="direct">Comment now</button><button id="pending" class="primary">Add to pending review</button></div>
 <p id="status" class="muted" role="status" aria-live="polite">A pending comment stays private until you submit your review on GitHub.</p>
 <script nonce="${nonce}">
 const api=acquireVsCodeApi();
