@@ -26,6 +26,12 @@ test('parses gh pr list output into summaries', () => {
   assert.deepEqual(parsePullRequestList([ghEntry]), [summary]);
 });
 
+test('reads when a PR was opened and updated and how much it changes, skipping values that do not parse', () => {
+  const [parsed] = parsePullRequestList([{ ...ghEntry, createdAt: '2026-11-01T10:00:00Z', updatedAt: '2026-11-02T10:00:00Z', additions: 312, deletions: 48, changedFiles: 14 }]);
+  assert.deepEqual(parsed, { ...summary, createdAt: '2026-11-01T10:00:00Z', updatedAt: '2026-11-02T10:00:00Z', changes: { additions: 312, deletions: 48, files: 14 } });
+  assert.deepEqual(parsePullRequestList([{ ...ghEntry, createdAt: 'soon', additions: -1, deletions: 0, changedFiles: 1 }]), [summary]);
+});
+
 test('sums up the latest reviews with changes requested above approval above comments', () => {
   const reviewed = (...states: string[]) => parsePullRequestList([{ ...ghEntry, latestReviews: states.map((state) => ({ state })) }])[0]?.review;
   assert.equal(reviewed('COMMENTED', 'APPROVED'), 'approved');
@@ -488,7 +494,7 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   assert.deepEqual(redrawn, [pr?.node, undefined]);
 });
 
-test('lists a checked-out PR\'s guide steps above its files and opens the review page at a step', async (t) => {
+test('lists a checked-out PR\'s files or its guide steps, and opens the review page at a step', async (t) => {
   window.trees.length = 0;
   const provider = {
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
@@ -514,14 +520,64 @@ test('lists a checked-out PR\'s guide steps above its files and opens the review
   const [repository] = await level(tree);
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
-  const [guide, file] = await level(tree, pr?.node);
-  assert.deepEqual([guide?.item.label, guide?.item.description, file?.item.label], ['Guide', '1/3 viewed', 'a.ts']);
-  const groups = await level(tree, guide?.node);
+  assert.deepEqual((await level(tree, pr?.node)).map(({ item }) => item.label), ['a.ts']);
+  await commands.executeCommand('pairReview.showGuideInTree');
+  const groups = await level(tree, pr?.node);
   assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
   const steps = await level(tree, groups[0]?.node);
   assert.deepEqual(steps.map(({ item }) => [item.label, item.description, (item.iconPath as vscode.ThemeIcon).id]), [['1. Check tokens', 'a.ts', 'pass-filled'], ['2. b.ts', 'src', 'circle-large-outline']]);
   const command = steps[0]?.item.command;
   await commands.executeCommand(command?.command ?? '', ...command?.arguments ?? []);
   assert.deepEqual(shown, ['g0.0']);
+
+  worktrees.checkedOut.delete(7);
+  view.dispose();
+  const unchecked = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
+  t.after(() => { unchecked.dispose(); });
+  const fresh = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+  const [freshRepository] = await level(fresh);
+  const [freshSection] = await level(fresh, freshRepository?.node);
+  const [freshPr] = await level(fresh, freshSection?.node);
+  assert.deepEqual((await level(fresh, freshPr?.node)).map(({ item }) => item.label), ['a.ts']);
+});
+
+test('filters PRs by author and shows their size and dates', async (t) => {
+  window.trees.length = 0;
+  const pr = (number: number, author: string): PullRequestSummary => ({
+    ...summary, number, author, draft: false, createdAt: '2026-11-01T10:00:00Z', updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+    changes: { additions: 312, deletions: 48, files: 14 },
+  });
+  const provider = {
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [],
+    listReviewRequested: async () => [pr(7, 'octo'), pr(8, 'alice')],
+  } as unknown as PullRequestProvider;
+  const settings = new FakeMemento();
+  await settings.update('pairReview.groupBy', 'repository');
+  const workspace = new FakeMemento();
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, settings, workspace);
+  t.after(() => { view.dispose(); });
+  const registered = window.trees.at(-1);
+  const tree = registered?.provider as vscode.TreeDataProvider<unknown>;
+  const rows = async () => {
+    const [repository] = await level(tree);
+    const [section] = await level(tree, repository?.node);
+    return await level(tree, section?.node);
+  };
+
+  const [first] = await rows();
+  assert.equal(first?.item.description, '#7 · octo · +312 −48');
+  assert.match(String(first?.item.tooltip), /\+312 −48 in 14 files\nOpened .+, updated 2h ago$/u);
+
+  window.quickPickIndex = 2;
+  await commands.executeCommand('pairReview.filterByAuthor');
+  assert.deepEqual(window.quickPicks.at(-1), ['$(clear-all) All authors', 'alice', 'octo']);
+  assert.deepEqual((await rows()).map(({ item }) => item.description), ['#7 · octo · +312 −48']);
+  assert.equal(registered?.description, 'Author: octo');
+
+  window.quickPickIndex = 0;
+  await commands.executeCommand('pairReview.filterByAuthorActive');
+  assert.equal((await rows()).length, 2);
+  assert.equal(workspace.get('pairReview.authorFilter'), undefined);
 });
 

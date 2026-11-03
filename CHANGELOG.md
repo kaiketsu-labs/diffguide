@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Filter the Pull Requests sidebar by author with the filter button in its title bar. The view's title shows the active author, and the filled filter icon clears it.
+- PR rows in the sidebar list either their files or their guide steps, not both. The map and files buttons in the title bar switch between them; a PR without a guide always lists its files.
+- PRs show their size and age. Sidebar rows end in lines added and removed, and their tooltip says when the PR was opened and last updated. The review page shows the same under the byline: Opened 3d ago · Updated 2h ago · +312 −48 in 14 files.
 - PR worktrees moved from `.git/pair-review` to `.claude/worktrees/pair-review` in the repository, where Claude Code keeps its own. Claude refused to edit files under `.git` as sensitive, so implementing a comment in a PR worktree failed. Existing worktrees move on the next start, with their uncommitted changes, comments and review marks; Claude starts a new conversation for each. Git ignores the folder through `.git/info/exclude`, so `.gitignore` stays untouched.
 - Pair Review removes PR worktrees when the PR is merged or closed, or when you have not opened it for 14 days (`pairReview.worktreeCleanupDays`). Worktrees with uncommitted changes or unpushed commits are kept. **Pair Review: Clean up worktrees** runs the check on demand.
 - The Pull Requests sidebar lists PRs of a repository that was renamed or moved on GitHub while your clone's remote still uses the old name. It showed none before.
