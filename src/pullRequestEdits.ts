@@ -11,6 +11,7 @@ const reviewStates: Record<PullRequestDetails['reviewers'][number]['state'], str
 
 /** Pick reviewers, assignees or labels in VS Code, then save what changed on GitHub. */
 export async function pickAndSave(provider: PullRequestProvider, number: number, details: PullRequestDetails, what: PickTarget): Promise<void> {
+  if (!details.canEdit) throw new Error('You do not have permission to edit this pull request.');
   const choices = provider.pickerOptions().then((options) => choicesFor(what, options, details));
   const picked = await vscode.window.showQuickPick(choices, { canPickMany: true, title: titles[what], matchOnDescription: true });
   if (picked === undefined) return;
@@ -21,7 +22,14 @@ export async function pickAndSave(provider: PullRequestProvider, number: number,
       { users: picked.filter((choice) => !choice.team).map((choice) => choice.value), teams: picked.filter((choice) => choice.team).map((choice) => choice.value) },
     );
     if (add.users.length || add.teams.length) await provider.requestReviewers(number, add);
-    if (remove.users.length || remove.teams.length) await provider.removeReviewers(number, remove);
+    if (remove.users.length || remove.teams.length) {
+      try {
+        await provider.removeReviewers(number, remove);
+      } catch (error: unknown) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Could not withdraw reviewer requests. Earlier requests may already have been saved. Refresh before retrying. ${detail}`, { cause: error });
+      }
+    }
     return;
   }
   const values = picked.map((choice) => choice.value);
@@ -47,7 +55,7 @@ function choicesFor(what: PickTarget, options: PickerOptions, details: PullReque
   if (what === 'assignees') {
     return [...new Set([...details.assignees, ...options.users])].map((login) => ({ label: login, value: login, team: false, picked: details.assignees.includes(login) }));
   }
-  const reviewer = (name: string) => details.reviewers.find((entry) => entry.name === name);
+  const reviewer = (name: string) => details.reviewers.find((entry) => entry.team === undefined && entry.name === name);
   const users = [...new Set([...details.reviewers.filter((entry) => entry.team === undefined).map((entry) => entry.name), ...options.users])].map((login): Choice => {
     const state = reviewer(login)?.state;
     return { label: login, value: login, team: false, picked: state === 'requested', ...(state === undefined || state === 'requested' ? {} : { description: reviewStates[state] }) };

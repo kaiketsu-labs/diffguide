@@ -148,6 +148,7 @@ export class FakePanel {
   readonly onDidDispose = this.closed.event;
   readonly webview = {
     html: '',
+    asWebviewUri: (uri: vscode.Uri): vscode.Uri => uri,
     onDidReceiveMessage: this.received.event,
     postMessage: async (message: unknown): Promise<boolean> => {
       if (this.disposed) return false;
@@ -604,6 +605,7 @@ export const window = {
   statusMessages: [] as string[],
   quickPicks: [] as (readonly vscode.QuickPickItem[])[],
   quickPickIndex: 0 as number | undefined,
+  quickPickManyIndexes: undefined as number[] | undefined,
   quickPickIndexes: [] as (number | undefined)[],
   beforeQuickPick: undefined as (() => void | Promise<void>) | undefined,
   beforeShow: undefined as (() => Promise<void>) | undefined,
@@ -616,10 +618,12 @@ export const window = {
   async showInformationMessage(message: string): Promise<void> { this.information.push(message); },
 
   /** Choose or cancel an actual navigation picker without creating synthetic command arguments. */
-  async showQuickPick<T extends vscode.QuickPickItem>(items: readonly T[], options?: vscode.QuickPickOptions): Promise<T | T[] | undefined> {
+  async showQuickPick<T extends vscode.QuickPickItem>(itemsOrPromise: readonly T[] | Thenable<readonly T[]>, options?: vscode.QuickPickOptions): Promise<T | T[] | undefined> {
+    const items = await itemsOrPromise;
     this.quickPicks.push(items);
     await this.beforeQuickPick?.();
     const index = this.quickPickIndexes.length > 0 ? this.quickPickIndexes.shift() : this.quickPickIndex;
+    if (options?.canPickMany === true && this.quickPickManyIndexes !== undefined) return items.filter((_, i) => this.quickPickManyIndexes?.includes(i));
     const selected = index === undefined ? undefined : items[index];
     return selected === undefined ? undefined : options?.canPickMany === true ? [selected] : selected;
   },
@@ -684,6 +688,7 @@ export function resetFakeWindow(): void {
   window.statusMessages.length = 0;
   window.quickPicks.length = 0;
   window.quickPickIndex = 0;
+  window.quickPickManyIndexes = undefined;
   window.quickPickIndexes.length = 0;
   window.beforeQuickPick = undefined;
   window.beforeShow = undefined;

@@ -372,6 +372,9 @@ export async function showPullRequestOverview(
         } else if (typeof action === 'string' && pullRequestActions.has(action) && !busy) {
           busy = true;
           try {
+            if (action !== 'review' && action !== 'merge' && state.details?.canEdit !== true) {
+              throw new Error('You do not have permission to edit this pull request.');
+            }
             if (action === 'review' && reviewEvents.includes(event as ReviewEvent) && typeof body === 'string' && body.length <= maximumReviewLength) {
               await actions.submitReview(event as ReviewEvent, body.trim());
               post({ done: 'review' });
@@ -386,6 +389,10 @@ export async function showPullRequestOverview(
             else if (action === 'close' || action === 'reopen') await actions.setOpen(action === 'reopen');
             else if (action === 'delete-branch') await actions.deleteBranch();
           } finally {
+            // GitHub writes can succeed before a later step or the response fails.
+            // Re-read authoritative state even when the action rejects.
+            actions.refresh();
+            redraw();
             busy = false;
             post({ idle: true });
           }

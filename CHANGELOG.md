@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Re-read GitHub state after PR management actions even when a write fails partway through, so saved reviewer requests and completed merges do not leave a stale review page. Report potentially saved requests when withdrawal fails.
+- Reject PR management messages without edit permission, and correctly preselect users whose login matches a team display name.
+
 - Comments and Claude's replies render Markdown tables, with column alignment and inline code. They showed as raw pipes before.
 - Code suggestions on the review page. **Suggest change** in the comment box starts a GitHub-style suggestion from the selected lines. Suggestions in local threads show as a small diff with **Publish suggestion**, which adds it to your pending GitHub review so the author can commit it there, and a button that uses it right away. Both refuse once the commented code changed. Claude on a PR now proposes code as suggestions and can offer up to three options to switch between. Suggestions show in the file's syntax colors and line up with the comment text. On a PR you can push to, **Commit suggestion** commits the option to the PR branch as "Apply suggestion from code review" and pushes it, like GitHub; a failed push takes the commit back. On other PRs, **Apply** changes the worktree only and the card offers **Discard**. The diff reloads either way.
 - Comments Claude is waiting on or working on show a pulsing line inside the thread with Claude's current step, such as "Reading src/app.ts". The Threads card shows the same step. Sending a reply redraws only that file instead of the whole review page.
