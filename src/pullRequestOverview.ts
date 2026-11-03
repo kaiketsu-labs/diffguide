@@ -13,6 +13,7 @@ import type { FileDiff } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
+import { conflictFixLabel } from './conflicts.js';
 import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
@@ -30,7 +31,8 @@ export interface OverviewState {
   readonly viewed: readonly string[];
   /** Line ranges marked read, collapsed in the diff. */
   readonly read: readonly ReadRange[];
-  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean };
+  /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
+  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string };
   readonly threads: readonly {
     readonly id: string;
     readonly location: string;
@@ -387,7 +389,7 @@ body{margin:0;padding:var(--space-24) var(--space-24) 48px}
 h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
-.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}.head{justify-content:space-between}
+.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}#conflict-row>button{margin-left:auto}.head{justify-content:space-between}
 .byline,.facts{margin-top:var(--space-6)}
 .status{margin-top:var(--space-12);font-size:12px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
@@ -578,7 +580,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
 <div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
 <p class="muted" id="review-note"></p></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span class="muted">Claude merges the base branch, resolves the conflicts and pushes.</span><span class="gap"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div class="row state-actions" id="state-actions"></div></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
 <div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
@@ -649,7 +651,8 @@ export function buildOverviewState(
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),
     ...(details === undefined ? {} : details instanceof Error ? { detailsError: details.message } : { details }),
     ...(remote === undefined ? {} : remote instanceof Error ? { githubError: remote.message } : { github: remote.map(githubThreadView) }),
-    claude: { text: claude.text, running: runner.activity.running, retry: claude.retry },
+    claude: { text: claude.text, running: runner.activity.running, retry: claude.retry,
+      ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}) },
     analysis,
     threads: session.store.threads.map((thread) => {
       const publication = session.publication?.(thread.id);

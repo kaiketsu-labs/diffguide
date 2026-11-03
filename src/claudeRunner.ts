@@ -13,6 +13,8 @@ export interface ClaudeActivity {
   readonly running: boolean;
   /** Current step in a few words, such as "Reading src/app.ts". */
   readonly step?: string;
+  /** Label of the task running instead of comments, such as "fixing merge conflicts". */
+  readonly task?: string;
   /** Threads whose comments the current or last run handles. */
   readonly threads: ReadonlySet<string>;
   readonly error?: string;
@@ -75,7 +77,7 @@ export class ClaudeRunner implements vscode.Disposable {
    */
   async runTask(task: ClaudeTask): Promise<string | undefined> {
     if (this.#disposed || this.#child !== undefined || this.#activity.running) throw new Error('Claude is still working on this PR. Try again when it is done.');
-    this.#set({ running: true, step: 'Starting', threads: new Set(), skipped: 0, error: undefined });
+    this.#set({ running: true, step: 'Starting', task: task.label, threads: new Set(), skipped: 0, error: undefined });
     let error: string | undefined;
     try {
       error = await this.#spawn({
@@ -87,7 +89,7 @@ export class ClaudeRunner implements vscode.Disposable {
     }
     if (error !== undefined) this.options.log(`Failed: ${error}`);
     this.#child = undefined;
-    this.#set({ running: false, step: undefined, threads: new Set(), skipped: 0, error });
+    this.#set({ running: false, step: undefined, task: undefined, threads: new Set(), skipped: 0, error });
     this.#next();
     return error;
   }
@@ -107,8 +109,8 @@ export class ClaudeRunner implements vscode.Disposable {
   }
 
   #set(activity: { [K in keyof ClaudeActivity]: ClaudeActivity[K] | undefined }): void {
-    const { step, error, ...rest } = activity;
-    this.#activity = { ...rest, ...(step === undefined ? {} : { step }), ...(error === undefined ? {} : { error }) } as ClaudeActivity;
+    const { step, task, error, ...rest } = activity;
+    this.#activity = { ...rest, ...(step === undefined ? {} : { step }), ...(task === undefined ? {} : { task }), ...(error === undefined ? {} : { error }) } as ClaudeActivity;
     if (!this.#disposed) this.#changed.fire();
   }
 

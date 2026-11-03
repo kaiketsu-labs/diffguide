@@ -129,6 +129,7 @@ test('runs a task in the PR conversation with its own tools, and keeps Git hooks
     const child = children[0];
     assert.ok(child !== undefined);
     assert.equal(child.args[1], 'Merge the base.');
+    assert.equal(instance.activity.task, 'fixing merge conflicts');
     assert.deepEqual(child.args.slice(child.args.indexOf('--allowedTools') + 1, child.args.indexOf('--allowedTools') + 3), ['mcp__pair-review', 'Bash(git merge *)']);
     assert.equal(child.args[child.args.indexOf('--permission-mode') + 1], 'acceptEdits');
     assert.ok(!child.args.includes('--disallowedTools'));
@@ -139,6 +140,7 @@ test('runs a task in the PR conversation with its own tools, and keeps Git hooks
     await child.exit(0);
     assert.equal(await done, undefined);
     assert.equal(instance.activity.running, false);
+    assert.equal(instance.activity.task, undefined);
   }
 });
 
