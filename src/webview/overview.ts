@@ -520,8 +520,8 @@ function composerBox(draft: Composer): HTMLElement {
     option.setAttribute('aria-pressed', String(on));
     toggle.append(option);
   }
-  head.append(el('span', 'source', 'New comment'), toggle,
-    el('span', 'muted', (draft.side === 'old' ? 'Base · ' : '') + range(draft.start, draft.end)));
+  const lines = el('span', 'muted', (draft.side === 'old' ? 'Base · ' : '') + range(draft.start, draft.end));
+  head.append(el('span', 'source', 'New comment'), toggle, lines);
   box.append(head);
   const cancel = (): void => { composer = undefined; save(); renderFiles([draft.path]); };
   const send = (pending: boolean, intent: Intent = 'ask'): void => {
@@ -590,7 +590,7 @@ function composerBox(draft: Composer): HTMLElement {
       renderFiles([draft.path]);
     }, 'quiet small');
     suggest.title = 'Start a suggestion from these lines. On GitHub it becomes a change the author can commit.';
-    head.append(suggest);
+    lines.before(suggest);
   }
   head.append(read);
   box.append(area, row);
