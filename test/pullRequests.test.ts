@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type * as vscode from 'vscode';
 
-import { parseDetails, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
+import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
 import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githubApi.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
 import { fileTree, type FileFolder } from '../src/fileTree.js';
@@ -94,11 +94,13 @@ async function level(provider: vscode.TreeDataProvider<unknown>, node?: unknown)
 
 test('parses PR details into reviewers, checks and allowed merge methods', () => {
   const details = parseDetails({
-    squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: true,
+    squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: true, deleteBranchOnMerge: false,
     pullRequest: {
-      bodyHTML: '<p>Hi</p>', state: 'OPEN', mergeable: 'CONFLICTING', viewerDidAuthor: true,
+      bodyHTML: '<p>Hi</p>', body: 'Hi', title: 'Add search', state: 'OPEN', isDraft: true, mergeable: 'CONFLICTING', viewerDidAuthor: true,
+      viewerCanUpdate: true, isCrossRepository: false, headRef: { id: 'R1' },
+      labels: { nodes: [{ name: 'bug', color: 'd73a4a' }, { name: 'bad', color: 'red' }] }, assignees: { nodes: [{ login: 'alice' }, {}] },
       latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'alice' } }, { state: 'COMMENTED', author: null }] },
-      reviewRequests: { nodes: [{ requestedReviewer: { login: 'bob' } }, { requestedReviewer: { name: 'core' } }, { requestedReviewer: { login: 'alice' } }] },
+      reviewRequests: { nodes: [{ requestedReviewer: { login: 'bob' } }, { requestedReviewer: { name: 'core', slug: 'core-team' } }, { requestedReviewer: { login: 'alice' } }] },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
         { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://ci/1' },
         { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null, detailsUrl: 'javascript:alert(1)' },
@@ -107,10 +109,29 @@ test('parses PR details into reviewers, checks and allowed merge methods', () =>
     },
   });
   assert.deepEqual(details, {
-    bodyHtml: '<p>Hi</p>', open: true, mergeable: 'no', viewerIsAuthor: true, mergeMethods: ['squash', 'rebase'],
-    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested' }],
+    bodyHtml: '<p>Hi</p>', title: 'Add search', body: 'Hi', open: true, merged: false, draft: true, canEdit: true, branchDeletable: true,
+    labels: [{ name: 'bug', color: 'd73a4a' }], assignees: ['alice'],
+    mergeable: 'no', viewerIsAuthor: true, mergeMethods: ['squash', 'rebase'],
+    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested', team: 'core-team' }],
     checks: [{ name: 'build', state: 'success', url: 'https://ci/1' }, { name: 'test', state: 'pending' }, { name: 'deploy', state: 'failure' }],
   });
+});
+
+test('offers no branch deletion for forks, deleted branches or repositories that delete on merge', () => {
+  const deletable = (repository: Record<string, unknown>, pullRequest: Record<string, unknown>) =>
+    parseDetails({ ...repository, pullRequest: { latestOpinionatedReviews: { nodes: [] }, reviewRequests: { nodes: [] }, commits: { nodes: [] }, labels: { nodes: [] }, assignees: { nodes: [] },
+      isCrossRepository: false, headRef: { id: 'R1' }, ...pullRequest } }).branchDeletable;
+  assert.equal(deletable({}, {}), true);
+  assert.equal(deletable({}, { isCrossRepository: true }), false);
+  assert.equal(deletable({}, { headRef: null }), false);
+  assert.equal(deletable({ deleteBranchOnMerge: true }, {}), false);
+});
+
+test('reads picker options, with teams only for organizations', () => {
+  const repository = { assignableUsers: { nodes: [{ login: 'alice' }] }, labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] } };
+  assert.deepEqual(parsePickerOptions({ ...repository, owner: { teams: { nodes: [{ name: 'Core', slug: 'core' }, { name: 'No slug' }] } } }),
+    { users: ['alice'], teams: [{ name: 'Core', slug: 'core' }], labels: [{ name: 'bug', color: 'd73a4a' }] });
+  assert.deepEqual(parsePickerOptions({ ...repository, owner: {} }).teams, []);
 });
 
 test('reads GitHub review threads, using original lines for outdated ones and skipping file-level threads', () => {
@@ -158,6 +179,12 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
     deleteComment: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
+    editPullRequest: async () => { throw new Error('not used'); },
+    setDraft: async () => { throw new Error('not used'); },
+    requestReviewers: async () => { throw new Error('not used'); },
+    removeReviewers: async () => { throw new Error('not used'); },
+    deleteBranch: async () => { throw new Error('not used'); },
+    pickerOptions: async () => { throw new Error('not used'); },
   };
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
@@ -288,6 +315,12 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
     deleteComment: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
+    editPullRequest: async () => { throw new Error('not used'); },
+    setDraft: async () => { throw new Error('not used'); },
+    requestReviewers: async () => { throw new Error('not used'); },
+    removeReviewers: async () => { throw new Error('not used'); },
+    deleteBranch: async () => { throw new Error('not used'); },
+    pickerOptions: async () => { throw new Error('not used'); },
   });
   const connect = (name: string, pullRequests: readonly PullRequestSummary[]) => async () => { connected.push(name); return provider(name, pullRequests); };
   const serviceA = recordingWorktrees();

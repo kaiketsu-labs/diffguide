@@ -69,6 +69,8 @@ let peekAt = -1;
 let drag: { path: string; side: DiffSide; from: number; to: number } | undefined;
 let busy = false;
 let author = true;
+/** The description is open for editing, so redraws leave it alone. */
+let editingBody = false;
 const reviewButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-event]')];
 const labels: Record<ReviewerState | CheckState, readonly [string, string, string]> = {
   approved: ['✓', 'ok', 'Approved'], changes: ['✗', 'bad', 'Requested changes'], commented: ['●', 'muted', 'Commented'],
@@ -231,6 +233,53 @@ function setBusy(value: boolean): void {
   busy = value;
   for (const review of reviewButtons) review.disabled = value || (author && review.hasAttribute('data-reviewer'));
   $<HTMLButtonElement>('merge').disabled = value || current?.details?.mergeable === 'no';
+  for (const action of document.querySelectorAll<HTMLButtonElement>('[data-pr-action]')) action.disabled = value;
+}
+
+/** Send a change to the PR on GitHub; the page stays busy until the extension answers. */
+function changePullRequest(message: PageMessage): void {
+  $('error').textContent = '';
+  setBusy(true);
+  post(message);
+}
+
+function editBody(): void {
+  const details = current?.details;
+  if (!details) return;
+  editingBody = true;
+  const area = el('textarea');
+  area.value = details.body;
+  area.setAttribute('aria-label', 'Description');
+  const cancel = button('Cancel', () => { editingBody = false; if (current) render(current); }, 'quiet');
+  const save = button('Save', () => changePullRequest({ action: 'edit-body', body: area.value }), 'primary');
+  save.dataset.prAction = '';
+  const row = el('div', 'row actions review-actions');
+  row.append(cancel, save);
+  $('body').replaceChildren(area, row);
+  $('edit-body').hidden = true;
+  area.focus();
+}
+
+/** The merge box: merge controls while open, then the PR's state and what you can still do with it. */
+function renderState(details: PullRequestDetails): void {
+  const draft = details.open && details.draft;
+  $('merge-title').textContent = details.merged ? 'Merged' : !details.open ? 'Closed' : draft ? 'Draft' : 'Merge';
+  $('merge-row').hidden = !details.open || draft || !details.mergeMethods.length;
+  $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
+    : !details.open ? (details.merged ? '' : 'Closed without merging.')
+    : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
+  const actions: HTMLButtonElement[] = [];
+  const add = (label: string, message: PageMessage, className = 'quiet'): void => {
+    const node = button(label, () => changePullRequest(message), className);
+    node.dataset.prAction = '';
+    actions.push(node);
+  };
+  if (details.canEdit && details.open && !draft) add('Convert to draft', { action: 'draft', draft: true });
+  if (details.canEdit && details.open) add('Close pull request', { action: 'close' });
+  if (details.canEdit && draft) add('Ready for review', { action: 'draft', draft: false }, 'primary');
+  if (details.canEdit && !details.open && !details.merged) add('Reopen', { action: 'reopen' });
+  if (details.merged && details.branchDeletable) add('Delete branch', { action: 'delete-branch' }, '');
+  $('state-actions').replaceChildren(...actions);
 }
 
 function verdict(reviewers: PullRequestDetails['reviewers']): readonly [string, string] {
@@ -254,8 +303,8 @@ function render(state: OverviewState): void {
   const { details } = state;
   const body = $('body');
   if (!details) body.replaceChildren(el('span', 'muted', state.detailsError ? 'Could not load from GitHub: ' + state.detailsError : 'Loading from GitHub…'));
-  else if (details.bodyHtml.trim()) body.innerHTML = details.bodyHtml;
-  else body.replaceChildren(el('span', 'muted', 'No description.'));
+  else if (!editingBody && details.bodyHtml.trim()) body.innerHTML = details.bodyHtml;
+  else if (!editingBody) body.replaceChildren(el('span', 'muted', 'No description.'));
   const reviewers = $('reviewers');
   reviewers.replaceChildren();
   if (details) {
@@ -268,6 +317,14 @@ function render(state: OverviewState): void {
     for (const check of details.checks) checks.append(status(check.state, check.name, check.url));
     if (!details.checks.length) checks.append(el('li', 'muted', 'No checks.'));
   }
+  for (const id of ['edit-title', 'pick-reviewers', 'pick-assignees', 'pick-labels']) $(id).hidden = !details?.canEdit;
+  $('edit-body').hidden = !details?.canEdit || editingBody;
+  $('assignees').replaceChildren(...details?.assignees.length ? details.assignees.map((name) => el('li', '', name)) : details ? [el('li', 'muted', 'Nobody assigned.')] : []);
+  $('labels').replaceChildren(...details?.labels.length ? details.labels.map((label) => {
+    const chip = el('span', 'label', label.name);
+    chip.style.setProperty('--label', '#' + label.color);
+    return chip;
+  }) : details ? [el('span', 'muted', 'No labels.')] : []);
   const reviewed = $('reviewed');
   reviewed.replaceChildren();
   if (state.reviewed) {
@@ -298,8 +355,9 @@ function render(state: OverviewState): void {
     badge.textContent = label;
   }
   $('review-box').hidden = !details?.open;
-  $('merge-box').hidden = !details?.open || !details.mergeMethods.length;
+  $('merge-box').hidden = !details;
   if (details) {
+    renderState(details);
     const select = $<HTMLSelectElement>('method');
     const chosen = select.value;
     select.replaceChildren(...details.mergeMethods.map((method) => {
@@ -308,7 +366,6 @@ function render(state: OverviewState): void {
       return option;
     }));
     if (details.mergeMethods.some((method) => method === chosen)) select.value = chosen;
-    $('mergeable').textContent = details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
   }
   const next = new Set(state.viewed);
   for (const path of next) if (!viewed.has(path)) collapsed.set(path, true);
@@ -1622,6 +1679,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
     if (data.form && sending.delete(data.form)) renderFiles();
   }
   if (data.done === 'review') $<HTMLTextAreaElement>('review').value = '';
+  if (data.done === 'body') { editingBody = false; if (current) render(current); }
   if (data.done === 'composer') {
     sending.delete('composer');
     const path = composer?.path;
@@ -1712,6 +1770,9 @@ for (const review of reviewButtons) {
     post({ action: 'review', event: review.dataset.event as ReviewEvent, body: $<HTMLTextAreaElement>('review').value });
   });
 }
+$('edit-title').addEventListener('click', () => changePullRequest({ action: 'edit-title' }));
+$('edit-body').addEventListener('click', editBody);
+for (const what of ['reviewers', 'assignees', 'labels'] as const) $('pick-' + what).addEventListener('click', () => changePullRequest({ action: 'pick', what }));
 $('merge').addEventListener('click', () => {
   $('error').textContent = '';
   setBusy(true);

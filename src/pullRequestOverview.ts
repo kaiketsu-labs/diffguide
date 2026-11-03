@@ -126,10 +126,21 @@ export interface OverviewActions {
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   merge(method: MergeMethod): Promise<void>;
+  /** Ask for a new title in VS Code and save it. */
+  editTitle(): Promise<void>;
+  editBody(body: string): Promise<void>;
+  /** Pick from the repository's users, teams or labels in VS Code and save the choice. */
+  pick(what: PickTarget): Promise<void>;
+  setDraft(draft: boolean): Promise<void>;
+  setOpen(open: boolean): Promise<void>;
+  deleteBranch(): Promise<void>;
   refresh(): void;
   analyze(): Promise<void>;
   stopAnalysis(): void;
 }
+
+export type PickTarget = 'reviewers' | 'assignees' | 'labels';
+const pickTargets: readonly unknown[] = ['reviewers', 'assignees', 'labels'] satisfies PickTarget[];
 
 export type DefinitionTarget = { readonly path: string } | { readonly peek: string };
 type PageRange = { readonly path: string; readonly side: DiffSide; readonly startLine: number; readonly endLine: number };
@@ -151,7 +162,11 @@ export type PageMessage =
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
   | { readonly action: 'open-definition'; readonly peek: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
-  | { readonly action: 'merge'; readonly method: MergeMethod };
+  | { readonly action: 'merge'; readonly method: MergeMethod }
+  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' }
+  | { readonly action: 'edit-body'; readonly body: string }
+  | { readonly action: 'pick'; readonly what: PickTarget }
+  | { readonly action: 'draft'; readonly draft: boolean };
 
 /** What the extension sends the page; each field is handled on its own. */
 export interface ExtensionMessage {
@@ -177,6 +192,8 @@ const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comme
 const mergeMethods: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
 const commentIntents: readonly unknown[] = ['ask', 'implement'] satisfies CommentIntent[];
 const maximumReviewLength = 60_000;
+/** Actions that change the PR on GitHub, one at a time. */
+const pullRequestActions = new Set(['review', 'merge', 'edit-title', 'edit-body', 'pick', 'draft', 'close', 'reopen', 'delete-branch']);
 const panels = new Map<string, vscode.WebviewPanel>();
 
 const isLine = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
@@ -237,7 +254,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -289,7 +306,7 @@ export async function showPullRequestOverview(
         else if (action === 'github' && typeof id === 'string') {
           const url = [...state.threads, ...state.github ?? []].find((thread) => thread.id === id)?.url;
           if (url !== undefined) await vscode.env.openExternal(vscode.Uri.parse(url));
-        } else if ((action === 'review' || action === 'merge') && !busy) {
+        } else if (typeof action === 'string' && pullRequestActions.has(action) && !busy) {
           busy = true;
           try {
             if (action === 'review' && reviewEvents.includes(event as ReviewEvent) && typeof body === 'string' && body.length <= maximumReviewLength) {
@@ -297,7 +314,14 @@ export async function showPullRequestOverview(
               post({ done: 'review' });
             } else if (action === 'merge' && mergeMethods.includes(method as MergeMethod)) {
               await actions.merge(method as MergeMethod);
-            }
+            } else if (action === 'edit-title') await actions.editTitle();
+            else if (action === 'edit-body' && typeof body === 'string' && body.length <= maximumReviewLength) {
+              await actions.editBody(body);
+              post({ done: 'body' });
+            } else if (action === 'pick' && pickTargets.includes(what)) await actions.pick(what as PickTarget);
+            else if (action === 'draft' && typeof draft === 'boolean') await actions.setDraft(draft);
+            else if (action === 'close' || action === 'reopen') await actions.setOpen(action === 'reopen');
+            else if (action === 'delete-branch') await actions.deleteBranch();
           } finally {
             busy = false;
             post({ idle: true });
@@ -358,6 +382,10 @@ ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
 .review-actions{justify-content:flex-end}
+.title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-8)}.section-head h3{margin:0}.section-head .icon-button{width:22px;height:22px;min-height:22px;margin:-2px 0}
+.labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}.label::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--label)}
+.state-actions:not(:empty){margin-top:var(--space-8)}.state-actions .gap{flex:1}#body textarea{width:100%;min-height:120px}
 .verdict{display:inline-flex;align-items:center;height:24px;box-sizing:border-box;padding:0 var(--space-12);border:1px solid currentColor;border-radius:var(--radius-pill);font-size:12px;font-weight:600}
 .verdict.muted{color:var(--ink-muted)}
 #error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
@@ -468,7 +496,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .card-thread{display:flex;align-items:baseline;gap:var(--space-8);padding:var(--space-2) 0 var(--space-2) var(--space-8);border-left:2px solid var(--accent);font-size:12px}.card-thread+.card-thread{border-top:0}.card-thread .where{flex:none}.card-thread .state{flex:none}.card-thread .text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
 </style></head><body>
-<div class="row head"><h1 id="title"></h1><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a></span></div>
+<div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
@@ -480,18 +508,20 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <button id="peek-close" title="Close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div><div id="peek-code"></div></aside>
 <div class="layout">
 <div class="main-col">
-<section class="card"><h3>Description</h3><div id="body"></div></section>
+<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div></section>
 <section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
 </div>
 <aside class="rail">
-<section><h3>Reviewers</h3><ul id="reviewers"></ul></section>
+<section><div class="section-head"><h3>Reviewers</h3><button id="pick-reviewers" class="icon-button" data-pr-action data-tip="Request reviewers" aria-label="Request reviewers" hidden>${codicons.gear}</button></div><ul id="reviewers"></ul></section>
+<section><div class="section-head"><h3>Assignees</h3><button id="pick-assignees" class="icon-button" data-pr-action data-tip="Edit assignees" aria-label="Edit assignees" hidden>${codicons.gear}</button></div><ul id="assignees"></ul></section>
+<section><div class="section-head"><h3>Labels</h3><button id="pick-labels" class="icon-button" data-pr-action data-tip="Edit labels" aria-label="Edit labels" hidden>${codicons.gear}</button></div><div id="labels" class="labels"></div></section>
 <section><h3>Checks</h3><ul id="checks"></ul></section>
 <section id="review-box"><h3>Finish your review</h3>
 <p class="muted" id="pending-note"></p>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
 <div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
 <p class="muted" id="review-note"></p></section>
-<section id="merge-box"><h3>Merge</h3><div class="row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
 <div id="files-bar" class="row head"><h2 id="files-title">Files</h2><span class="toolbar">
