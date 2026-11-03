@@ -71,6 +71,16 @@ async function writeMarks(worktree: string, marks: Marks): Promise<void> {
   await writePrivateJson(marksPath(worktree), marks);
 }
 
+const updates = new Map<string, Promise<void>>();
+
+/** Change a worktree's marks one update at a time, so concurrent ticks don't overwrite each other. */
+function updateMarks(worktree: string, change: (marks: Marks) => Marks | Promise<Marks>): Promise<void> {
+  const key = marksPath(worktree);
+  const run = (updates.get(key) ?? Promise.resolve()).then(async () => { await writeMarks(worktree, await change(await readMarks(worktree))); });
+  updates.set(key, run.catch(() => undefined));
+  return run;
+}
+
 /** Paths among `paths` marked reviewed whose content is unchanged since. */
 export async function readReviewedFiles(worktree: string, paths: readonly string[]): Promise<ReadonlySet<string>> {
   const { files } = await readMarks(worktree);
@@ -81,10 +91,11 @@ export async function readReviewedFiles(worktree: string, paths: readonly string
 /** Mark a file reviewed at its current content, or clear the mark. */
 export async function setFileReviewed(worktree: string, relativePath: string, reviewed: boolean): Promise<void> {
   if (!isWorkspaceRelativePath(relativePath)) throw new Error(`Unsupported file path: ${relativePath}`);
-  const marks = await readMarks(worktree);
-  if (reviewed) marks.files[relativePath] = await fingerprint(worktree, relativePath);
-  else delete marks.files[relativePath];
-  await writeMarks(worktree, marks);
+  await updateMarks(worktree, async (marks) => {
+    if (reviewed) marks.files[relativePath] = await fingerprint(worktree, relativePath);
+    else delete marks.files[relativePath];
+    return marks;
+  });
 }
 
 /** Lines of one diff side: the base ("old") or the PR's version ("new"). */
@@ -122,14 +133,12 @@ export async function markRangeRead(worktree: string, base: string, range: LineR
   const text = await sideText(worktree, base, range.path, range.side);
   if (text === undefined) throw new Error(`Could not read ${range.path}.`);
   const anchor = anchorFromText(text, { ...range, side: range.side === 'old' ? 'original' : 'working', baseRevision: base });
-  const marks = await readMarks(worktree);
-  await writeMarks(worktree, { ...marks, ranges: [...marks.ranges, { id: randomUUID(), anchor }] });
+  await updateMarks(worktree, (marks) => ({ ...marks, ranges: [...marks.ranges, { id: randomUUID(), anchor }] }));
 }
 
 /** Clear read marks by id. */
 export async function unmarkRangesRead(worktree: string, ids: readonly string[]): Promise<void> {
-  const marks = await readMarks(worktree);
-  await writeMarks(worktree, { ...marks, ranges: marks.ranges.filter((range) => !ids.includes(range.id)) });
+  await updateMarks(worktree, (marks) => ({ ...marks, ranges: marks.ranges.filter((range) => !ids.includes(range.id)) }));
 }
 
 /** Reviewed files per PR: local ticks merged with the code host's "Viewed" flags, which are cached until `forget`. */
