@@ -8,5 +8,5 @@ The client retries failed requests a fixed number of times.
 
 | Setting | Value |
 |---|---|
-| Attempts | 3 |
+| Attempts | 4 |
 | Delay | 200 ms |
