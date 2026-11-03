@@ -295,7 +295,9 @@ function renderState(details: PullRequestDetails): void {
   const fixing = current?.claude.fixingConflicts;
   const note = $('conflict-note');
   note.className = fixing === undefined ? 'muted' : 'chip claude working';
-  note.textContent = fixing ?? 'Claude merges the base branch, resolves the conflicts and pushes.';
+  const text = fixing ?? 'Claude merges the base branch, resolves the conflicts and pushes.';
+  note.replaceChildren(fixing === undefined ? text : el('span', '', text));
+  note.title = fixing ?? '';
   const actions: HTMLButtonElement[] = [];
   const add = (label: string, message: PageMessage, className = 'quiet'): void => {
     const node = button(label, () => changePullRequest(message), className);
@@ -370,7 +372,8 @@ function render(state: OverviewState): void {
   renderThreadList();
   author = !details || details.viewerIsAuthor;
   setBusy(busy);
-  for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.title = author ? 'GitHub does not let you approve or request changes on your own PR.' : '';
+  for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.hidden = author;
+  document.querySelector<HTMLButtonElement>('[data-event="comment"]')?.classList.toggle('primary', author);
   $('review-note').textContent = author ? 'This is your PR, so you can only comment.' : '';
   const pendingCount = details?.pendingComments;
   $('pending-note').textContent = pendingCount !== undefined
