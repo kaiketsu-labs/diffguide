@@ -396,7 +396,7 @@ body{margin:0;padding:var(--space-24) var(--space-24) 48px}
 h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
-.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}#conflict-row>button{margin-left:auto}#conflict-ask{margin-top:var(--space-8)}#conflict-reply{margin-top:var(--space-8)}.head{justify-content:space-between}
+.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}#conflict-row{flex-wrap:nowrap}#conflict-row>button{margin-left:auto;flex-shrink:0}#conflict-note{min-width:0;max-width:100%}#conflict-note::before{flex-shrink:0}#conflict-note>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#conflict-ask{margin-top:var(--space-8)}#conflict-reply{margin-top:var(--space-8)}.head{justify-content:space-between}
 .byline,.facts{margin-top:var(--space-6)}
 .status{margin-top:var(--space-12);font-size:12px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
@@ -422,7 +422,7 @@ ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px
 #body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
-.review-actions{justify-content:flex-end}
+.review-actions{justify-content:flex-end}#review-note{flex:1 1 160px}#review-note:empty{display:none}.state-actions{justify-content:flex-end}
 .title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-8)}.section-head h3{margin:0}.section-head .icon-button{width:22px;height:22px;min-height:22px;margin:-2px 0}
 .labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}.label::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--label)}
@@ -585,8 +585,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <section id="review-box"><h3>Finish your review</h3>
 <p class="muted" id="pending-note"></p>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
-<div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
-<p class="muted" id="review-note"></p></section>
+<div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
 <section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
