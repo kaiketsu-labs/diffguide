@@ -247,6 +247,7 @@ export class GitHubApiProvider implements PullRequestProvider {
   /** One provider per repository keeps its remotes, PR ids and Viewed flags until `forget`. */
   static readonly #providers = new Map<string, GitHubApiProvider>();
   #repository: Promise<{ readonly owner: string; readonly name: string; readonly host: string }> | undefined;
+  #renamed: Promise<string> | undefined;
   #remotes: Promise<string> | undefined;
   readonly #ids = new Map<number, Promise<string>>();
   /** Viewed flags from the latest file list of each PR, so reading them needs no second request. */
@@ -290,7 +291,16 @@ export class GitHubApiProvider implements PullRequestProvider {
       search.catch(() => { GitHubApiProvider.#searches.delete(host); });
       GitHubApiProvider.#searches.set(host, search);
     }
-    return (await search).get(`${owner}/${name}`.toLowerCase()) ?? { mine: [], reviewRequested: [] };
+    const results = await search;
+    return results.get(`${owner}/${name}`.toLowerCase()) ?? results.get(await this.#currentName()) ?? { mine: [], reviewRequested: [] };
+  }
+
+  /** The repository's name on GitHub now, which search reports, when the remote still uses a name from before a rename or transfer. */
+  #currentName(): Promise<string> {
+    this.#renamed ??= this.#graphql('query($owner:String!,$name:String!){repository(owner:$owner,name:$name){nameWithOwner}}', {})
+      .then((data) => text(object(data['repository'])['nameWithOwner']).toLowerCase())
+      .catch(() => '');
+    return this.#renamed;
   }
 
   async #search(host: string): Promise<SearchResults> {
