@@ -14,7 +14,7 @@ test('reads the lines each side of a diff shows, so comments outside it go on th
 test('summarizes a PR for its overview and keeps model text out of the page markup', () => {
   const thread = {
     id: 't1', intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: 'e1',
-    anchor: { path: 'src/a.ts', startLine: 12, endLine: 14, side: 'working' }, messages: [{ id: 'm1', author: 'human', text: 'Why\n</script><b>?', createdAt: '' }],
+    anchor: { path: 'src/a.ts', startLine: 12, endLine: 14, side: 'working', selectedText: 'retry();' }, messages: [{ id: 'm1', author: 'human', text: 'Why\n</script><b>?', createdAt: '' }],
   };
   const opened = {
     session: {
@@ -35,7 +35,7 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
   assert.deepEqual([state.author, state.headBranch, state.baseBranch], ['alice', 'feature', 'main']);
   assert.deepEqual(state.claude, { text: 'Claude · Reading src/a.ts', running: true, retry: false });
   assert.deepEqual(state.threads, [{ id: 't1', location: 'src/a.ts:12', text: 'Why </script><b>?', status: 'Answered · On GitHub (pending)', url: 'https://github.com/acme/app/pull/3#r1',
-    path: 'src/a.ts', side: 'new', startLine: 12, endLine: 14, resolved: false, messages: [{ author: 'human', html: '<p>Why<br>&lt;/script&gt;&lt;b&gt;?</p>', createdAt: '' }],
+    path: 'src/a.ts', side: 'new', startLine: 12, endLine: 14, resolved: false, original: 'retry();', messages: [{ author: 'human', html: '<p>Why<br>&lt;/script&gt;&lt;b&gt;?</p>', createdAt: '' }],
   }]);
   const html = overviewHtml(state, 'overview.js', 'https://example.test/</script><i>.svg');
   assert.ok(!html.includes('</script><b>') && !html.includes('</script><i>') );

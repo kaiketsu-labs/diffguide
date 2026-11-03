@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -27,7 +27,8 @@ import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from '
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
-import { getHeadRevision, readGitBaseBytes } from './git.js';
+import { getHeadRevision, readGitBase, readGitBaseBytes } from './git.js';
+import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
 import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
 import { anchorFromText } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
@@ -253,6 +254,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         revealThread: async (id) => { await vscode.commands.executeCommand('pairReview.revealThread', id); },
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
+          void loadDetails();
+        },
+        applySuggestion: async (id, message, option) => {
+          const { anchor, messages } = findThread(id);
+          const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
+          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
+          const file = join(folder, anchor.path);
+          await writeFile(file, applySuggestion(await readFile(file, 'utf8'), anchor, suggestion));
+          void vscode.window.showInformationMessage(`Applied the suggestion to ${anchor.path}. It is an uncommitted change in the PR worktree.`);
+        },
+        publishSuggestion: async (id, message, option) => {
+          const { anchor, messages } = findThread(id);
+          const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
+          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (anchor.side !== 'working') throw new Error('GitHub takes suggestions only on the PR\'s version of a file.');
+          const head = await readHead();
+          const lines = suggestionLines(await readGitBase(folder, anchor.path, head), anchor);
+          await provider.publishComment(pullRequest.number, { path: anchor.path, body: suggestionMarkdown(suggestion), commitId: head, side: 'RIGHT', lines }, true);
+          void loadThreads();
           void loadDetails();
         },
         fixConflicts: async () => {
