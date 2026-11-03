@@ -26,13 +26,15 @@ export interface ConflictFix {
   readonly headBranch: string;
   /** `origin`, or the fork's URL when the head branch lives in a fork. */
   readonly pushTo: string;
+  /** The user's answer to what Claude asked when it last stopped. */
+  readonly answer?: string;
 }
 
 /** The label of the conflict fix task, which the review page shows progress for. */
 export const conflictFixLabel = 'fixing merge conflicts';
 
 /** Ask Claude to merge the base, resolve the conflicts, commit and push; it may run only the Git commands this needs. */
-export function conflictTask({ base, baseBranch, headBranch, pushTo }: ConflictFix): ClaudeTask {
+export function conflictTask({ base, baseBranch, headBranch, pushTo, answer }: ConflictFix): ClaudeTask {
   if (!/^[a-f\d]{40,64}$/u.test(base) || [baseBranch, headBranch].some((branch) => !/^[\w./-]+$/u.test(branch) || branch.startsWith('-') || branch.includes('..'))
     || !(pushTo === 'origin' || /^https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\.git$/u.test(pushTo))) {
     throw new Error('Unsupported branch or remote for fixing conflicts.');
@@ -46,6 +48,7 @@ export function conflictTask({ base, baseBranch, headBranch, pushTo }: ConflictF
       `Then run \`${push}\` to update the pull request.`,
       'Run only these Git commands. If a conflict needs a decision the code does not answer, run `git merge --abort`, push nothing, and explain what is needed.',
       'Finish with one line per conflicted file saying how you resolved it.',
+      ...(answer === undefined ? [] : [`You stopped here before and asked the user how to resolve the conflicts. They answered:\n\n${answer}`]),
     ].join('\n\n'),
     allowedTools: ['Bash(git merge *)', 'Bash(git status)', 'Bash(git status *)', 'Bash(git diff)', 'Bash(git diff *)', 'Bash(git log *)', 'Bash(git show *)', 'Bash(git add *)', 'Bash(git commit *)', `Bash(${push})`],
   };

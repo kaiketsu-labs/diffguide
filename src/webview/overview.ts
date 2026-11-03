@@ -282,7 +282,15 @@ function renderState(details: PullRequestDetails): void {
   $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
     : !details.open ? (details.merged ? '' : 'Closed without merging.')
     : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
-  $('conflict-row').hidden = !(details.open && details.mergeable === 'no' && details.canEdit);
+  const conflicted = details.open && details.mergeable === 'no' && details.canEdit;
+  const question = conflicted && current?.claude.running !== true ? current?.conflictQuestion : undefined;
+  $('conflict-row').hidden = !conflicted || question !== undefined;
+  $('conflict-ask').hidden = question === undefined;
+  const reply = $('conflict-reply');
+  if (question !== undefined && reply.dataset.html !== question) {
+    reply.dataset.html = question;
+    reply.innerHTML = question;
+  }
   $<HTMLButtonElement>('fix-conflicts').disabled = current?.claude.running === true;
   const fixing = current?.claude.fixingConflicts;
   const note = $('conflict-note');
@@ -2000,6 +2008,14 @@ for (const review of reviewButtons) {
     post({ action: 'review', event: review.dataset.event as ReviewEvent, body: $<HTMLTextAreaElement>('review').value });
   });
 }
+$('conflict-send').addEventListener('click', () => {
+  const answer = $<HTMLTextAreaElement>('conflict-answer');
+  if (!answer.value.trim()) { answer.focus(); return; }
+  $('error').textContent = '';
+  post({ action: 'fix-conflicts', text: answer.value });
+  answer.value = '';
+});
+$('conflict-cancel').addEventListener('click', () => post({ action: 'dismiss-conflict-question' }));
 $('fix-conflicts').addEventListener('click', () => {
   $('error').textContent = '';
   $<HTMLButtonElement>('fix-conflicts').disabled = true;
