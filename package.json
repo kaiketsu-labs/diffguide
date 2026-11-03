@@ -323,6 +323,12 @@
           "id": "pairReview.threads",
           "name": "Review",
           "icon": "resources/review.svg"
+        },
+        {
+          "id": "pairReview.legend",
+          "name": "Legend",
+          "icon": "resources/review.svg",
+          "visibility": "collapsed"
         }
       ]
     },
