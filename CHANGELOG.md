@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The review page's file list has two tabs: **Files** with the file count, and **Guide** with the step count, a pulsing dot while Claude builds it, and Build guide. Unified and Split are a separate diff style that works in both tabs, so guide steps can show side by side. Switching tabs also switches the Pull Requests sidebar between files and guide steps.
+- Every border and divider on the review page uses the theme's input border color, so file boxes, comments, code blocks and cards stand apart from the page even in themes where the panel border is near black. Comments no longer show a collapse arrow; click the header to fold them.
+- Drag the definition panel's left edge to make it wider or narrower. The page remembers the width; double-click the edge to reset it.
+- Hovering a diff line shows a **+** next to its line number, as on GitHub. Click it to comment on the line, or drag over the numbers to comment on a range.
 - Cmd or Ctrl-click on a name with no definition shows a short hint that clears itself after a few seconds, on the next click or on Escape, instead of an error that stayed until clicked. When VS Code has no language support for the file, the hint offers **Find extension**, which searches the Marketplace for that file type.
 - Definitions in the same file are found without a language extension's answer. Pair Review first asks the file's symbols, then looks for a declaration of the name (`def`, `class`, `function`, `const` and similar). The definition panel marks such a match as "same name in this file".
 - Filter the Pull Requests sidebar by author with the filter button in its title bar. The view's title shows the active author, and the filled filter icon clears it.
