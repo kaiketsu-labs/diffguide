@@ -10,11 +10,17 @@ import { codicons } from '../codicons.js';
 
 declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; getState(): unknown; setState(state: Saved): void };
 
-type Layout = 'unified' | 'split' | 'guided';
+type Layout = 'unified' | 'split';
+/** What the file list shows: every file, or Claude's guide in reading order. */
+type View = 'files' | 'guide';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
 interface Saved {
-  readonly layout?: Layout;
+  /** 'guided' is how pages saved before Files and Guide became tabs remember the guide. */
+  readonly layout?: Layout | 'guided';
+  readonly view?: View;
+  /** Width of the definition panel in pixels, when the user resized it. */
+  readonly peekWidth?: number | undefined;
   readonly folders?: boolean;
   readonly collapsed?: Record<string, boolean>;
   readonly previewing?: readonly string[];
@@ -40,7 +46,9 @@ const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: 
 const { claudeIcon } = initial;
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
-let layout: Layout = saved.layout ?? 'unified';
+let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
+let view: View = saved.view ?? (saved.layout === 'guided' ? 'guide' : 'files');
+let peekWidth = saved.peekWidth;
 let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
 const previewing = new Set(saved.previewing ?? []);
@@ -170,7 +178,7 @@ function frameMain(): void {
 }
 
 function save(): void {
-  api.setState({ layout, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies) });
+  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies) });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -386,7 +394,7 @@ function render(state: OverviewState): void {
   if (stamp !== guideStamp) {
     guideStamp = stamp;
     guide = undefined;
-    if (layout === 'guided') { renderFiles(); return; }
+    if (view === 'guide') { renderFiles(); return; }
   }
   renderFiles('state');
 }
@@ -704,7 +712,7 @@ function jump(thread: Thread): void {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
   }
-  if (layout === 'guided' && !document.getElementById('thread-' + thread.id)) { layout = 'unified'; save(); renderFiles(); }
+  if (view === 'guide' && !document.getElementById('thread-' + thread.id)) { setView('files'); }
   if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
     collapsed.set(thread.path, false);
     openFolders(thread.path);
@@ -1097,14 +1105,16 @@ function setTip(button: HTMLElement, tip: string): void {
 
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
-  for (const name of ['unified', 'split', 'guided'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
+  for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
+  for (const name of ['files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
+  showGuideTab();
   const folderButton = $('folders');
-  folderButton.toggleAttribute('disabled', layout === 'guided');
-  setTip(folderButton, layout === 'guided' ? 'Folders are off in Guided view' : 'Group files by folder');
+  folderButton.toggleAttribute('disabled', view === 'guide');
+  setTip(folderButton, view === 'guide' ? 'Folders are off in the guide' : 'Group files by folder');
   folderButton.setAttribute('aria-pressed', String(folders));
   folderButton.setAttribute('aria-pressed', String(folders));
   if (!files) return;
-  if (layout === 'guided') { keepView(() => renderGuide(only)); return; }
+  if (view === 'guide') { keepView(() => renderGuide(only)); return; }
   const shownFiles = files;
   const container = $('files');
   const threadsByFile = new Map<string, Thread[]>();
@@ -1113,7 +1123,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     threadsByFile.set(thread.path, list);
     list.push(thread);
   }
-  $('files-title').textContent = 'Files (' + shownFiles.length + ') · ' + shownFiles.filter((file) => viewed.has(file.path)).length + ' viewed';
+  $('files-title').textContent = shownFiles.filter((file) => viewed.has(file.path)).length + '/' + shownFiles.length + ' viewed';
   const tree = fileTree(shownFiles);
   const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
@@ -1397,7 +1407,7 @@ function foldToggle(isCollapsed: boolean): HTMLElement {
 
 function updateGuideProgress(groups: readonly GuideGroup[]): void {
   const steps = groups.flatMap((group) => group.steps);
-  $('files-title').textContent = 'Steps (' + steps.length + ') · ' + steps.filter(stepViewed).length + ' viewed';
+  $('files-title').textContent = steps.filter(stepViewed).length + '/' + steps.length + ' steps viewed';
   for (const group of groups) {
     const progress = document.querySelector('[data-group="' + CSS.escape(group.key) + '"] .progress');
     if (progress) progress.textContent = group.steps.filter(stepViewed).length + '/' + group.steps.length + ' viewed';
@@ -1409,7 +1419,7 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const container = $('files');
   const result = current?.analysis.result;
   if (!files || !result) {
-    $('files-title').textContent = 'Guide';
+    $('files-title').textContent = '';
     container.replaceChildren(guideIntro());
     return;
   }
@@ -1694,9 +1704,29 @@ function renderPeek(): void {
   if (first) codeBox.scrollTop = Math.max(0, first.getBoundingClientRect().top - codeBox.getBoundingClientRect().top - 3 * first.offsetHeight);
 }
 
+/** Switch between the file list and the guide; the sidebar follows. */
+function setView(next: View): void {
+  view = next;
+  save();
+  renderFiles();
+  post({ action: 'view', view: next });
+}
+
+/** The Guide tab's count: steps once a guide exists, a pulse while Claude builds it. Build guide shows only in the guide. */
+function showGuideTab(): void {
+  const analysis = current?.analysis;
+  const count = $('guide-count');
+  const steps = analysis?.result?.groups.reduce((sum, group) => sum + group.steps.length, 0);
+  count.className = analysis?.running ? 'count working' : 'count';
+  count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
+  count.hidden = !analysis?.running && steps === undefined;
+  $('files-count').textContent = files ? String(files.length) : '';
+  for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
+}
+
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
 function revealStep(key: string): void {
-  layout = 'guided';
+  view = 'guide';
   const result = current?.analysis.result;
   if (files && result) {
     guide ??= buildGuide(result, files);
@@ -1779,6 +1809,32 @@ for (const type of ['keydown', 'keyup'] as const) {
 window.addEventListener('blur', () => { hovered = undefined; showLink(); });
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && peeks.length && !(event.target instanceof HTMLTextAreaElement)) closePeek(); });
 $('peek-close').addEventListener('click', closePeek);
+/** Drag the definition panel's left edge to resize it; double-click restores the default width. */
+function showPeekWidth(): void {
+  if (peekWidth === undefined) document.body.style.removeProperty('--peek-width');
+  else document.body.style.setProperty('--peek-width', peekWidth + 'px');
+}
+showPeekWidth();
+$('peek-resize').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const handle = $('peek-resize');
+  handle.setPointerCapture(event.pointerId);
+  document.body.classList.add('resizing');
+  const move = (moved: PointerEvent): void => {
+    peekWidth = Math.round(Math.min(window.innerWidth - 16, Math.max(320, window.innerWidth - moved.clientX - 8)));
+    showPeekWidth();
+  };
+  const stop = (): void => {
+    handle.removeEventListener('pointermove', move);
+    document.body.classList.remove('resizing');
+    save();
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', stop, { once: true });
+  handle.addEventListener('pointercancel', stop, { once: true });
+});
+$('peek-resize').addEventListener('dblclick', () => { peekWidth = undefined; showPeekWidth(); save(); });
 $('peek-back').addEventListener('click', () => { if (peekAt > 0) { peekAt -= 1; renderPeek(); } });
 $('peek-forward').addEventListener('click', () => { if (peekAt < peeks.length - 1) { peekAt += 1; renderPeek(); } });
 $('peek-open').addEventListener('click', () => {
@@ -1787,12 +1843,12 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
-$('guided').addEventListener('click', () => { layout = 'guided'; save(); renderFiles(); });
+for (const name of ['files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
 $('folders').addEventListener('click', () => { folders = !folders; save(); renderFiles(); });
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
 for (const [id, value] of [['collapse', true], ['expand', false]] as const) {
   $(id).addEventListener('click', () => {
-    if (layout === 'guided') {
+    if (view === 'guide') {
       for (const group of guide ?? []) {
         if (!value) collapsed.set(guideState('group', group.key), false);
         for (const step of group.steps) collapsed.set(guideState('step', step.key), value);
