@@ -185,6 +185,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (!diffPaths.includes(at.path)) return false;
           return definitions.has(vscode.Uri.file(join(folder, at.path)), line, column);
         },
+        missingLanguage: async (at) => {
+          if ('peek' in at) return definitions.missingLanguage(definitions.location(at.peek).uri);
+          return diffPaths.includes(at.path) ? definitions.missingLanguage(vscode.Uri.file(join(folder, at.path))) : undefined;
+        },
         openDefinition: async (peek) => {
           const { uri, range } = definitions.location(peek);
           await vscode.window.showTextDocument(uri, { selection: range, preview: true });
