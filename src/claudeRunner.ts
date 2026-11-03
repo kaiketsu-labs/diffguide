@@ -22,6 +22,12 @@ export interface ClaudeActivity {
   readonly skipped: number;
 }
 
+/** How a task ended: an error message, or Claude's last message on success. */
+export interface ClaudeTaskResult {
+  readonly error?: string;
+  readonly reply?: string;
+}
+
 /** A one-off job for a PR's Claude conversation, outside the comment queue, such as fixing merge conflicts. */
 export interface ClaudeTask {
   /** What the log calls the run, such as "fixing merge conflicts". */
@@ -67,15 +73,18 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#next();
   }
 
+  /** Claude's last message in the current or latest run. */
+  #reply: string | undefined;
+
   get activity(): ClaudeActivity {
     return this.#activity;
   }
 
   /**
-   * Run a task in this PR's conversation; resolves with an error message, or undefined on success.
+   * Run a task in this PR's conversation; resolves with Claude's error or its last message.
    * On someone else's PR, Git hooks stay off, since the PR's author controls the checkout.
    */
-  async runTask(task: ClaudeTask): Promise<string | undefined> {
+  async runTask(task: ClaudeTask): Promise<ClaudeTaskResult> {
     if (this.#disposed || this.#child !== undefined || this.#activity.running) throw new Error('Claude is still working on this PR. Try again when it is done.');
     this.#set({ running: true, step: 'Starting', task: task.label, threads: new Set(), skipped: 0, error: undefined });
     let error: string | undefined;
@@ -91,7 +100,7 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#child = undefined;
     this.#set({ running: false, step: undefined, task: undefined, threads: new Set(), skipped: 0, error });
     this.#next();
-    return error;
+    return error !== undefined ? { error } : this.#reply === undefined ? {} : { reply: this.#reply };
   }
 
   /** Send comments Claude did not pick up again, and clear the last error. */
@@ -162,6 +171,7 @@ export class ClaudeRunner implements vscode.Disposable {
       ...(run.edits ? ['--permission-mode', 'acceptEdits'] : ['--disallowedTools', ...reviewerBlockedTools]),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
+    this.#reply = undefined;
     this.options.log(`Starting Claude for ${run.label} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);
     const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
     const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...run.env } });
@@ -184,6 +194,7 @@ export class ClaudeRunner implements vscode.Disposable {
             this.#set({ ...this.#activity, step: 'Thinking' });
           } else if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
             this.options.log(block.text.trim());
+            this.#reply = block.text.trim();
             this.#set({ ...this.#activity, step: 'Writing' });
           }
         }

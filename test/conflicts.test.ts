@@ -64,3 +64,9 @@ test('lets Claude push only the PR branch, and rejects names that could be read 
   assert.throws(() => conflictTask({ ...fix, pushTo: 'ext::sh -c id' }));
   assert.throws(() => conflictTask({ ...fix, base: 'HEAD' }));
 });
+
+test('passes the user\'s answer on when Claude asked how to resolve the conflicts', () => {
+  const fix = { base: 'a'.repeat(40), baseBranch: 'main', headBranch: 'feat/retry', pushTo: 'origin' };
+  assert.ok(!conflictTask(fix).prompt.includes('They answered'));
+  assert.match(conflictTask({ ...fix, answer: '4 attempts, 200 ms' }).prompt, /They answered:\n\n4 attempts, 200 ms$/u);
+});

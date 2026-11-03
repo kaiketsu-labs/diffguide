@@ -136,9 +136,10 @@ test('runs a task in the PR conversation with its own tools, and keeps Git hooks
     assert.equal(child.args.includes('--setting-sources'), role === 'reviewer');
     assert.equal(child.env?.['GIT_CONFIG_VALUE_0'], role === 'reviewer' ? '/dev/null' : undefined);
     await assert.rejects(instance.runTask(task), /still working/u);
+    child.send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Which value wins?' }] } });
     child.send({ type: 'result', subtype: 'success', is_error: false });
     await child.exit(0);
-    assert.equal(await done, undefined);
+    assert.deepEqual(await done, { reply: 'Which value wins?' });
     assert.equal(instance.activity.running, false);
     assert.equal(instance.activity.task, undefined);
   }
