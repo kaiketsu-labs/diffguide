@@ -162,10 +162,10 @@ export class ClaudeRunner implements vscode.Disposable {
   }
 }
 
-type StreamMessage = Record<string, unknown>;
+export type StreamMessage = Record<string, unknown>;
 
 /** Parse one stream-json line; Claude output is untrusted, so anything unexpected is skipped. */
-function parseLine(line: string): StreamMessage | undefined {
+export function parseLine(line: string): StreamMessage | undefined {
   try {
     const value: unknown = JSON.parse(line);
     return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as StreamMessage : undefined;
@@ -174,7 +174,7 @@ function parseLine(line: string): StreamMessage | undefined {
   }
 }
 
-function contentBlocks(message: StreamMessage): readonly Record<string, unknown>[] {
+export function contentBlocks(message: StreamMessage): readonly Record<string, unknown>[] {
   const inner = message.message;
   const content = typeof inner === 'object' && inner !== null ? (inner as Record<string, unknown>).content : undefined;
   return Array.isArray(content) ? content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null) : [];
