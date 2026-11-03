@@ -147,7 +147,7 @@ test('runs Claude read-only, saves the analysis and links each step to its note 
   const store = await createReviewStore(path.join(root, 'review.json'), root);
   const children: FakeChild[] = [];
   const analysis = new PullRequestAnalysis({
-    store, cwd: '/worktree', dataPath: root, log: () => undefined,
+    store, cwd: '/worktree', dataPath: root, role: 'reviewer', log: () => undefined,
     resolve: async () => ({ executable: '/bin/claude', mcpPath: '/mcp.json' }),
     spawn: ((_command: string, args: readonly string[]) => {
       const child = new FakeChild(args);
@@ -162,6 +162,8 @@ test('runs Claude read-only, saves the analysis and links each step to its note 
   const child = children[0];
   assert.ok(child !== undefined);
   assert.ok(child.args.includes('--json-schema') && child.args.includes('Bash') && !child.args.includes('acceptEdits'));
+  assert.equal(child.args[child.args.indexOf('--setting-sources') + 1], 'user');
+  assert.ok(child.args.includes('--strict-mcp-config'));
   await until(() => child.input.includes('[b4]'));
   child.send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/worktree/src/a.ts' } }] } });
   await until(() => analysis.activity.step === 'Reading src/a.ts');
