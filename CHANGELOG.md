@@ -3,7 +3,7 @@
 ## Unreleased
 
 - The review page's file list has two tabs: **Files** with the file count, and **Guide** with the step count, a pulsing dot while Claude builds it, and Build guide. Unified and Split are a separate diff style that works in both tabs, so guide steps can show side by side. Switching tabs also switches the Pull Requests sidebar between files and guide steps.
-- File boxes on the review page have a stronger border, so they stand apart from the page in themes where both share one background.
+- File boxes and comments on the review page have a stronger border, so they stand apart from the page in themes where both share one background or the panel border is near black. Comments no longer show a collapse arrow; click the header to fold them.
 - Drag the definition panel's left edge to make it wider or narrower. The page remembers the width; double-click the edge to reset it.
 - Hovering a diff line shows a **+** next to its line number, as on GitHub. Click it to comment on the line, or drag over the numbers to comment on a range.
 - Filter the Pull Requests sidebar by author with the filter button in its title bar. The view's title shows the active author, and the filled filter icon clears it.
