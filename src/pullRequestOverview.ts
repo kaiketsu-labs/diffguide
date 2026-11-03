@@ -519,6 +519,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .md-block pre,.msg-text pre{padding:var(--space-8) 10px;border:1px solid var(--line);border-radius:var(--radius-md);overflow:auto;background:var(--surface-sunken)}.md-block pre code,.msg-text pre code{padding:0;background:none}
 .md-block table{border-collapse:collapse}.md-block th,.md-block td{padding:4px 10px;border:1px solid var(--line)}
 .md-block blockquote,.msg-text blockquote{margin:var(--space-8) 0;padding-left:var(--space-12);border-left:3px solid var(--line);color:var(--ink-muted)}.md-block img,.msg-text img{max-width:100%}
+.msg-text table{display:block;width:auto;max-width:100%;overflow-x:auto;margin:var(--space-6) 0;table-layout:auto;font:inherit}.msg-text th,.msg-text td{padding:var(--space-4) var(--space-8);border:1px solid var(--line);text-align:left;white-space:normal}.msg-text th{font-weight:600;background:var(--surface-sunken)}.msg-text .right{text-align:right}.msg-text .center{text-align:center}
 .md-block hr{border:0;border-top:1px solid var(--line)}
 .html-preview{display:block;width:100%;border:0}
 .html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}

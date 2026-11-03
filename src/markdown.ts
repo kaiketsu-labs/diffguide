@@ -56,7 +56,26 @@ export function markdownBlocks(markdown: string): readonly MarkdownBlock[] {
 }
 
 const listItem = /^\s*([-*+]|\d+[.)])\s+(.*)$/u;
-const blockStart = /^\s*(?:```|~~~|#{1,6}\s|>|[-*+]\s|\d+[.)]\s)/u;
+const blockStart = /^\s*(?:```|~~~|#{1,6}\s|>|[-*+]\s|\d+[.)]\s|\|)/u;
+const tableDivider = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/u;
+const isTableRow = (line: string): boolean => line.trim().startsWith('|');
+
+/** A table row's cells, split on pipes outside inline code; `\|` is a literal pipe. */
+function tableCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let code = false;
+  const text = line.trim().replace(/^\|/u, '').replace(/(?<!\\)\|$/u, '');
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at] ?? '';
+    if (char === '\\' && text[at + 1] === '|') { cell += '|'; at += 1; }
+    else if (char === '`') { code = !code; cell += char; }
+    else if (char === '|' && !code) { cells.push(cell.trim()); cell = ''; }
+    else cell += char;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
 
 /** Render the Markdown subset Claude writes as HTML built only from escaped text and fixed tags. */
 export function markdownHtml(markdown: string): string {
@@ -88,6 +107,16 @@ export function markdownHtml(markdown: string): string {
       const quoted: string[] = [];
       while (index < lines.length && (lines[index] ?? '').startsWith('>')) quoted.push((lines[index++] ?? '').replace(/^>\s?/u, ''));
       out.push(`<blockquote>${markdownHtml(quoted.join('\n'))}</blockquote>`);
+      continue;
+    }
+    if (isTableRow(line) && tableDivider.test(lines[index + 1] ?? '')) {
+      const align = tableCells(lines[index + 1] ?? '').map((cell) => cell.endsWith(':') ? (cell.startsWith(':') ? ' class="center"' : ' class="right"') : '');
+      const row = (cells: readonly string[], tag: 'th' | 'td'): string => `<tr>${align.map((attribute, column) => `<${tag}${attribute}>${inline(cells[column] ?? '')}</${tag}>`).join('')}</tr>`;
+      const head = row(tableCells(line), 'th');
+      index += 2;
+      const body: string[] = [];
+      while (index < lines.length && isTableRow(lines[index] ?? '')) body.push(row(tableCells(lines[index++] ?? ''), 'td'));
+      out.push(`<table><thead>${head}</thead><tbody>${body.join('')}</tbody></table>`);
       continue;
     }
     const first = listItem.exec(line);
