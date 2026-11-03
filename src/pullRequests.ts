@@ -65,6 +65,8 @@ export interface PullRequestDetails {
   readonly assignees: readonly string[];
   readonly mergeable: 'yes' | 'no' | 'unknown';
   readonly viewerIsAuthor: boolean;
+  /** The signed-in user's GitHub avatar; empty when GitHub sent none. */
+  readonly viewerAvatarUrl: string;
   /** Comments in the viewer's unsubmitted review; undefined when there is no such review. */
   readonly pendingComments?: number;
   readonly mergeMethods: readonly MergeMethod[];
@@ -88,7 +90,7 @@ export interface RemoteThread {
   readonly pending: boolean;
   /** Bodies come rendered and sanitized by GitHub. */
   /** `canDelete` when the viewer may delete the comment, usually because they wrote it. */
-  readonly comments: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean }[];
+  readonly comments: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean; readonly createdAt: string }[];
 }
 
 export interface Label { readonly name: string; readonly color: string }
@@ -206,6 +208,7 @@ type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSu
 const searchFields = 'number title url isDraft headRefName baseRefName author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
+const viewerField = 'viewer{avatarUrl(size:40)}';
 const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id}
   labels(first:50){nodes{name color}} assignees(first:20){nodes{login}}
   reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
@@ -214,7 +217,7 @@ const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuth
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
 const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
-  comments(first:100){nodes{id viewerCanDelete url bodyHTML state author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
+  comments(first:100){nodes{id viewerCanDelete url bodyHTML state createdAt author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
 
 /** Group search hits by repository, in the shape `parsePullRequestList` reads. */
 export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
@@ -388,9 +391,9 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   async details(number: number): Promise<PullRequestDetails> {
-    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){${viewerField} repository(owner:$owner,name:$name){
       ${mergeMethodFields} pullRequest(number:$number){${detailsFields}}}}`, { number });
-    return parseDetails(object(data['repository']));
+    return parseDetails(object(data['repository']), object(data['viewer']));
   }
 
   async threads(number: number): Promise<readonly RemoteThread[]> {
@@ -398,12 +401,12 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   async overview(number: number): Promise<{ readonly details: PullRequestDetails; readonly threads: readonly RemoteThread[] }> {
-    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){${viewerField} repository(owner:$owner,name:$name){
       ${mergeMethodFields} pullRequest(number:$number){id ${detailsFields} ${threadsField}}}}`, { number, after: null });
     const repository = object(data['repository']);
     const id = object(repository['pullRequest'])['id'];
     if (typeof id === 'string' && id !== '') this.#ids.set(number, Promise.resolve(id));
-    return { details: parseDetails(repository), threads: await this.#threads(number, data) };
+    return { details: parseDetails(repository, object(data['viewer'])), threads: await this.#threads(number, data) };
   }
 
   /** All review threads, continuing from an already fetched first page when given. */
@@ -624,7 +627,7 @@ function checkState(raw: unknown): PullRequestDetails['checks'][number]['state']
 }
 
 /** Validate PR details from GraphQL; reviewers without an account and malformed checks are left out. */
-export function parseDetails(repository: Record<string, unknown>): PullRequestDetails {
+export function parseDetails(repository: Record<string, unknown>, viewer: Record<string, unknown> = {}): PullRequestDetails {
   const pullRequest = object(repository['pullRequest']);
   const methods: readonly [string, MergeMethod][] = [['squashMergeAllowed', 'squash'], ['mergeCommitAllowed', 'merge'], ['rebaseMergeAllowed', 'rebase']];
   const reviewers: PullRequestDetails['reviewers'][number][] = [];
@@ -672,6 +675,7 @@ export function parseDetails(repository: Record<string, unknown>): PullRequestDe
     assignees: logins(pullRequest['assignees']),
     mergeable: pullRequest['mergeable'] === 'MERGEABLE' ? 'yes' : pullRequest['mergeable'] === 'CONFLICTING' ? 'no' : 'unknown',
     viewerIsAuthor: pullRequest['viewerDidAuthor'] === true,
+    viewerAvatarUrl: optionalHttpsUrl(viewer['avatarUrl']),
     mergeMethods: methods.filter(([key]) => repository[key] === true).map(([, method]) => method),
     reviewers,
     checks,
@@ -730,6 +734,7 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
           pending: comment['state'] === 'PENDING',
           bodyHtml: typeof comment['bodyHTML'] === 'string' ? comment['bodyHTML'] : '',
           canDelete: comment['viewerCanDelete'] === true,
+          createdAt: typeof comment['createdAt'] === 'string' ? comment['createdAt'] : '',
         };
       }),
     });

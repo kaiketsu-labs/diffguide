@@ -375,9 +375,9 @@ function render(state: OverviewState): void {
   readRanges = state.read;
   const { analysis } = state;
   const analyze = $<HTMLButtonElement>('analyze');
-  analyze.textContent = analysis.running ? 'Stop' : analysis.result ? 'Analyze again' : 'Analyze';
+  analyze.textContent = analysis.running ? 'Stop' : analysis.result ? 'Rebuild guide' : 'Build guide';
   const analysisStatus = $('analysis-status');
-  analysisStatus.textContent = analysis.running ? 'Pre-review · ' + (analysis.step ?? 'Working') : analysis.error ? 'Pre-review failed' : '';
+  analysisStatus.textContent = analysis.running ? 'Guide · ' + (analysis.step ?? 'Working') : analysis.error ? 'Guide failed' : '';
   analysisStatus.title = analysis.error ?? '';
   analysisStatus.className = analysis.running ? 'chip claude working' : analysis.error ? 'chip bad' : '';
   analysisStatus.hidden = !analysis.running && !analysis.error;
@@ -554,40 +554,72 @@ function composerBox(draft: Composer): HTMLElement {
   return box;
 }
 
+/** "just now", "5m ago", "3h ago", "2d ago", then the date. */
+function relativeTime(iso: string): string {
+  const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return minutes + 'm ago';
+  if (minutes < 24 * 60) return Math.floor(minutes / 60) + 'h ago';
+  if (minutes < 30 * 24 * 60) return Math.floor(minutes / (24 * 60)) + 'd ago';
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function timeLabel(iso: string): HTMLElement[] {
+  if (Number.isNaN(Date.parse(iso))) return [];
+  const node = el('time', 'when', relativeTime(iso));
+  node.dateTime = iso;
+  node.title = new Date(iso).toLocaleString();
+  return [node];
+}
+
+setInterval(() => { for (const node of document.querySelectorAll<HTMLTimeElement>('time.when')) node.textContent = relativeTime(node.dateTime); }, 60_000);
+
+function avatar(entry: Message, author: string): HTMLElement {
+  const url = 'avatarUrl' in entry ? entry.avatarUrl : entry.author === 'claude' ? claudeIcon : current?.details?.viewerAvatarUrl ?? '';
+  if (!url) {
+    const fallback = el('span', 'avatar');
+    fallback.append(icon(codicons.account));
+    fallback.title = author;
+    return fallback;
+  }
+  const image = el('img', 'avatar' + (url === claudeIcon ? ' claude' : ''));
+  image.src = url;
+  image.alt = author;
+  image.title = author;
+  return image;
+}
+
+/** Avatar on the left, text beside it. GitHub messages name their author; local ones are You or Claude, which the avatar already says. */
 function message(entry: Message): HTMLElement {
-  const item = el('div', 'msg');
-  const who = el('div', 'who');
   const github = 'avatarUrl' in entry;
-  if (!github && entry.author === 'claude' && claudeIcon) {
-    const icon = el('img');
-    icon.src = claudeIcon;
-    icon.alt = '';
-    who.append(icon);
-  }
-  if (github && entry.avatarUrl) {
-    const avatar = el('img', 'avatar');
-    avatar.src = entry.avatarUrl;
-    avatar.alt = '';
-    who.append(avatar);
-  }
-  who.append(github ? entry.author : entry.author === 'claude' ? 'Claude' : 'You');
-  if (github && entry.pending) who.append(el('span', 'pill', 'Pending'));
+  const author = github ? entry.author : entry.author === 'claude' ? 'Claude' : 'You';
+  const meta = el('span', 'msg-meta');
+  if (github && entry.pending) meta.append(el('span', 'chip warning', 'Pending'));
+  if (!github) meta.append(...timeLabel(entry.createdAt));
   if (github && entry.canDelete) {
     const remove = button('', () => post({ action: 'github-delete', id: entry.id }), 'quiet delete');
     remove.append(icon(codicons.trash));
     remove.title = 'Delete on GitHub';
     remove.setAttribute('aria-label', 'Delete on GitHub');
-    who.append(remove);
+    meta.append(remove);
   }
+  const main = el('div', 'msg-main');
+  if (github) {
+    const head = el('div', 'msg-head');
+    head.append(el('b', '', author), ...timeLabel(entry.createdAt), meta);
+    main.append(head);
+  } else if (meta.childElementCount > 0) main.append(meta);
   const body = el('div', 'msg-text');
   body.innerHTML = entry.html;
-  item.append(who, body);
+  main.append(body);
+  const item = el('div', 'msg');
+  item.append(avatar(entry, author), main);
   return item;
 }
 
-/** Who can see a thread: Local stays with you and Claude, On GitHub is on the PR, Pre-review is Claude's note from its pre-review. */
-const kindMarks: Record<'github' | 'local' | 'analysis', string> = { github: codicons.github, local: codicons.vm, analysis: codicons.checklist };
-const kindLabels: Record<'github' | 'local' | 'analysis', string> = { github: 'On GitHub', local: 'Local', analysis: 'Pre-review' };
+/** Who can see a thread: Local stays with you and Claude, On GitHub is on the PR, Guide is Claude's note from its guide. */
+const kindMarks: Record<'github' | 'local' | 'analysis', string> = { github: codicons.github, local: codicons.vm, analysis: codicons.map };
+const kindLabels: Record<'github' | 'local' | 'analysis', string> = { github: 'On GitHub', local: 'Local', analysis: 'Guide' };
 
 function kindLabel(kind: 'github' | 'local' | 'analysis'): HTMLElement {
   const label = el('span', 'source');
@@ -613,7 +645,7 @@ function threadBox(thread: Thread): HTMLElement {
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   box.append(strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
-    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s pre-review. Reply to ask about it.' : 'Only you and Claude see it.',
+    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
     status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
   for (const entry of thread.messages) box.append(message(entry));
   const key = 'reply:' + thread.id;
@@ -636,11 +668,11 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(actions);
     return box;
   }
-  if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
-  actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })), el('span', 'gap'));
-  actions.append(thread.url
+  actions.append(el('span', 'gap'), thread.url
     ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
     : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
+  actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
+  if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
   return box;
 }
@@ -1230,13 +1262,13 @@ function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, 
 function guideIntro(): HTMLElement {
   const analysis = current?.analysis;
   const card = el('section', 'card guide-intro');
-  card.append(el('h3', '', 'Claude\'s pre-review'), el('p', '', 'Claude reads the changes, groups them by severity, puts them in reading order and explains each step. '
+  card.append(el('h3', '', 'Guide'), el('p', '', 'Claude reads the changes, groups them by severity, puts them in reading order and explains each step. '
     + 'Each note is a thread you can reply to. Every change lands in exactly one step, so once every step is Viewed, the whole PR is.'));
   const row = el('div', 'row');
-  const start = button(analysis?.running ? 'Stop' : 'Analyze', () => post({ action: analysis?.running ? 'analysis-stop' : 'analyze' }), analysis?.running ? '' : 'primary');
+  const start = button(analysis?.running ? 'Stop' : 'Build guide', () => post({ action: analysis?.running ? 'analysis-stop' : 'analyze' }), analysis?.running ? '' : 'primary');
   row.append(start);
-  if (analysis?.running) row.append(el('span', 'chip claude working', 'Pre-review · ' + (analysis.step ?? 'Working')));
-  else if (analysis?.error) row.append(el('span', 'bad', 'Pre-review failed: ' + analysis.error));
+  if (analysis?.running) row.append(el('span', 'chip claude working', 'Guide · ' + (analysis.step ?? 'Working')));
+  else if (analysis?.error) row.append(el('span', 'bad', 'Guide failed: ' + analysis.error));
   else row.append(el('span', 'muted', 'Runs Claude read-only on this PR. Large PRs take a few minutes.'));
   card.append(row);
   return card;
@@ -1244,9 +1276,9 @@ function guideIntro(): HTMLElement {
 
 function guideSummary(overview: string, stale: boolean): HTMLElement {
   const card = el('section', 'card guide-intro');
-  card.append(el('h3', '', 'Claude\'s pre-review'));
+  card.append(el('h3', '', 'Guide'));
   if (overview) card.append(el('p', 'text', overview));
-  if (stale) card.append(el('p', 'wait', 'Made for an older commit. Steps whose code changed since then moved to Unclassified. Analyze again to update.'));
+  if (stale) card.append(el('p', 'wait', 'Made for an older commit. Steps whose code changed since then moved to Unclassified. Rebuild the guide to update.'));
   card.append(el('p', 'muted', 'Every change is in exactly one step. Viewed on every step marks the whole PR viewed.'));
   return card;
 }
@@ -1258,7 +1290,7 @@ function threadKind(thread: Thread): ThreadKind {
   return thread.source === 'github' ? 'github' : thread.origin === 'analysis' ? 'analysis' : 'local';
 }
 
-/** The Threads card: one foldable group per kind, one line per thread. Pre-review starts folded because its notes already sit in the diff. */
+/** The Threads card: one foldable group per kind, one line per thread. Guide starts folded because its notes already sit in the diff. */
 function renderThreadList(): void {
   const threads = allThreads();
   $('threads-title').textContent = 'Threads (' + threads.length + ')';
@@ -1285,18 +1317,27 @@ function renderThreadList(): void {
   }
 }
 
+/** Plain text with `backtick` spans shown as code. */
+function inlineCode(text: string): Node[] {
+  return text.split('`').map((part, index) => index % 2 === 1 ? el('code', '', part) : document.createTextNode(part));
+}
+
+/** One thread as a row: where on the left, the text in a column that lines up, status on the right only when it adds something. */
 function threadRow(thread: Thread, kind: ThreadKind): HTMLElement {
   const item = el('li', 'card-thread ' + kind);
-  const where = el('a', 'where', thread.location.split('/').pop() ?? thread.location);
-  where.title = thread.location;
-  where.addEventListener('click', () => jump(thread));
-  const text = el('span', 'text', thread.text);
-  text.title = thread.text;
-  item.append(where, el('span', 'muted state', thread.status), text);
+  item.title = thread.location + '\n' + thread.text;
+  item.addEventListener('click', () => jump(thread));
+  const text = el('span', 'text');
+  text.append(...inlineCode(thread.text));
+  const status = kind === 'analysis' ? '' : thread.status;
+  const [name = '', line = ''] = (thread.location.split('/').pop() ?? '').split(/(?=:\d+$)/u);
+  const where = el('span', 'where');
+  where.append(el('span', 'name', name), line);
+  item.append(where, text, el('span', 'state', status));
   if (thread.url) {
-    const link = el('a', '', '↗');
+    const link = el('a', 'open', '↗');
     link.title = 'Open on GitHub';
-    link.addEventListener('click', () => post({ action: 'github', id: thread.id }));
+    link.addEventListener('click', (event) => { event.stopPropagation(); post({ action: 'github', id: thread.id }); });
     item.append(link);
   }
   return item;
@@ -1355,7 +1396,7 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const container = $('files');
   const result = current?.analysis.result;
   if (!files || !result) {
-    $('files-title').textContent = 'Guided review';
+    $('files-title').textContent = 'Guide';
     container.replaceChildren(guideIntro());
     return;
   }
@@ -1696,7 +1737,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
   if (data.idle) setBusy(false);
 }
 
-for (const [id, action] of [['pr', 'pr'], ['log', 'log'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
+for (const [id, action] of [['pr', 'pr'], ['log', 'log'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
 $('error').addEventListener('click', () => { $('error').textContent = ''; });
 document.addEventListener('mousemove', (event) => {
   pointer = event;

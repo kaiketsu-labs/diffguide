@@ -339,7 +339,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'guide': {
         const steps = node.groups.flatMap((group) => group.steps);
-        const item = new vscode.TreeItem('Guided review', vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem('Guide', vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon('compass');
         item.description = `${steps.filter((step) => step.viewed).length}/${steps.length} viewed`;
         return item;

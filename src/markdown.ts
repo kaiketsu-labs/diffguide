@@ -20,6 +20,11 @@ const preview = new MarkdownIt({
   highlight: (code, language) => codePreviewHtml(code.replace(/\n$/u, ''), fenceFiles[language.toLowerCase()] ?? 'x.txt'),
 });
 
+/** Stand-in file names for the code fences' languages, so their grammars can load before rendering. */
+export function fenceFilePaths(markdown: string): string[] {
+  return [...markdown.matchAll(/^\s*(?:`{3,}|~{3,})\s*([\w+-]+)/gmu)].flatMap((match) => fenceFiles[(match[1] ?? '').toLowerCase()] ?? []);
+}
+
 /** Render a Markdown file block by block, so each block can take comments on its source lines. Raw HTML stays escaped. */
 export function markdownBlocks(markdown: string): readonly MarkdownBlock[] {
   const lines = markdown.split('\n');

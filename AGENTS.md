@@ -28,7 +28,7 @@ Pair Review is a VS Code extension for reviewing code with Claude: native inline
 ## UI
 
 - Webview colors, type sizes, spacing and corners come from `src/designTokens.ts` as CSS custom properties (`--brand`, `--ink`, `--radius-md`). Use only those properties in webview CSS; change a value there, not at the use site. `src/webviewStyles.ts` holds the shared buttons (`primary`, `claude`, `quiet`, `small`), inputs, key caps and chips.
-- Color names who is involved: `brand` teal is you, `claude` clay is Claude, `github` slate blue is GitHub. Everything else follows the VS Code theme.
+- Color names who is involved: `brand` is you and stays neutral (the theme's text color), `claude` clay is Claude, `github` slate blue is GitHub. Everything else follows the VS Code theme.
 - Webview icons are codicon SVGs from `src/codicons.ts`; add new ones there from microsoft/vscode-codicons.
 - Use clear system sans-serif fonts for extension UI and monospace fonts for code. Never use Comic Sans or handwritten novelty fonts.
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.

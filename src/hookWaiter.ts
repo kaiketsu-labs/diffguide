@@ -131,7 +131,7 @@ async function main(): Promise<void> {
       const events = delivery.select(batch.events, recover);
       recover = false;
       if (events.length > 0) {
-        const custom = await readCustomInstructions('ask', { projectRoot: descriptor.workspaceRoot, repository: { cwd: descriptor.workspaceRoot } });
+        const custom = await readCustomInstructions('comments', { projectRoot: descriptor.workspaceRoot, repository: { cwd: descriptor.workspaceRoot } });
         const prompt = `${buildReviewBatchPrompt(events, batch.threads, custom)}\n`;
         await new Promise<void>((resolveOutput, rejectOutput) => {
           process.stderr.write(prompt, (error) => {

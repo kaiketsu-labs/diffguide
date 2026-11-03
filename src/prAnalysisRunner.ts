@@ -79,7 +79,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
       () => { this.#set({ running: false }); },
       (failure: unknown) => {
         const error = this.#stopped ? 'Stopped.' : failure instanceof Error ? failure.message : String(failure);
-        this.options.log(`Analysis failed: ${error}`);
+        this.options.log(`Guide failed: ${error}`);
         this.#set({ running: false, error });
       },
     );
@@ -133,7 +133,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
     };
     await writePrivateJson(analysisFile(this.options.dataPath), saved);
     this.#result = Promise.resolve(saved);
-    this.options.log(`Analysis done: ${saved.groups.length} groups, ${index} steps.`);
+    this.options.log(`Guide done: ${saved.groups.length} groups, ${index} steps.`);
   }
 
   /** Run Claude and resolve with its structured output. */
@@ -144,7 +144,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
       '--allowedTools', 'Read', 'Grep', 'Glob', '--disallowedTools', ...blockedTools,
       ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
     ];
-    this.options.log('Starting the PR analysis');
+    this.options.log('Building the PR guide');
     const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
     const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     this.#child = child;
@@ -178,7 +178,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
     if (error !== undefined) throw new Error(error);
     if (output === undefined) {
       const reason = stderr.trim().split('\n').at(-1);
-      throw new Error(code === 0 ? 'Claude returned no analysis.' : `Claude exited with code ${code ?? 'unknown'}${reason ? `: ${reason.slice(0, 200)}` : ''}`);
+      throw new Error(code === 0 ? 'Claude returned no guide.' : `Claude exited with code ${code ?? 'unknown'}${reason ? `: ${reason.slice(0, 200)}` : ''}`);
     }
     return output;
   }

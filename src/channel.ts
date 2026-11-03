@@ -217,7 +217,7 @@ async function main(): Promise<void> {
         const batch = readBatch(await bridge.request(recovering ? '/pending' : `/events?after=${sequence}`), descriptor.workspaceRoot);
         const threads = new Map(batch.threads.map((thread) => [thread.id, thread]));
         const events = [...batch.events].sort((left, right) => left.sequence - right.sequence);
-        const custom = events.length === 0 ? '' : await readCustomInstructions('ask', { projectRoot: descriptor.workspaceRoot, repository: { cwd: descriptor.workspaceRoot } });
+        const custom = events.length === 0 ? '' : await readCustomInstructions('comments', { projectRoot: descriptor.workspaceRoot, repository: { cwd: descriptor.workspaceRoot } });
         for (const event of events) {
           if (shutdown.signal.aborted) break;
           if ((recovering || !event.acknowledged) && !delivered.has(event.id)) {

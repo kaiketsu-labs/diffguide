@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { markdownBlocks, markdownHtml } from '../src/markdown.js';
+import { fenceFilePaths, markdownBlocks, markdownHtml } from '../src/markdown.js';
 
 test('renders the Markdown Claude writes: paragraphs, lists, inline code, emphasis, links and fenced code', () => {
   const html = markdownHtml('`5` is **hardcoded**, see _notes_.\nSecond line.\n\n- `a.json` has 3\n- b\n\n1. one\n2. two\n\n> quoted\n\n## Fix\n\n```typescript\nconst total = 2;\n```');
@@ -29,4 +29,8 @@ test('a Markdown file renders block by block with the source lines of each block
   assert.match(blocks[2]?.html ?? '', /<ul>\n<li>one<\/li>/u);
   assert.doesNotMatch(blocks[3]?.html ?? '', /<img|href="javascript/u);
   assert.match(blocks[4]?.html ?? '', /class="hljs-keyword">let/u);
+});
+
+test('names a stand-in file for each known code fence language', () => {
+  assert.deepEqual(fenceFilePaths('Text\n```python\nx = 1\n```\n  ~~~TS\nlet a\n~~~\n```\nplain\n```\n```brainfuck\n+\n```'), ['x.py', 'x.ts']);
 });

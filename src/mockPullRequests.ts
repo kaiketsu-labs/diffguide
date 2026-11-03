@@ -28,7 +28,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
   publishComment: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   details: async () => ({
     bodyHtml: '<p>Sample description.</p>', title: 'Sample pull request', body: 'Sample description.', open: true, merged: false, draft: false,
-    canEdit: false, branchDeletable: false, labels: [], assignees: [], mergeable: 'yes', viewerIsAuthor: false, mergeMethods: ['squash', 'merge'],
+    canEdit: false, branchDeletable: false, labels: [], assignees: [], mergeable: 'yes', viewerAvatarUrl: '', viewerIsAuthor: false, mergeMethods: ['squash', 'merge'],
     reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }],
     checks: [{ name: 'build', state: 'success' }, { name: 'lint', state: 'pending' }],
   }),

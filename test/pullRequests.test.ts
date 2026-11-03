@@ -111,7 +111,7 @@ test('parses PR details into reviewers, checks and allowed merge methods', () =>
   assert.deepEqual(details, {
     bodyHtml: '<p>Hi</p>', title: 'Add search', body: 'Hi', open: true, merged: false, draft: true, canEdit: true, branchDeletable: true,
     labels: [{ name: 'bug', color: 'd73a4a' }], assignees: ['alice'],
-    mergeable: 'no', viewerIsAuthor: true, mergeMethods: ['squash', 'rebase'],
+    mergeable: 'no', viewerIsAuthor: true, viewerAvatarUrl: '', mergeMethods: ['squash', 'rebase'],
     reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested', team: 'core-team' }],
     checks: [{ name: 'build', state: 'success', url: 'https://ci/1' }, { name: 'test', state: 'pending' }, { name: 'deploy', state: 'failure' }],
   });
@@ -127,6 +127,12 @@ test('offers no branch deletion for forks, deleted branches or repositories that
   assert.equal(deletable({ deleteBranchOnMerge: true }, {}), false);
 });
 
+test('reads the viewer\'s avatar and drops links that are not https', () => {
+  const pullRequest = { latestOpinionatedReviews: { nodes: [] }, reviewRequests: { nodes: [] }, commits: { nodes: [] }, labels: { nodes: [] }, assignees: { nodes: [] } };
+  assert.equal(parseDetails({ pullRequest }, { avatarUrl: 'https://avatars.githubusercontent.com/u/1' }).viewerAvatarUrl, 'https://avatars.githubusercontent.com/u/1');
+  assert.equal(parseDetails({ pullRequest }, { avatarUrl: 'javascript:alert(1)' }).viewerAvatarUrl, '');
+});
+
 test('reads picker options, with teams only for organizations', () => {
   const repository = { assignableUsers: { nodes: [{ login: 'alice' }] }, labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] } };
   assert.deepEqual(parsePickerOptions({ ...repository, owner: { teams: { nodes: [{ name: 'Core', slug: 'core' }, { name: 'No slug' }] } } }),
@@ -135,7 +141,7 @@ test('reads picker options, with teams only for organizations', () => {
 });
 
 test('reads GitHub review threads, using original lines for outdated ones and skipping file-level threads', () => {
-  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
+  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, createdAt: login === null ? undefined : '2026-01-02T03:04:05Z', author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
   const threads = parseReviewThreads([
     { id: 'T1', path: 'src/a.ts', diffSide: 'RIGHT', line: 12, startLine: 10, originalLine: 3, originalStartLine: 1, isOutdated: false, isResolved: true,
       comments: { nodes: [comment('alice', 'Why?'), comment(null, 'Because.')] } },
@@ -146,9 +152,9 @@ test('reads GitHub review threads, using original lines for outdated ones and sk
   ]);
   assert.deepEqual(threads, [
     { id: 'T1', path: 'src/a.ts', side: 'RIGHT', startLine: 10, endLine: 12, outdated: false, resolved: true, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Why?', author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false }] },
+      comments: [{ id: 'C-Why?', author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z' }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '' }] },
     { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false }] },
+      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z' }] },
   ]);
   assert.throws(() => parseReviewThreads([{ id: 'T4', path: 'a', line: 1, isOutdated: false, comments: { nodes: [comment('x', 'y', 'javascript:alert(1)')] } }]), /invalid link/u);
 });
@@ -497,7 +503,7 @@ test('lists a checked-out PR\'s guide steps above its files and opens the review
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
   const [guide, file] = await level(tree, pr?.node);
-  assert.deepEqual([guide?.item.label, guide?.item.description, file?.item.label], ['Guided review', '1/3 viewed', 'a.ts']);
+  assert.deepEqual([guide?.item.label, guide?.item.description, file?.item.label], ['Guide', '1/3 viewed', 'a.ts']);
   const groups = await level(tree, guide?.node);
   assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
   const steps = await level(tree, groups[0]?.node);

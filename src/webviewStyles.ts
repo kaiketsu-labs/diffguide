@@ -3,7 +3,7 @@ import { designTokenStyles } from './designTokens.js';
 /**
  * Tokens plus the controls every webview shares: page text, buttons, inputs, key caps and the focus ring.
  * Give a button `data-tip` for a hover tip; icon-only buttons need one.
- * Buttons are secondary by default; add `primary` (yours, teal), `claude` (sends to Claude, clay) or `quiet` (text only).
+ * Buttons are secondary by default; add `primary` (yours, in the theme's text color), `claude` (sends to Claude, clay) or `quiet` (text only).
  */
 export const webviewStyles = `${designTokenStyles}
 body{color:var(--ink);background:var(--surface);font:13px/20px var(--font-ui)}
@@ -33,6 +33,7 @@ kbd.on-fill{height:16px;border-color:currentColor;color:inherit;opacity:.7}
 .chip::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
 .chip.claude{color:var(--claude);background:var(--claude-soft)}
 .chip.working::before{animation:pulse 1.2s ease-in-out infinite}
+.chip.warning{color:var(--warning);background:color-mix(in srgb,var(--warning) 14%,transparent)}
 .chip.success{color:var(--success);background:color-mix(in srgb,var(--success) 14%,transparent)}
 .chip.danger{color:var(--danger);background:var(--danger-soft)}
 [data-tip]{position:relative}

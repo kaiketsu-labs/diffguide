@@ -22,7 +22,7 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
   'action-secondary': { vscode: 'button-secondaryBackground', dark: '#313335', light: '#e6e8ea' },
   'on-action-secondary': { vscode: 'button-secondaryForeground', dark: '#cccccc', light: '#2b2b2b' },
   success: { vscode: 'testing-iconPassed', dark: '#4fbf7a', light: '#1a7f37' },
-  warning: { vscode: 'testing-iconQueued', dark: '#d9a33a', light: '#8a5d00' },
+  warning: { vscode: 'editorWarning-foreground', dark: '#d9a33a', light: '#8a5d00' },
   danger: { vscode: 'testing-iconFailed', dark: '#f0726a', light: '#c4322a' },
   'diff-add': { vscode: 'diffEditor-insertedLineBackground', dark: '#9bb95533', light: '#9bb95533' },
   'diff-del': { vscode: 'diffEditor-removedLineBackground', dark: '#ff000033', light: '#ff00001f' },
@@ -31,13 +31,11 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
   'git-deleted': { vscode: 'gitDecoration-deletedResourceForeground', dark: '#c74e39', light: '#ad0707' },
   'git-renamed': { vscode: 'gitDecoration-renamedResourceForeground', dark: '#73c991', light: '#007100' },
   // Our own color contributions in package.json, so users can override them; keep their defaults in sync.
-  'brand-soft': { vscode: 'pairReview-selectionBackground', dark: '#5db9c326', light: '#087d8b1f' },
-  'brand-line': { vscode: 'pairReview-selectionBorder', dark: '#83d6d8aa', light: '#247d8faa' },
+  'brand-soft': { vscode: 'pairReview-selectionBackground', dark: '#ffffff1a', light: '#0000000f' },
+  'brand-line': { vscode: 'pairReview-selectionBorder', dark: '#ffffff66', light: '#00000059' },
 };
 
 const brandTokens: Readonly<Record<string, BrandToken>> = {
-  brand: { dark: '#5cc6c9', light: '#0a7680' },
-  'on-brand': { dark: '#0b2a2c', light: '#ffffff' },
   claude: { dark: '#e8896a', light: '#b34f2b' },
   'claude-soft': { dark: '#e8896a24', light: '#b34f2b1a' },
   'on-claude': { dark: '#2a130a', light: '#ffffff' },
@@ -47,8 +45,10 @@ const brandTokens: Readonly<Record<string, BrandToken>> = {
   'shadow-overlay': { dark: '0 4px 16px rgba(0,0,0,.35)', light: '0 4px 16px rgba(0,0,0,.12)' },
 };
 
-/** Tokens that point at another token, in every theme. */
+/** Tokens that point at another token, in every theme. You are neutral: your accent is the theme's text color, so only Claude and GitHub carry a hue. */
 const aliases: Readonly<Record<string, string>> = {
+  brand: 'ink',
+  'on-brand': 'surface',
   action: 'brand',
   'on-action': 'on-brand',
 };

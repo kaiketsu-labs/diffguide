@@ -15,7 +15,7 @@ import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequest
 import { buildGuide, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
 import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
-import { markdownBlocks } from './markdown.js';
+import { fenceFilePaths, markdownBlocks } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
@@ -154,6 +154,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
         const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
+        await prepareHighlighting(opened.session.store.threads.flatMap((thread) => thread.messages.flatMap((entry) => fenceFilePaths(entry.text))));
         return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
@@ -280,6 +281,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (answer !== remove) return;
           await provider.deleteBranch(pullRequest.headBranch);
           void loadDetails();
+        },
+        removeWorktree: async () => {
+          const confirm = 'Remove worktree';
+          const answer = await vscode.window.showWarningMessage(
+            `Remove the worktree for #${pullRequest.number}? Its local comments are deleted too. Git refuses if it has uncommitted changes.`, { modal: true }, confirm);
+          if (answer !== confirm) return false;
+          await pullRequestSessions.close(repository, pullRequest.number);
+          await removeWorktree(checkout.root, storageRoot, repository, pullRequest.number);
+          void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+          return true;
         },
         refresh: () => { void loadDetails(); void loadThreads(); },
         analyze: async () => {

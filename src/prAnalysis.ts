@@ -282,7 +282,7 @@ export function buildGuide(analysis: Analysis, files: readonly FileDiff[]): Guid
     const hasBlocks = blocks.some((block) => block.path === file.path);
     return own.length > 0 || !hasBlocks ? [{ key: 'u:' + file.path, path: file.path, blocks: own }] : [];
   });
-  if (rest.length > 0) groups.push({ key: 'u', severity: 'unclassified', title: 'Not placed by the analysis', steps: rest });
+  if (rest.length > 0) groups.push({ key: 'u', severity: 'unclassified', title: 'Not placed by the guide', steps: rest });
   const notes = new Map(analysis.files.map((file) => [file.path, file.note]));
   const seen = new Set<string>();
   return groups.map((group) => ({

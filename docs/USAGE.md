@@ -82,7 +82,7 @@ The command, editor action and keyboard shortcut capture code when opening a dra
 
 ## Your own instructions for Claude
 
-Add Markdown files to steer Claude: `analysis.md` for **Analyze** on the review page, `ask.md` for answers to review comments. Claude gets them after the built-in instructions, which still decide the output format and tools. Pair Review reads them on every run, from the most general to the most specific; on conflict the later file wins:
+Add Markdown files to steer Claude: `guide.md` for **Build guide** on the review page, `comments.md` for Claude's work on your review comments, both answers and changes. Claude gets them after the built-in instructions, which still decide the output format and tools. Pair Review reads them on every run, from the most general to the most specific; on conflict the later file wins:
 
 | File | Applies to |
 | --- | --- |

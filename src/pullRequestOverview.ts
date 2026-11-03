@@ -41,7 +41,7 @@ export interface OverviewState {
     /** Set when the thread holds a note from Claude's analysis. */
     readonly origin?: 'analysis';
     /** Rendered from Markdown with escaped text only. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string }[];
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];
@@ -79,7 +79,7 @@ export interface GitHubThreadView {
   /** In the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
   /** Bodies as GitHub rendered and sanitized them. */
-  readonly messages: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean }[];
+  readonly messages: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean; readonly createdAt: string }[];
 }
 export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string };
 type CommentIntent = Extract<ReviewIntent, 'ask' | 'implement'>;
@@ -134,6 +134,8 @@ export interface OverviewActions {
   setDraft(draft: boolean): Promise<void>;
   setOpen(open: boolean): Promise<void>;
   deleteBranch(): Promise<void>;
+  /** Remove the PR's local worktree after the user confirms; true when removed, so the page closes. */
+  removeWorktree(): Promise<boolean>;
   refresh(): void;
   analyze(): Promise<void>;
   stopAnalysis(): void;
@@ -147,7 +149,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' }
+  | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'editor'; readonly path: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
@@ -220,7 +222,7 @@ export async function showPullRequestOverview(
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-mark.svg'));
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (): void => {
     void actions.readFiles().then((files) => {
@@ -293,6 +295,7 @@ export async function showPullRequestOverview(
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
+        else if (action === 'remove-worktree') { if (await actions.removeWorktree()) panel.dispose(); }
         else if (action === 'refresh') {
           actions.refresh();
           sendFiles();
@@ -453,10 +456,12 @@ tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
 .source{display:inline-flex;align-items:center;gap:var(--space-4);font-weight:600;color:var(--accent)}.source svg{width:14px;height:14px;fill:currentColor}
 .strip .muted:last-child{margin-left:auto}
 .thread textarea{margin-top:var(--space-12);min-height:64px}
-.msg{margin-top:var(--space-8)}.msg+.msg{padding-top:var(--space-8);border-top:1px solid var(--line)}
-.who{display:flex;align-items:center;gap:var(--space-6);font-size:12px;font-weight:600}.who img{width:16px;height:16px}.who img.avatar{width:18px;height:18px;border-radius:50%}
+.msg{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);margin-top:var(--space-8)}.msg+.msg{padding-top:var(--space-8);border-top:1px solid var(--line)}
+.msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.claude{box-sizing:border-box;padding:2px;border-radius:0}.msg .avatar svg{width:20px;height:20px;fill:currentColor}
+.msg-head{display:flex;align-items:center;gap:var(--space-6);min-height:20px}.msg-head b{font-weight:600}.msg-head .msg-meta{margin-left:auto}
+.msg-meta{display:flex;align-items:center;gap:var(--space-6)}.msg-main>.msg-meta{float:right;margin-left:var(--space-12)}.when{font-size:12px;color:var(--ink-muted)}
 .pill{padding:0 var(--space-6);border:1px solid var(--warning);border-radius:var(--radius-pill);font-size:11px;font-weight:500;color:var(--warning)}
-.msg-text{overflow-wrap:anywhere}.msg-text>:first-child{margin-top:2px}.msg-text>:last-child{margin-bottom:0}
+.msg-text{overflow-wrap:anywhere}.msg-text>:first-child{margin-top:0}.msg-text>:last-child{margin-bottom:0}
 .msg-text p,.msg-text ul,.msg-text ol,.msg-text pre,.msg-text blockquote{margin:var(--space-6) 0}.msg-text ul,.msg-text ol{padding-left:20px}.msg-text ul{list-style:disc}.msg-text li{padding:1px 0;border:0;font-size:inherit}
 .outside{padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.outside>.muted{margin-bottom:var(--space-6);font-size:12px}
 .comments{font-size:12px}
@@ -468,7 +473,7 @@ tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
 .thread.analysis,.card-thread.analysis,.thread-group.analysis{--accent:var(--claude);--tint:var(--claude-soft)}
 .thread.github,.card-thread.github,.thread-group.github{--accent:var(--github);--tint:var(--github-soft)}
 .strip .gap{flex:1}.pill.state{border-color:var(--line-strong);color:var(--ink-muted)}
-.who .delete{margin-left:auto;min-height:20px;padding:0 var(--space-2)}.who .delete svg{width:14px;height:14px}.who .delete:hover{color:var(--danger);text-decoration:none}
+.msg .delete{min-height:20px;padding:0 var(--space-2)}.msg .delete svg{width:14px;height:14px}.msg .delete:hover{color:var(--danger);text-decoration:none}
 details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size:12px}
 .chip.bad{color:var(--danger);background:var(--danger-soft)}
 .guide-intro{margin-top:var(--space-12)}.guide-intro p{margin:var(--space-6) 0}
@@ -493,10 +498,12 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .file-note,.step-note{padding:var(--space-8) var(--space-12);border-bottom:1px solid var(--line)}.file-note .tag{font-size:12px;font-weight:600;color:var(--claude)}
 .step>.diff>.thread{max-width:none;margin:var(--space-8) 10px}
 .thread-group{padding:var(--space-2) 0}.thread-group-head{display:flex;align-items:center;gap:var(--space-6);padding:var(--space-4) 0;cursor:pointer;user-select:none}
-.card-thread{display:flex;align-items:baseline;gap:var(--space-8);padding:var(--space-2) 0 var(--space-2) var(--space-8);border-left:2px solid var(--accent);font-size:12px}.card-thread+.card-thread{border-top:0}.card-thread .where{flex:none}.card-thread .state{flex:none}.card-thread .text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-thread{display:grid;grid-template-columns:minmax(0,11em) minmax(0,1fr) auto auto;align-items:baseline;column-gap:var(--space-12);padding:var(--space-2) var(--space-6) var(--space-2) var(--space-8);border-left:2px solid var(--accent);font-size:12px;cursor:pointer}.card-thread+.card-thread{border-top:0}.card-thread:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.card-thread .name,.card-thread .text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card-thread .where{display:flex;min-width:0;font-family:var(--font-code);color:var(--ink-muted)}.card-thread .state{color:var(--ink-muted)}
+.card-thread code{font-family:var(--font-code);font-size:.92em}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
 </style></head><body>
-<div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a></span></div>
+<div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
@@ -525,9 +532,9 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 </aside>
 </div>
 <div id="files-bar" class="row head"><h2 id="files-title">Files</h2><span class="toolbar">
-<span id="analysis-status"></span><button id="analyze" class="small">Analyze</button>
+<span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
 <span class="divider"></span>
-<span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button><button id="guided" data-tip="Guided: files in the order of Claude's pre-review" aria-label="Guided by Claude's pre-review">${codicons.checklist}</button></span>
+<span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button><button id="guided" data-tip="Guided: files in the order of Claude's guide" aria-label="Guided by Claude's guide">${codicons.map}</button></span>
 <button id="folders" class="icon-button" data-tip="Group files by folder" aria-label="Group files by folder">${codicons.listTree}</button>
 <span class="divider"></span>
 <button id="collapse" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
@@ -553,7 +560,7 @@ function githubThreadView(thread: RemoteThread): GitHubThreadView {
     outdated: thread.outdated,
     resolved: thread.resolved,
     pending: thread.pending,
-    messages: thread.comments.map(({ id, author, avatarUrl, pending, bodyHtml, canDelete }) => ({ id, author, avatarUrl, pending, html: bodyHtml, canDelete })),
+    messages: thread.comments.map(({ id, author, avatarUrl, pending, bodyHtml, canDelete, createdAt }) => ({ id, author, avatarUrl, pending, html: bodyHtml, canDelete, createdAt })),
   };
 }
 
@@ -605,7 +612,7 @@ export function buildOverviewState(
         endLine: thread.anchor.endLine,
         resolved: thread.resolved,
         ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        messages: thread.messages.map(({ author, text }) => ({ author, html: markdownHtml(text) })),
+        messages: thread.messages.map(({ author, text, createdAt }) => ({ author, html: markdownHtml(text), createdAt })),
         ...(publication === undefined ? {} : { url: publication.url }),
       };
     }),
