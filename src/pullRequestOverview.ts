@@ -35,6 +35,8 @@ export interface OverviewState {
     readonly location: string;
     readonly text: string;
     readonly status: string;
+    /** What Claude is doing with this thread right now, while it waits for or works on it. */
+    readonly working?: string;
     readonly url?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
@@ -132,6 +134,8 @@ export interface OverviewActions {
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   merge(method: MergeMethod): Promise<void>;
+  /** Have the PR's Claude merge the base branch, resolve the conflicts and push; resolves when Claude is done. */
+  fixConflicts(): Promise<void>;
   /** Ask for a new title in VS Code and save it. */
   editTitle(): Promise<void>;
   editBody(body: string): Promise<void>;
@@ -172,7 +176,7 @@ export type PageMessage =
   | { readonly action: 'view'; readonly view: 'files' | 'guide' }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
   | { readonly action: 'merge'; readonly method: MergeMethod }
-  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' }
+  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' }
   | { readonly action: 'edit-body'; readonly body: string }
   | { readonly action: 'pick'; readonly what: PickTarget }
   | { readonly action: 'draft'; readonly draft: boolean };
@@ -302,6 +306,8 @@ export async function showPullRequestOverview(
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
         else if (action === 'view' && (view === 'files' || view === 'guide')) {
           await vscode.commands.executeCommand(view === 'guide' ? 'pairReview.showGuideInTree' : 'pairReview.showFilesInTree');
+        } else if (action === 'fix-conflicts') {
+          void actions.fixConflicts().catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
         } else if (action === 'log') actions.showLog();
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
@@ -445,6 +451,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 #peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:var(--peek-width,min(560px,92vw));max-width:calc(100vw - 2 * var(--space-8));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.claude-live{margin-top:var(--space-8)}
 .media{display:flex;flex-wrap:wrap;gap:var(--space-12);padding:var(--space-12)}
 .media-side{flex:1 1 280px;min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-6)}
 .media-side figcaption{font-size:12px}
@@ -555,7 +562,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
 <div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
 <p class="muted" id="review-note"></p></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row state-actions" id="state-actions"></div></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span class="muted">Claude merges the base branch, resolves the conflicts and pushes.</span><span class="gap"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
 <div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
@@ -630,8 +637,11 @@ export function buildOverviewState(
     analysis,
     threads: session.store.threads.map((thread) => {
       const publication = session.publication?.(thread.id);
+      const activity = session.activity?.(thread.id);
+      const working = thread.resolved ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
+        : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
       const status = [
-        thread.resolved ? 'Resolved' : session.activity?.(thread.id) ?? threadStatus[thread.status],
+        thread.resolved ? 'Resolved' : working !== undefined ? undefined : activity ?? threadStatus[thread.status],
         publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
       ].filter(Boolean).join(' · ');
       return {
@@ -639,6 +649,7 @@ export function buildOverviewState(
         location: `${thread.anchor.path}:${thread.anchor.startLine}`,
         text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
         status,
+        ...(working === undefined ? {} : { working }),
         path: thread.anchor.path,
         side: thread.anchor.side === 'original' ? 'old' : 'new',
         startLine: thread.anchor.startLine,

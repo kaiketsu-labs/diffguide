@@ -282,6 +282,8 @@ function renderState(details: PullRequestDetails): void {
   $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
     : !details.open ? (details.merged ? '' : 'Closed without merging.')
     : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
+  $('conflict-row').hidden = !(details.open && details.mergeable === 'no' && details.canEdit);
+  $<HTMLButtonElement>('fix-conflicts').disabled = current?.claude.running === true;
   const actions: HTMLButtonElement[] = [];
   const add = (label: string, message: PageMessage, className = 'quiet'): void => {
     const node = button(label, () => changePullRequest(message), className);
@@ -675,6 +677,12 @@ function threadBox(thread: Thread): HTMLElement {
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
     status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
   for (const entry of thread.messages) box.append(message(entry));
+  const working = thread.source === 'local' ? thread.working : undefined;
+  if (working) {
+    const live = el('div', 'claude-live');
+    live.append(el('span', 'chip claude working', working));
+    box.append(live);
+  }
   const key = 'reply:' + thread.id;
   const actions = el('div', 'row actions composer-actions');
   const reply = replies.get(thread.id);
@@ -1445,10 +1453,13 @@ function threadRow(thread: Thread, kind: ThreadKind): HTMLElement {
   const text = el('span', 'text');
   text.append(...inlineCode(thread.text));
   const status = kind === 'analysis' ? '' : thread.status;
+  const working = thread.source === 'local' ? thread.working : undefined;
   const [name = '', line = ''] = (thread.location.split('/').pop() ?? '').split(/(?=:\d+$)/u);
   const where = el('span', 'where');
   where.append(el('span', 'name', name), line);
-  item.append(where, text, el('span', 'state', status));
+  const state = el('span', 'state', working ? '' : status);
+  if (working) state.append(el('span', 'chip claude working', working));
+  item.append(where, text, state);
   if (thread.url) {
     const link = el('a', 'open', '↗');
     link.title = 'Open on GitHub';
@@ -1876,10 +1887,11 @@ function onExtensionMessage(data: ExtensionMessage): void {
     renderFiles([path]);
   }
   if (data.done?.startsWith('reply:')) {
+    const id = data.done.slice(6);
     sending.delete(data.done);
-    replies.delete(data.done.slice(6));
+    replies.delete(id);
     save();
-    renderFiles();
+    renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
   }
   if (data.idle) setBusy(false);
 }
@@ -1984,6 +1996,11 @@ for (const review of reviewButtons) {
     post({ action: 'review', event: review.dataset.event as ReviewEvent, body: $<HTMLTextAreaElement>('review').value });
   });
 }
+$('fix-conflicts').addEventListener('click', () => {
+  $('error').textContent = '';
+  $<HTMLButtonElement>('fix-conflicts').disabled = true;
+  post({ action: 'fix-conflicts' });
+});
 $('edit-title').addEventListener('click', () => changePullRequest({ action: 'edit-title' }));
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels'] as const) $('pick-' + what).addEventListener('click', () => changePullRequest({ action: 'pick', what }));

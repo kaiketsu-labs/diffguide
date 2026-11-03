@@ -20,6 +20,15 @@ export interface ClaudeActivity {
   readonly skipped: number;
 }
 
+/** A one-off job for a PR's Claude conversation, outside the comment queue, such as fixing merge conflicts. */
+export interface ClaudeTask {
+  /** What the log calls the run, such as "fixing merge conflicts". */
+  readonly label: string;
+  readonly prompt: string;
+  /** Tools Claude may use without asking, beyond Pair Review's own. */
+  readonly allowedTools: readonly string[];
+}
+
 /** How to start Claude for one PR worktree. */
 export interface ClaudeRunnerOptions {
   readonly store: ReviewStore;
@@ -56,6 +65,29 @@ export class ClaudeRunner implements vscode.Disposable {
 
   get activity(): ClaudeActivity {
     return this.#activity;
+  }
+
+  /**
+   * Run a task in this PR's conversation; resolves with an error message, or undefined on success.
+   * On someone else's PR, Git hooks stay off, since the PR's author controls the checkout.
+   */
+  async runTask(task: ClaudeTask): Promise<string | undefined> {
+    if (this.#disposed || this.#child !== undefined || this.#activity.running) throw new Error('Claude is still working on this PR. Try again when it is done.');
+    this.#set({ running: true, step: 'Starting', threads: new Set(), skipped: 0, error: undefined });
+    let error: string | undefined;
+    try {
+      error = await this.#spawn({
+        prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, edits: true,
+        env: this.options.role === 'reviewer' ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } : {},
+      });
+    } catch (failure: unknown) {
+      error = failure instanceof Error ? failure.message : String(failure);
+    }
+    if (error !== undefined) this.options.log(`Failed: ${error}`);
+    this.#child = undefined;
+    this.#set({ running: false, step: undefined, threads: new Set(), skipped: 0, error });
+    this.#next();
+    return error;
   }
 
   /** Send comments Claude did not pick up again, and clear the last error. */
@@ -96,7 +128,11 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: true, step: 'Starting', threads, skipped: 0, error: undefined });
     let error: string | undefined;
     try {
-      error = await this.#spawn(events);
+      const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
+      error = await this.#spawn({
+        prompt: this.options.role === 'reviewer' ? `${reviewerNote}\n\n${prompt}` : prompt,
+        label: `${events.length} comment${events.length === 1 ? '' : 's'}`, allowedTools: [], edits: this.options.role === 'author', env: {},
+      });
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
@@ -106,22 +142,25 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#next();
   }
 
-  /** Run Claude once over the given comments; resolves with an error message, or undefined on success. */
-  async #spawn(events: readonly ReviewEvent[]): Promise<string | undefined> {
+  /**
+   * Run Claude once in the PR's conversation; resolves with an error message, or undefined on success.
+   * `edits` lets Claude change files; without it, edits and commands are blocked.
+   */
+  async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly edits: boolean; readonly env: Readonly<Record<string, string>> }): Promise<string | undefined> {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const sessionPath = join(this.options.dataPath, 'claude-session.json');
     const saved = await readPrivateJson(sessionPath).catch(() => undefined) as { sessionId?: unknown } | undefined;
     const resume = typeof saved?.sessionId === 'string' && /^[\da-f-]{36}$/u.test(saved.sessionId) ? saved.sessionId : undefined;
     const sessionId = resume ?? randomUUID();
-    const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
     const args = [
-      '-p', this.options.role === 'reviewer' ? `${reviewerNote}\n\n${prompt}` : prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review',
-      ...(this.options.role === 'author' ? ['--permission-mode', 'acceptEdits'] : [...untrustedCheckoutFlags, '--disallowedTools', ...reviewerBlockedTools]),
+      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...run.allowedTools,
+      ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
+      ...(run.edits ? ['--permission-mode', 'acceptEdits'] : ['--disallowedTools', ...reviewerBlockedTools]),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
-    this.options.log(`Starting Claude for ${events.length} comment${events.length === 1 ? '' : 's'} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);
+    this.options.log(`Starting Claude for ${run.label} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);
     const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
-    const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...run.env } });
     this.#child = child;
     let stderr = '';
     child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });

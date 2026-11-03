@@ -10,6 +10,7 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
+import { conflictTask, prepareConflictFix } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, guideOutline } from './prAnalysis.js';
@@ -253,6 +254,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
+        },
+        fixConflicts: async () => {
+          const loaded = await currentDetails();
+          if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
+          const base = await prepareConflictFix(folder, pullRequest.number, pullRequest.baseBranch);
+          const pushTo = loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
+          const error = await opened.runner.runTask(conflictTask({ base, baseBranch: pullRequest.baseBranch, headBranch: pullRequest.headBranch, pushTo }));
+          changedOnGitHub();
+          if (error !== undefined) throw new Error(`Claude did not fix the conflicts: ${error}`);
         },
         merge: async (method) => {
           const merge = 'Merge';
