@@ -129,9 +129,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (details === undefined && remote === undefined) loadOverview();
         const paths = await listed;
         const all = [...new Set([...(paths ?? []), ...diffPaths])];
-        const viewed = await fileReviews.reviewed(provider, repository, pullRequest.number, all);
+        const [viewed, read] = await Promise.all([
+          fileReviews.reviewed(provider, repository, pullRequest.number, all),
+          readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
+        ]);
         const [loadedDetails, loadedThreads] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads()]);
-        return buildOverviewState(pullRequest, opened, [...viewed], paths?.length, loadedDetails, loadedThreads);
+        return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads);
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -192,6 +195,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await loadThreads();
         },
         setViewed: (path, viewed) => fileReviews.set(provider, repository, pullRequest.number, path, viewed),
+        markRead: async (range, fileDone) => {
+          if (!diffPaths.includes(range.path)) throw new Error(`${range.path} is not part of this PR's changes.`);
+          await fileReviews.markRead(repository, pullRequest.number, await readBase(), range);
+          if (fileDone) await fileReviews.set(provider, repository, pullRequest.number, range.path, true);
+        },
+        unmarkRead: (ids) => fileReviews.unmarkRead(repository, pullRequest.number, ids),
         openInEditor: (path) => openPullRequestFile(storageRoot, repository, pullRequest, path),
         showLog: () => { opened.output.show(true); },
         retry: () => { opened.runner.retry(); },
