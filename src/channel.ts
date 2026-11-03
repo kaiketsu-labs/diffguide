@@ -14,6 +14,7 @@ import {
   readDescriptor,
   record,
 } from './connection.js';
+import { readCustomInstructions } from './customInstructions.js';
 import { buildReviewPrompt, reviewInstructions, reviewReplyInstructions } from './eventPrompt.js';
 import { maximumReplyLength } from './limits.js';
 import { ownsSession } from './sessionBinding.js';
@@ -216,13 +217,14 @@ async function main(): Promise<void> {
         const batch = readBatch(await bridge.request(recovering ? '/pending' : `/events?after=${sequence}`), descriptor.workspaceRoot);
         const threads = new Map(batch.threads.map((thread) => [thread.id, thread]));
         const events = [...batch.events].sort((left, right) => left.sequence - right.sequence);
+        const custom = events.length === 0 ? '' : await readCustomInstructions('ask', { projectRoot: descriptor.workspaceRoot, repository: { cwd: descriptor.workspaceRoot } });
         for (const event of events) {
           if (shutdown.signal.aborted) break;
           if ((recovering || !event.acknowledged) && !delivered.has(event.id)) {
             await server.notification({
               method: 'notifications/claude/channel',
               params: {
-                content: buildReviewPrompt(event, threads.get(event.threadId)),
+                content: buildReviewPrompt(event, threads.get(event.threadId), custom),
                 meta: { event_id: event.id, thread_id: event.threadId, intent: event.intent },
               },
             });

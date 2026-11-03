@@ -130,6 +130,7 @@ test('stores a comment on a PR file in that PR\'s own review, anchored to the PR
   assert.equal(thread?.anchor.baseRevision, await readPullRequestBase(worktree, 'main'));
   assert.equal(opened.session.store.pendingEvents.length, 1);
   assert.equal(opened.bridge.descriptor.workspaceRoot, worktree);
+  for (let wait = 0; started.length === 0 && wait < 100; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(started, [worktree]);
 
   assert.ok(thread !== undefined);

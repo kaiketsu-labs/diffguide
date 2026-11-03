@@ -77,6 +77,8 @@ test('answers a sent comment in the background, shows each step, and resumes the
   assert.ok(first !== undefined);
   assert.equal(first.cwd, '/worktree');
   assert.ok(first.args.includes('--disallowedTools') && first.args.includes('Edit') && first.args.includes('Bash'));
+  assert.equal(first.args[first.args.indexOf('--setting-sources') + 1], 'user');
+  assert.ok(first.args.includes('--strict-mcp-config'));
   assert.equal(first.args[0], '-p');
   assert.ok(first.args[1]?.startsWith('This is someone else\'s pull request.'));
   assert.match(first.args[1] ?? '', /Question one/u);
@@ -111,6 +113,7 @@ test('lets Claude edit only on the author\'s own PR', async (t) => {
   await until(() => children.length === 1);
   const args = children[0]?.args ?? [];
   assert.ok(!args.includes('--disallowedTools'));
+  assert.ok(!args.includes('--setting-sources') && !args.includes('--strict-mcp-config'));
   assert.equal(args[args.indexOf('--permission-mode') + 1], 'acceptEdits');
   assert.ok(!children[0]?.args[1]?.includes('someone else'));
 });

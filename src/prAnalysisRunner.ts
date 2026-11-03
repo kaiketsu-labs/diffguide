@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import * as vscode from 'vscode';
-import { contentBlocks, describeTool, parseLine, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { contentBlocks, describeTool, parseLine, untrustedCheckoutFlags, type ClaudeRunnerOptions } from './claudeRunner.js';
 import type { CodeAnchor, ReviewStore } from './contracts.js';
 import { analysisPrompt, analysisSchema, changeBlocks, parseClaudeAnalysis, readStoredAnalysis, type Analysis, type ChangeBlock } from './prAnalysis.js';
 import { writePrivateJson } from './privateFiles.js';
@@ -20,9 +20,12 @@ export interface AnalysisOptions {
   readonly store: ReviewStore;
   readonly cwd: string;
   readonly dataPath: string;
+  readonly role: ClaudeRunnerOptions['role'];
   readonly resolve: ClaudeRunnerOptions['resolve'];
   readonly log: (line: string) => void;
   readonly spawn?: typeof spawnProcess;
+  /** The user's own analysis instructions, read fresh for each run. */
+  readonly instructions?: () => Promise<string>;
 }
 
 /** What one run analyzes. */
@@ -101,7 +104,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
   async #run(input: AnalysisInput): Promise<void> {
     const blocks = changeBlocks(input.files);
     if (blocks.length === 0) throw new Error('This PR has no line changes to analyze.');
-    const prompt = analysisPrompt(input.files, blocks, input.about);
+    const prompt = analysisPrompt(input.files, blocks, input.about, await this.options.instructions?.() ?? '');
     if (prompt.length > maximumPromptLength) throw new Error(`This PR is too large to analyze (${blocks.length} changed blocks).`);
     const output = await this.#spawn(prompt);
     const analysis = parseClaudeAnalysis(output, blocks, input.head, new Date().toISOString());
@@ -139,6 +142,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
     const args = [
       '-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--json-schema', JSON.stringify(analysisSchema),
       '--allowedTools', 'Read', 'Grep', 'Glob', '--disallowedTools', ...blockedTools,
+      ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
     ];
     this.options.log('Starting the PR analysis');
     const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
