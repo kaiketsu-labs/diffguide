@@ -221,6 +221,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "pairReview.cleanUpWorktrees",
+        "title": "Clean up worktrees",
+        "category": "Pair Review",
+        "icon": "$(trash)"
+      },
+      {
         "command": "pairReview.signInToGitHub",
         "title": "Sign in to GitHub",
         "category": "Pair Review",
@@ -646,6 +652,12 @@
           ],
           "default": "hooks",
           "description": "Automatische Zustellung im Hintergrund (Standard: hooks). channels ist eine experimentelle Alternative mit zusätzlichen Voraussetzungen."
+        },
+        "pairReview.worktreeCleanupDays": {
+          "type": "number",
+          "default": 14,
+          "minimum": 0,
+          "description": "Remove a PR worktree that was not opened for this many days. Worktrees of merged or closed PRs are removed regardless. Worktrees with uncommitted changes or unpushed commits are always kept. 0 removes only merged or closed ones."
         },
         "pairReview.mockPullRequests": {
           "type": "boolean",
