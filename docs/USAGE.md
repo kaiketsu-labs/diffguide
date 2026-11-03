@@ -93,6 +93,12 @@ Add Markdown files to steer Claude: `guide.md` for **Build guide** on the review
 
 `~/.claude` is `CLAUDE_CONFIG_DIR` when set. `<project>` is the project path with every character other than a letter or digit replaced by `-`, the same folder Claude Code keeps the project's conversations in. On someone else's PR, the repository's file comes from the base branch, so a PR cannot change the instructions it is reviewed with. For the same reason, Claude skips that checkout's `CLAUDE.md`, skills, hooks, settings and MCP servers.
 
+## PR worktrees
+
+Each PR you open gets its own checkout under `.claude/worktrees/pair-review/` in the repository, where Claude Code keeps its own worktrees. Claude can edit there, and your Claude account choice and parent `CLAUDE.md` files apply as in the repository itself. Pair Review hides the folder from Git through `.git/info/exclude`, so nothing changes in `.gitignore`.
+
+Pair Review removes a PR's worktree when the PR is merged or closed, or when you have not opened it for `pairReview.worktreeCleanupDays` days (14 by default, 0 turns the age limit off). It never removes a worktree with uncommitted changes or unpushed commits. It checks when VS Code starts, and **Pair Review: Clean up worktrees** checks right away.
+
 ## Preview status
 
 This is an early preview. Native conversations have distinct avatars and compact status headings; the optional side composer shows one compact, syntax-colored code preview. Python, JavaScript/TypeScript, JSON and shell snippets use editor-like light/dark colors; unsupported or large snippets remain plain text. The editor icon opens native hover and reference navigation. VS Code controls native comment dimensions and typography. The project appearance action softens reply outlines using the shared contrast-border color, so other controls in that project's current theme can also receive the quieter border; high-contrast themes stay unchanged. Current checks and remaining authenticated integration work are recorded in the [review findings](REVIEW.md). The demo uses simulated responses.
