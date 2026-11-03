@@ -9,8 +9,8 @@ export interface GitHubEndpoints {
   readonly authProvider: AuthProvider;
 }
 
-/** Only `repo` reaches private repositories; GitHub offers no narrower scope for reading them. */
-const scopes = ['repo'];
+/** Only `repo` reaches private repositories; GitHub offers no narrower scope for reading them. `read:org` reads team reviewer names. */
+const scopes = ['repo', 'read:org'];
 const requestTimeoutMs = 30_000;
 
 /** API addresses for github.com, or for the one enterprise host VS Code's `github-enterprise.uri` names. */

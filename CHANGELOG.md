@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The review page shows the description, reviewers and checks again. GitHub refused that request because reading team reviewer names needs the `read:org` scope. Pair Review now asks for it, so VS Code asks you to sign in to GitHub once more.
 - Local Review is now Pair Review. The extension ID, settings (`pairReview.*`), commands, Claude plugin (`/pair-review:connect`) and PR worktree folder (`.git/pair-review`) use the new name. Settings, PR worktrees and PR handoff comments from Local Review are not carried over.
 - On someone else's PR, Claude no longer loads the checkout's `CLAUDE.md`, skills, hooks, settings or MCP servers, for both Analyze and answers to comments. The PR author controls those files. Your own user-level Claude setup still applies.
 - Add your own instructions for **Analyze** (`analysis.md`) and for answers to review comments (`ask.md`) in `.claude/pair-review/` folders: in Claude's config folder, parent folders of the project, the repository, or Claude's per-project folder. Claude gets them after the built-in instructions, most specific last. On someone else's PR, the repository's file is read from the base branch. See [Usage](docs/USAGE.md#your-own-instructions-for-claude).
