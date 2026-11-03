@@ -11,6 +11,13 @@ test('renders the Markdown Claude writes: paragraphs, lists, inline code, emphas
     + '<pre><code><span class="hljs-keyword">const</span> total = <span class="hljs-number">2</span>;</code></pre>');
 });
 
+test('renders tables with aligned columns, inline code and escaped pipes, and leaves a lone pipe line as text', () => {
+  const html = markdownHtml('With:\n\n| attempt | base wait |\n|---|--:|\n| `0` | 200 ms |\n| 1 | a \\| b |\n\n| not a table |');
+  assert.equal(html, '<p>With:</p><table><thead><tr><th>attempt</th><th class="right">base wait</th></tr></thead>'
+    + '<tbody><tr><td><code>0</code></td><td class="right">200 ms</td></tr><tr><td>1</td><td class="right">a | b</td></tr></tbody></table>'
+    + '<p>| not a table |</p>');  assert.equal(markdownHtml('Calls:\n| a | b |\n|---|---|\n| 1 | 2 |'), '<p>Calls:</p><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>');
+});
+
 test('keeps identifiers with underscores and stars intact', () => {
   assert.equal(markdownHtml('snake_case_name and a*b*c'), '<p>snake_case_name and a*b*c</p>');
 });
