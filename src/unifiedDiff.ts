@@ -29,8 +29,7 @@ interface RawFile { path: string; oldPath?: string; change: FileDiff['change']; 
 
 /** A PR worktree's tracked changes against its base, highlighted per line; yields between files so a large PR does not block the extension host. */
 export async function readPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
-  const output = await git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv',
-    '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3', base, '--']);
+  const output = await diffOutput(worktree, base);
   await prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
   const files: FileDiff[] = [];
   for (const file of parseRawDiff(output)) {
@@ -40,9 +39,24 @@ export async function readPullRequestDiff(worktree: string, base: string): Promi
   return files;
 }
 
+function diffOutput(worktree: string, base: string): Promise<string> {
+  return git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3', base, '--']);
+}
+
+/** The PR's changes without syntax colors, for counting and matching lines where nothing is shown. */
+export async function readPlainPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
+  return parsePlainDiff(await diffOutput(worktree, base));
+}
+
+export function parsePlainDiff(output: string): readonly FileDiff[] {
+  return parseRawDiff(output).map((file) => highlightFile(file, (lines) => lines.map(escapeHtml)));
+}
+
+const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+
 /** Parse `git diff` output; lines are highlighted per side so tokens spanning lines stay correct. */
 export function parseUnifiedDiff(output: string): readonly FileDiff[] {
-  return parseRawDiff(output).map(highlightFile);
+  return parseRawDiff(output).map((file) => highlightFile(file));
 }
 
 function parseRawDiff(output: string): readonly RawFile[] {
@@ -102,15 +116,15 @@ function parseRawDiff(output: string): readonly RawFile[] {
   return files.filter((entry) => entry.path !== '');
 }
 
-function highlightFile(file: RawFile): FileDiff {
+function highlightFile(file: RawFile, highlight = highlightLines): FileDiff {
   let additions = 0;
   let deletions = 0;
   const hunks = file.hunks.map(({ header, lines }) => {
     const oldSide = lines.filter((line) => line.kind !== 'add');
     const newSide = lines.filter((line) => line.kind !== 'del');
     const html = new Map<RawLine, string>();
-    const oldHtml = highlightLines(oldSide.map((line) => line.text), file.oldPath ?? file.path);
-    const newHtml = highlightLines(newSide.map((line) => line.text), file.path);
+    const oldHtml = highlight(oldSide.map((line) => line.text), file.oldPath ?? file.path);
+    const newHtml = highlight(newSide.map((line) => line.text), file.path);
     oldSide.forEach((line, index) => { html.set(line, oldHtml[index] ?? ''); });
     newSide.forEach((line, index) => { html.set(line, newHtml[index] ?? ''); });
     return {

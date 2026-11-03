@@ -46,6 +46,7 @@ Local Review brings that conversation into the editor: **feedback attached to a 
 | 📌 **Keep your draft** | An optional compact side composer follows new selections while empty and keeps written feedback attached to its original code. |
 | ✅ **You resolve it** | Claude reports progress and replies. You decide when a thread is done; completed threads can be reopened. |
 | 🔁 **Choose your conversation** | Search saved conversations by name or branch, start a new one, or connect the conversation already running in your terminal. |
+| 🧭 **Guided PR review** | Claude groups a PR's changes by severity, orders them for reading and explains each step. Every change lands in one step, so ticking Viewed on each step covers the whole PR. The Pull Requests sidebar lists the steps under the PR; click one to jump to it. |
 | 🔗 **Carry it into a PR** | Preview summaries and unresolved questions, edit the text, then explicitly publish to the branch's existing GitHub PR. |
 | 🎙️ **Speak your feedback** | Use existing macOS Dictation in the comment field, without an extra recorder or transcription account. |
 
@@ -151,6 +152,8 @@ The interface currently uses German labels. Code previews provide display colors
 - [ ] Unread reply navigation and direct Claude-to-thread navigation
 - [ ] VS Code Marketplace / Open VSX publication
 - [ ] Linux and Windows verification
+
+Analysis notes are stored as threads that start with Claude's message. Versions before guided review cannot load a PR's comments once it has been analyzed.
 
 The [running-conversation verification](docs/QA-2026-10-26.md) records an authenticated Claude session started before setup, unchanged process/session identity after connecting, and a real inline question and formatted reply. Strict TypeScript and **256 tests** pass. Busy-agent delivery, a full separate-terminal roundtrip and real remote PR publication remain separate verification tasks. [Earlier native review](docs/UX-REVIEW-2026-10-21.md) · [Review tracker](docs/REVIEW.md)
 

@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import type { PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, ReviewVerdict } from './pullRequests.js';
 import type { PullRequestRole } from './worktrees.js';
 import { GitHubSignInRequired } from './githubApi.js';
+import { fileTree, type FileFolder } from './fileTree.js';
+import type { OutlineGroup, OutlineStep } from './prAnalysis.js';
 
 type Listing =
   | { readonly kind: 'ready'; readonly folder: string; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
@@ -21,49 +23,13 @@ type Node =
   | PullRequestNode
   | FileNode
   | FolderNode
+  | { readonly kind: 'guide'; readonly parent: PullRequestNode; readonly groups: readonly OutlineGroup[] }
+  | { readonly kind: 'guideGroup'; readonly parent: PullRequestNode; readonly group: OutlineGroup }
+  | { readonly kind: 'guideStep'; readonly parent: PullRequestNode; readonly step: OutlineStep; readonly number: number }
   | { readonly kind: 'message'; readonly text: string; readonly icon: string; readonly command?: vscode.Command };
 
 type FileNode = { readonly kind: 'file'; readonly parent: PullRequestNode; readonly file: PullRequestFile; readonly inTree: boolean };
-type FolderNode = { readonly kind: 'folder'; readonly parent: PullRequestNode; readonly folder: FileFolder };
-
-/** A folder of changed files; `name` spans several path parts when folders hold only one folder each. */
-export interface FileFolder {
-  readonly name: string;
-  readonly path: string;
-  readonly folders: readonly FileFolder[];
-  readonly files: readonly PullRequestFile[];
-}
-
-/** Group changed files by folder like Source Control's tree view, folding single-folder chains into one row. */
-export function fileTree(files: readonly PullRequestFile[]): FileFolder {
-  type Building = { folders: Map<string, Building>; files: PullRequestFile[] };
-  const root: Building = { folders: new Map(), files: [] };
-  for (const file of files) {
-    let folder = root;
-    for (const part of file.path.split('/').slice(0, -1)) {
-      let next = folder.folders.get(part);
-      if (next === undefined) folder.folders.set(part, next = { folders: new Map(), files: [] });
-      folder = next;
-    }
-    folder.files.push(file);
-  }
-  const finish = (name: string, path: string, folder: Building): FileFolder => {
-    if (folder.files.length === 0 && folder.folders.size === 1) {
-      const [[child, only]] = [...folder.folders] as [[string, Building]];
-      return finish(`${name}/${child}`, `${path}/${child}`, only);
-    }
-    return {
-      name, path,
-      folders: [...folder.folders].sort(([a], [b]) => a.localeCompare(b)).map(([child, next]) => finish(child, path === '' ? child : `${path}/${child}`, next)),
-      files: [...folder.files].sort((a, b) => a.path.localeCompare(b.path)),
-    };
-  };
-  return {
-    name: '', path: '',
-    folders: [...root.folders].sort(([a], [b]) => a.localeCompare(b)).map(([name, folder]) => finish(name, name, folder)),
-    files: [...root.files].sort((a, b) => a.path.localeCompare(b.path)),
-  };
-}
+type FolderNode = { readonly kind: 'folder'; readonly parent: PullRequestNode; readonly folder: FileFolder<PullRequestFile> };
 
 const fileViewKey = 'localReview.fileView';
 const groupByKey = 'localReview.groupBy';
@@ -111,8 +77,10 @@ export interface PullRequestWorktrees {
   /** Files of a checked-out PR ticked here and unchanged since, or marked Viewed on the code host. */
   reviewedFiles(provider: PullRequestProvider, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>>;
   setReviewed(provider: PullRequestProvider, repository: string, number: number, path: string, reviewed: boolean): Promise<void>;
-  /** Open a tab with the PR's review progress, threads and Claude activity. */
-  showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole): Promise<void>;
+  /** Open a tab with the PR's review progress, threads and Claude activity; with `step`, in the guided layout at that step. */
+  showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, step?: string): Promise<void>;
+  /** The steps of a checked-out PR's guided review, or undefined before it is analyzed. */
+  guide(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary): Promise<readonly OutlineGroup[] | undefined>;
   /** Drop cached code host state so the next read is fresh. */
   forget(): void;
 }
@@ -133,6 +101,15 @@ const verdicts: Record<ReviewVerdict, { readonly icon: string; readonly color: s
   approved: { icon: 'pass', color: 'testing.iconPassed', label: 'Approved' },
   changes: { icon: 'request-changes', color: 'testing.iconFailed', label: 'Changes requested' },
   commented: { icon: 'comment-discussion', color: 'descriptionForeground', label: 'Commented' },
+};
+
+/** How the sidebar shows each guide group's severity; folded groups start closed, as on the review page. */
+const severityLooks: Record<OutlineGroup['severity'], { readonly label: string; readonly icon: string; readonly color: string; readonly folded?: true }> = {
+  critical: { label: 'Critical', icon: 'error', color: 'errorForeground' },
+  significant: { label: 'Significant', icon: 'warning', color: 'editorWarning.foreground' },
+  routine: { label: 'Routine', icon: 'info', color: 'editorInfo.foreground' },
+  trivial: { label: 'Trivial', icon: 'circle-small', color: 'descriptionForeground', folded: true },
+  unclassified: { label: 'Unclassified', icon: 'question', color: 'descriptionForeground' },
 };
 
 const sectionLabels: Record<PullRequestRole, string> = { author: 'Mine', reviewer: 'Review requested' };
@@ -181,6 +158,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   /** Worktree and reviewed state per PR, read once per redraw and shared by the PR's row and its file rows. */
   readonly #checkedOut = new Map<string, Promise<boolean>>();
   readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
+  readonly #guides = new Map<string, Promise<readonly OutlineGroup[] | undefined>>();
 
   constructor(
     private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
@@ -254,9 +232,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     if (pullRequest === undefined) {
       this.#checkedOut.clear();
       this.#reviewed.clear();
+      this.#guides.clear();
     } else {
       this.#checkedOut.delete(pullRequest);
       this.#reviewed.delete(pullRequest);
+      this.#guides.delete(pullRequest);
     }
   }
 
@@ -280,15 +260,19 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === 'folder') return this.#folderChildren(node.parent, node.folder);
     if (node.kind === 'pullRequest') {
+      const groups = await this.#isCheckedOut(node).then((checkedOut) => checkedOut ? this.#guideOf(node) : undefined).catch(() => undefined);
+      const guide: Node[] = groups === undefined || groups.length === 0 ? [] : [{ kind: 'guide', parent: node, groups }];
       try {
         const files = await this.#filesOf(node);
-        return files.length === 0
-          ? [{ kind: 'message', text: 'No changed files', icon: 'info' }]
-          : this.asTree ? this.#folderChildren(node, fileTree(files)) : files.map((file) => ({ kind: 'file', parent: node, file, inTree: false }));
+        return [...guide, ...files.length === 0
+          ? [{ kind: 'message', text: 'No changed files', icon: 'info' } as const]
+          : this.asTree ? this.#folderChildren(node, fileTree(files)) : files.map((file): Node => ({ kind: 'file', parent: node, file, inTree: false }))];
       } catch (error: unknown) {
-        return [{ kind: 'message', text: error instanceof Error ? error.message : String(error), icon: 'warning' }];
+        return [...guide, { kind: 'message', text: error instanceof Error ? error.message : String(error), icon: 'warning' }];
       }
     }
+    if (node.kind === 'guide') return node.groups.map((group): Node => ({ kind: 'guideGroup', parent: node.parent, group }));
+    if (node.kind === 'guideGroup') return node.group.steps.map((step, index): Node => ({ kind: 'guideStep', parent: node.parent, step, number: index + 1 }));
     return [];
   }
 
@@ -350,9 +334,32 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'folder': {
         const item = new vscode.TreeItem(node.folder.name, vscode.TreeItemCollapsibleState.Expanded);
-        item.resourceUri = vscode.Uri.from({ scheme: fileScheme, authority: `pr-${node.parent.pullRequest.number}`, path: `/${node.folder.path}` });
-        item.iconPath = vscode.ThemeIcon.Folder;
         item.tooltip = node.folder.path;
+        return item;
+      }
+      case 'guide': {
+        const steps = node.groups.flatMap((group) => group.steps);
+        const item = new vscode.TreeItem('Guided review', vscode.TreeItemCollapsibleState.Expanded);
+        item.iconPath = new vscode.ThemeIcon('compass');
+        item.description = `${steps.filter((step) => step.viewed).length}/${steps.length} viewed`;
+        return item;
+      }
+      case 'guideGroup': {
+        const { group } = node;
+        const look = severityLooks[group.severity];
+        const item = new vscode.TreeItem(`${look.label} · ${group.title}`, look.folded ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
+        item.iconPath = new vscode.ThemeIcon(look.icon, new vscode.ThemeColor(look.color));
+        item.description = `${group.steps.filter((step) => step.viewed).length}/${group.steps.length}`;
+        return item;
+      }
+      case 'guideStep': {
+        const { step, parent } = node;
+        const name = path.posix.basename(step.path);
+        const item = new vscode.TreeItem(`${node.number}. ${step.title ?? name}`, vscode.TreeItemCollapsibleState.None);
+        item.description = step.title === undefined ? path.posix.dirname(step.path).replace(/^\.$/u, '') : name;
+        item.iconPath = step.viewed ? new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('testing.iconPassed')) : new vscode.ThemeIcon('circle-large-outline');
+        item.tooltip = new vscode.MarkdownString().appendText(`${step.path}${step.viewed ? ' · Viewed' : ''}${step.note === undefined ? '' : `\n\n${step.note}`}`);
+        item.command = { command: 'localReview.showGuideStep', title: 'Show step', arguments: [parent, step.key] };
         return item;
       }
       case 'message': {
@@ -371,7 +378,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     await listing.worktrees.setReviewed(listing.provider, listing.repository.name, pullRequest.number, node.file.path, state === vscode.TreeItemCheckboxState.Checked);
   }
 
-  #folderChildren(parent: PullRequestNode, folder: FileFolder): Node[] {
+  #folderChildren(parent: PullRequestNode, folder: FileFolder<PullRequestFile>): Node[] {
     return [
       ...folder.folders.map((child): Node => ({ kind: 'folder', parent, folder: child })),
       ...folder.files.map((file): Node => ({ kind: 'file', parent, file, inTree: true })),
@@ -396,6 +403,17 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     if (files === undefined || files.length === 0) return undefined;
     const reviewed = await this.#reviewedOf(node).catch(() => undefined);
     return reviewed === undefined ? undefined : `${reviewed.size}/${files.length} reviewed`;
+  }
+
+  #guideOf(node: PullRequestNode): Promise<readonly OutlineGroup[] | undefined> {
+    const key = pullRequestKey(node);
+    let guide = this.#guides.get(key);
+    if (guide === undefined) {
+      guide = node.listing.worktrees.guide(node.listing.provider, node.listing.repository.name, node.pullRequest);
+      guide.catch(() => { this.#guides.delete(key); });
+      this.#guides.set(key, guide);
+    }
+    return guide;
   }
 
   #isCheckedOut(node: PullRequestNode): Promise<boolean> {
@@ -590,6 +608,14 @@ export function registerPullRequestView(
         report(error);
       }
       tree.redraw(pullRequestKey(node));
+    }),
+    vscode.commands.registerCommand('localReview.showGuideStep', async (node: unknown, step: unknown) => {
+      if (!isPullRequestNode(node) || typeof step !== 'string') return;
+      try {
+        await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, step);
+      } catch (error: unknown) {
+        report(error);
+      }
     }),
     vscode.commands.registerCommand('localReview.removePullRequestWorktree', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;

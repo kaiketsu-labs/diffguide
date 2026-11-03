@@ -9,6 +9,7 @@ import type { PullRequestProvider } from './pullRequests.js';
 import { showPublishPanel } from './publishPanel.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
 import { createReviewStore } from './store.js';
@@ -19,6 +20,8 @@ export interface PullRequestSession {
   readonly session: ReviewSession;
   readonly bridge: ReviewBridge;
   readonly runner: ClaudeRunner;
+  /** Claude's guided-review analysis of the PR. */
+  readonly analysis: PullRequestAnalysis;
   /** Full log of what Claude did for this PR. */
   readonly output: vscode.OutputChannel;
 }
@@ -75,7 +78,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         }
         this.#ready.set(id, session);
         const fire = (): void => { this.#stateChanged.fire(session); };
-        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.runner.onDidChange(fire)));
+        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.runner.onDidChange(fire), session.analysis.onDidChange(fire)));
         this.#changed.fire();
         fire();
       }, () => { if (this.#open.get(id) === opening) this.#open.delete(id); });
@@ -139,22 +142,20 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     const publishing = new Map<string, vscode.WebviewPanel>();
     const output = vscode.window.createOutputChannel(`Claude · #${number}`);
     const configuration = vscode.workspace.getConfiguration('localReview');
-    const runner = new ClaudeRunner({
-      store, cwd: worktree, dataPath, role: metadata.role,
-      log: (line) => { output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`); },
-      resolve: async () => {
-        const claudePath = configuration.get<string>('claudePath', 'claude');
-        const shell = loginShell();
-        const [executable, nodePath] = await Promise.all([
-          shell === undefined ? resolveExecutable(claudePath, worktree) : claudePath,
-          resolveExecutable(configuration.get<string>('nodePath', 'node'), worktree),
-        ]);
-        await requireNodeRuntime(nodePath);
-        const mcpPath = (await prepareConnection(this.context, bridge, dataPath, nodePath)).mcpPath;
-        return shell === undefined ? { executable, mcpPath } : { executable, mcpPath, shell };
-      },
-      ...this.claude,
-    });
+    const log = (line: string): void => { output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`); };
+    const resolve: ClaudeRunnerOptions['resolve'] = async () => {
+      const claudePath = configuration.get<string>('claudePath', 'claude');
+      const shell = loginShell();
+      const [executable, nodePath] = await Promise.all([
+        shell === undefined ? resolveExecutable(claudePath, worktree) : claudePath,
+        resolveExecutable(configuration.get<string>('nodePath', 'node'), worktree),
+      ]);
+      await requireNodeRuntime(nodePath);
+      const mcpPath = (await prepareConnection(this.context, bridge, dataPath, nodePath)).mcpPath;
+      return shell === undefined ? { executable, mcpPath } : { executable, mcpPath, shell };
+    };
+    const runner = new ClaudeRunner({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, ...this.claude });
+    const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, log, resolve, ...this.claude });
     const session: ReviewSession = {
       key: key(repository, number),
       label: `#${number}`,
@@ -212,14 +213,15 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         panel.onDidDispose(() => { publishing.delete(threadId); });
       },
     };
-    const result: PullRequestSession = { session, bridge, runner, output };
+    const result: PullRequestSession = { session, bridge, runner, analysis, output };
     return result;
   }
 }
 
 /** Stop a PR's Claude and its connection. */
-function release({ runner, bridge, output }: PullRequestSession): void {
+function release({ runner, analysis, bridge, output }: PullRequestSession): void {
   runner.dispose();
+  analysis.dispose();
   bridge.dispose();
   output.dispose();
 }

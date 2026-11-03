@@ -50,7 +50,7 @@ async function fixture(
     get events() { return store.events; },
     get pendingEvents() { return store.pendingEvents; },
     submit: store.submit.bind(store), updateFromAgent: store.updateFromAgent.bind(store),
-    resolve: store.resolve.bind(store), setOutdated: store.setOutdated.bind(store),
+    resolve: store.resolve.bind(store), setOutdated: store.setOutdated.bind(store), replaceAnalysisNotes: store.replaceAnalysisNotes.bind(store),
     onChange: store.onChange.bind(store), flush: store.flush.bind(store),
   };
   const registered = await createReviewController(presentedStore, context, ...(resolveBase === undefined ? [] : [resolveBase]));

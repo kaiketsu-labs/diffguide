@@ -35,6 +35,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
   overview: async (number) => ({ details: await mockPullRequestProvider.details(number), threads: await mockPullRequestProvider.threads(number) }),
   replyToThread: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   resolveThread: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
+  deleteComment: async () => { throw new Error('Sample pull requests cannot receive comments.'); },
   submitReview: async () => { throw new Error('Sample pull requests cannot be reviewed.'); },
   merge: async () => { throw new Error('Sample pull requests cannot be merged.'); },
 };

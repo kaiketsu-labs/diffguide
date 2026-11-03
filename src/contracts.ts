@@ -36,6 +36,8 @@ export interface ReviewThread {
   readonly resolved: boolean;
   readonly outdated: boolean;
   readonly latestEventId: string;
+  /** Set when Claude's PR analysis opened the thread; its first message is then Claude's. */
+  readonly origin?: 'analysis';
 }
 
 /** A single immutable work item sent to Claude at least once. */
@@ -88,6 +90,8 @@ export interface ReviewStore {
   updateFromAgent(update: AgentUpdate): Promise<ReviewThread>;
   resolve(threadId: string, resolved: boolean): Promise<void>;
   setOutdated(threadId: string, outdated: boolean): Promise<void>;
+  /** Replace the analysis's notes that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
+  replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]>;
   onChange(listener: () => void): Disposable;
   flush(): Promise<void>;
 }
