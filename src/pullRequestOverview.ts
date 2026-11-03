@@ -111,7 +111,46 @@ export interface OverviewActions {
   refresh(): void;
 }
 
-const reviewEvents: readonly ReviewEvent[] = ['approve', 'requestChanges', 'comment'];
+export type DefinitionTarget = { readonly path: string } | { readonly peek: string };
+type PageRange = { readonly path: string; readonly side: DiffSide; readonly startLine: number; readonly endLine: number };
+
+/** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
+export type PageMessage =
+  | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' }
+  | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
+  | { readonly action: 'context' | 'preview' | 'editor'; readonly path: string }
+  | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
+  | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
+  | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
+  | { readonly action: 'unread'; readonly ids: readonly string[] }
+  | { readonly action: 'reply' | 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
+  | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
+  | { readonly action: 'viewed'; readonly path: string; readonly viewed: boolean }
+  | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
+  | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
+  | { readonly action: 'open-definition'; readonly peek: string }
+  | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
+  | { readonly action: 'merge'; readonly method: MergeMethod };
+
+/** What the extension sends the page; each field is handled on its own. */
+export interface ExtensionMessage {
+  readonly state?: OverviewState;
+  readonly files?: readonly FileDiff[];
+  readonly reveal?: string | undefined;
+  readonly filesError?: string;
+  readonly preview?: FilePreview & { readonly path: string };
+  readonly context?: { readonly path: string; readonly lines: readonly string[] };
+  readonly definition?: DefinitionPeek;
+  readonly probe?: { readonly id: string; readonly found: boolean };
+  readonly error?: string;
+  /** The form whose send failed, so the page can enable it again. */
+  readonly form?: string | undefined;
+  /** The form whose send succeeded, or 'review'. */
+  readonly done?: string | undefined;
+  readonly idle?: true;
+}
+
+const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comment'];
 const mergeMethods: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
 const commentIntents: readonly unknown[] = ['ask', 'implement'] satisfies CommentIntent[];
 const maximumReviewLength = 60_000;
@@ -127,16 +166,17 @@ export async function showPullRequestOverview(
   const existing = panels.get(key);
   if (existing !== undefined) {
     existing.reveal();
-    if (revealPath !== undefined) void existing.webview.postMessage({ reveal: revealPath }).then(undefined, () => undefined);
+    if (revealPath !== undefined) void existing.webview.postMessage({ reveal: revealPath } satisfies ExtensionMessage).then(undefined, () => undefined);
     return;
   }
   let reveal = revealPath;
   let state = await read();
   const panel = vscode.window.createWebviewPanel('localReview.pullRequestOverview', state.title, vscode.ViewColumn.Active,
-    { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources')], retainContextWhenHidden: true });
+    { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
-  panel.webview.html = overviewHtml(state, panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'claude-mark.svg')).toString());
-  const post = (message: unknown): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
+  const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-mark.svg'));
+  const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (): void => {
     void actions.readFiles().then((files) => {
       post({ files, reveal });
@@ -235,8 +275,8 @@ export async function showPullRequestOverview(
   });
 }
 
-/** The review page: PR overview on top, every changed file below. It draws itself from state and file messages. */
-export function overviewHtml(state: OverviewState, claudeIcon = ''): string {
+/** The review page: PR overview on top, every changed file below. `script` (src/webview/overview.ts) draws it from state and file messages. */
+export function overviewHtml(state: OverviewState, script: string, claudeIcon = ''): string {
   const nonce = randomUUID().replaceAll('-', '');
   // Inline styles are allowed because an HTML preview frame inherits this policy; its sandbox still blocks scripts.
   return `<!doctype html>
@@ -386,500 +426,9 @@ tr.inline>td{padding:6px 10px 8px}
 <span class="group"><span class="muted">Files</span><span class="seg"><button id="collapse">Collapse</button><button id="expand">Expand</button></span></span>
 <span class="group"><span class="muted">Comments</span><span class="seg"><button id="collapse-comments">Collapse</button><button id="expand-comments">Expand</button></span></span></span></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
-<script nonce="${nonce}">
-const api=acquireVsCodeApi();
-const $=(id)=>document.getElementById(id);
-const saved=api.getState()||{};
-let layout=saved.layout||'unified';
-const collapsed=new Map(Object.entries(saved.collapsed||{}));const previewing=new Set(saved.previewing||[]);const previews=new Map();const frameHeight=new Map();const frameTops=new Map();const frameAnchors=new Map();const nonce=document.currentScript.nonce;
-/** Runs inside the HTML preview frame: reports clicks as source lines, and where commented elements sit. */
-function frameMain(){
-  const lines=(node)=>node.dataset.lrLines.split('-').map(Number);
-  const target=(event)=>event.target.closest&&event.target.closest('[data-lr-lines]');
-  const style=document.createElement('style');
-  style.textContent='[data-lr-hover]{outline:2px dashed #0078d4!important;outline-offset:1px;cursor:pointer!important}'+
-    '[data-lr-sel]{outline:2px solid #0078d4!important;outline-offset:1px;background-color:rgba(0,120,215,.12)!important}'+
-    '[data-lr-anchor=local]{outline:2px solid rgba(209,134,22,.75)!important;outline-offset:1px}[data-lr-anchor=github]{outline:2px solid rgba(55,148,255,.75)!important;outline-offset:1px}'+
-    '[data-lr-focus]{outline-width:3px!important;background-color:rgba(128,128,128,.15)!important}';
-  document.head.append(style);
-  let hover;let anchors=[];let pending=false;
-  const closest=(anchor)=>{let exact,inner,size=Infinity,after,afterStart=Infinity;
-    for(const node of document.querySelectorAll('[data-lr-lines]')){const [start,end]=lines(node);
-      if(!exact&&start===anchor.start&&end===anchor.end)exact=node;
-      if(start<=anchor.end&&anchor.end<=end&&end-start<=size){inner=node;size=end-start;}
-      if(start>=anchor.end&&start<afterStart){after=node;afterStart=start;}}
-    return exact||inner||after;};
-  const report=()=>{pending=false;const tops={};
-    for(const node of document.querySelectorAll('[data-lr-anchor]'))node.removeAttribute('data-lr-anchor');
-    for(const anchor of anchors){const node=closest(anchor);if(!node)continue;anchor.node=node;
-      if(anchor.source!=='draft')node.setAttribute('data-lr-anchor',anchor.source);tops[anchor.key]=node.getBoundingClientRect().top+scrollY;}
-    parent.postMessage({lrHeight:document.documentElement.scrollHeight,lrAnchors:tops},'*');};
-  const schedule=()=>{if(!pending){pending=true;setTimeout(report,30);}};
-  new ResizeObserver(schedule).observe(document.documentElement);
-  addEventListener('load',schedule);
-  addEventListener('mouseover',(event)=>{const at=target(event);if(hover)hover.removeAttribute('data-lr-hover');hover=at;if(at)at.setAttribute('data-lr-hover','');});
-  addEventListener('click',(event)=>{event.preventDefault();event.stopPropagation();const at=target(event);if(!at)return;
-    const [start,end]=lines(at);parent.postMessage({lrPick:{start,end,extend:event.shiftKey,top:at.getBoundingClientRect().top+scrollY}},'*');},true);
-  addEventListener('submit',(event)=>event.preventDefault(),true);
-  addEventListener('message',(event)=>{if(event.source!==parent)return;const data=event.data||{};
-    if(Array.isArray(data.anchors)){anchors=data.anchors;schedule();}
-    if('focus' in data){for(const node of document.querySelectorAll('[data-lr-focus]'))node.removeAttribute('data-lr-focus');
-      const anchor=anchors.find((item)=>item.key===data.focus);if(anchor&&anchor.node)anchor.node.setAttribute('data-lr-focus','');}
-    if(Array.isArray(data.select))for(const node of document.querySelectorAll('[data-lr-lines]')){const [start,end]=lines(node);
-      if(start>=data.select[0]&&end<=data.select[1]&&!(node.parentElement&&node.parentElement.closest('[data-lr-sel]')))node.setAttribute('data-lr-sel','');}});
-  parent.postMessage({lrReady:true},'*');}
-let files;let viewed=new Set();let current;let readRanges=[];const openReads=new Set();const fileKeys=new Map();
-const claudeIcon=${JSON.stringify(claudeIcon).replaceAll('<', '\\u003c')};
-let composer=saved.composer;
-const replies=new Map(Object.entries(saved.replies||{}));
-const sending=new Set();const threadOpen=new Map();let focusNext;let sentPending=true;
-const contextLines=new Map();const expanded=new Map();const loading=new Set();const step=20;const peeks=[];let peekAt=-1;
-const reviewButtons=[...document.querySelectorAll('[data-event]')];
-const labels={approved:['✓','ok','Approved'],changes:['✗','bad','Requested changes'],commented:['●','muted','Commented'],dismissed:['○','muted','Dismissed'],requested:['○','wait','Review requested'],
-  success:['✓','ok','Passed'],failure:['✗','bad','Failed'],pending:['●','wait','Running'],neutral:['○','muted','Skipped']};
-const methodLabels={squash:'Squash and merge',merge:'Create a merge commit',rebase:'Rebase and merge'};
-const changeLetters={added:'A',modified:'M',deleted:'D',renamed:'R'};
-let busy=false;let author=true;
-function save(){api.setState({layout,collapsed:Object.fromEntries(collapsed),previewing:[...previewing],composer,replies:Object.fromEntries(replies)});}
-function el(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
-function status(key,name,url){const item=el('li','row');const [icon,tone,label]=labels[key];const mark=el('span',tone,icon);mark.title=label;item.append(mark);
-  if(url){const link=el('a','',name);link.href=url;item.append(link);}else item.append(el('span','',name));item.append(el('span','muted',label));return item;}
-function setBusy(value){busy=value;for(const button of reviewButtons)button.disabled=value||(author&&button.hasAttribute('data-reviewer'));$('merge').disabled=value||(current&&current.details&&current.details.mergeable==='no');}
-const verdictText={changes:['bad','Changes requested by '],approved:['ok','Approved by '],commented:['muted','Commented: ']};
-function verdict(reviewers){for(const key of ['changes','approved','commented']){const names=reviewers.filter((reviewer)=>reviewer.state===key).map((reviewer)=>reviewer.name);
-  if(names.length)return [verdictText[key][0],verdictText[key][1]+names.join(', ')];}
-  const waiting=reviewers.filter((reviewer)=>reviewer.state==='requested').map((reviewer)=>reviewer.name);
-  return waiting.length?['wait','Waiting for '+waiting.join(', ')]:['muted','No reviews yet'];}
-function allThreads(){return current?[...current.threads.map((thread)=>({...thread,source:'local'})),...(current.github||[]).map((thread)=>({...thread,source:'github'}))]:[];}
-function render(state){
-  current=state;
-  $('title').textContent=state.title;
-  $('subtitle').textContent=state.subtitle;
-  const details=state.details;
-  const body=$('body');
-  if(!details){body.replaceChildren(el('span','muted',state.detailsError?'Could not load from GitHub: '+state.detailsError:'Loading from GitHub…'));}
-  else if(details.bodyHtml.trim()){body.innerHTML=details.bodyHtml;}
-  else body.replaceChildren(el('span','muted','No description.'));
-  const reviewers=$('reviewers');reviewers.replaceChildren();
-  if(details){for(const reviewer of details.reviewers)reviewers.append(status(reviewer.state,reviewer.name));if(!details.reviewers.length)reviewers.append(el('li','muted','No reviewers yet.'));}
-  const checks=$('checks');checks.replaceChildren();
-  if(details){for(const check of details.checks)checks.append(status(check.state,check.name,check.url));if(!details.checks.length)checks.append(el('li','muted','No checks.'));}
-  const reviewed=$('reviewed');reviewed.replaceChildren();
-  if(state.reviewed){const wrap=el('div','bar-wrap');const fill=el('span');fill.style.width=(state.reviewed.total?100*state.reviewed.done/state.reviewed.total:0)+'%';wrap.append(fill);reviewed.append(wrap,el('span','',state.reviewed.done+'/'+state.reviewed.total+' viewed'));}
-  const claude=$('claude');claude.textContent=state.claude.text;claude.className=state.claude.running?'spin muted':'muted';
-  $('retry').hidden=!state.claude.retry;
-  const threads=allThreads();
-  $('threads-title').textContent='Threads ('+threads.length+')';
-  const list=$('threads');list.replaceChildren();
-  if(threads.length===0)list.append(el('li','muted',state.github||state.githubError?'No comments yet.':'No local comments yet. Loading GitHub comments…'));
-  if(state.githubError)list.append(el('li','bad','Could not load GitHub comments: '+state.githubError));
-  for(const thread of threads){
-    const item=el('li','card-thread '+thread.source);const head=el('div','row');const where=el('a','where',thread.location);
-    where.addEventListener('click',()=>jump(thread));
-    head.append(el('span','tag',thread.source==='github'?'GitHub':'Local'),where,el('span','text',thread.text));
-    const line=el('div','muted',thread.status);
-    if(thread.url){const link=el('a','',' ↗');link.title='Open on GitHub';link.addEventListener('click',()=>api.postMessage({action:'github',id:thread.id}));line.append(link);}
-    item.append(head,line);list.append(item);
-  }
-  author=!details||details.viewerIsAuthor;setBusy(busy);
-  for(const button of document.querySelectorAll('[data-reviewer]'))button.title=author?'GitHub does not let you approve or request changes on your own PR.':'';
-  $('review-note').textContent=author?'This is your PR, so you can only comment.':'';
-  const pendingCount=details&&details.pendingComments;
-  $('pending-note').textContent=details&&details.pendingComments!==undefined?'Your pending review has '+pendingCount+' comment'+(pendingCount===1?'':'s')+'. Only you see '+(pendingCount===1?'it':'them')+' until you submit.':'';
-  const badge=$('verdict');badge.hidden=!details;
-  if(details){const [tone,label]=verdict(details.reviewers);badge.className='verdict '+tone;badge.textContent=label;}
-  $('review-box').hidden=!details||!details.open;
-  $('merge-box').hidden=!details||!details.open||!details.mergeMethods.length;
-  if(details){
-    const select=$('method');const chosen=select.value;select.replaceChildren(...details.mergeMethods.map((method)=>{const option=el('option','',methodLabels[method]);option.value=method;return option;}));
-    if(details.mergeMethods.includes(chosen))select.value=chosen;
-    $('mergeable').textContent=details.mergeable==='no'?'Has conflicts with the base branch.':details.mergeable==='unknown'?'GitHub is still checking for conflicts.':'';
-  }
-  const next=new Set(state.viewed);
-  for(const path of next)if(!viewed.has(path))collapsed.set(path,true);
-  for(const path of viewed)if(!next.has(path))collapsed.set(path,false);
-  viewed=next;save();
-  readRanges=state.read;
-  renderFiles('state');
-}
-function code(line,side){const cell=el('td','code'+(side?' '+side:''));cell.innerHTML=line.html;if(line.kind!=='del'&&line.newLine!==undefined)cell.dataset.line=String(line.newLine);return cell;}
-function num(value,path,side){const cell=el('td','num',value===undefined?'':String(value));
-  if(value!==undefined){cell.classList.add('pick');cell.dataset.path=path;cell.dataset.side=side;cell.title='Comment on this line. Drag or Shift-click to select a range.';
-    cell.addEventListener('mousedown',(event)=>{if(event.button!==0)return;event.preventDefault();drag={path,side,from:value,to:value,cell};paintDrag();});
-    cell.addEventListener('mouseenter',()=>{if(drag&&drag.path===path&&drag.side===side&&drag.to!==value){drag.to=value;paintDrag();}});}
-  return cell;}
-let drag;
-function paintDrag(){for(const cell of document.querySelectorAll('.drag-sel'))cell.classList.remove('drag-sel');if(!drag)return;
-  const low=Math.min(drag.from,drag.to),high=Math.max(drag.from,drag.to);
-  for(const cell of document.querySelectorAll('td.num.pick')){const line=Number(cell.textContent);
-    if(cell.dataset.path!==drag.path||cell.dataset.side!==drag.side||line<low||line>high)continue;
-    cell.classList.add('drag-sel');const code=layout==='split'?cell.nextElementSibling:cell.parentElement.lastElementChild;if(code)code.classList.add('drag-sel');}}
-document.addEventListener('mouseup',(event)=>{if(!drag)return;const {path,side,from,to}=drag;drag=undefined;paintDrag();
-  if(from===to)pick(path,side,from,event.shiftKey);
-  else{pick(path,side,Math.min(from,to),false);composer.end=Math.max(from,to);save();renderFiles([path]);}});
-function pick(path,side,line,extend){const before=composer&&composer.path;
-  if(extend&&composer&&composer.path===path&&composer.side===side){composer.start=Math.min(composer.start,line);composer.end=Math.max(composer.end,line);}
-  else composer={path,side,start:line,end:line,text:composer?composer.text:'',intent:composer?composer.intent:'ask',target:composer?composer.target:'claude'};
-  focusNext='composer';save();renderFiles([before,path]);}
-function range(start,end){return start===end?'Line '+start:'Lines '+start+'–'+end;}
-function textarea(key,value,placeholder,onInput,onSubmit,onCancel){const area=el('textarea');area.value=value;area.placeholder=placeholder;area.dataset.draft=key;area.setAttribute('aria-label',placeholder);
-  area.addEventListener('input',()=>onInput(area.value));
-  area.addEventListener('keydown',(event)=>{if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();onSubmit();}else if(event.key==='Escape')onCancel();});
-  return area;}
-function button(label,onClick,className){const node=el('button',className||'',label);node.addEventListener('click',onClick);return node;}
-function composerBox(){
-  const github=composer.target==='github';
-  const box=el('div','thread draft'+(github?' github':''));
-  const head=el('div','strip');const toggle=el('span','switch');
-  for(const [value,label] of [['claude','Claude'],['github','GitHub']]){const option=button(label,()=>{composer.target=value;focusNext='composer';save();renderFiles([composer.path]);},composer.target===value||(!composer.target&&value==='claude')?'on':'');
-    option.setAttribute('aria-pressed',String(option.className==='on'));toggle.append(option);}
-  head.append(el('span','tag','New comment'),toggle,el('span','muted',github?'everyone on the PR sees it':'only you and Claude see it'),
-    el('span','muted',(composer.side==='old'?'Base · ':'')+range(composer.start,composer.end)));
-  box.append(head);
-  const cancel=()=>{const path=composer.path;composer=undefined;save();renderFiles([path]);};
-  const send=(pending)=>{if(!composer.text.trim()||sending.has('composer'))return;sending.add('composer');sentPending=pending;$('error').textContent='';renderFiles([composer.path]);
-    const where={form:'composer',path:composer.path,side:composer.side,startLine:composer.start,endLine:composer.end,text:composer.text};
-    api.postMessage(github?{action:'github-comment',pending,...where}:{action:'comment',intent:composer.intent,...where});};
-  const submit=()=>send(true);
-  const selection={path:composer.path,side:composer.side,startLine:composer.start,endLine:composer.end};
-  const file=files&&files.find((item)=>item.path===selection.path);
-  const covered=file?selectedReadIds(file,selection):undefined;
-  const read=el('label','check');const readBox=el('input');readBox.type='checkbox';readBox.checked=covered!==undefined;
-  read.title='Collapse these lines. When every change in the file is read, the file is marked Viewed.';read.append(readBox,'Viewed');
-  readBox.addEventListener('change',()=>{
-    if(readBox.checked){const done=!!file&&!viewed.has(file.path)&&fullyRead(file,[...readRanges,selection]);
-      readRanges=[...readRanges,{id:'pending',...selection}];if(done)markViewed(selection.path,true);
-      api.postMessage({action:'read',...selection,viewed:done});}
-    else if(covered)unmarkRead(covered);
-    if(readBox.checked&&!composer.text.trim())composer=undefined;save();renderFiles([selection.path]);});
-  const hint=(label)=>{const node=el('span','hint');node.append(el('kbd','','⌘/Ctrl'),'+',el('kbd','','Enter'),' '+label);return node;};
-  const cancelLink=button('Cancel',cancel,'quiet');
-  const area=textarea('composer',composer.text,github?'Comment on GitHub':'Ask Claude about these lines',(value)=>{composer.text=value;save();},submit,cancel);
-  const busy=sending.has('composer');const row=el('div','row actions composer-actions');
-  if(github){
-    const review=button(busy&&sentPending?'Sending…':'Add to review',()=>send(true),'primary');review.disabled=busy;review.title='Goes into your pending review. Nobody sees it until you submit the review.';
-    const reviewing=current&&current.details&&current.details.pendingComments!==undefined;
-    const now=button(busy&&!sentPending?'Sending…':'Post now',()=>send(false));now.disabled=busy||reviewing;
-    now.title=reviewing?'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.':'Posts on GitHub right away.';
-    row.append(review,now,reviewing?el('span','hint','Your review is in progress, so comments go into it.'):hint('adds to review'),el('span','gap'),cancelLink);
-  }else{
-    const intent=el('select');intent.setAttribute('aria-label','What Claude should do');
-    for(const [value,label] of [['ask','Ask a question'],['implement','Ask for a change']]){const option=el('option','',label);option.value=value;intent.append(option);}
-    intent.value=composer.intent;intent.addEventListener('change',()=>{composer.intent=intent.value;save();});
-    const ask=button(busy?'Sending…':'Ask Claude',submit,'primary');ask.disabled=busy;
-    row.append(intent,ask,hint('sends'),el('span','gap'),cancelLink);
-  }
-  head.append(read);
-  box.append(area,row);return box;}
-function message(entry,github){const item=el('div','msg');const who=el('div','who');
-  if(!github&&entry.author==='claude'&&claudeIcon){const icon=el('img');icon.src=claudeIcon;icon.alt='';who.append(icon);}
-  if(github&&entry.avatarUrl){const avatar=el('img','avatar');avatar.src=entry.avatarUrl;avatar.alt='';who.append(avatar);}
-  who.append(github?entry.author:entry.author==='claude'?'Claude':'You');
-  if(github&&entry.pending)who.append(el('span','pill','Pending'));const body=el('div','msg-text');body.innerHTML=entry.html;item.append(who,body);return item;}
-function strip(tag,label,note,right){const node=el(tag,'strip');node.append(el('span','tag',label),el('span','muted',note),el('span','muted',right));return node;}
-function threadBox(thread){
-  const github=thread.source==='github';
-  const box=el('details','thread '+thread.source+(thread.pending?' pending':''));box.id='thread-'+thread.id;
-  box.open=threadOpen.has(thread.id)?threadOpen.get(thread.id):!thread.resolved;
-  box.addEventListener('toggle',()=>threadOpen.set(thread.id,box.open));
-  const status=thread.pending?(thread.outdated?' · Outdated':''):' · '+thread.status;
-  box.append(strip('summary',github?'GitHub':'Local',
-    github?(thread.pending?'only you see it until you submit your review':'everyone on the PR sees it'):'only you and Claude see it',
-    (thread.side==='old'?'Base · ':'')+range(thread.startLine,thread.endLine)+status));
-  for(const entry of thread.messages)box.append(message(entry,github));
-  const key='reply:'+thread.id;
-  const actions=el('div','row actions');
-  if(replies.has(thread.id)&&!thread.resolved){
-    const cancel=()=>{replies.delete(thread.id);save();renderFiles([thread.path]);};
-    const submit=()=>{const text=replies.get(thread.id)||'';if(!text.trim()||sending.has(key))return;sending.add(key);$('error').textContent='';renderFiles([thread.path]);
-      api.postMessage({action:github?'github-reply':'reply',form:key,id:thread.id,text});};
-    box.append(textarea(key,replies.get(thread.id),github?'Reply on GitHub, visible to everyone':'Reply to Claude',(value)=>{replies.set(thread.id,value);save();},submit,cancel));
-    const send=button(sending.has(key)?'Sending…':github?'Post on GitHub':'Reply',submit,'primary');send.disabled=sending.has(key);
-    actions.append(send,button('Cancel',cancel));
-  }else if(!thread.resolved)actions.append(button('Reply',()=>{replies.set(thread.id,'');focusNext=key;save();renderFiles([thread.path]);}));
-  actions.append(button(thread.resolved?'Reopen':'Resolve',()=>api.postMessage({action:github?'github-resolve':'resolve',id:thread.id,resolved:!thread.resolved})));
-  actions.append(thread.url?button('Open on GitHub ↗',()=>api.postMessage({action:'github',id:thread.id})):button('Publish to GitHub…',()=>api.postMessage({action:'publish',id:thread.id})));
-  box.append(actions);return box;}
-function inline(content,width){const row=el('tr','inline');const cell=el('td');cell.colSpan=width;cell.append(content);row.append(cell);return row;}
-function jump(thread){
-  const known=files&&files.some((file)=>file.path===thread.path);
-  if(!known){api.postMessage({action:thread.source==='github'?'github':'thread',id:thread.id});return;}
-  if(collapsed.get(thread.path)){collapsed.set(thread.path,false);save();renderFiles([thread.path]);}
-  const target=document.getElementById('thread-'+thread.id);if(!target)return;
-  target.open=true;threadOpen.set(thread.id,true);target.scrollIntoView({block:'center'});}
-function pairs(hunk){const out=[];let dels=[];let adds=[];
-  const flush=()=>{for(let i=0;i<Math.max(dels.length,adds.length);i++)out.push([dels[i],adds[i]]);dels=[];adds=[];};
-  for(const line of hunk.lines){if(line.kind==='del')dels.push(line);else if(line.kind==='add')adds.push(line);else{flush();out.push([line,line]);}}
-  flush();return out;}
-function hunkRange(hunk){const match=/^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@/.exec(hunk.header);if(!match)return undefined;
-  const oldStart=Number(match[1]),oldCount=match[2]===undefined?1:Number(match[2]),newStart=Number(match[3]),newCount=match[4]===undefined?1:Number(match[4]);
-  return {oldBefore:oldCount?oldStart-1:oldStart,newBefore:newCount?newStart-1:newStart,oldEnd:oldCount?oldStart+oldCount-1:oldStart,newEnd:newCount?newStart+newCount-1:newStart};}
-/** Unchanged lines around each hunk, as new-side line ranges; the last one runs to the end of the file. */
-function gapsOf(file){const lines=contextLines.get(file.path);const out=[];let newEnd=0,oldEnd=0;
-  for(const hunk of file.hunks){const range=hunkRange(hunk);if(!range)return [];out.push({from:newEnd+1,to:range.newBefore,offset:range.oldBefore-range.newBefore});newEnd=range.newEnd;oldEnd=range.oldEnd;}
-  out.push({from:newEnd+1,to:lines?lines.length:Infinity,offset:oldEnd-newEnd,last:true});return out;}
-function expansion(path,index){const byFile=expanded.get(path);return byFile&&byFile.get(index)||{top:0,bottom:0};}
-function expand(file,index,top,bottom){if(!expanded.has(file.path))expanded.set(file.path,new Map());const current=expansion(file.path,index);
-  expanded.get(file.path).set(index,{top:current.top+top,bottom:current.bottom+bottom});loadContext(file);renderFiles([file.path]);}
-function previewKind(file){if(file.binary||file.change==='deleted')return undefined;return /\.(md|markdown)$/i.test(file.path)?'markdown':/\.html?$/i.test(file.path)?'html':undefined;}
-function loadPreview(file){const key='preview:'+file.path;if(!previews.has(file.path)&&!loading.has(key)){loading.add(key);api.postMessage({action:'preview',path:file.path});}}
-function previewNode(file,threads,placed){const data=previews.get(file.path);
-  if(!data){loadPreview(file);return el('div','note muted','Loading preview…');}
-  if(data.kind==='html'){const wrap=el('div','preview');const frame=el('iframe','html-preview');frame.setAttribute('sandbox','allow-scripts');frame.title='Preview of '+file.path;frame.dataset.path=file.path;
-    frame.srcdoc=data.html.replace('<!--'+data.marker+'-->','<script nonce="'+nonce+'">('+frameMain.toString()+')();<'+'/script>');
-    frame.style.height=(frameHeight.get(file.path)||600)+'px';
-    const margin=el('div','html-margin');margin.dataset.path=file.path;const anchors=[];
-    const attach=(card,anchor)=>{card.dataset.anchor=anchor.key;anchors.push(anchor);margin.append(card);
-      card.addEventListener('mouseenter',()=>frame.contentWindow&&frame.contentWindow.postMessage({focus:anchor.key},'*'));
-      card.addEventListener('mouseleave',()=>frame.contentWindow&&frame.contentWindow.postMessage({focus:null},'*'));};
-    for(const thread of threads)if(!placed.has(thread.id)&&!thread.outdated&&thread.side==='new'){placed.add(thread.id);
-      attach(threadBox(thread),{key:thread.id,start:thread.startLine,end:thread.endLine,source:thread.source});}
-    if(composer&&composer.path===file.path&&composer.side==='new')attach(composerBox(),{key:'composer',start:composer.start,end:composer.end,source:'draft'});
-    frameAnchors.set(file.path,anchors);
-    const split=el('div','html-split');split.append(frame,margin);
-    wrap.append(el('div','note muted','Click an element to comment on its source lines, Shift-click to extend. Scripts in the file are off, and linked stylesheets and relative images do not load.'),split);
-    return wrap;}
-  const wrap=el('div','preview md');const drafting=composer&&composer.path===file.path&&composer.side==='new';
-  for(const block of data.blocks){const node=el('div','md-block');node.innerHTML=block.html;node.title=range(block.startLine,block.endLine)+'. Click to comment, Shift-click to extend.';
-    if(drafting&&composer.start<=block.endLine&&composer.end>=block.startLine)node.classList.add('sel');
-    node.addEventListener('click',(event)=>{if(event.target.closest('a'))return;
-      if(event.shiftKey&&drafting){composer.start=Math.min(composer.start,block.startLine);composer.end=Math.max(composer.end,block.endLine);focusNext='composer';save();renderFiles([file.path]);}
-      else{pick(file.path,'new',block.startLine,false);composer.end=block.endLine;save();renderFiles([file.path]);}});
-    wrap.append(node);
-    for(const thread of threads)if(!placed.has(thread.id)&&!thread.outdated&&thread.side==='new'&&block.startLine<=thread.endLine&&thread.endLine<=block.endLine){placed.add(thread.id);wrap.append(threadBox(thread));}
-    if(drafting&&block.startLine<=composer.end&&composer.end<=block.endLine)wrap.append(composerBox());}
-  return wrap;}
-function frameMessage(frame,data){const path=frame.dataset.path;if(!data||typeof data!=='object')return;
-  if(data.lrReady){const drafting=composer&&composer.path===path&&composer.side==='new';
-    frame.contentWindow.postMessage({anchors:(frameAnchors.get(path)||[]).map(({key,start,end,source})=>({key,start,end,source})),select:drafting?[composer.start,composer.end]:null},'*');}
-  else if(Number.isFinite(data.lrHeight)){const height=Math.min(Math.max(data.lrHeight,100),20000);frameHeight.set(path,height);frame.style.height=height+'px';
-    if(data.lrAnchors&&typeof data.lrAnchors==='object'){frameTops.set(path,data.lrAnchors);layoutMargin(frame,data.lrAnchors);}}
-  else if(data.lrPick&&Number.isSafeInteger(data.lrPick.start)&&Number.isSafeInteger(data.lrPick.end)&&data.lrPick.start>0&&data.lrPick.start<=data.lrPick.end){
-    const {start,end,extend,top}=data.lrPick;const tops={...frameTops.get(path)};
-    if(Number.isFinite(top))tops.composer=extend&&Number.isFinite(tops.composer)?Math.min(tops.composer,top):top;frameTops.set(path,tops);
-    if(extend&&composer&&composer.path===path&&composer.side==='new'){composer.start=Math.min(composer.start,start);composer.end=Math.max(composer.end,end);focusNext='composer';save();renderFiles([path]);}
-    else{pick(path,'new',start,false);composer.end=end;save();renderFiles([path]);}}}
-/** Line each margin card up with its element, pushing cards down so they never overlap. */
-function layoutMargin(frame,tops){const margin=frame.nextElementSibling;if(!margin||!margin.classList.contains('html-margin'))return;
-  const cards=[...margin.children].sort((a,b)=>(Number.isFinite(tops[a.dataset.anchor])?tops[a.dataset.anchor]:Infinity)-(Number.isFinite(tops[b.dataset.anchor])?tops[b.dataset.anchor]:Infinity));
-  let next=0;for(const card of cards){const want=tops[card.dataset.anchor];const top=Math.max(Number.isFinite(want)?want:next,next);card.style.top=top+'px';next=top+card.offsetHeight+8;}
-  margin.style.minHeight=next+'px';}
-function loadContext(file){if(!contextLines.has(file.path)&&!loading.has(file.path)){loading.add(file.path);api.postMessage({action:'context',path:file.path});}}
-function fullFile(file){const gaps=gapsOf(file);return contextLines.has(file.path)&&gaps.every((gap,index)=>{const shown=expansion(file.path,index);return shown.top+shown.bottom>=gap.to-gap.from+1;});}
-/** Show a file as viewed right away; the extension's next state confirms it. */
-function markViewed(path,on){if(on)viewed.add(path);else viewed.delete(path);collapsed.set(path,on);save();}
-function unmarkRead(ids){readRanges=readRanges.filter((range)=>!ids.includes(range.id));api.postMessage({action:'unread',ids});}
-/** What a file's box shows from extension state, so a state update redraws only the files it changed. */
-function fileKey(path,threads){return JSON.stringify([viewed.has(path),collapsed.get(path)===true,readRanges.filter((range)=>range.path===path),threads,
-  composer&&composer.path===path?[author,current&&current.details&&current.details.pendingComments]:null]);}
-/** Diff lines inside read ranges, with the ids of the ranges covering each; marking added lines also covers the lines they replace, and the reverse. */
-function readLines(file,ranges){const lines=file.hunks.flatMap((hunk)=>hunk.lines);const read=new Map();
-  for(const range of ranges){if(range.path!==file.path)continue;const key=range.side==='old'?'oldLine':'newLine';let first=-1,last=-1;
-    lines.forEach((line,index)=>{const number=line[key];if(number!==undefined&&number>=range.startLine&&number<=range.endLine){if(first<0)first=index;last=index;}});
-    if(first<0)continue;
-    if(range.side==='new'&&lines[first].kind==='add')while(first>0&&lines[first-1].kind==='del')first--;
-    if(range.side==='old'&&lines[last].kind==='del')while(last<lines.length-1&&lines[last+1].kind==='add')last++;
-    for(let index=first;index<=last;index++){const line=lines[index];if(!read.has(line))read.set(line,[]);if(range.id)read.get(line).push(range.id);}}
-  return read;}
-/** Ids of the read ranges covering every selected diff line, or undefined when some selected line is unread. */
-function selectedReadIds(file,range){const read=readLines(file,readRanges);const key=range.side==='old'?'oldLine':'newLine';
-  const lines=file.hunks.flatMap((hunk)=>hunk.lines).filter((line)=>line[key]!==undefined&&line[key]>=range.startLine&&line[key]<=range.endLine);
-  return lines.length&&lines.every((line)=>read.has(line))?[...new Set(lines.flatMap((line)=>read.get(line)))]:undefined;}
-function fullyRead(file,ranges){const read=readLines(file,ranges);return file.hunks.every((hunk)=>hunk.lines.every((line)=>line.kind==='context'||read.has(line)));}
-function table(file,threads,placed){
-  const node=el('table');const columns=el('colgroup');
-  const widths=layout==='split'?['num','','num','']:['num','num',''];
-  for(const name of widths){const column=el('col',name);columns.append(column);}node.append(columns);
-  const add=(row,covers,hidden)=>{if(!hidden)node.append(row);
-    for(const [side,line] of covers){if(line===undefined)continue;
-      if(composer&&composer.path===file.path&&composer.side===side&&composer.start<=line&&line<=composer.end){
-        const cells=[...row.children].slice(layout==='split'&&side==='new'?2:0,layout==='split'&&side==='old'?2:undefined);
-        for(const cell of cells)cell.classList.add('sel');cells[0].classList.add('sel-start');}
-      for(const thread of threads)if(!placed.has(thread.id)&&!thread.outdated&&thread.side===side&&thread.endLine===line){placed.add(thread.id);node.append(inline(threadBox(thread),widths.length));}
-      if(composer&&composer.path===file.path&&composer.side===side&&composer.end===line)node.append(inline(composerBox(),widths.length));}};
-  const lineRow=(line,hidden)=>{const row=el('tr',line.kind);row.append(num(line.oldLine,file.path,'old'),num(line.newLine,file.path,'new'),code(line,''));add(row,[['old',line.oldLine],['new',line.newLine]],hidden);};
-  const pairRow=(left,right,hidden)=>{const row=el('tr');const same=left===right;
-    if(left){row.append(num(left.oldLine,file.path,'old'),code(left,same?'':'del'));}else row.append(el('td','num empty'),el('td','code empty'));
-    if(right){row.append(num(right.newLine,file.path,'new'),code(right,same?'':'add'));}else row.append(el('td','num empty'),el('td','code empty'));
-    add(row,[['old',left&&left.oldLine],['new',right&&right.newLine]],hidden);};
-  const contextRow=(newLine,offset)=>{const html=(contextLines.get(file.path)||[])[newLine-1];if(html===undefined)return;
-    const line={kind:'context',oldLine:newLine+offset,newLine,html};if(layout==='split')pairRow(line,line);else lineRow(line);};
-  const gaps=gapsOf(file);
-  const read=readLines(file,readRanges);
-  const readRow=(lines,key,open)=>{const row=el('tr','read-run');const cell=el('td');cell.colSpan=widths.length;row.append(cell);
-    const label=el('span','read-label',(open?'▾ ':'▸ ')+'✓ '+lines.length+(lines.length===1?' line read':' lines read'));label.title=open?'Hide these lines':'Show these lines';
-    label.addEventListener('click',()=>{if(open)openReads.delete(key);else openReads.add(key);renderFiles([file.path]);});
-    const ids=[...new Set(lines.flatMap((line)=>read.get(line)))];
-    cell.append(label,button('Unmark',()=>{unmarkRead(ids);renderFiles([file.path]);}));return row;};
-  const expander=(gap,index,header)=>{const size=gap.to-gap.from+1;const shown=expansion(file.path,index);const hidden=size-shown.top-shown.bottom;
-    const row=el('tr','hunk');const cell=el('td');cell.colSpan=widths.length;row.append(cell);
-    if(hidden>0){const tools=el('span','expand');
-      if(hidden<=step&&!gap.last)tools.append(button('↕',()=>expand(file,index,hidden,0)));
-      else{if(index>0)tools.append(button('↓',()=>expand(file,index,step,0)));if(!gap.last)tools.append(button('↑',()=>expand(file,index,0,step)));}
-      for(const tool of tools.children)tool.title=tool.textContent==='↕'?'Show '+hidden+' hidden lines':tool.textContent==='↓'?'Show '+step+' more lines below':'Show '+step+' more lines above';
-      cell.append(tools);}
-    if(header)cell.append(el('span','',header));
-    else if(hidden>0)cell.append(el('span','',Number.isFinite(hidden)?hidden+' more lines':'Rest of the file'));
-    if(hidden>0||(header&&size<=0))node.append(row);};
-  const gapRows=(gap,index,header)=>{const size=gap.to-gap.from+1;const shown=expansion(file.path,index);
-    if(size<=0){if(header)expander({from:1,to:0},index,header);return;}
-    if(!contextLines.has(file.path)){expander(gap,index,header);return;}
-    const top=Math.min(shown.top,size),bottom=Math.min(shown.bottom,size-top);
-    for(let line=gap.from;line<gap.from+top;line++)contextRow(line,gap.offset);
-    expander(gap,index,header);
-    for(let line=gap.to-bottom+1;line<=gap.to;line++)contextRow(line,gap.offset);};
-  file.hunks.forEach((hunk,index)=>{
-    if(gaps[index])gapRows(gaps[index],index,hunk.header);
-    else{const header=el('tr','hunk');const cell=el('td','',hunk.header);cell.colSpan=widths.length;header.append(cell);node.append(header);}
-    const rows=layout==='split'?pairs(hunk):hunk.lines.map((line)=>[line]);
-    const draw=(row,hidden)=>layout==='split'?pairRow(row[0],row[1],hidden):lineRow(row[0],hidden);
-    const isRead=(row)=>row.every((line)=>!line||read.has(line));
-    for(let at=0;at<rows.length;){
-      if(!isRead(rows[at])){draw(rows[at],false);at+=1;continue;}
-      let end=at;while(end<rows.length&&isRead(rows[end]))end+=1;
-      const run=rows.slice(at,end);const lines=[...new Set(run.flat().filter(Boolean))];
-      const key=file.path+':'+(lines[0].oldLine??'')+':'+(lines[0].newLine??'');const open=openReads.has(key);
-      node.append(readRow(lines,key,open));
-      for(const row of run)draw(row,!open);
-      at=end;}
-  });
-  const last=gaps[file.hunks.length];if(last&&file.change!=='added'&&file.change!=='deleted')gapRows(last,file.hunks.length);
-  return node;
-}
-/** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
-function renderFiles(only){
-  $('unified').className=layout==='unified'?'on':'';$('split').className=layout==='split'?'on':'';
-  if(!files)return;
-  const container=$('files');
-  const scroll=window.scrollY;
-  const active=document.activeElement;
-  const focus=active&&active.dataset&&active.dataset.draft?{key:active.dataset.draft,start:active.selectionStart,end:active.selectionEnd}:undefined;
-  const threadsByFile=new Map();
-  for(const thread of allThreads()){if(!threadsByFile.has(thread.path))threadsByFile.set(thread.path,[]);threadsByFile.get(thread.path).push(thread);}
-  $('files-title').textContent='Files ('+files.length+') · '+files.filter((file)=>viewed.has(file.path)).length+' viewed';
-  const boxes=new Map([...container.children].filter((node)=>node.classList.contains('file')).map((node)=>[node.dataset.path,node]));
-  const threadsOf=(path)=>threadsByFile.get(path)||[];
-  const changed=only==='state'?files.map((file)=>file.path).filter((path)=>fileKeys.get(path)!==fileKey(path,threadsOf(path))):only;
-  const targets=changed&&boxes.size===files.length?[...new Set(changed.filter(Boolean))]:undefined;
-  const draw=(file)=>{fileKeys.set(file.path,fileKey(file.path,threadsOf(file.path)));return fileBox(file,threadsOf(file.path));};
-  if(targets&&targets.every((path)=>boxes.has(path))){
-    for(const path of targets)boxes.get(path).replaceWith(draw(files.find((file)=>file.path===path)));
-  }else{
-    container.replaceChildren();fileKeys.clear();
-    if(!files.length)container.append(el('p','muted','No changes against the base branch.'));
-    for(const file of files)container.append(draw(file));
-  }
-  for(const frame of container.querySelectorAll('iframe.html-preview'))layoutMargin(frame,frameTops.get(frame.dataset.path)||{});
-  if(focus){const area=container.querySelector('[data-draft="'+CSS.escape(focus.key)+'"]');if(area){area.focus({preventScroll:true});area.setSelectionRange(focus.start,focus.end);}}
-  window.scrollTo(0,scroll);
-  if(focusNext){const area=container.querySelector('[data-draft="'+CSS.escape(focusNext)+'"]');focusNext=undefined;if(area)area.focus();}
-}
-function fileBox(file,threads){
-    const isCollapsed=collapsed.get(file.path)===true;
-    const box=el('div','file'+(isCollapsed?' collapsed':''));box.dataset.path=file.path;
-    const head=el('div','file-head');
-    const chevron=el('span','chevron',isCollapsed?'▸':'▾');
-    const name=el('span','name',file.oldPath?file.oldPath+' → '+file.path:file.path);
-    const toggle=()=>{collapsed.set(file.path,!isCollapsed);save();renderFiles([file.path]);};
-    chevron.addEventListener('click',toggle);name.addEventListener('click',toggle);
-    const badge=el('span','badge '+file.change,changeLetters[file.change]);badge.title=file.change;
-    const stats=el('span','');stats.append(el('span','stat-add','+'+file.additions),' ',el('span','stat-del','−'+file.deletions));
-    const label=el('label','viewed');const box2=el('input');box2.type='checkbox';box2.checked=viewed.has(file.path);
-    box2.addEventListener('change',()=>{markViewed(file.path,box2.checked);api.postMessage({action:'viewed',path:file.path,viewed:box2.checked});renderFiles([file.path]);});
-    label.append(box2,'Viewed');
-    const open=el('button','','Open in editor');open.addEventListener('click',()=>api.postMessage({action:'editor',path:file.path}));
-    const whole=fullFile(file);const full=button(whole?'Diff only':'Full file',()=>{
-      expanded.set(file.path,whole?new Map():new Map(file.hunks.concat([null]).map((_,index)=>[index,{top:Infinity,bottom:0}])));loadContext(file);renderFiles([file.path]);});
-    const kind=previewKind(file);const showPreview=kind!==undefined&&previewing.has(file.path);
-    full.hidden=showPreview||file.binary||file.change==='added'||file.change==='deleted'||!file.hunks.length;
-    const mode=el('span','seg');mode.hidden=kind===undefined;
-    for(const [label,on] of [['Diff',false],['Preview',true]]){const option=button(label,()=>{if(on)previewing.add(file.path);else previewing.delete(file.path);save();renderFiles([file.path]);});option.className=showPreview===on?'on':'';mode.append(option);}
-    const unresolved=threads.filter((thread)=>!thread.resolved).length;
-    const comments=el('span','muted comments',!threads.length?'':threads.length+(threads.length===1?' comment':' comments')+(unresolved===threads.length?'':', '+unresolved+' open'));
-    head.append(chevron,name,badge,stats,comments,mode,label,full,open);box.append(head);
-    const diff=el('div','diff');const placed=new Set();
-    if(file.binary)diff.append(el('div','note muted','Binary file not shown.'));
-    else if(showPreview)diff.append(previewNode(file,threads,placed));
-    else if(!file.hunks.length)diff.append(el('div','note muted',file.change==='renamed'?'Renamed without changes.':'No content changes.'));
-    else diff.append(table(file,threads,placed));
-    const outside=threads.filter((thread)=>!placed.has(thread.id));
-    if(outside.length){const block=el('div','outside');block.append(el('div','muted','Comments on lines this diff does not show'),...outside.map(threadBox));diff.prepend(block);}
-    box.append(diff);return box;
-}
-for(const [id,action] of [['pr','pr'],['log','log'],['retry','retry'],['refresh','refresh']])$(id).addEventListener('click',()=>api.postMessage({action}));
-$('error').addEventListener('click',()=>{$('error').textContent='';});
-function columnAt(cell,event){const range=document.caretRangeFromPoint(event.clientX,event.clientY);if(!range||!cell.contains(range.startContainer))return undefined;
-  const walker=document.createTreeWalker(cell,NodeFilter.SHOW_TEXT);let offset=0;let node;
-  while((node=walker.nextNode())){if(node===range.startContainer)return offset+range.startOffset;offset+=node.textContent.length;}return undefined;}
-function textRange(cell,start,end){const range=document.createRange();const walker=document.createTreeWalker(cell,NodeFilter.SHOW_TEXT);let offset=0;let node;let begun=false;
-  while((node=walker.nextNode())){const length=node.textContent.length;
-    if(!begun&&start<=offset+length){range.setStart(node,start-offset);begun=true;}
-    if(begun&&end<=offset+length){range.setEnd(node,end-offset);return range;}offset+=length;}return undefined;}
-function wordAt(cell,column){const text=cell.textContent;const word=/[\\p{L}\\p{N}_$]/u;if(column>=text.length||!word.test(text[column]))return undefined;
-  let start=column;let end=column;while(start>0&&word.test(text[start-1]))start-=1;while(end<text.length&&word.test(text[end]))end+=1;return {start,end};}
-function lookupTarget(cell){const peekId=cell.closest('#peek')?peeks[peekAt]&&peeks[peekAt].id:undefined;const fileBox=cell.closest('.file');
-  return peekId?{peek:peekId}:fileBox?{path:fileBox.dataset.path}:undefined;}
-const probes=new Map();let hovered;let pointer;let probeTimer;
-function setHighlight(name,range){if(!window.CSS||!CSS.highlights)return;if(range)CSS.highlights.set(name,new Highlight(range));else CSS.highlights.delete(name);}
-function showLink(){document.querySelectorAll('td.code.linked').forEach((cell)=>cell.classList.remove('linked'));
-  if(!hovered||probes.get(hovered.id)!==true){setHighlight('lr-link');return;}
-  hovered.cell.classList.add('linked');setHighlight('lr-link',textRange(hovered.cell,hovered.start,hovered.end));}
-function probeAt(event){clearTimeout(probeTimer);hovered=undefined;
-  const cell=event.target&&event.target.closest&&event.target.closest('td.code[data-line]');const target=cell&&lookupTarget(cell);
-  const column=cell?columnAt(cell,event):undefined;const word=column===undefined?undefined:wordAt(cell,column);
-  if(!target||!word){showLink();return;}
-  const id=JSON.stringify([target.peek||target.path,cell.dataset.line,word.start]);hovered={id,cell,start:word.start,end:word.end};showLink();
-  if(probes.has(id))return;
-  probeTimer=setTimeout(()=>{probes.set(id,'pending');api.postMessage({action:'probe',id,...target,line:Number(cell.dataset.line),column:word.start});},60);}
-document.addEventListener('mousemove',(event)=>{pointer=event;if(event.metaKey||event.ctrlKey)probeAt(event);else if(hovered){hovered=undefined;showLink();}});
-document.addEventListener('click',(event)=>{if(!(event.metaKey||event.ctrlKey))return;const cell=event.target.closest&&event.target.closest('td.code[data-line]');if(!cell)return;
-  const column=columnAt(cell,event);const target=lookupTarget(cell);if(column===undefined||!target)return;event.preventDefault();$('error').textContent='';
-  api.postMessage({action:'definition',...target,line:Number(cell.dataset.line),column});});
-for(const type of ['keydown','keyup'])window.addEventListener(type,(event)=>{const held=event.metaKey||event.ctrlKey;document.body.classList.toggle('peeking',held);
-  if(held&&pointer)probeAt(pointer);else if(!held){clearTimeout(probeTimer);hovered=undefined;showLink();}});
-window.addEventListener('blur',()=>{hovered=undefined;showLink();});
-function closePeek(){peeks.length=0;peekAt=-1;renderPeek();}
-window.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&peeks.length&&!(event.target instanceof HTMLTextAreaElement))closePeek();});
-function renderPeek(){const panel=$('peek');panel.hidden=peekAt<0;setHighlight('lr-name');if(peekAt<0)return;const peek=peeks[peekAt];
-  $('peek-title').textContent=peek.location;$('peek-back').disabled=peekAt<1;$('peek-forward').disabled=peekAt>=peeks.length-1;
-  const body=el('table');const columns=el('colgroup');columns.append(el('col','num'),el('col'));body.append(columns);let nameCell;
-  peek.lines.forEach((html,index)=>{const line=peek.startLine+index;const row=el('tr',line>=peek.focus.start&&line<=peek.focus.end?'focus':'');
-    const cell=el('td','code');cell.innerHTML=html;cell.dataset.line=String(line);row.append(el('td','num',String(line)),cell);body.append(row);
-    if(peek.name&&peek.name.line===line)nameCell=cell;});
-  const code=$('peek-code');code.replaceChildren(body);
-  if(nameCell)setHighlight('lr-name',textRange(nameCell,peek.name.start,peek.name.end));
-  const first=body.querySelector('tr.focus');if(first)code.scrollTop=Math.max(0,first.getBoundingClientRect().top-code.getBoundingClientRect().top-3*first.offsetHeight);}
-$('peek-close').addEventListener('click',closePeek);
-$('peek-back').addEventListener('click',()=>{if(peekAt>0){peekAt-=1;renderPeek();}});
-$('peek-forward').addEventListener('click',()=>{if(peekAt<peeks.length-1){peekAt+=1;renderPeek();}});
-$('peek-open').addEventListener('click',()=>{const peek=peeks[peekAt];if(peek)api.postMessage({action:'open-definition',peek:peek.id});});
-$('unified').addEventListener('click',()=>{layout='unified';save();renderFiles();});
-$('split').addEventListener('click',()=>{layout='split';save();renderFiles();});
-$('collapse').addEventListener('click',()=>{for(const file of files||[])collapsed.set(file.path,true);save();renderFiles();});
-$('expand').addEventListener('click',()=>{for(const file of files||[])collapsed.set(file.path,false);save();renderFiles();});
-for(const [id,open] of [['collapse-comments',false],['expand-comments',true]])$(id).addEventListener('click',()=>{for(const thread of allThreads())threadOpen.set(thread.id,open);renderFiles();});
-for(const button of reviewButtons)button.addEventListener('click',()=>{$('error').textContent='';setBusy(true);api.postMessage({action:'review',event:button.dataset.event,body:$('review').value});});
-$('merge').addEventListener('click',()=>{$('error').textContent='';setBusy(true);api.postMessage({action:'merge',method:$('method').value});});
-window.addEventListener('message',(event)=>{const data=event.data;
-  const frame=event.source&&[...document.querySelectorAll('iframe.html-preview')].find((node)=>node.contentWindow===event.source);
-  if(frame){frameMessage(frame,data);return;}
-  if(data.state)render(data.state);
-  if(data.files){files=data.files;contextLines.clear();loading.clear();renderFiles();}
-  if(data.preview){previews.set(data.preview.path,data.preview);loading.delete('preview:'+data.preview.path);renderFiles([data.preview.path]);}
-  if(data.context){contextLines.set(data.context.path,data.context.lines);loading.delete(data.context.path);renderFiles([data.context.path]);}
-  if(data.definition){peeks.length=peekAt+1;peeks.push(data.definition);peekAt=peeks.length-1;renderPeek();}
-  if(data.probe){probes.set(data.probe.id,data.probe.found);showLink();}
-  if(data.reveal&&files){collapsed.set(data.reveal,false);save();renderFiles();const target=document.querySelector('[data-path="'+CSS.escape(data.reveal)+'"]');if(target)target.scrollIntoView({block:'start'});}
-  if(data.filesError)$('files').replaceChildren(el('p','bad','Could not read the changes: '+data.filesError));
-  if(data.error){loading.clear();$('error').textContent=String(data.error);if(data.form&&sending.delete(data.form))renderFiles();}
-  if(data.done==='review')$('review').value='';
-  if(data.done==='composer'){sending.delete('composer');const path=composer&&composer.path;composer=undefined;save();renderFiles([path]);}
-  if(typeof data.done==='string'&&data.done.startsWith('reply:')){sending.delete(data.done);replies.delete(data.done.slice(6));save();renderFiles();}
-  if(data.idle)setBusy(false);});
-render(${JSON.stringify(state).replaceAll('<', '\\u003c')});
-new ResizeObserver(([entry])=>document.body.style.setProperty('--bar-height',entry.target.offsetHeight+'px')).observe($('files-bar'));
-api.postMessage({action:'ready'});
-</script></body></html>`;
+<script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon }).replaceAll('<', '\\u003c')}</script>
+<script nonce="${nonce}" src="${script}"></script>
+</body></html>`;
 }
 
 function githubThreadView(thread: RemoteThread): GitHubThreadView {

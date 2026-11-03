@@ -37,6 +37,6 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
   assert.deepEqual(state.threads, [{ id: 't1', location: 'src/a.ts:12', text: 'Why </script><b>?', status: 'Answered · On GitHub (pending)', url: 'https://github.com/acme/app/pull/3#r1',
     path: 'src/a.ts', side: 'new', startLine: 12, endLine: 14, resolved: false, messages: [{ author: 'human', html: '<p>Why<br>&lt;/script&gt;&lt;b&gt;?</p>' }],
   }]);
-  const html = overviewHtml(state, 'https://example.test/</script><i>.svg');
+  const html = overviewHtml(state, 'overview.js', 'https://example.test/</script><i>.svg');
   assert.ok(!html.includes('</script><b>') && !html.includes('</script><i>') );
 });
