@@ -54,7 +54,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (event.affectsConfiguration('editor.tokenColorCustomizations') || event.affectsConfiguration('workbench.colorTheme')) loadHighlighter();
     }),
   );
-  const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('localReview').get('mockPullRequests', false);
+  const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('pairReview').get('mockPullRequests', false);
   const checkouts = new Checkouts(root, context.globalStorageUri.fsPath, {
     discover: async () => mockPullRequests() ? [] : await nestedRepositoryRoots(root),
     create: (checkoutRoot, storageRoot) => {
@@ -62,7 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect), fileReviews: new FileReviews(storageRoot) };
     },
     onRestoreError: (error) => {
-      void vscode.window.showErrorMessage(`Local Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(`Pair Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
     },
   });
   context.subscriptions.push(checkouts, registerPullRequestDiffs(async (repository, number) => (await checkouts.locate(repository, number))?.storageRoot));
@@ -204,7 +204,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         openInEditor: (path) => openPullRequestFile(storageRoot, repository, pullRequest, path),
         showLog: () => { opened.output.show(true); },
         retry: () => { opened.runner.retry(); },
-        revealThread: async (id) => { await vscode.commands.executeCommand('localReview.revealThread', id); },
+        revealThread: async (id) => { await vscode.commands.executeCommand('pairReview.revealThread', id); },
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
@@ -215,7 +215,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (answer !== confirm) return;
           await provider.merge(pullRequest.number, method);
           void loadDetails();
-          void vscode.commands.executeCommand('localReview.refreshPullRequests');
+          void vscode.commands.executeCommand('pairReview.refreshPullRequests');
         },
         refresh: () => { void loadDetails(); void loadThreads(); },
       }, context.extensionUri, revealPath);
@@ -255,18 +255,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.globalState,
         context.workspaceState,
       ),
-      watchGitHubSessions(() => { void vscode.commands.executeCommand('localReview.refreshPullRequests'); }),
-      vscode.commands.registerCommand('localReview.signInToGitHub', async (provider: unknown) => {
+      watchGitHubSessions(() => { void vscode.commands.executeCommand('pairReview.refreshPullRequests'); }),
+      vscode.commands.registerCommand('pairReview.signInToGitHub', async (provider: unknown) => {
         try {
           await signInToGitHub(provider === 'github' || provider === 'github-enterprise' ? provider : undefined);
-          await vscode.commands.executeCommand('localReview.refreshPullRequests');
+          await vscode.commands.executeCommand('pairReview.refreshPullRequests');
         } catch (error: unknown) {
           void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
         }
       }),
       reportClaudeFailures(checkouts),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('localReview.mockPullRequests') || event.affectsConfiguration('github-enterprise.uri')) void vscode.commands.executeCommand('localReview.refreshPullRequests');
+        if (event.affectsConfiguration('pairReview.mockPullRequests') || event.affectsConfiguration('github-enterprise.uri')) void vscode.commands.executeCommand('pairReview.refreshPullRequests');
       }),
     );
     await createReviewController(store, context, getHeadRevision, checkouts);
@@ -274,17 +274,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(registerPrExport(context, store));
     const bridge = await createReviewBridge(store, join(storage.fsPath, 'selected-session.json'));
     activeBridge = bridge;
-    context.subscriptions.push(bridge, registerClaudeLauncher(context, bridge, storage.fsPath), vscode.commands.registerCommand('localReview.showFocusedClaude', () => {
+    context.subscriptions.push(bridge, registerClaudeLauncher(context, bridge, storage.fsPath), vscode.commands.registerCommand('pairReview.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
       if (focused !== undefined) showClaude(focused);
     }));
     void checkouts.list().catch((error: unknown) => {
-      void vscode.window.showErrorMessage(`Local Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(`Pair Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
     });
     await prepareConnection(context, bridge, storage.fsPath);
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
-    status.command = 'localReview.startClaude';
+    status.command = 'pairReview.startClaude';
     const updateStatus = (): void => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
@@ -292,11 +292,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const current = claudeStatus(focused.runner.activity);
         status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
         status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
-        status.command = 'localReview.showFocusedClaude';
+        status.command = 'pairReview.showFocusedClaude';
         status.show();
         return;
       }
-      status.command = 'localReview.startClaude';
+      status.command = 'pairReview.startClaude';
       const waiting = store.pendingEvents.length;
       const ready = bridge.state.deliveryReady === true;
       const label = !bridge.state.connected ? '$(debug-disconnect) Review · Verbinden'
@@ -315,7 +315,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     updateStatus();
   } catch (error: unknown) {
     activeBridge?.dispose();
-    await vscode.window.showErrorMessage(`Local Review konnte nicht starten: ${error instanceof Error ? error.message : String(error)}`);
+    await vscode.window.showErrorMessage(`Pair Review konnte nicht starten: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

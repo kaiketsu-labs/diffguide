@@ -2,7 +2,7 @@ import type * as vscode from 'vscode';
 
 import type { ReviewThread } from './contracts.js';
 
-export const resolvedVisibilityKey = 'localReview.showResolved';
+export const resolvedVisibilityKey = 'pairReview.showResolved';
 
 /** Keep resolved reviews hidden by default without changing their durable conversations. */
 export class ReviewVisibility {

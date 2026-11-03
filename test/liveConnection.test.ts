@@ -26,7 +26,7 @@ afterEach(() => { resetFakeEditor(); resetFakeWindow(); });
 
 /** Isolate session selection and real-process delivery from every existing Claude conversation. */
 async function fixture(t: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), 'local-review-live-'));
+  const root = await mkdtemp(join(tmpdir(), 'pair-review-live-'));
   const bindingPath = join(root, 'selected-session.json');
   const store = await createReviewStore(join(root, 'review.json'), root);
   const bridge = await createReviewBridge(store, bindingPath);
@@ -96,13 +96,13 @@ test('the bridge refuses other or missing sessions without exposing work or repo
   const f = await fixture(t); await bind(f);
   for (const sessionId of ['', otherSession]) {
     const response = await fetch(`${f.bridge.descriptor.url}/pending`, {
-      headers: { ...f.headers, 'X-Local-Review-Session': sessionId, 'X-Local-Review-Client': 'watcher' },
+      headers: { ...f.headers, 'X-Pair-Review-Session': sessionId, 'X-Pair-Review-Client': 'watcher' },
     });
     assert.equal(response.status, 403);
     assert.equal(f.bridge.state.connected, false);
     assert.equal(f.bridge.state.deliveryReady, false);
   }
-  const response = await fetch(`${f.bridge.descriptor.url}/pending`, { headers: { ...f.headers, 'X-Local-Review-Session': firstSession } });
+  const response = await fetch(`${f.bridge.descriptor.url}/pending`, { headers: { ...f.headers, 'X-Pair-Review-Session': firstSession } });
   assert.equal(response.status, 200);
   assert.equal(readBatch(await response.json(), f.root).events.length, 0);
 });
@@ -129,7 +129,7 @@ test('the live plugin rejects another MCP session and returns its reply only fro
     t.after(async () => { await client.close(); });
     const transport = new StdioClientTransport({ command: process.execPath,
       args: [resolve('dist/channel.cjs'), '--connection', f.connectionPath, '--no-push'], stderr: 'pipe',
-      env: { LOCAL_REVIEW_SESSION_BINDING: f.bindingPath, CLAUDE_CODE_SESSION_ID: sessionId },
+      env: { PAIR_REVIEW_SESSION_BINDING: f.bindingPath, CLAUDE_CODE_SESSION_ID: sessionId },
     });
     transport.stderr?.on('data', () => {});
     await client.connect(transport);
@@ -148,7 +148,7 @@ test('only the selected hook wakes for feedback and leaves acknowledgment to Cla
     contextAfter: '', documentHash: 'hash', side: 'working', baseRevision: 'HEAD' }, 'Explain this.', 'ask');
   for (const sessionId of [otherSession, firstSession]) {
     const child = spawn(process.execPath, [resolve('dist/hook-waiter.cjs'), '--connection', f.connectionPath], {
-      env: { ...process.env, LOCAL_REVIEW_SESSION_BINDING: f.bindingPath }, stdio: 'pipe',
+      env: { ...process.env, PAIR_REVIEW_SESSION_BINDING: f.bindingPath }, stdio: 'pipe',
     });
     let output = ''; child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
     child.stdin.end(JSON.stringify({ session_id: sessionId, hook_event_name: 'Stop' }));
@@ -174,10 +174,10 @@ test('live setup generates a local plugin with session guards and uses only loca
   await writeFile(executable, `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv[2]==='--version'){console.log('2.1.280 (Claude Code)');}else{fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');}\n`, { mode: 0o700 });
   const context = { extensionPath: resolve('.'), subscriptions: [] } as unknown as vscode.ExtensionContext;
   await installLivePlugin(context, f.bridge, f.root, executable, process.execPath);
-  const plugin = join(f.root, 'live', 'marketplace', 'plugins', 'local-review');
-  const mcp = JSON.parse(await readFile(join(plugin, '.mcp.json'), 'utf8')) as { mcpServers: { 'local-review': { env: Record<string, string>; args: string[] } } };
-  assert.equal(mcp.mcpServers['local-review'].env['LOCAL_REVIEW_SESSION_BINDING'], f.bindingPath);
-  assert.ok(mcp.mcpServers['local-review'].args.includes('--no-push'));
+  const plugin = join(f.root, 'live', 'marketplace', 'plugins', 'pair-review');
+  const mcp = JSON.parse(await readFile(join(plugin, '.mcp.json'), 'utf8')) as { mcpServers: { 'pair-review': { env: Record<string, string>; args: string[] } } };
+  assert.equal(mcp.mcpServers['pair-review'].env['PAIR_REVIEW_SESSION_BINDING'], f.bindingPath);
+  assert.ok(mcp.mcpServers['pair-review'].args.includes('--no-push'));
   assert.match(await readFile(join(plugin, 'skills', 'connect', 'SKILL.md'), 'utf8'), /\$\{CLAUDE_SESSION_ID\}/u);
   const commands = (await readFile(calls, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[]);
   assert.deepEqual(commands.map(args => args.slice(-2)), [['--scope', 'local'], ['--scope', 'local']]);
@@ -192,7 +192,7 @@ test('the live setup view copies only its two known commands and does not run te
   fake.receive({ type: 'copy', command: 'reload' }); await settle();
   fake.receive({ type: 'copy', command: 'connect' }); await settle();
   fake.receive({ type: 'copy', command: 'arbitrary-command' }); await settle();
-  assert.deepEqual(env.clipboard.writes, ['/reload-plugins --force', '/local-review:connect']);
+  assert.deepEqual(env.clipboard.writes, ['/reload-plugins --force', '/pair-review:connect']);
   assert.equal(window.terminals.length, 0);
   assert.match(fake.webview.html, /aria-live="polite"/u);
 });

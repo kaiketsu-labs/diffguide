@@ -19,7 +19,7 @@ const grammar = {
 };
 
 async function toyHighlighter(): Promise<TextMateHighlighter> {
-  const folder = await mkdtemp(join(tmpdir(), 'local-review-textmate-'));
+  const folder = await mkdtemp(join(tmpdir(), 'pair-review-textmate-'));
   await writeFile(join(folder, 'toy.tmLanguage.json'), JSON.stringify(grammar));
   await writeFile(join(folder, 'base.json'), '{\n  // base theme\n  "tokenColors": [{ "scope": "string", "settings": { "foreground": "#E6DB74" } }],\n}');
   await writeFile(join(folder, 'theme.json'), JSON.stringify({ include: './base.json', tokenColors: [{ scope: 'keyword', settings: { foreground: '#F92672', fontStyle: 'italic' } }] }));

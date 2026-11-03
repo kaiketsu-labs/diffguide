@@ -43,7 +43,7 @@ jobs:
       - name: Upload installable extension
         uses: actions/upload-artifact@v7
         with:
-          name: local-review-vsix
+          name: pair-review-vsix
           path: '*.vsix'
           if-no-files-found: error
           retention-days: 14

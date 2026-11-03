@@ -132,7 +132,7 @@ test('restored preview text and previous publication cannot escape the inline sc
 });
 
 test('closing and reopening an edited handoff restores its exact snapshot without publishing', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'local-review-handoff-'));
+  const root = await mkdtemp(join(tmpdir(), 'pair-review-handoff-'));
   const store = await createReviewStore(join(root, 'review.json'), root);
   const anchor: CodeAnchor = { path: 'example.ts', startLine: 1, endLine: 1, selectedText: 'example();',
     contextBefore: '', contextAfter: '', documentHash: 'original', side: 'working', baseRevision: '' };
@@ -144,7 +144,7 @@ test('closing and reopening an edited handoff restores its exact snapshot withou
   } as unknown as GitHubReviewClient));
   const registered = registerPrExport(extensionContext(), store);
   cleanup.push(async () => { registered.dispose(); await store.flush(); await rm(root, { recursive: true, force: true }); });
-  await commands.executeCommand('localReview.exportToPr');
+  await commands.executeCommand('pairReview.exportToPr');
   const firstPanel = window.panels.at(-1);
   assert.ok(firstPanel);
   firstPanel.receive({ action: 'openPr', url: 'https://example.invalid/wrong-target' });
@@ -156,7 +156,7 @@ test('closing and reopening an edited handoff restores its exact snapshot withou
   firstPanel.dispose();
   await store.submit(anchor, 'Later discussion is separate.', 'ask', thread.id);
 
-  await commands.executeCommand('localReview.exportToPr');
+  await commands.executeCommand('pairReview.exportToPr');
   const restored = window.panels.at(-1);
   assert.ok(restored);
   assert.notEqual(restored, firstPanel);
@@ -169,7 +169,7 @@ test('closing and reopening an edited handoff restores its exact snapshot withou
   await settle();
   assert.equal(publishes, 1);
   restored.dispose();
-  await commands.executeCommand('localReview.exportToPr');
+  await commands.executeCommand('pairReview.exportToPr');
   const retry = window.panels.at(-1);
   assert.ok(retry);
   assert.equal(new PreviewBrowser(retry.webview.html).element('body').value, edited);
@@ -177,7 +177,7 @@ test('closing and reopening an edited handoff restores its exact snapshot withou
   retry.dispose();
   await store.submit(anchor, 'A separate new question?', 'ask');
   window.quickPickIndex = 1;
-  await commands.executeCommand('localReview.exportToPr');
+  await commands.executeCommand('pairReview.exportToPr');
   const fresh = window.panels.at(-1);
   assert.ok(fresh);
   assert.match(fresh.webview.html, /A separate new question/u);

@@ -69,7 +69,7 @@ export class GitHubReviewClient {
       if (comments.length < 100) break;
     }
     if (matches.length > 1) {
-      throw new Error('Dieser PR enthält mehrere Local-Review-Übergaben von deinem Konto. Kläre die doppelten Kommentare auf GitHub, bevor du aktualisierst.');
+      throw new Error('Dieser PR enthält mehrere Pair-Review-Übergaben von deinem Konto. Kläre die doppelten Kommentare auf GitHub, bevor du aktualisierst.');
     }
     const comment = matches[0];
     return comment === undefined ? { pullRequest, viewerLogin } : { pullRequest, viewerLogin, comment };

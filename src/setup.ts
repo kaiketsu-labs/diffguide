@@ -10,7 +10,7 @@ import { listClaudeConversations } from './claudeSessions.js';
 import { readSessionBinding } from './sessionBinding.js';
 export { quotePosix } from './shell.js';
 
-const reviewTerminalName = 'Claude · Local Review';
+const reviewTerminalName = 'Claude · Pair Review';
 
 /** Quote terminal arguments without interpreting user-configured executable paths. */
 function terminalCommand(executable: string, args: readonly string[]): string {
@@ -38,7 +38,7 @@ export async function prepareConnection(
   runtimeNodePath?: string,
 ): Promise<{ readonly mcpPath: string; readonly hooksPath: string; readonly transport: 'hooks' | 'channels' }> {
   await mkdir(storagePath, { recursive: true, mode: 0o700 });
-  const configuration = vscode.workspace.getConfiguration('localReview');
+  const configuration = vscode.workspace.getConfiguration('pairReview');
   const nodePath = runtimeNodePath ?? configuration.get<string>('nodePath', 'node');
   const transport = configuration.get<string>('transport', 'hooks') === 'channels' ? 'channels' : 'hooks';
   const connectionPath = join(storagePath, 'connection.json');
@@ -51,7 +51,7 @@ export async function prepareConnection(
   if (await readPrivateJson(liveConnection) !== undefined) await writePrivateJson(liveConnection, bridge.descriptor);
   await writePrivateJson(mcpPath, {
     mcpServers: {
-      'local-review': {
+      'pair-review': {
         command: nodePath,
         args: [channelPath, '--connection', connectionPath, ...(transport === 'hooks' ? ['--no-push'] : [])],
       },
@@ -75,7 +75,7 @@ async function selectConversation(workspaceRoot: string, includeRunning = true):
     { label: 'Neue Unterhaltung', description: 'Mit leerem Gespräch beginnen', resume: false },
   ];
   if (includeRunning) choices.push({ label: 'Laufende Unterhaltung verbinden', description: 'Im bestehenden Claude bleiben',
-    detail: '/local-review:connect verbindet genau die Unterhaltung, in der du den Befehl ausführst.', resume: 'running' });
+    detail: '/pair-review:connect verbindet genau die Unterhaltung, in der du den Befehl ausführst.', resume: 'running' });
   const selection = await vscode.window.showQuickPick(choices, {
     title: 'Claude Code verbinden', placeHolder: 'Laufend verbinden, frühere Unterhaltung fortsetzen oder neu starten', matchOnDescription: true,
   });
@@ -97,7 +97,7 @@ async function selectConversation(workspaceRoot: string, includeRunning = true):
 async function prepareClaudeCommand(
   context: vscode.ExtensionContext, bridge: ReviewBridge, storagePath: string, resume: boolean | string,
 ): Promise<string> {
-  const configuration = vscode.workspace.getConfiguration('localReview');
+  const configuration = vscode.workspace.getConfiguration('pairReview');
   const [executable, nodePath] = await Promise.all([
     resolveExecutable(configuration.get<string>('claudePath', 'claude'), bridge.descriptor.workspaceRoot),
     resolveExecutable(configuration.get<string>('nodePath', 'node'), bridge.descriptor.workspaceRoot),
@@ -106,7 +106,7 @@ async function prepareClaudeCommand(
   const prepared = await prepareConnection(context, bridge, storagePath, nodePath);
   const args = ['--mcp-config', prepared.mcpPath];
   if (prepared.transport === 'hooks') args.push('--settings', prepared.hooksPath);
-  else args.push('--dangerously-load-development-channels', 'server:local-review');
+  else args.push('--dangerously-load-development-channels', 'server:pair-review');
   if (resume) args.push('--resume');
   if (typeof resume === 'string') args.push(resume);
   const launch = terminalCommand(executable, args);
@@ -159,14 +159,14 @@ export function createClaudeLauncher(
       }
       await action();
     } catch (error: unknown) {
-      void vscode.window.showErrorMessage(`Local Review: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(`Pair Review: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       launching = false;
     }
   };
   const connectRunning = async (): Promise<void> => {
     if (receiverConflict(undefined)) return;
-    const configuration = vscode.workspace.getConfiguration('localReview');
+    const configuration = vscode.workspace.getConfiguration('pairReview');
     const [executable, nodePath] = await Promise.all([
       resolveExecutable(configuration.get<string>('claudePath', 'claude'), bridge.descriptor.workspaceRoot),
       resolveExecutable(configuration.get<string>('nodePath', 'node'), bridge.descriptor.workspaceRoot),
@@ -253,8 +253,8 @@ export function registerClaudeLauncher(
   const target = (): ClaudeLauncher => pick() ?? local;
   return vscode.Disposable.from(
     local,
-    vscode.commands.registerCommand('localReview.startClaude', () => target().start()),
-    vscode.commands.registerCommand('localReview.copyClaudeCommand', () => target().copyCommand()),
-    vscode.commands.registerCommand('localReview.connectRunningClaude', () => target().connectRunning()),
+    vscode.commands.registerCommand('pairReview.startClaude', () => target().start()),
+    vscode.commands.registerCommand('pairReview.copyClaudeCommand', () => target().copyCommand()),
+    vscode.commands.registerCommand('pairReview.connectRunningClaude', () => target().connectRunning()),
   );
 }

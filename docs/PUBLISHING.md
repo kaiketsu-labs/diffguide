@@ -1,6 +1,6 @@
 # Releases and Marketplace publishing
 
-The extension is not published to the VS Code Marketplace yet. `local-review-dev` is a development placeholder, not a claim of publisher ownership.
+The extension is not published to the VS Code Marketplace yet. `pair-review-dev` is a development placeholder, not a claim of publisher ownership.
 
 ## Register the publisher
 

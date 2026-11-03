@@ -74,8 +74,8 @@ test('generated code action opens the uniquely matching range in live unsaved so
   assert.equal(markdown.supportThemeIcons, true);
   assert.equal(markdown.supportHtml, true);
   assert.equal(markdown.isTrusted, undefined);
-  assert.equal(comment.contextValue, 'localReview.code');
-  assert.equal(markdown.value.includes('command:localReview.'), false);
+  assert.equal(comment.contextValue, 'pairReview.code');
+  assert.equal(markdown.value.includes('command:pairReview.'), false);
   assert.equal(markdown.value.includes('```typescript\nvalue();'), true);
 
   await commands.executeCommand(openCommentCodeCommand, comment);
@@ -98,7 +98,7 @@ test('a proposal opens beside the native discussion instead of replacing its doc
   await commands.executeCommand(openCommentCodeCommand, commentFor(navigator, thread, message));
 
   assert.equal(window.shownDocuments[0]?.options?.viewColumn, ViewColumn.Beside);
-  assert.equal(window.shownDocuments[0]?.document.uri.scheme, 'local-review-snippet');
+  assert.equal(window.shownDocuments[0]?.document.uri.scheme, 'pair-review-snippet');
 });
 
 test('legacy code boxes open their displayed snippet and recover it after a reload', async () => {
@@ -108,7 +108,7 @@ test('legacy code boxes open their displayed snippet and recover it after a relo
   await commands.executeCommand(openCommentCodeCommand, commentFor(navigator, thread, message));
   const document = window.shownDocuments.at(-1)?.document;
   assert.ok(document);
-  assert.equal(document.uri.scheme, 'local-review-snippet');
+  assert.equal(document.uri.scheme, 'pair-review-snippet');
   assert.equal(document.getText(), `${code}\n`);
   navigator.dispose();
   workspace.textDocuments.splice(0);
@@ -147,7 +147,7 @@ test('opening composer code beside a lone chat preserves its only editor group',
   const { store, thread } = fixture('Discussion');
   const document = new FakeTextDocument(Uri.file('/workspace/src/example.ts'), 'before\nvalue();\nafter', 'typescript');
   workspace.textDocuments.push(document);
-  const composer = { input: new TabInputWebview('localReview.composer') };
+  const composer = { input: new TabInputWebview('pairReview.composer') };
   window.tabGroups.all.push({ viewColumn: 2, tabs: [{ input: new TabInputText(document.uri) }, composer], activeTab: composer });
   const navigator = await navigation(store);
 
@@ -160,11 +160,11 @@ test('opening composer code beside a lone chat preserves its only editor group',
 test('composer source navigation reuses the diff group when embedded editors have no view column', async () => {
   const { store, thread } = fixture('Discussion');
   const document = new FakeTextDocument(Uri.file('/workspace/src/example.ts'), 'unsaved insertion\nbefore\nvalue();\nafter', 'typescript');
-  const original = new FakeTextDocument(Uri.from({ scheme: 'local-review-base', path: '/src/example.ts' }), 'before\nvalue();\nafter', 'typescript');
+  const original = new FakeTextDocument(Uri.from({ scheme: 'pair-review-base', path: '/src/example.ts' }), 'before\nvalue();\nafter', 'typescript');
   workspace.textDocuments.push(document, original);
   window.visibleTextEditors.push({ document: original }, { document });
   const diff = { input: new TabInputTextDiff(original.uri, document.uri) };
-  const composer = { input: new TabInputWebview('localReview.composer') };
+  const composer = { input: new TabInputWebview('pairReview.composer') };
   window.tabGroups.all.push({ viewColumn: 1, tabs: [diff], activeTab: diff }, { viewColumn: 2, tabs: [composer], activeTab: composer });
   const navigator = await navigation(store);
   const before = JSON.stringify(thread.anchor);
@@ -183,7 +183,7 @@ test('composer prefers the already visible standalone source over the same file 
   const document = new FakeTextDocument(Uri.file('/workspace/src/example.ts'), 'before\nvalue();\nafter', 'typescript');
   workspace.textDocuments.push(document);
   window.visibleTextEditors.push({ document }, { document, viewColumn: 3 });
-  const diff = { input: new TabInputTextDiff(Uri.from({ scheme: 'local-review-base', path: '/src/example.ts' }), document.uri) };
+  const diff = { input: new TabInputTextDiff(Uri.from({ scheme: 'pair-review-base', path: '/src/example.ts' }), document.uri) };
   window.tabGroups.all.push({ viewColumn: 1, tabs: [diff], activeTab: diff });
   const navigator = await navigation(store);
 
@@ -197,7 +197,7 @@ test('stale composer code uses an existing source group for its exact readonly p
   const document = new FakeTextDocument(Uri.file('/workspace/src/example.ts'), 'before\nchanged();\nafter', 'typescript');
   workspace.textDocuments.push(document);
   const other = { input: new TabInputText(Uri.file('/workspace/src/other.ts')) };
-  const composer = { input: new TabInputWebview('localReview.composer') };
+  const composer = { input: new TabInputWebview('pairReview.composer') };
   window.tabGroups.all.push({ viewColumn: 1, tabs: [other], activeTab: other }, { viewColumn: 2, tabs: [composer], activeTab: composer });
   const navigator = await navigation(store);
 
@@ -205,7 +205,7 @@ test('stale composer code uses an existing source group for its exact readonly p
 
   const shown = window.shownDocuments[0];
   assert.equal(shown?.options?.viewColumn, 1);
-  assert.equal(shown?.document.uri.scheme, 'local-review-snippet');
+  assert.equal(shown?.document.uri.scheme, 'pair-review-snippet');
   assert.equal(shown?.document.isReadonly, true);
   assert.equal(shown?.document.getText(), thread.anchor.selectedText);
   assert.equal(document.getText(), 'before\nchanged();\nafter');
@@ -221,7 +221,7 @@ test('missing or ambiguous code opens exact readonly snippets with the installed
 
   const ambiguous = window.shownDocuments[0]?.document;
   assert.ok(ambiguous);
-  assert.equal(ambiguous.uri.scheme, 'local-review-snippet');
+  assert.equal(ambiguous.uri.scheme, 'pair-review-snippet');
   assert.match(ambiguous.uri.path, /\/Codevorschau – example\.ts$/u);
   assert.equal(ambiguous.getText(), '  value();\n\n');
   assert.equal(ambiguous.isReadonly, true);
@@ -233,7 +233,7 @@ test('missing or ambiguous code opens exact readonly snippets with the installed
   await commands.executeCommand(openCommentCodeCommand, comment);
   const missing = window.shownDocuments.at(-1)?.document;
   assert.ok(missing);
-  assert.equal(missing.uri.scheme, 'local-review-snippet');
+  assert.equal(missing.uri.scheme, 'pair-review-snippet');
   assert.equal(missing.getText(), '  value();\n\n');
   assert.equal(missing.languageId, 'python');
 });
@@ -300,7 +300,7 @@ test('durable readonly preview recovers from stored review content after navigat
   const savedUri = preview.uri;
   first.dispose();
   workspace.textDocuments.splice(0);
-  assert.equal(workspace.providers.has('local-review-snippet'), false);
+  assert.equal(workspace.providers.has('pair-review-snippet'), false);
 
   await navigation(store);
   const restored = await workspace.openTextDocument(savedUri);

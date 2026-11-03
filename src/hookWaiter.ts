@@ -72,7 +72,7 @@ async function releaseLock(path: string, owner: string): Promise<void> {
     await unlink(join(path, owner));
     await rmdir(path);
   } catch (error: unknown) {
-    if (record(error)?.code !== 'ENOENT') process.stderr.write('Local Review: watcher lock cleanup failed.\n');
+    if (record(error)?.code !== 'ENOENT') process.stderr.write('Pair Review: watcher lock cleanup failed.\n');
   }
 }
 
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
     throw new Error('Claude did not supply a session identifier.');
   }
   const descriptor = await readDescriptor(connectionPath);
-  const bindingPath = process.env['LOCAL_REVIEW_SESSION_BINDING'];
+  const bindingPath = process.env['PAIR_REVIEW_SESSION_BINDING'];
   if (bindingPath !== undefined && !await ownsSession(bindingPath, descriptor.workspaceRoot, sessionId)) return;
   const hash = createHash('sha256').update(descriptor.workspaceRoot).digest('hex').slice(0, 20);
   const lockPath = join(dirname(connectionPath), `watcher-${hash}.lock`);
@@ -152,6 +152,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`Local Review hook: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(`Pair Review hook: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 });

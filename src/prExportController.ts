@@ -30,7 +30,7 @@ export function registerPrExport(_context: vscode.ExtensionContext, store: Revie
   /** Keep edited snapshots available after closing the panel during this editor session. */
   function showPreview(session: PreviewSession): void {
     const { draft, client } = session;
-    const panel = vscode.window.createWebviewPanel('localReview.prExport', `PR #${session.target.pullRequest.number} · Review übergeben`,
+    const panel = vscode.window.createWebviewPanel('pairReview.prExport', `PR #${session.target.pullRequest.number} · Review übergeben`,
       vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
     activePanel = panel;
     panel.webview.html = previewHtml(draft, session.target, session.body, session.publishedBody);
@@ -97,7 +97,7 @@ export function registerPrExport(_context: vscode.ExtensionContext, store: Revie
     });
   }
 
-  const command = vscode.commands.registerCommand('localReview.exportToPr', async () => {
+  const command = vscode.commands.registerCommand('pairReview.exportToPr', async () => {
     if (disposed || revealExistingPanel()) return;
     const pendingPublication = publicationInFlight;
     if (pendingPublication !== undefined) {

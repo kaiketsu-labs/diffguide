@@ -87,7 +87,7 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${await token(endpoints.authProvider, interactive)}`,
-      'User-Agent': 'local-review',
+      'User-Agent': 'pair-review',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

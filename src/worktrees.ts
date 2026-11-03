@@ -42,7 +42,7 @@ function checkNames(repository: string, branch: string): void {
 /** Keep PR worktrees inside the repository's Git folder, so folder-based shell setup such as Claude accounts applies to them. */
 export async function repositoryStorage(sourceRoot: string): Promise<string | undefined> {
   const common = (await git(sourceRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']).catch(() => undefined))?.trim();
-  return common === undefined || common === '' ? undefined : join(common, 'local-review');
+  return common === undefined || common === '' ? undefined : join(common, 'pair-review');
 }
 
 /** Folder that holds the worktree for one PR. */

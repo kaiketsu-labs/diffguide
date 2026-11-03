@@ -41,7 +41,7 @@ async function openComposer(
 
 /** Narrow stored drafts so assertions inspect actual persisted user text. */
 function savedDrafts(storage: FakeMemento): readonly { readonly id: string; readonly text: string }[] {
-  return storage.get<{ readonly drafts: readonly { readonly id: string; readonly text: string }[] }>('localReview.composerDrafts.v1')?.drafts ?? [];
+  return storage.get<{ readonly drafts: readonly { readonly id: string; readonly text: string }[] }>('pairReview.composerDrafts.v1')?.drafts ?? [];
 }
 
 test('selection following does not open a composer before the reviewer asks for one', async () => {

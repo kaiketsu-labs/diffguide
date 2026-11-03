@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: local-review-release
+  group: pair-review-release
   cancel-in-progress: false
 
 jobs:
@@ -102,4 +102,4 @@ jobs:
           NOTES
           gh release create "$RELEASE_TAG" release-assets/*.vsix \
             --draft --prerelease --target "$GITHUB_SHA" \
-            --title "Local Review $RELEASE_VERSION" --notes-file release-notes.md
+            --title "Pair Review $RELEASE_VERSION" --notes-file release-notes.md

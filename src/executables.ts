@@ -45,7 +45,7 @@ export async function resolveExecutable(configured: string, workspaceRoot: strin
       // A later standard installation path can still provide the executable.
     }
   }
-  throw new Error(`${executable} wurde nicht gefunden. Prüfe den Programmpfad in den Local-Review-Einstellungen.`);
+  throw new Error(`${executable} wurde nicht gefunden. Prüfe den Programmpfad in den Pair-Review-Einstellungen.`);
 }
 
 /** Explain a missing or outdated Node runtime before opening a broken Claude session. */
@@ -61,6 +61,6 @@ export async function requireNodeRuntime(executable: string): Promise<void> {
   });
   const major = /^v(\d+)\./u.exec(version)?.[1];
   if (major === undefined || Number(major) < 20) {
-    throw new Error(`Local Review benötigt Node.js 20 oder neuer; gefunden wurde ${version || 'keine gültige Version'}.`);
+    throw new Error(`Pair Review benötigt Node.js 20 oder neuer; gefunden wurde ${version || 'keine gültige Version'}.`);
   }
 }

@@ -9,7 +9,7 @@ import { createHookDeliveryLedger } from '../src/hookDelivery.js';
 
 /** Provide isolated session metadata without a network server or review-store mutations. */
 async function fixture(t: TestContext): Promise<{ root: string; connectionPath: string }> {
-  const root = await mkdtemp(join(tmpdir(), 'local-review-delivery-'));
+  const root = await mkdtemp(join(tmpdir(), 'pair-review-delivery-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, connectionPath: join(root, 'connection.json') };
 }

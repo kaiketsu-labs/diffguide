@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { readCodeBlocks, withCodeBlockCards, withDetectedCodeBlocks } from './codeBlocks.js';
 import type { ReviewMessage, ReviewThread } from './contracts.js';
 
-export const openCodeCommand = 'localReview.openCode';
+export const openCodeCommand = 'pairReview.openCode';
 
 /** Durable identities resolved from an extension-owned, opaque action handle. */
 export interface CodeReference {

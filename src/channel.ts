@@ -66,12 +66,12 @@ async function main(): Promise<void> {
   }
   const descriptorPath = resolve(descriptorArgument);
   const descriptor = await readDescriptor(descriptorPath);
-  const bindingPath = process.env['LOCAL_REVIEW_SESSION_BINDING'];
+  const bindingPath = process.env['PAIR_REVIEW_SESSION_BINDING'];
   const sessionId = process.env['CLAUDE_CODE_SESSION_ID'];
   const selected = async (): Promise<boolean> => bindingPath === undefined || await ownsSession(bindingPath, descriptor.workspaceRoot, sessionId);
   const shutdown = new AbortController();
   const bridge = new BridgeClient(descriptor, descriptorPath, shutdown.signal, noPush ? 'tools' : 'channel');
-  const server = new Server({ name: 'local-review', version: '0.4.5' }, {
+  const server = new Server({ name: 'pair-review', version: '0.4.5' }, {
     capabilities: { tools: {}, ...(noPush ? {} : { experimental: { 'claude/channel': {} } }) },
     instructions: reviewInstructions,
   });
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     }
   };
   const requestStop = (): void => {
-    void stop().catch((error: unknown) => process.stderr.write(`Local Review: ${describeError(error)}\n`));
+    void stop().catch((error: unknown) => process.stderr.write(`Pair Review: ${describeError(error)}\n`));
   };
   process.once('SIGINT', requestStop);
   process.once('SIGTERM', requestStop);
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     try {
-      if (!await selected()) return result('Diese Unterhaltung ist nicht mit Local Review verbunden. In der gewünschten Unterhaltung /local-review:connect ausführen. Ältere Claude-Versionen benötigen ein Update.', true);
+      if (!await selected()) return result('Diese Unterhaltung ist nicht mit Pair Review verbunden. In der gewünschten Unterhaltung /pair-review:connect ausführen. Ältere Claude-Versionen benötigen ein Update.', true);
       if (request.params.name === 'list_pending_reviews') {
         const argsRecord = record(request.params.arguments ?? {});
         if (argsRecord === undefined || Object.keys(argsRecord).length !== 0) {
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
       }
 
       const supported = ['acknowledge_review', 'set_review_working', 'reply_to_review'];
-      if (!supported.includes(request.params.name)) return result('Unknown Local Review tool.', true);
+      if (!supported.includes(request.params.name)) return result('Unknown Pair Review tool.', true);
       const isReply = request.params.name === 'reply_to_review';
       const eventId = eventIdFromArguments(request.params.arguments, isReply ? ['event_id', 'text', 'status'] : ['event_id']);
       let update: AgentUpdate;
@@ -239,7 +239,7 @@ async function main(): Promise<void> {
         if (error instanceof BridgeProtocolError) throw error;
         const diagnostic = describeError(error);
         if (diagnostic !== lastDiagnostic) {
-          process.stderr.write(`Local Review: ${diagnostic} Reconnecting automatically.\n`);
+          process.stderr.write(`Pair Review: ${diagnostic} Reconnecting automatically.\n`);
           lastDiagnostic = diagnostic;
         }
         try {
@@ -252,7 +252,7 @@ async function main(): Promise<void> {
         } catch (refreshError: unknown) {
           const refreshDiagnostic = describeError(refreshError);
           if (refreshDiagnostic !== lastRefreshDiagnostic) {
-            process.stderr.write(`Local Review: ${refreshDiagnostic}\n`);
+            process.stderr.write(`Pair Review: ${refreshDiagnostic}\n`);
             lastRefreshDiagnostic = refreshDiagnostic;
           }
         }
@@ -269,6 +269,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`Local Review: ${describeError(error)}\n`);
+  process.stderr.write(`Pair Review: ${describeError(error)}\n`);
   process.exitCode = 1;
 });

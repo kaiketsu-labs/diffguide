@@ -10,7 +10,7 @@ Use Node.js 22+ and install the locked dependencies:
 npm ci --ignore-scripts
 ```
 
-Build with `npm run build`, then open this folder in VS Code and launch **Local Review ausprobieren** from Run and Debug. This opens an extension development host. End users install a VSIX and do not need the development dependencies.
+Build with `npm run build`, then open this folder in VS Code and launch **Pair Review ausprobieren** from Run and Debug. This opens an extension development host. End users install a VSIX and do not need the development dependencies.
 
 After human approval, run the checks relevant to the change:
 

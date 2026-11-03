@@ -1,14 +1,14 @@
-# Local Review
+# Pair Review
 
-<img src="https://raw.githubusercontent.com/flucas96/local-review/main/resources/icon.png" alt="Local Review icon" width="80" height="80" />
+<img src="https://raw.githubusercontent.com/flucas96/local-review/main/resources/icon.png" alt="Pair Review icon" width="80" height="80" />
 
 ### Review local code. Give Claude feedback where it belongs.
 
 GitHub-style review conversations, directly in VS Code. Select a line in your local changes, ask a question or request a change, and send it straight to Claude Code in your terminal. Replies return to the same inline thread.
 
-[Install the preview](INSTALL.md) · [Download a VSIX](https://github.com/kaiketsu-labs/local-review/releases) · [Report an issue](https://github.com/kaiketsu-labs/local-review/issues/new/choose)
+[Install the preview](INSTALL.md) · [Download a VSIX](https://github.com/kaiketsu-labs/pair-review/releases) · [Report an issue](https://github.com/kaiketsu-labs/pair-review/issues/new/choose)
 
-[![Watch the Local Review demo](media/local-review-poster.jpg)](media/local-review-demo.mp4)
+[![Watch the Pair Review demo](media/pair-review-poster.jpg)](media/pair-review-demo.mp4)
 
 **Demo:** staged interface with simulated Claude responses, showing the optional side composer. The default input is now native inline comments. It is not a recording of a verified live integration.
 
@@ -34,7 +34,7 @@ Write directly beside the changed code: click the gutter **+**, enter `/a`, `/i`
 
 The gutter **+** focuses its input directly; drafts opened by an extension command may need a click into the input because VS Code's stable API cannot focus that field.
 
-Prefer a separate input? **Local Review: Feedback in Seitenansicht schreiben** opens a compact composer with live mode buttons, saved drafts and selection following. An empty draft follows new selections without moving focus; written drafts stay pinned and offer an explicit switch. Selected lines remain outlined when you click into the composer. Active text composition is preserved before slash switching, and bare `/r` on a new comment explains that it needs an existing conversation. Closing keeps drafts for **Local Review: Entwurf fortsetzen**. Native inline draft recovery remains managed by VS Code.
+Prefer a separate input? **Pair Review: Feedback in Seitenansicht schreiben** opens a compact composer with live mode buttons, saved drafts and selection following. An empty draft follows new selections without moving focus; written drafts stay pinned and offer an explicit switch. Selected lines remain outlined when you click into the composer. Active text composition is preserved before slash switching, and bare `/r` on a new comment explains that it needs an existing conversation. Closing keeps drafts for **Pair Review: Entwurf fortsetzen**. Native inline draft recovery remains managed by VS Code.
 
 **Speak on macOS:** click the input, type `/a` or `/i`, then use your Mac's Microphone key or Dictation shortcut. Review the text and choose **Senden**. [Dictation guide →](DICTATION.md)
 
@@ -42,7 +42,7 @@ Code blocks appear in darker rounded cards with a compact file/language header a
 
 ## Carry the conversation into your PR
 
-Use the **An GitHub-PR übergeben** action in the Review toolbar. Local Review finds the current branch's open PR and prepares an editable preview of available summaries and unresolved questions. Select the content, inspect the exact PR and text, then explicitly publish it. Later handoffs update your managed review comment instead of adding a duplicate.
+Use the **An GitHub-PR übergeben** action in the Review toolbar. Pair Review finds the current branch's open PR and prepares an editable preview of available summaries and unresolved questions. Select the content, inspect the exact PR and text, then explicitly publish it. Later handoffs update your managed review comment instead of adding a duplicate.
 
 Edited or failed handoffs can be resumed after closing the preview during the same VS Code session. **Entwurf fortsetzen** keeps the original snapshot; **Neue Momentaufnahme** prepares current content. This recovery ends when VS Code reloads. Editing published text clearly marks it as unpublished again.
 
@@ -50,9 +50,9 @@ Edited or failed handoffs can be resumed after closing the preview during the sa
 
 ## Start in a minute
 
-Download a `.vsix` from [GitHub Releases](https://github.com/kaiketsu-labs/local-review/releases), then choose **Extensions → … → Install from VSIX…** in VS Code. The extension is not published on the Marketplace yet.
+Download a `.vsix` from [GitHub Releases](https://github.com/kaiketsu-labs/pair-review/releases), then choose **Extensions → … → Install from VSIX…** in VS Code. The extension is not published on the Marketplace yet.
 
-Open a trusted local Git repository and run **Local Review: Mit Claude verbinden**:
+Open a trusted local Git repository and run **Pair Review: Mit Claude verbinden**:
 
 | Choice | Result |
 | --- | --- |
@@ -60,21 +60,21 @@ Open a trusted local Git repository and run **Local Review: Mit Claude verbinden
 | **Neue Unterhaltung** | Start a fresh conversation with review feedback enabled. |
 | **Laufende Unterhaltung verbinden** | Keep the original Claude process and conversation; use the setup view's two copyable commands inside it. Requires Claude Code 2.1.280+. |
 
-To connect a running conversation, prepare it in VS Code, then run `/reload-plugins --force` and `/local-review:connect` in the intended Claude conversation. Local Review installs a project-local plugin and waits for that session's actual receiver before showing **Feedback aktiv**. The reload rereads conversation context once. This works in either terminal location; the current authenticated walkthrough covers the integrated terminal. For a new/resumed conversation in a separate app, use **Review → … → Verbindungsbefehl kopieren** at a shell prompt. Keep the project's VS Code window open. [Connection details](CLAUDE-SESSION-ATTACH.md).
+To connect a running conversation, prepare it in VS Code, then run `/reload-plugins --force` and `/pair-review:connect` in the intended Claude conversation. Pair Review installs a project-local plugin and waits for that session's actual receiver before showing **Feedback aktiv**. The reload rereads conversation context once. This works in either terminal location; the current authenticated walkthrough covers the integrated terminal. For a new/resumed conversation in a separate app, use **Review → … → Verbindungsbefehl kopieren** at a shell prompt. Keep the project's VS Code window open. [Connection details](CLAUDE-SESSION-ATTACH.md).
 
-Open **Local Review: Änderungen reviewen**, then click the gutter **+** or select code and press **⌘⌥M** on macOS / **Ctrl+Alt+M** on Linux. Write `/a Why this approach?` or `/i Make this change…` and choose **Senden**. Continue directly in the thread's reply field. The current interface uses German labels.
+Open **Pair Review: Änderungen reviewen**, then click the gutter **+** or select code and press **⌘⌥M** on macOS / **Ctrl+Alt+M** on Linux. Write `/a Why this approach?` or `/i Make this change…` and choose **Senden**. Continue directly in the thread's reply field. The current interface uses German labels.
 
 Requires **VS Code 1.100+**, **Node.js 22+**, **Git**, and an installed, authenticated **Claude Code with `asyncRewake` support**. macOS is the primary target; Linux is unverified. Automatic connection is currently unavailable on Windows. [Installation and troubleshooting →](INSTALL.md)
 
 ## How the connection works
 
-![Code review with an agent: inspect changes, comment, discuss or change, and verify](media/local-review-flow.png)
+![Code review with an agent: inspect changes, comment, discuss or change, and verify](media/pair-review-flow.png)
 
 Send a comment and your connected Claude session receives it automatically. Claude's answer returns to the same conversation. The LLM does not repeatedly check for comments; a small local helper waits for saved feedback. An already running tool can finish before Claude handles the new request. [Visual walkthrough and optional technical details →](HOW-IT-WORKS.md)
 
 Hook messages identify the file, review mode and actual feedback. Ordinary tool calls and Stop hooks do not repeatedly announce the same event in one session. Starting or resuming Claude explicitly recovers unfinished work; delivery is still acknowledged only through Claude's review tools.
 
-The status bar distinguishes **Review · Verbinden**, **Review · Zustellung pausiert**, and an active feedback receiver. Readiness is separate from Claude acknowledging a comment. After upgrading, reconnect Claude once so older helpers can report the new readiness signal. A window reload reuses this project's managed **Claude · Local Review** terminal instead of creating a second session.
+The status bar distinguishes **Review · Verbinden**, **Review · Zustellung pausiert**, and an active feedback receiver. Readiness is separate from Claude acknowledging a comment. After upgrading, reconnect Claude once so older helpers can report the new readiness signal. A window reload reuses this project's managed **Claude · Pair Review** terminal instead of creating a second session.
 
 Connection files and submitted threads live in VS Code's workspace storage. The extension passes configuration to the session it launches, without editing your repository's `.claude` files or `.mcp.json`. Claude's existing tool permissions still apply; `/a` and `/r` are instructions to avoid edits, not a separate permission sandbox.
 

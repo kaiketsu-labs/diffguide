@@ -6,7 +6,7 @@ import { isWorkspaceRelativePath, readGitBase } from './git.js';
 import type { PullRequestSummary } from './pullRequests.js';
 import { readPullRequestBase, readWorktree, worktreePath } from './worktrees.js';
 
-const scheme = 'local-review-pr';
+const scheme = 'pair-review-pr';
 
 /** Recently read files at a fixed commit; their content can never change. */
 const baseContents = new Map<string, Promise<string>>();

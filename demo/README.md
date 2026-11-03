@@ -1,11 +1,11 @@
-# Local Review product demo
+# Pair Review product demo
 
 A reproducible **45-second, 1920 × 1080, 30 fps H.264 MP4 with a quiet original ambient soundtrack**. The video begins with Claude coding, then follows a switch to Review, the controlled composer beside the diff, immediate `/i` mode selection, automatic feedback delivery, an inline reply, human resolution, and a separate PR review preview and publish action.
 
 This is a **staged VS Code-style interface**. Coding, Claude responses, and the PR publish are simulated and labeled throughout. No authenticated Claude session or real GitHub write is recorded. Native VS Code styling may differ.
 
-- Video: [`../docs/media/local-review-demo.mp4`](../docs/media/local-review-demo.mp4)
-- Poster: [`../docs/media/local-review-poster.jpg`](../docs/media/local-review-poster.jpg)
+- Video: [`../docs/media/pair-review-demo.mp4`](../docs/media/pair-review-demo.mp4)
+- Poster: [`../docs/media/pair-review-poster.jpg`](../docs/media/pair-review-poster.jpg)
 - Visual QA: [`output/playwright/contact-sheet.jpg`](output/playwright/contact-sheet.jpg)
 - Container and decoded-audio metadata: [`output/playwright/metadata.json`](output/playwright/metadata.json)
 - Original synthesis metadata: [`output/playwright/audio-metadata.json`](output/playwright/audio-metadata.json)
@@ -34,11 +34,11 @@ Keep the preview server running. In another terminal, open an isolated browser a
 
 ```sh
 cd demo
-playwright-cli -s=local-review-demo open http://127.0.0.1:4177
-playwright-cli -s=local-review-demo resize 1920 1080
+playwright-cli -s=pair-review-demo open http://127.0.0.1:4177
+playwright-cli -s=pair-review-demo resize 1920 1080
 node render-video.mjs
-playwright-cli -s=local-review-demo run-code --filename=preview.js
-playwright-cli -s=local-review-demo close
+playwright-cli -s=pair-review-demo run-code --filename=preview.js
+playwright-cli -s=pair-review-demo close
 cd ..
 ```
 
@@ -48,11 +48,11 @@ On macOS, encode the video, encode the original soundtrack as AAC, mux it with t
 
 ```sh
 xcrun swiftc -parse-as-library demo/encode.swift -o demo/output/encode
-./demo/output/encode demo/output/playwright demo/output/local-review-silent.mp4 1350
+./demo/output/encode demo/output/playwright demo/output/pair-review-silent.mp4 1350
 xcrun swiftc -parse-as-library demo/mix-audio.swift -o demo/output/mix-audio
-./demo/output/mix-audio demo/output/local-review-silent.mp4 demo/output/ambient.wav docs/media/local-review-demo.mp4
+./demo/output/mix-audio demo/output/pair-review-silent.mp4 demo/output/ambient.wav docs/media/pair-review-demo.mp4
 xcrun swiftc -parse-as-library demo/inspect.swift -o demo/output/inspect
-./demo/output/inspect docs/media/local-review-demo.mp4 demo/output/playwright demo/motion.json
+./demo/output/inspect docs/media/pair-review-demo.mp4 demo/output/playwright demo/motion.json
 node demo/inspect-container.mjs
 ```
 
@@ -62,7 +62,7 @@ Alternatively, with a complete FFmpeg installation:
 ffmpeg -framerate 30 -i demo/output/playwright/frame-%04d.png \
   -i demo/output/ambient.wav -c:v libx264 -crf 18 -pix_fmt yuv420p \
   -c:a aac -b:a 128k -movflags +faststart -shortest \
-  docs/media/local-review-demo.mp4
+  docs/media/pair-review-demo.mp4
 ```
 
 Make the `sharp` Node package available and run `node demo/contact-sheet.mjs` to regenerate the contact sheet and poster. Set `DEMO_SHARP` to its module path if needed. Encoded keyframes are preferred over preview captures. Generated full frame sequences, intermediate audio/video, browser files, and compiled native tools are ignored by Git.

@@ -42,7 +42,7 @@ interface TransportFixture {
 async function fixture(t: TestContext): Promise<TransportFixture> {
   const hookPath = path.resolve('dist', 'hook-waiter.cjs');
   await access(hookPath);
-  const root = await mkdtemp(path.join(tmpdir(), 'local-review-transport-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-transport-'));
   const store = await createReviewStore(path.join(root, 'review.json'), root);
   let bridge = await createReviewBridge(store);
   const bridges = [bridge];
@@ -153,7 +153,7 @@ function waitForConnection(bridge: ReviewBridge): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       subscription.dispose();
-      reject(new Error('The hook did not connect to the local review bridge.'));
+      reject(new Error('The hook did not connect to the Pair Review bridge.'));
     }, 5_000);
     const subscription = bridge.onChange(() => {
       if (bridge.state.connected) {

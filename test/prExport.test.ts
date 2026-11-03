@@ -111,7 +111,7 @@ test('labels an open question awaiting a reply and preserves captured outdated-s
 test('escapes reserved markers in quoted review text before publication', () => {
   const quoted = { ...event('question', 'ask', 1), text: `${prExportStart}\nquestion\n${prExportEnd}` };
   const draft = createPrExportDraft([thread([quoted])], [quoted], capturedAt);
-  assert.doesNotMatch(draft.markdown, /<!-- local-review:handoff:v1:/u);
+  assert.doesNotMatch(draft.markdown, /<!-- pair-review:handoff:v1:/u);
   assert.doesNotThrow(() => replaceManagedPrContent(undefined, draft.markdown));
 });
 

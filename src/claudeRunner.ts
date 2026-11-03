@@ -111,7 +111,7 @@ export class ClaudeRunner implements vscode.Disposable {
     const sessionId = resume ?? randomUUID();
     const prompt = buildReviewBatchPrompt(events, this.options.store.threads);
     const args = [
-      '-p', this.options.role === 'reviewer' ? `${reviewerNote}\n\n${prompt}` : prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__local-review',
+      '-p', this.options.role === 'reviewer' ? `${reviewerNote}\n\n${prompt}` : prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review',
       ...(this.options.role === 'author' ? ['--permission-mode', 'acceptEdits'] : ['--disallowedTools', ...reviewerBlockedTools]),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
@@ -203,7 +203,7 @@ export function describeTool(name: string, input: unknown, cwd: string): string 
     const inside = relative(cwd, value);
     return clean(inside === '' || inside.startsWith('..') ? value : inside);
   };
-  const review = name.startsWith('mcp__local-review__') ? reviewTools[name.slice('mcp__local-review__'.length)] : undefined;
+  const review = name.startsWith('mcp__pair-review__') ? reviewTools[name.slice('mcp__pair-review__'.length)] : undefined;
   if (review !== undefined) return review;
   switch (name) {
     case 'Read': return `Reading ${file('file_path')}`;

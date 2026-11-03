@@ -17,7 +17,7 @@ const executeFile = promisify(execFile);
 /** Run a fixture Git command without user configuration or hooks. */
 async function git(root: string, args: readonly string[]): Promise<void> {
   await executeFile('git', [
-    '-C', root, '-c', 'user.name=Local Review Test', '-c', 'user.email=local-review@example.invalid',
+    '-C', root, '-c', 'user.name=Pair Review Test', '-c', 'user.email=pair-review@example.invalid',
     '-c', 'commit.gpgSign=false', '-c', `core.hooksPath=${path.join(root, 'no-hooks')}`, ...args,
   ], { encoding: 'utf8', timeout: 10_000 });
 }
@@ -29,7 +29,7 @@ const pullRequest: PullRequestSummary = {
 
 /** Source clone whose origin has `main` plus a `feature` branch that diverged from it. */
 async function fixture(t: { after(callback: () => Promise<void>): void }): Promise<{ source: string; storage: string }> {
-  const scratch = await mkdtemp(path.join(tmpdir(), 'local-review-worktree-'));
+  const scratch = await mkdtemp(path.join(tmpdir(), 'pair-review-worktree-'));
   t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
   const origin = path.join(scratch, 'origin');
   const source = path.join(scratch, 'source');
@@ -132,7 +132,7 @@ test('serves both sides of a PR file from the worktree under short addresses', a
   assert.equal(added.modifiedUri.authority, 'pr-5');
   assert.equal(added.modifiedUri.path, '/feature.ts');
 
-  const files = workspace.fileSystems.get('local-review-pr') as unknown as {
+  const files = workspace.fileSystems.get('pair-review-pr') as unknown as {
     readFile(uri: Uri): Promise<Uint8Array>;
     writeFile(uri: Uri, content: Uint8Array, options: object): Promise<void>;
   } | undefined;

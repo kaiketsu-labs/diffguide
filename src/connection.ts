@@ -182,14 +182,14 @@ export function readBatch(value: unknown, expectedWorkspaceRoot?: string): Revie
 export async function readDescriptor(path: string): Promise<ConnectionDescriptor> {
   const info = await stat(path);
   if (!info.isFile() || info.size > 65_536) {
-    throw new Error('The review connection file is invalid. Run Local Review: Connect Claude Code again.');
+    throw new Error('The review connection file is invalid. Run Pair Review: Connect Claude Code again.');
   }
   const raw: unknown = JSON.parse(await readFile(path, 'utf8'));
   const data = record(raw);
   if (data === undefined || data.version !== 1 || !isText(data.url, 4096)
     || !isText(data.token, 512) || !/^[A-Za-z0-9_-]{16,512}$/u.test(data.token)
     || !isText(data.workspaceRoot, 4096) || !isAbsolute(data.workspaceRoot)) {
-    throw new Error('The review connection file is invalid. Run Local Review: Connect Claude Code again.');
+    throw new Error('The review connection file is invalid. Run Pair Review: Connect Claude Code again.');
   }
   const url = new URL(data.url);
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.port === ''
@@ -240,9 +240,9 @@ export class BridgeClient {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${this.descriptor.token}`,
         Accept: 'application/json',
-        'X-Local-Review-Client': this.role,
+        'X-Pair-Review-Client': this.role,
       };
-      if (isIdentifier(this.sessionId)) headers['X-Local-Review-Session'] = this.sessionId;
+      if (isIdentifier(this.sessionId)) headers['X-Pair-Review-Session'] = this.sessionId;
       if (update !== undefined) headers['Content-Type'] = 'application/json';
       const response = await fetch(endpoint, {
         method: update === undefined ? 'GET' : 'POST',

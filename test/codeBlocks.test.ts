@@ -251,14 +251,14 @@ test('renders theme-aware code cards while keeping code bytes and block indexes 
 });
 
 test('neutralizes original raw HTML but preserves inline code, links, entities, and blockquotes', () => {
-  const markdown = '<img src=x onerror="alert(1)">\n\n> Keep this quote &amp; entity.\n\n`<div>` and ``<script>`</script>``.\n\n<https://example.com/path> <user@example.com> [Open](command:localReview.openCode?%5B%22id%22%5D)\n\n```html\n<script>alert(1)</script>\n```';
+  const markdown = '<img src=x onerror="alert(1)">\n\n> Keep this quote &amp; entity.\n\n`<div>` and ``<script>`</script>``.\n\n<https://example.com/path> <user@example.com> [Open](command:pairReview.openCode?%5B%22id%22%5D)\n\n```html\n<script>alert(1)</script>\n```';
   const rendered = withCodeBlockCards(markdown, 'plaintext');
   assert.equal(rendered.includes('<img'), false);
   assert.equal(rendered.startsWith('&lt;img src=x onerror="alert(1)">'), true);
   assert.equal(rendered.includes('> Keep this quote &amp; entity.'), true);
   assert.equal(rendered.includes('`<div>` and ``<script>`</script>``.'), true);
   assert.equal(rendered.includes('<https://example.com/path> <user@example.com>'), true);
-  assert.equal(rendered.includes('[Open](command:localReview.openCode?%5B%22id%22%5D)'), true);
+  assert.equal(rendered.includes('[Open](command:pairReview.openCode?%5B%22id%22%5D)'), true);
   assert.equal(readCodeBlocks(rendered)[0]?.code, '<script>alert(1)</script>\n');
 });
 

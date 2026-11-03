@@ -22,7 +22,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
     { path: 'src/reviewed.ts', additions: 18, deletions: 0, change: 'added' },
     { path: 'docs/legacy.md', additions: 0, deletions: 12, change: 'deleted' },
   ],
-  checkout: async () => { throw new Error('Sample pull requests cannot be checked out. Turn off localReview.mockPullRequests to open real PRs.'); },
+  checkout: async () => { throw new Error('Sample pull requests cannot be checked out. Turn off pairReview.mockPullRequests to open real PRs.'); },
   viewedFiles: async () => new Set(),
   setViewed: async () => undefined,
   publishComment: async () => { throw new Error('Sample pull requests cannot receive comments.'); },

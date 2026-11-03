@@ -138,7 +138,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     const publications = await readPublications(dataPath);
     const publishing = new Map<string, vscode.WebviewPanel>();
     const output = vscode.window.createOutputChannel(`Claude · #${number}`);
-    const configuration = vscode.workspace.getConfiguration('localReview');
+    const configuration = vscode.workspace.getConfiguration('pairReview');
     const runner = new ClaudeRunner({
       store, cwd: worktree, dataPath, role: metadata.role,
       log: (line) => { output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`); },

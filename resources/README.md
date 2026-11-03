@@ -1,4 +1,4 @@
-# Local Review identity
+# Pair Review identity
 
 The code chevrons inside a conversation bubble continue the mark used in the product demo. The mint-on-navy listing icon uses a simple silhouette without lettering so it remains readable at small sizes.
 

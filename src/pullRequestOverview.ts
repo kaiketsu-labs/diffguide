@@ -171,7 +171,7 @@ export async function showPullRequestOverview(
   }
   let reveal = revealPath;
   let state = await read();
-  const panel = vscode.window.createWebviewPanel('localReview.pullRequestOverview', state.title, vscode.ViewColumn.Active,
+  const panel = vscode.window.createWebviewPanel('pairReview.pullRequestOverview', state.title, vscode.ViewColumn.Active,
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
@@ -359,7 +359,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .preview.md{padding:8px 20px 12px;font-family:var(--review-font-ui);line-height:1.6;overflow-wrap:anywhere}
 .md-block{margin:0 -10px;padding:1px 10px;border-left:2px solid transparent;border-radius:3px;cursor:pointer}
 .md-block:hover{background:rgba(128,128,128,.08);border-left-color:var(--vscode-textLink-foreground)}
-.md-block.sel{background:var(--vscode-localReview-selectionBackground,rgba(0,120,215,.18));border-left-color:var(--vscode-localReview-selectionBorder,#0078d4)}
+.md-block.sel{background:var(--vscode-pairReview-selectionBackground,rgba(0,120,215,.18));border-left-color:var(--vscode-pairReview-selectionBorder,#0078d4)}
 .preview.md>.thread{margin:4px 0 10px}
 .md-block h1,.md-block h2{padding-bottom:4px;border-bottom:1px solid var(--border)}.md-block h1{font-size:1.8em}.md-block h2{font-size:1.4em}.md-block h3{font-size:1.15em}
 .md-block code{font-family:var(--review-font-code);font-size:.9em;padding:1px 5px;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 12%,transparent)}
@@ -371,8 +371,8 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;padding:0 12px 12px 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
 td.num.pick{cursor:pointer}td.num.pick:hover{color:var(--vscode-textLink-foreground);background:rgba(128,128,128,.18)}
-td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--vscode-localReview-selectionBackground,rgba(0,120,215,.18))}
-td.sel-start{box-shadow:inset 2px 0 0 var(--vscode-localReview-selectionBorder,#0078d4),inset 0 0 0 999px var(--vscode-localReview-selectionBackground,rgba(0,120,215,.18))}
+td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--vscode-pairReview-selectionBackground,rgba(0,120,215,.18))}
+td.sel-start{box-shadow:inset 2px 0 0 var(--vscode-pairReview-selectionBorder,#0078d4),inset 0 0 0 999px var(--vscode-pairReview-selectionBackground,rgba(0,120,215,.18))}
 tr.inline>td{padding:6px 10px 8px}
 .thread{--accent:var(--local);max-width:860px;padding:0 12px 8px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;overflow:hidden;background:var(--vscode-editorWidget-background,var(--vscode-editor-background));font-family:var(--review-font-ui);font-size:var(--vscode-font-size);line-height:1.5}
 .thread.github{--accent:var(--github)}.thread.pending{border-left-style:dashed}.thread.draft{border:1px dashed var(--accent);border-left:3px dashed var(--accent)}

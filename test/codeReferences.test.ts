@@ -26,7 +26,7 @@ test('generates opaque native actions that resolve only to stored identities', (
   const { thread, message } = fixture('```typescript\nconst secret = 1;\n```');
   const [action] = references.actions(thread, message, 'javascript');
   assert.ok(action);
-  assert.equal(openCodeCommand, 'localReview.openCode');
+  assert.equal(openCodeCommand, 'pairReview.openCode');
   assert.match(action.handle, /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/u);
   assert.equal(action.label, 'Code 1 · typescript');
   assert.equal(action.description, 'const secret = 1;');
@@ -158,7 +158,7 @@ test('original model command links stay visible but never become extension-owned
   const rendered = references.render(thread, message, 'javascript');
   const actions = references.actions(thread, message, 'javascript');
   assert.equal(rendered.includes(malicious), true);
-  assert.equal((rendered.match(/command:localReview\.openCode/gu) ?? []).length, 1);
+  assert.equal((rendered.match(/command:pairReview\.openCode/gu) ?? []).length, 1);
   assert.equal(references.resolve(attackerHandle), undefined);
   assert.equal(actions.length, 1);
   assert.equal(references.resolve(actions[0]?.handle)?.blockIndex, 0);

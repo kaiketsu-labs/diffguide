@@ -9,7 +9,7 @@ import { FileReviews, markRangeRead, readReadRanges, readReviewedFiles, setFileR
 import { worktreePath } from '../src/worktrees.js';
 
 test('keeps a file reviewed until its content changes, and clears it on untick', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'local-review-reviewed-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-reviewed-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-3');
   await mkdir(path.join(worktree, 'src'), { recursive: true });
@@ -29,7 +29,7 @@ test('keeps a file reviewed until its content changes, and clears it on untick',
 });
 
 test('notices a same-size edit that keeps the old modification time', async (t) => {
-  const worktree = await mkdtemp(path.join(tmpdir(), 'local-review-reviewed-'));
+  const worktree = await mkdtemp(path.join(tmpdir(), 'pair-review-reviewed-'));
   t.after(async () => { await rm(worktree, { recursive: true, force: true }); });
   const file = path.join(worktree, 'a.ts');
   await writeFile(file, 'one');
@@ -43,7 +43,7 @@ test('notices a same-size edit that keeps the old modification time', async (t) 
 });
 
 test('merges local ticks with the code host\'s Viewed flags and sends ticks to it', async (t) => {
-  const storage = await mkdtemp(path.join(tmpdir(), 'local-review-reviews-'));
+  const storage = await mkdtemp(path.join(tmpdir(), 'pair-review-reviews-'));
   t.after(async () => { await rm(storage, { recursive: true, force: true }); });
   const worktree = worktreePath(storage, 'acme/app', 3);
   await mkdir(worktree, { recursive: true });
@@ -69,7 +69,7 @@ test('merges local ticks with the code host\'s Viewed flags and sends ticks to i
 });
 
 test('keeps read ranges on their code as lines shift, drops them once that code changes, and keeps file ticks', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'local-review-read-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-read-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-4');
   await mkdir(worktree, { recursive: true });

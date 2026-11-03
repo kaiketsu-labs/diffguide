@@ -39,7 +39,7 @@ Three independent read-only audits of preview `0.1.1` (`1765984`) identified the
 | LR-018 | P2 | Review file selection is HEAD-relative and opens one file at a time. | A stable review baseline and next/previous-file navigation; committed work must remain reviewable. |
 | LR-019 | P2 | The flat queue hides filename/line in a tooltip and includes all resolved threads. | Fixed: visible filename:line in 0.4.7, saved resolved filter and quick actions in 0.4.4. Native hide/show/reopen repeated in 0.4.7. Unread tracking remains LR-013. |
 | LR-020 | P2 | A slash prefix can override the clicked intent button without a preview. | Source fixed in 0.2.0: controlled composer previews live mode and uses one send action; native walkthrough pending. |
-| LR-021 | P2 | Add-comment shortcut and context action exclude original-side virtual documents. | Source fixed in 0.2.0: include `local-review-base`; removed/original-line walkthrough pending. |
+| LR-021 | P2 | Add-comment shortcut and context action exclude original-side virtual documents. | Source fixed in 0.2.0: include `pair-review-base`; removed/original-line walkthrough pending. |
 
 The recommended first pass is direct thread navigation, reply visibility, and truthful delivery readiness. Both integrated and separate local terminal apps should use the same review protocol. Claude's built-in `/ide` connection does not by itself install this extension's review hooks or MCP tools.
 

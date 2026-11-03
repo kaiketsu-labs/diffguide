@@ -8,8 +8,8 @@ import { CodeReferences, openCodeCommand, type CodeAction } from './codeReferenc
 import type { CodeAnchor, ReviewMessage, ReviewThread } from './contracts.js';
 import { isWorkspaceRelativePath } from './git.js';
 
-const snippetScheme = 'local-review-snippet';
-export const openCommentCodeCommand = 'localReview.openCommentCode';
+const snippetScheme = 'pair-review-snippet';
+export const openCommentCodeCommand = 'pairReview.openCommentCode';
 const languageAliases: Readonly<Record<string, string>> = {
   js: 'javascript', cjs: 'javascript', mjs: 'javascript', jsx: 'javascriptreact',
   ts: 'typescript', tsx: 'typescriptreact', py: 'python', rs: 'rust', rb: 'ruby',
@@ -172,7 +172,7 @@ export async function createCodeNavigation(source: CodeNavigationSource): Promis
     bindComment(thread, message, comment) {
       const actions = references.actions(thread, message, anchorLanguage(thread.anchor));
       commentActions.set(comment, actions);
-      if (actions.length > 0) comment.contextValue = 'localReview.code';
+      if (actions.length > 0) comment.contextValue = 'pairReview.code';
     },
     async openAnchor(anchor) {
       await openCode(anchor, anchor.selectedText, anchorLanguage(anchor), true);

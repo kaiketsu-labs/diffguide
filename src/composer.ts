@@ -41,7 +41,7 @@ interface SavedDraft extends ComposerSubmission {
   readonly updatedAt: number;
 }
 
-const storageKey = 'localReview.composerDrafts.v1';
+const storageKey = 'pairReview.composerDrafts.v1';
 
 /** Accept persisted and webview data only after narrowing its actual shape. */
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -294,7 +294,7 @@ export function createComposer(
     pendingSelection = undefined;
     targetChanged.fire(draft);
     if (panel === undefined) {
-      panel = vscode.window.createWebviewPanel('localReview.composer', 'Review-Kommentar', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false }, {
+      panel = vscode.window.createWebviewPanel('pairReview.composer', 'Review-Kommentar', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false }, {
         enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [],
       });
       ready = false;
@@ -361,7 +361,7 @@ function composerHtml(): string {
 <title>Review-Kommentar</title><style nonce="${nonce}">
 ${webviewFontStyles}
 ${codePreviewStyles()}
-:root { --review-line: var(--vscode-widget-border, var(--vscode-panel-border, #80808045)); --review-accent: var(--vscode-localReview-selectionBorder, var(--vscode-focusBorder)); --review-tint: var(--vscode-localReview-selectionBackground, var(--vscode-textBlockQuote-background)); --review-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
+:root { --review-line: var(--vscode-widget-border, var(--vscode-panel-border, #80808045)); --review-accent: var(--vscode-pairReview-selectionBorder, var(--vscode-focusBorder)); --review-tint: var(--vscode-pairReview-selectionBackground, var(--vscode-textBlockQuote-background)); --review-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
 * { box-sizing: border-box; } body { margin: 0; padding: 16px 14px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.5 var(--review-font-ui); }
 main { max-width: 620px; margin: auto; } .code-header { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 7px 3px 12px; border-bottom: 1px solid var(--review-line); } #path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: var(--vscode-descriptionForeground); font: 11px/1.5 var(--review-font-code); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
