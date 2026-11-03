@@ -14,4 +14,15 @@ await build({
   logLevel: 'info'
 });
 
+await build({
+  entryPoints: { overview: 'src/webview/overview.ts' },
+  outdir: 'dist',
+  bundle: true,
+  platform: 'browser',
+  target: 'chrome120',
+  format: 'iife',
+  sourcemap: true,
+  logLevel: 'info'
+});
+
 await copyFile('node_modules/vscode-oniguruma/release/onig.wasm', 'dist/onig.wasm');

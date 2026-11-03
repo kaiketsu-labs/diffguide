@@ -5,7 +5,7 @@ Local Review is a VS Code extension for reviewing code with Claude: native inlin
 ## Code map
 
 - `src/extension.ts` wires everything together, including the actions the PR review page calls.
-- `src/pullRequestOverview.ts` is the PR review page: a webview whose script and CSS live inside one TypeScript template string.
+- `src/pullRequestOverview.ts` is the PR review page's extension side: its HTML and CSS, and the messages it exchanges with the page. `src/webview/overview.ts` is the page script, bundled for the browser into `dist/overview.js`.
 - `src/reviewedFiles.ts` stores per-PR review marks: files ticked Viewed and line ranges marked read.
 - `src/unifiedDiff.ts` parses `git diff` into highlighted hunks. `src/anchors.ts` captures and relocates code by content.
 - `src/pullRequests.ts` reads and writes PRs through `src/githubApi.ts`, which signs in with VS Code's GitHub account. `src/github.ts` handles PR handoff. `src/pullRequestView.ts` is the PR sidebar.
@@ -19,7 +19,9 @@ Local Review is a VS Code extension for reviewing code with Claude: native inlin
 
 ## Review page webview
 
-- The script is untyped JavaScript inside a template string, so `tsc` does not check it. Never write backticks or `${` in it, double every regex backslash, and do not shadow its helpers (`range`, `el`, `button`).
+- Type both directions of the page protocol with `PageMessage` and `ExtensionMessage`. The extension still validates every page message.
+- `frameMain` runs inside the HTML preview frame from its source text, so it must not use anything outside its own body.
+- The CSS lives in a template string: no backticks or `${` in it.
 - Redraw only what changed. `renderFiles([paths])` rebuilds those files' boxes; `renderFiles('state')` rebuilds files whose state changed. A full `renderFiles()` is for global changes such as layout, and costs about 100 ms on a 40-file PR.
 - Update the page right away for the user's own toggles (Viewed, read marks) and let the extension's next state confirm them. A round trip waits for a 150 ms debounce and a state re-read.
 
