@@ -55,12 +55,12 @@ function reviewData(event: ReviewEvent, thread?: ReviewThread): string {
 }
 
 /** Render one complete event for transports that deliver individual notifications. */
-export function buildReviewPrompt(event: ReviewEvent, thread?: ReviewThread): string {
-  return `${reviewInstructions}\n\n${reviewData(event, thread)}`;
+export function buildReviewPrompt(event: ReviewEvent, thread?: ReviewThread, custom = ''): string {
+  return `${reviewInstructions}${custom === '' ? '' : `\n\n${custom}`}\n\n${reviewData(event, thread)}`;
 }
 
 /** Identify actual feedback immediately and share the agent contract across a hook batch. */
-export function buildReviewBatchPrompt(events: readonly ReviewEvent[], threads: readonly ReviewThread[]): string {
+export function buildReviewBatchPrompt(events: readonly ReviewEvent[], threads: readonly ReviewThread[], custom = ''): string {
   const labels = { ask: 'Ask', implement: 'Implement', summarize: 'Summarize' } as const;
   const summary = events.map((event) => {
     const { path, startLine, endLine } = event.anchor;
@@ -71,5 +71,5 @@ export function buildReviewBatchPrompt(events: readonly ReviewEvent[], threads: 
   }).join('\n\n');
   const byId = new Map(threads.map((thread) => [thread.id, thread]));
   const data = events.map((event) => reviewData(event, byId.get(event.threadId))).join('\n\n');
-  return `${summary}\n\n${reviewInstructions}\n\n${data}`;
+  return `${summary}\n\n${reviewInstructions}${custom === '' ? '' : `\n\n${custom}`}\n\n${data}`;
 }

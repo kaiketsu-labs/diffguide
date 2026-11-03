@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { BridgeClient, BridgeProtocolError, readBatch, readDescriptor, record } from './connection.js';
 import type { ReviewBatch } from './connection.js';
 import { buildReviewBatchPrompt } from './eventPrompt.js';
+import { readCustomInstructions } from './customInstructions.js';
 import { createHookDeliveryLedger } from './hookDelivery.js';
 import { ownsSession } from './sessionBinding.js';
 
@@ -130,7 +131,8 @@ async function main(): Promise<void> {
       const events = delivery.select(batch.events, recover);
       recover = false;
       if (events.length > 0) {
-        const prompt = `${buildReviewBatchPrompt(events, batch.threads)}\n`;
+        const custom = await readCustomInstructions('ask', { projectRoot: descriptor.workspaceRoot, repository: { cwd: descriptor.workspaceRoot } });
+        const prompt = `${buildReviewBatchPrompt(events, batch.threads, custom)}\n`;
         await new Promise<void>((resolveOutput, rejectOutput) => {
           process.stderr.write(prompt, (error) => {
             if (error === null || error === undefined) resolveOutput();
