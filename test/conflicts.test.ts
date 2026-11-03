@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { promisify } from 'node:util';
+
+import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from '../src/conflicts.js';
+
+const run = promisify(execFile);
+const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
+
+/** An origin with `main` and PR #7, and a worktree checked out at an older PR commit. */
+async function fixture(t: test.TestContext): Promise<{ origin: string; worktree: string; older: string; latest: string; base: string }> {
+  const scratch = await mkdtemp(path.join(tmpdir(), 'pair-review-conflicts-'));
+  t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
+  const origin = path.join(scratch, 'origin');
+  await git(scratch, 'init', '--quiet', '--initial-branch=main', origin);
+  await writeFile(path.join(origin, 'a.txt'), 'one\n');
+  await git(origin, 'add', '.');
+  await git(origin, 'commit', '--quiet', '-m', 'base');
+  await git(origin, 'switch', '--quiet', '-c', 'feature');
+  await writeFile(path.join(origin, 'a.txt'), 'feature\n');
+  await git(origin, 'commit', '--quiet', '-am', 'older');
+  const older = await git(origin, 'rev-parse', 'HEAD');
+  await writeFile(path.join(origin, 'b.txt'), 'more\n');
+  await git(origin, 'add', '.');
+  await git(origin, 'commit', '--quiet', '-m', 'latest');
+  const latest = await git(origin, 'rev-parse', 'HEAD');
+  await git(origin, 'update-ref', 'refs/pull/7/head', latest);
+  await git(origin, 'switch', '--quiet', 'main');
+  await writeFile(path.join(origin, 'a.txt'), 'main\n');
+  await git(origin, 'commit', '--quiet', '-am', 'conflicting');
+  const base = await git(origin, 'rev-parse', 'HEAD');
+  const worktree = path.join(scratch, 'worktree');
+  await git(scratch, 'clone', '--quiet', origin, worktree);
+  await git(worktree, 'checkout', '--quiet', '--detach', older);
+  return { origin, worktree, older, latest, base };
+}
+
+test('brings the worktree to the PR\'s latest commit and returns the base to merge', async (t) => {
+  const { worktree, latest, base } = await fixture(t);
+  assert.equal(await prepareConflictFix(worktree, 7, 'main'), base);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+});
+
+test('refuses a worktree with uncommitted changes or commits GitHub does not have', async (t) => {
+  const { worktree } = await fixture(t);
+  await writeFile(path.join(worktree, 'a.txt'), 'unsaved\n');
+  await assert.rejects(prepareConflictFix(worktree, 7, 'main'), /uncommitted changes/u);
+  await git(worktree, 'commit', '--quiet', '-am', 'local only');
+  await assert.rejects(prepareConflictFix(worktree, 7, 'main'), /not on GitHub/u);
+});
+
+test('lets Claude push only the PR branch, and rejects names that could be read as options', () => {
+  const fix = { base: 'a'.repeat(40), baseBranch: 'main', headBranch: 'feat/retry', pushTo: 'origin' };
+  const task = conflictTask(fix);
+  assert.ok(task.allowedTools.includes('Bash(git push origin HEAD:refs/heads/feat/retry)'));
+  assert.ok(!task.allowedTools.some((tool) => tool === 'Bash' || tool.startsWith('Bash(git push *')));
+  assert.match(task.prompt, new RegExp(`git merge --no-edit ${fix.base}`, 'u'));
+  assert.ok(conflictTask({ ...fix, pushTo: 'https://github.com/someone/app.git' }).allowedTools.includes('Bash(git push https://github.com/someone/app.git HEAD:refs/heads/feat/retry)'));
+  assert.throws(() => conflictTask({ ...fix, headBranch: '--force' }));
+  assert.throws(() => conflictTask({ ...fix, pushTo: 'ext::sh -c id' }));
+  assert.throws(() => conflictTask({ ...fix, base: 'HEAD' }));
+});
+
+test('passes the user\'s answer on when Claude asked how to resolve the conflicts', () => {
+  const fix = { base: 'a'.repeat(40), baseBranch: 'main', headBranch: 'feat/retry', pushTo: 'origin' };
+  assert.ok(!conflictTask(fix).prompt.includes('They answered'));
+  assert.match(conflictTask({ ...fix, answer: '4 attempts, 200 ms' }).prompt, /They answered:\n\n4 attempts, 200 ms$/u);
+});
+
+test('commits one file and pushes it to the PR branch, and takes the commit back when the push fails', async (t) => {
+  const { origin, worktree, latest } = await fixture(t);
+  for (const [key, value] of [['user.name', 't'], ['user.email', 't@example.invalid'], ['commit.gpgSign', 'false']] as const) await git(worktree, 'config', key, value);
+  await syncToPullRequestHead(worktree, 7);
+  await writeFile(path.join(worktree, 'a.txt'), 'suggested\n');
+  await writeFile(path.join(worktree, 'b.txt'), 'unrelated edit\n');
+  const push = { path: 'a.txt', message: 'Apply suggestion from code review', pushTo: 'origin', headBranch: 'feature', hooksOff: true };
+  await commitAndPush(worktree, push);
+  assert.equal(await git(origin, 'log', '-1', '--format=%s', 'feature'), 'Apply suggestion from code review');
+  assert.equal(await git(origin, 'show', 'feature:a.txt'), 'suggested');
+  assert.equal(await git(origin, 'show', 'feature:b.txt'), 'more');
+  assert.equal(await git(origin, 'rev-parse', 'feature~1'), latest);
+
+  const pushed = await git(worktree, 'rev-parse', 'HEAD');
+  await git(worktree, 'remote', 'set-url', 'origin', path.join(origin, 'missing'));
+  await writeFile(path.join(worktree, 'a.txt'), 'second\n');
+  await assert.rejects(commitAndPush(worktree, push));
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), pushed);
+  assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'suggested\n');
+  await assert.rejects(commitAndPush(worktree, { ...push, headBranch: '--force' }), /Unsupported/u);
+});

@@ -21,6 +21,7 @@ class FakeChild extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   input = '';
+  env: NodeJS.ProcessEnv | undefined;
   readonly stdin = new Writable({ write: (chunk: Buffer, _encoding, done) => { this.input += chunk.toString(); done(); } });
   constructor(readonly args: readonly string[], readonly cwd: string, readonly command: string) { super(); }
   send(message: unknown): void { this.stdout.write(`${JSON.stringify(message)}\n`); }
@@ -59,8 +60,9 @@ async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, sh
   const instance = new ClaudeRunner({
     store, cwd: '/worktree', dataPath, role, log: (line) => { log.push(line); },
     resolve: async () => ({ executable: shell === undefined ? '/bin/claude' : 'claude', mcpPath: '/data/mcp.json', ...(shell === undefined ? {} : { shell }) }),
-    spawn: ((executable: string, args: readonly string[], options: { cwd: string }) => {
+    spawn: ((executable: string, args: readonly string[], options: { cwd: string; env?: NodeJS.ProcessEnv }) => {
       const child = new FakeChild(args, options.cwd, executable);
+      child.env = options.env;
       children.push(child);
       return child;
     }) as unknown as NonNullable<ClaudeRunnerOptions['spawn']>,
@@ -116,6 +118,31 @@ test('lets Claude edit only on the author\'s own PR', async (t) => {
   assert.ok(!args.includes('--setting-sources') && !args.includes('--strict-mcp-config'));
   assert.equal(args[args.indexOf('--permission-mode') + 1], 'acceptEdits');
   assert.ok(!children[0]?.args[1]?.includes('someone else'));
+});
+
+test('runs a task in the PR conversation with its own tools, and keeps Git hooks off on someone else\'s PR', async (t) => {
+  const task = { label: 'fixing merge conflicts', prompt: 'Merge the base.', allowedTools: ['Bash(git merge *)'] };
+  for (const role of ['author', 'reviewer'] as const) {
+    const { instance, children } = await runner(role, t);
+    const done = instance.runTask(task);
+    await until(() => children.length === 1);
+    const child = children[0];
+    assert.ok(child !== undefined);
+    assert.equal(child.args[1], 'Merge the base.');
+    assert.equal(instance.activity.task, 'fixing merge conflicts');
+    assert.deepEqual(child.args.slice(child.args.indexOf('--allowedTools') + 1, child.args.indexOf('--allowedTools') + 3), ['mcp__pair-review', 'Bash(git merge *)']);
+    assert.equal(child.args[child.args.indexOf('--permission-mode') + 1], 'acceptEdits');
+    assert.ok(!child.args.includes('--disallowedTools'));
+    assert.equal(child.args.includes('--setting-sources'), role === 'reviewer');
+    assert.equal(child.env?.['GIT_CONFIG_VALUE_0'], role === 'reviewer' ? '/dev/null' : undefined);
+    await assert.rejects(instance.runTask(task), /still working/u);
+    child.send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Which value wins?' }] } });
+    child.send({ type: 'result', subtype: 'success', is_error: false });
+    await child.exit(0);
+    assert.deepEqual(await done, { reply: 'Which value wins?' });
+    assert.equal(instance.activity.running, false);
+    assert.equal(instance.activity.task, undefined);
+  }
 });
 
 test('does not loop on comments Claude skipped, and sends them again on retry', async (t) => {

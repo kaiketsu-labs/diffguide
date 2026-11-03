@@ -176,7 +176,7 @@ npm test
 npm run package
 ```
 
-The generated `.vsix` can be installed through VS Code. [Contributing](CONTRIBUTING.md) · [Publishing guide](docs/PUBLISHING.md)
+The generated `.vsix` can be installed through VS Code. `make install` packages it and installs it in one step; `make` lists the other targets. [Contributing](CONTRIBUTING.md) · [Publishing guide](docs/PUBLISHING.md)
 
 Built on the [VS Code Comments API](https://code.visualstudio.com/api/references/vscode-api#CommentController), [Claude hooks](https://code.claude.com/docs/en/hooks), and [MCP](https://code.claude.com/docs/en/mcp). Not affiliated with Anthropic or Microsoft.
 

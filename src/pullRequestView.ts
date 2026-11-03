@@ -23,7 +23,6 @@ type Node =
   | PullRequestNode
   | FileNode
   | FolderNode
-  | { readonly kind: 'guide'; readonly parent: PullRequestNode; readonly groups: readonly OutlineGroup[] }
   | { readonly kind: 'guideGroup'; readonly parent: PullRequestNode; readonly group: OutlineGroup }
   | { readonly kind: 'guideStep'; readonly parent: PullRequestNode; readonly step: OutlineStep; readonly number: number }
   | { readonly kind: 'message'; readonly text: string; readonly icon: string; readonly command?: vscode.Command };
@@ -34,6 +33,8 @@ type FolderNode = { readonly kind: 'folder'; readonly parent: PullRequestNode; r
 const fileViewKey = 'pairReview.fileView';
 const groupByKey = 'pairReview.groupBy';
 const hiddenKey = 'pairReview.hiddenRepositories';
+const authorKey = 'pairReview.authorFilter';
+const childViewKey = 'pairReview.pullRequestChildren';
 const snapshotKey = 'pairReview.pullRequestSnapshot';
 
 /** A repository's PR lists from the last load, shown at once while fresh ones load. */
@@ -165,8 +166,19 @@ function splitCommitType(title: string): { readonly type?: string; readonly subj
   return match === null ? { subject: title } : { type: match[1] as string, subject: match[2] as string };
 }
 
-function pullRequestsOf(listing: Ready, role: PullRequestRole): readonly PullRequestSummary[] {
-  return role === 'author' ? listing.mine : listing.reviewRequested;
+function pullRequestsOf(listing: Ready, role: PullRequestRole, author?: string): readonly PullRequestSummary[] {
+  const all = role === 'author' ? listing.mine : listing.reviewRequested;
+  return author === undefined ? all : all.filter((pullRequest) => pullRequest.author === author);
+}
+
+/** "3d ago", or the date after a month. */
+function ago(iso: string, now = Date.now()): string {
+  const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+  if (minutes < 30 * 24 * 60) return `${Math.floor(minutes / (24 * 60))}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** `owner/name#number`, the key change events name a PR by. */
@@ -250,6 +262,31 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#changed.fire(undefined);
   }
 
+  /** Only PRs by this author are listed, when set. */
+  get author(): string | undefined {
+    return this.workspace.get<string>(authorKey);
+  }
+
+  /** Let the user pick an author among the listed PRs, or all authors. */
+  async chooseAuthor(): Promise<void> {
+    const authors = new Set([...this.#done.values()].flatMap((listing) => listing.kind === 'ready' ? [...listing.mine, ...listing.reviewRequested].map((pr) => pr.author) : []));
+    const all = '$(clear-all) All authors';
+    const picked = await vscode.window.showQuickPick([all, ...[...authors].sort((a, b) => a.localeCompare(b))], { title: 'Show PRs by', placeHolder: 'Type to filter' });
+    if (picked === undefined) return;
+    await this.workspace.update(authorKey, picked === all ? undefined : picked);
+    this.#changed.fire(undefined);
+  }
+
+  /** Whether a PR row lists its guide steps instead of its files, when it has a guide. */
+  get showsGuide(): boolean {
+    return this.settings.get<string>(childViewKey, 'files') === 'guide';
+  }
+
+  async setShowsGuide(guide: boolean): Promise<void> {
+    await this.settings.update(childViewKey, guide ? 'guide' : 'files');
+    this.#changed.fire(undefined);
+  }
+
   get asTree(): boolean {
     return this.settings.get(fileViewKey, 'tree') === 'tree';
   }
@@ -297,11 +334,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         : node.listings.map((listing) => ({ kind: 'repository', listing, role: node.role }));
     }
     if (node.kind === 'repository' && node.role === undefined) {
-      return roles.filter((role) => pullRequestsOf(node.listing, role).length > 0).map((role) => ({ kind: 'section', listing: node.listing, role }));
+      return roles.filter((role) => pullRequestsOf(node.listing, role, this.author).length > 0).map((role) => ({ kind: 'section', listing: node.listing, role }));
     }
     if (node.kind === 'repository' || node.kind === 'section') {
       const role = node.role as PullRequestRole;
-      return pullRequestsOf(node.listing, role).map((pullRequest) => {
+      return pullRequestsOf(node.listing, role, this.author).map((pullRequest) => {
         const row: PullRequestNode = { kind: 'pullRequest', listing: node.listing, role, pullRequest };
         this.#rows.set(pullRequestKey(row), row);
         return row;
@@ -309,18 +346,17 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === 'folder') return this.#folderChildren(node.parent, node.folder);
     if (node.kind === 'pullRequest') {
-      const groups = await this.#isCheckedOut(node).then((checkedOut) => checkedOut ? this.#guideOf(node) : undefined).catch(() => undefined);
-      const guide: Node[] = groups === undefined || groups.length === 0 ? [] : [{ kind: 'guide', parent: node, groups }];
+      const groups = this.showsGuide ? await this.#isCheckedOut(node).then((checkedOut) => checkedOut ? this.#guideOf(node) : undefined).catch(() => undefined) : undefined;
+      if (groups !== undefined && groups.length > 0) return groups.map((group): Node => ({ kind: 'guideGroup', parent: node, group }));
       try {
         const files = await this.#filesOf(node);
-        return [...guide, ...files.length === 0
-          ? [{ kind: 'message', text: 'No changed files', icon: 'info' } as const]
-          : this.asTree ? this.#folderChildren(node, fileTree(files)) : files.map((file): Node => ({ kind: 'file', parent: node, file, inTree: false }))];
+        return files.length === 0
+          ? [{ kind: 'message', text: 'No changed files', icon: 'info' }]
+          : this.asTree ? this.#folderChildren(node, fileTree(files)) : files.map((file): Node => ({ kind: 'file', parent: node, file, inTree: false }));
       } catch (error: unknown) {
-        return [...guide, { kind: 'message', text: error instanceof Error ? error.message : String(error), icon: 'warning' }];
+        return [{ kind: 'message', text: error instanceof Error ? error.message : String(error), icon: 'warning' }];
       }
     }
-    if (node.kind === 'guide') return node.groups.map((group): Node => ({ kind: 'guideGroup', parent: node.parent, group }));
     if (node.kind === 'guideGroup') return node.group.steps.map((step, index): Node => ({ kind: 'guideStep', parent: node.parent, step, number: index + 1 }));
     return [];
   }
@@ -330,7 +366,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'role': {
         const item = new vscode.TreeItem(sectionLabels[node.role].toUpperCase(), vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
-        item.description = String(node.listings.reduce((sum, listing) => sum + pullRequestsOf(listing, node.role).length, 0));
+        item.description = String(node.listings.reduce((sum, listing) => sum + pullRequestsOf(listing, node.role, this.author).length, 0));
         return item;
       }
       case 'repository': {
@@ -339,8 +375,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = repositoryIcon;
         const counts = role === undefined
-          ? roles.filter((each) => pullRequestsOf(listing, each).length > 0).map((each) => `${pullRequestsOf(listing, each).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
-          : String(pullRequestsOf(listing, role).length);
+          ? roles.filter((each) => pullRequestsOf(listing, each, this.author).length > 0).map((each) => `${pullRequestsOf(listing, each, this.author).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
+          : String(pullRequestsOf(listing, role, this.author).length);
         item.description = [owner, counts].filter(Boolean).join(' · ');
         item.tooltip = listing.folder;
         item.contextValue = 'pairReview.repository';
@@ -349,7 +385,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'section': {
         const item = new vscode.TreeItem(sectionLabels[node.role], vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
-        item.description = String(pullRequestsOf(node.listing, node.role).length);
+        item.description = String(pullRequestsOf(node.listing, node.role, this.author).length);
         return item;
       }
       case 'pullRequest': {
@@ -361,8 +397,15 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
         const verdict = pr.review === undefined ? undefined : verdicts[pr.review];
-        item.description = [`#${pr.number}`, type, verdict?.label, pr.author, pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress].filter(Boolean).join(' · ');
-        item.tooltip = `#${pr.number} ${pr.title}\n${pr.headBranch} → ${pr.baseBranch}${verdict === undefined ? '' : `\n${verdict.label}`}`;
+        const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;
+        item.description = [`#${pr.number}`, type, verdict?.label, pr.author, pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
+        item.tooltip = [
+          `#${pr.number} ${pr.title}`,
+          `${pr.headBranch} → ${pr.baseBranch}`,
+          verdict?.label,
+          pr.changes === undefined ? undefined : `${size} in ${pr.changes.files} ${pr.changes.files === 1 ? 'file' : 'files'}`,
+          [pr.createdAt === undefined ? undefined : `Opened ${new Date(pr.createdAt).toLocaleString()}`, pr.updatedAt === undefined ? undefined : `updated ${ago(pr.updatedAt)}`].filter(Boolean).join(', ') || undefined,
+        ].filter(Boolean).join('\n');
         item.iconPath = pullRequestIcon(pr.draft, pr.review);
         item.contextValue = checkedOut ? 'pairReview.pullRequest.checkedOut' : 'pairReview.pullRequest';
         item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node] };
@@ -386,13 +429,6 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'folder': {
         const item = new vscode.TreeItem(node.folder.name, vscode.TreeItemCollapsibleState.Expanded);
         item.tooltip = node.folder.path;
-        return item;
-      }
-      case 'guide': {
-        const steps = node.groups.flatMap((group) => group.steps);
-        const item = new vscode.TreeItem('Guide', vscode.TreeItemCollapsibleState.Expanded);
-        item.iconPath = new vscode.ThemeIcon('map');
-        item.description = `${steps.filter((step) => step.viewed).length}/${steps.length} viewed`;
         return item;
       }
       case 'guideGroup': {
@@ -499,7 +535,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     const hidden = this.#hidden;
     const shown = all.filter((checkout) => !hidden.has(checkout.folder));
-    this.describe(shown.length < all.length ? `${all.length - shown.length} hidden` : undefined);
+    const author = this.author;
+    this.describe([author === undefined ? undefined : `Author: ${author}`, shown.length < all.length ? `${all.length - shown.length} hidden` : undefined].filter(Boolean).join(' · ') || undefined);
     if (shown.length === 0 && all.length > 0) return [{ kind: 'message', text: 'All repositories are hidden', icon: 'eye-closed' }];
     const loading = Promise.all(shown.map((checkout) => this.#listingOf(checkout)));
     let listings: readonly Listing[];
@@ -522,11 +559,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     if (signIn !== undefined) return [];
     if (ready.length === 0) return failed;
     if (this.byRole) {
-      return [...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => pullRequestsOf(listing, role).length > 0) })), ...failed];
+      return [...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => pullRequestsOf(listing, role, this.author).length > 0) })), ...failed];
     }
-    const withPullRequests = ready.filter((listing) => listing.mine.length + listing.reviewRequested.length > 0);
+    const withPullRequests = ready.filter((listing) => roles.some((role) => pullRequestsOf(listing, role, this.author).length > 0));
     return [
-      ...withPullRequests.length === 0 ? [{ kind: 'message', text: 'No open PRs', icon: 'check' } as const] : [],
+      ...withPullRequests.length === 0 ? [{ kind: 'message', text: this.author === undefined ? 'No open PRs' : `No open PRs by ${this.author}`, icon: 'check' } as const] : [],
       ...withPullRequests.map((listing): Node => ({ kind: 'repository', listing })),
       ...failed,
     ];
@@ -599,6 +636,8 @@ export function registerPullRequestView(
   const showMode = (): void => {
     void vscode.commands.executeCommand('setContext', 'pairReview.filesAsTree', tree.asTree);
     void vscode.commands.executeCommand('setContext', 'pairReview.groupByRole', tree.byRole);
+    void vscode.commands.executeCommand('setContext', 'pairReview.authorFiltered', tree.author !== undefined);
+    void vscode.commands.executeCommand('setContext', 'pairReview.treeShowsGuide', tree.showsGuide);
   };
   showMode();
   const report = (error: unknown): void => {
@@ -625,6 +664,10 @@ export function registerPullRequestView(
     vscode.commands.registerCommand('pairReview.groupByRole', async () => { await tree.setByRole(true); showMode(); }),
     vscode.commands.registerCommand('pairReview.groupByRepository', async () => { await tree.setByRole(false); showMode(); }),
     vscode.commands.registerCommand('pairReview.chooseRepositories', async () => { await tree.chooseRepositories(); }),
+    vscode.commands.registerCommand('pairReview.filterByAuthor', async () => { await tree.chooseAuthor(); showMode(); }),
+    vscode.commands.registerCommand('pairReview.filterByAuthorActive', async () => { await tree.chooseAuthor(); showMode(); }),
+    vscode.commands.registerCommand('pairReview.showGuideInTree', async () => { await tree.setShowsGuide(true); showMode(); }),
+    vscode.commands.registerCommand('pairReview.showFilesInTree', async () => { await tree.setShowsGuide(false); showMode(); }),
     vscode.commands.registerCommand('pairReview.hideRepository', async (node: unknown) => {
       if (isRepositoryNode(node)) await tree.hide(node);
     }),

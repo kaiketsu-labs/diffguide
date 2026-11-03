@@ -7,14 +7,22 @@ import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLin
 import type { LineRange } from '../reviewedFiles.js';
 import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
 import { codicons } from '../codicons.js';
+import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
+import type * as PdfJs from 'pdfjs-dist';
 
 declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; getState(): unknown; setState(state: Saved): void };
 
-type Layout = 'unified' | 'split' | 'guided';
+type Layout = 'unified' | 'split';
+/** What the file list shows: every file, or Claude's guide in reading order. */
+type View = 'files' | 'guide';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
 interface Saved {
-  readonly layout?: Layout;
+  /** 'guided' is how pages saved before Files and Guide became tabs remember the guide. */
+  readonly layout?: Layout | 'guided';
+  readonly view?: View;
+  /** Width of the definition panel in pixels, when the user resized it. */
+  readonly peekWidth?: number | undefined;
   readonly folders?: boolean;
   readonly collapsed?: Record<string, boolean>;
   readonly previewing?: readonly string[];
@@ -36,15 +44,21 @@ type CheckState = PullRequestDetails['checks'][number]['state'];
 const api = acquireVsCodeApi();
 const post = (message: PageMessage): void => api.postMessage(message);
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly claudeIcon: string };
+const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly claudeIcon: string; readonly pdfScript?: string };
 const { claudeIcon } = initial;
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
-let layout: Layout = saved.layout ?? 'unified';
+let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
+let view: View = saved.view ?? (saved.layout === 'guided' ? 'guide' : 'files');
+let peekWidth = saved.peekWidth;
 let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
 const previewing = new Set(saved.previewing ?? []);
 const previews = new Map<string, Preview>();
+const medias = new Map<string, MediaPreview>();
+/** Rendered PDF pages per file side, kept so redrawing a file box does not render them again. */
+const pdfViews = new Map<string, HTMLElement>();
+let pdfLibrary: Promise<typeof PdfJs> | undefined;
 const frameHeight = new Map<string, number>();
 const frameTops = new Map<string, Record<string, number>>();
 const frameAnchors = new Map<string, Anchor[]>();
@@ -170,7 +184,7 @@ function frameMain(): void {
 }
 
 function save(): void {
-  api.setState({ layout, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies) });
+  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies) });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -268,6 +282,22 @@ function renderState(details: PullRequestDetails): void {
   $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
     : !details.open ? (details.merged ? '' : 'Closed without merging.')
     : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
+  const conflicted = details.open && details.mergeable === 'no' && details.canEdit;
+  const question = conflicted && current?.claude.running !== true ? current?.conflictQuestion : undefined;
+  $('conflict-row').hidden = !conflicted || question !== undefined;
+  $('conflict-ask').hidden = question === undefined;
+  const reply = $('conflict-reply');
+  if (question !== undefined && reply.dataset.html !== question) {
+    reply.dataset.html = question;
+    reply.innerHTML = question;
+  }
+  $<HTMLButtonElement>('fix-conflicts').disabled = current?.claude.running === true;
+  const fixing = current?.claude.fixingConflicts;
+  const note = $('conflict-note');
+  note.className = fixing === undefined ? 'muted' : 'chip claude working';
+  const text = fixing ?? 'Claude merges the base branch, resolves the conflicts and pushes.';
+  note.replaceChildren(fixing === undefined ? text : el('span', '', text));
+  note.title = fixing ?? '';
   const actions: HTMLButtonElement[] = [];
   const add = (label: string, message: PageMessage, className = 'quiet'): void => {
     const node = button(label, () => changePullRequest(message), className);
@@ -300,6 +330,7 @@ function render(state: OverviewState): void {
   current = state;
   $('title').textContent = state.title;
   $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch));
+  $('facts').replaceChildren(...pullRequestFacts(state));
   const { details } = state;
   const body = $('body');
   if (!details) body.replaceChildren(el('span', 'muted', state.detailsError ? 'Could not load from GitHub: ' + state.detailsError : 'Loading from GitHub…'));
@@ -341,7 +372,8 @@ function render(state: OverviewState): void {
   renderThreadList();
   author = !details || details.viewerIsAuthor;
   setBusy(busy);
-  for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.title = author ? 'GitHub does not let you approve or request changes on your own PR.' : '';
+  for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.hidden = author;
+  document.querySelector<HTMLButtonElement>('[data-event="comment"]')?.classList.toggle('primary', author);
   $('review-note').textContent = author ? 'This is your PR, so you can only comment.' : '';
   const pendingCount = details?.pendingComments;
   $('pending-note').textContent = pendingCount !== undefined
@@ -385,7 +417,7 @@ function render(state: OverviewState): void {
   if (stamp !== guideStamp) {
     guideStamp = stamp;
     guide = undefined;
-    if (layout === 'guided') { renderFiles(); return; }
+    if (view === 'guide') { renderFiles(); return; }
   }
   renderFiles('state');
 }
@@ -488,8 +520,8 @@ function composerBox(draft: Composer): HTMLElement {
     option.setAttribute('aria-pressed', String(on));
     toggle.append(option);
   }
-  head.append(el('span', 'source', 'New comment'), toggle,
-    el('span', 'muted', (draft.side === 'old' ? 'Base · ' : '') + range(draft.start, draft.end)));
+  const lines = el('span', 'muted', (draft.side === 'old' ? 'Base · ' : '') + range(draft.start, draft.end));
+  head.append(el('span', 'source', 'New comment'), toggle, lines);
   box.append(head);
   const cancel = (): void => { composer = undefined; save(); renderFiles([draft.path]); };
   const send = (pending: boolean, intent: Intent = 'ask'): void => {
@@ -549,6 +581,17 @@ function composerBox(draft: Composer): HTMLElement {
     ask.title = 'Claude answers without editing';
     row.append(hint('asks'), el('span', 'gap'), cancelLink, implement, ask);
   }
+  const original = draft.side === 'new' ? selectedText(draft.path, draft.start, draft.end) : undefined;
+  if (original !== undefined) {
+    const suggest = button('Suggest change', () => {
+      draft.text = (draft.text.trim() ? draft.text.replace(/\s*$/u, '\n\n') : '') + '```suggestion\n' + original + '\n```\n';
+      focusNext = 'composer';
+      save();
+      renderFiles([draft.path]);
+    }, 'quiet small');
+    suggest.title = 'Start a suggestion from these lines. On GitHub it becomes a change the author can commit.';
+    lines.before(suggest);
+  }
   head.append(read);
   box.append(area, row);
   return box;
@@ -562,6 +605,18 @@ function relativeTime(iso: string): string {
   if (minutes < 24 * 60) return Math.floor(minutes / 60) + 'h ago';
   if (minutes < 30 * 24 * 60) return Math.floor(minutes / (24 * 60)) + 'd ago';
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** "Opened 3d ago · Updated 2h ago · +312 −48 in 14 files", leaving out what GitHub did not send. */
+function pullRequestFacts(state: OverviewState): (string | Node)[] {
+  const parts: (string | Node)[][] = [];
+  if (state.createdAt) parts.push(['Opened ', ...timeLabel(state.createdAt)]);
+  if (state.updatedAt) parts.push(['Updated ', ...timeLabel(state.updatedAt)]);
+  if (state.changes) {
+    const { additions, deletions, files } = state.changes;
+    parts.push([el('span', 'stat-add', '+' + additions), ' ', el('span', 'stat-del', '−' + deletions), ' in ' + files + (files === 1 ? ' file' : ' files')]);
+  }
+  return parts.flatMap((part, index) => index === 0 ? part : [' · ', ...part]);
 }
 
 function timeLabel(iso: string): HTMLElement[] {
@@ -647,7 +702,18 @@ function threadBox(thread: Thread): HTMLElement {
   box.append(strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
     status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
-  for (const entry of thread.messages) box.append(message(entry));
+  thread.messages.forEach((entry, index) => {
+    const item = message(entry);
+    const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
+    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
+    box.append(item);
+  });
+  const working = thread.source === 'local' ? thread.working : undefined;
+  if (working) {
+    const live = el('div', 'claude-live');
+    live.append(el('span', 'chip claude working', working));
+    box.append(live);
+  }
   const key = 'reply:' + thread.id;
   const actions = el('div', 'row actions composer-actions');
   const reply = replies.get(thread.id);
@@ -677,6 +743,65 @@ function threadBox(thread: Thread): HTMLElement {
   return box;
 }
 
+/** Option picked on each message's suggestions, by thread id and message index. */
+const pickedOptions = new Map<string, number>();
+
+/** A message's suggestions as a small diff against the commented lines; several suggestions are options to switch between. */
+function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: number, suggestions: readonly (readonly string[])[]): HTMLElement {
+  const key = thread.id + ':' + index;
+  const picked = Math.min(pickedOptions.get(key) ?? (thread.applied?.message === index ? thread.applied.option : 0), suggestions.length - 1);
+  const card = el('div', 'suggestion');
+  const head = el('div', 'row suggestion-head');
+  head.append(el('span', 'muted', suggestions.length > 1 ? suggestions.length + ' suggested options' : 'Suggested change'));
+  if (suggestions.length > 1) {
+    const tabs = el('span', 'seg');
+    suggestions.forEach((_, option) => {
+      const tab = button('Option ' + (option + 1), () => { pickedOptions.set(key, option); renderFiles([thread.path]); });
+      tab.setAttribute('aria-pressed', String(option === picked));
+      tabs.append(tab);
+    });
+    head.append(tabs);
+  }
+  const lines = el('pre', 'suggestion-diff');
+  const line = (kind: 'add' | 'del', html: string): HTMLElement => {
+    const row = el('div', kind);
+    row.innerHTML = html;
+    row.prepend(el('span', 'sign', kind === 'add' ? '+' : '-'));
+    return row;
+  };
+  for (const html of thread.original ?? []) lines.append(line('del', html));
+  for (const html of suggestions[picked] ?? []) lines.append(line('add', html));
+  const actions = el('div', 'row actions');
+  const where = { id: thread.id, message: index, option: picked };
+  const publish = button('Publish suggestion', () => post({ action: 'publish-suggestion', ...where }));
+  publish.title = 'Adds it to your pending review as a GitHub suggestion the author can commit.';
+  const canPush = current?.details?.canEdit === true;
+  const apply = button(canPush ? 'Commit suggestion' : 'Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
+  apply.title = canPush ? 'Commits the change to the PR branch and pushes it.' : 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.';
+  const done = thread.applied?.message === index ? thread.applied : undefined;
+  if (done === undefined) actions.append(el('span', 'gap'), publish, apply);
+  else if (done.pushed) actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed and pushed.'));
+  else actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' applied to the worktree, not committed.'), button('Discard', () => post({ action: 'discard-suggestion', id: thread.id })), publish);
+  card.append(head, lines, actions);
+  return card;
+}
+
+/** The selected lines as plain text, for a suggestion to start from. */
+function selectedText(path: string, start: number, end: number): string | undefined {
+  const full = contextLines.get(path);
+  const fromDiff = new Map((files?.find((file) => file.path === path)?.hunks ?? []).flatMap((hunk) => hunk.lines)
+    .flatMap((line) => line.kind !== 'del' && line.newLine !== undefined ? [[line.newLine, line.html] as const] : []));
+  const lines: string[] = [];
+  for (let number = start; number <= end; number += 1) {
+    const html = full?.[number - 1] ?? fromDiff.get(number);
+    if (html === undefined) return undefined;
+    const holder = el('div');
+    holder.innerHTML = html;
+    lines.push(holder.textContent ?? '');
+  }
+  return lines.join('\n');
+}
+
 function inline(content: HTMLElement, width: number): HTMLTableRowElement {
   const row = el('tr', 'inline');
   const cell = el('td');
@@ -691,7 +816,7 @@ function jump(thread: Thread): void {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
   }
-  if (layout === 'guided' && !document.getElementById('thread-' + thread.id)) { layout = 'unified'; save(); renderFiles(); }
+  if (view === 'guide' && !document.getElementById('thread-' + thread.id)) { setView('files'); }
   if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
     collapsed.set(thread.path, false);
     openFolders(thread.path);
@@ -767,9 +892,95 @@ function expand(file: FileDiff, index: number, top: number, bottom: number): voi
   renderFiles([file.path]);
 }
 
-function previewKind(file: FileDiff): 'markdown' | 'html' | undefined {
+function previewKind(file: FileDiff): 'markdown' | 'html' | 'media' | undefined {
+  if (mediaType(file.path) !== undefined) return 'media';
   if (file.binary || file.change === 'deleted') return undefined;
   return /\.(md|markdown)$/iu.test(file.path) ? 'markdown' : /\.html?$/iu.test(file.path) ? 'html' : undefined;
+}
+
+/** Images and PDFs have no readable diff, so they always show as a preview; SVG keeps its Diff and Preview switch. */
+function previewOnly(file: FileDiff): boolean {
+  return previewKind(file) === 'media' && (file.binary || mediaType(file.path) === 'application/pdf');
+}
+
+function loadMedia(file: FileDiff): void {
+  const key = 'media:' + file.path;
+  if (!medias.has(file.path) && !loading.has(key)) {
+    loading.add(key);
+    post({ action: 'media', path: file.path });
+  }
+}
+
+/** The file before and after the PR, side by side: images as pictures, PDFs as pages. */
+function mediaNode(file: FileDiff): HTMLElement {
+  const data = medias.get(file.path);
+  if (!data) { loadMedia(file); return el('div', 'note muted', 'Loading preview…'); }
+  const wrap = el('div', 'media');
+  for (const [label, side] of [['Before', data.old], ['After', data.new]] as const) {
+    if (!side) continue;
+    const pane = el('figure', 'media-side');
+    const caption = el('figcaption', 'muted', label);
+    pane.append(caption);
+    if ('tooBig' in side) pane.append(el('div', 'note muted', 'Too large to preview.'));
+    else if (side.mime === 'application/pdf') pane.append(pdfView(file.path + '\0' + label, side));
+    else {
+      const image = el('img');
+      image.alt = label + ': ' + file.path;
+      image.addEventListener('load', () => { caption.textContent = label + ' · ' + image.naturalWidth + ' × ' + image.naturalHeight; }, { once: true });
+      image.src = 'data:' + side.mime + ';base64,' + side.data;
+      pane.append(image);
+    }
+    wrap.append(pane);
+  }
+  return wrap;
+}
+
+/** Load pdf.js once, on the first PDF the page shows. */
+function loadPdfLibrary(): Promise<typeof PdfJs> {
+  const source = initial.pdfScript;
+  if (!source) return Promise.reject(new Error('PDF preview is not available here.'));
+  pdfLibrary ??= new Promise((resolve, reject) => {
+    const tag = el('script');
+    tag.nonce = nonce;
+    tag.src = source;
+    tag.addEventListener('load', () => { resolve((window as unknown as { pdfjsLib: typeof PdfJs }).pdfjsLib); });
+    tag.addEventListener('error', () => { reject(new Error('Could not load the PDF viewer.')); });
+    document.head.append(tag);
+  });
+  return pdfLibrary;
+}
+
+/** Pages shown per PDF; longer files say how many more there are. */
+const maxPdfPages = 10;
+
+function pdfView(key: string, side: Extract<MediaSide, { data: string }>): HTMLElement {
+  const known = pdfViews.get(key);
+  if (known) return known;
+  const pages = el('div', 'pdf-pages');
+  pages.append(el('div', 'note muted', 'Rendering PDF…'));
+  pdfViews.set(key, pages);
+  void (async () => {
+    const library = await loadPdfLibrary();
+    const bytes = Uint8Array.from(atob(side.data), (char) => char.charCodeAt(0));
+    const pdf = await library.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    const shown: HTMLElement[] = [];
+    for (let number = 1; number <= Math.min(pdf.numPages, maxPdfPages); number += 1) {
+      const page = await pdf.getPage(number);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = el('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+      await page.render({ canvasContext: context, viewport }).promise;
+      shown.push(canvas);
+    }
+    if (pdf.numPages > maxPdfPages) shown.push(el('div', 'note muted', (pdf.numPages - maxPdfPages) + ' more pages. Open the file to see them.'));
+    pages.replaceChildren(...shown);
+  })().catch((error: unknown) => {
+    pages.replaceChildren(el('div', 'note bad', 'Could not show this PDF: ' + (error instanceof Error ? error.message : String(error))));
+  });
+  return pages;
 }
 
 function loadPreview(file: FileDiff): void {
@@ -1084,14 +1295,16 @@ function setTip(button: HTMLElement, tip: string): void {
 
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
-  for (const name of ['unified', 'split', 'guided'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
+  for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
+  for (const name of ['files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
+  showGuideTab();
   const folderButton = $('folders');
-  folderButton.toggleAttribute('disabled', layout === 'guided');
-  setTip(folderButton, layout === 'guided' ? 'Folders are off in Guided view' : 'Group files by folder');
+  folderButton.toggleAttribute('disabled', view === 'guide');
+  setTip(folderButton, view === 'guide' ? 'Folders are off in the guide' : 'Group files by folder');
   folderButton.setAttribute('aria-pressed', String(folders));
   folderButton.setAttribute('aria-pressed', String(folders));
   if (!files) return;
-  if (layout === 'guided') { keepView(() => renderGuide(only)); return; }
+  if (view === 'guide') { keepView(() => renderGuide(only)); return; }
   const shownFiles = files;
   const container = $('files');
   const threadsByFile = new Map<string, Thread[]>();
@@ -1100,7 +1313,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     threadsByFile.set(thread.path, list);
     list.push(thread);
   }
-  $('files-title').textContent = 'Files (' + shownFiles.length + ') · ' + shownFiles.filter((file) => viewed.has(file.path)).length + ' viewed';
+  $('files-title').textContent = shownFiles.filter((file) => viewed.has(file.path)).length + '/' + shownFiles.length + ' viewed';
   const tree = fileTree(shownFiles);
   const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
@@ -1330,10 +1543,13 @@ function threadRow(thread: Thread, kind: ThreadKind): HTMLElement {
   const text = el('span', 'text');
   text.append(...inlineCode(thread.text));
   const status = kind === 'analysis' ? '' : thread.status;
+  const working = thread.source === 'local' ? thread.working : undefined;
   const [name = '', line = ''] = (thread.location.split('/').pop() ?? '').split(/(?=:\d+$)/u);
   const where = el('span', 'where');
   where.append(el('span', 'name', name), line);
-  item.append(where, text, el('span', 'state', status));
+  const state = el('span', 'state', working ? '' : status);
+  if (working) state.append(el('span', 'chip claude working', working));
+  item.append(where, text, state);
   if (thread.url) {
     const link = el('a', 'open', '↗');
     link.title = 'Open on GitHub';
@@ -1384,7 +1600,7 @@ function foldToggle(isCollapsed: boolean): HTMLElement {
 
 function updateGuideProgress(groups: readonly GuideGroup[]): void {
   const steps = groups.flatMap((group) => group.steps);
-  $('files-title').textContent = 'Steps (' + steps.length + ') · ' + steps.filter(stepViewed).length + ' viewed';
+  $('files-title').textContent = steps.filter(stepViewed).length + '/' + steps.length + ' steps viewed';
   for (const group of groups) {
     const progress = document.querySelector('[data-group="' + CSS.escape(group.key) + '"] .progress');
     if (progress) progress.textContent = group.steps.filter(stepViewed).length + '/' + group.steps.length + ' viewed';
@@ -1396,7 +1612,7 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const container = $('files');
   const result = current?.analysis.result;
   if (!files || !result) {
-    $('files-title').textContent = 'Guide';
+    $('files-title').textContent = '';
     container.replaceChildren(guideIntro());
     return;
   }
@@ -1479,7 +1695,9 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
     renderFiles([step.path]);
   });
   label.append(check, 'Viewed');
-  head.append(chevron, name, badge, stats, label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
+  const kind = previewKind(file);
+  const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
+  head.append(chevron, name, badge, stats, previewSwitch(file, showPreview), label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
   box.append(head);
   const diff = el('div', 'diff');
   if (step.fileNote) {
@@ -1489,12 +1707,31 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   }
   if (note) diff.append(threadBox(note));
   else if (step.note) diff.append(el('div', 'step-note', step.note));
-  if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  if (showPreview && kind === 'media') diff.append(mediaNode(file));
+  else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  else if (showPreview) diff.append(previewNode(file, threads, new Set()));
   else if (!slice.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
   else diff.append(table(slice, threads, new Set(), hasDraft ? composer : null));
   box.append(diff);
   wrap.append(box);
   return wrap;
+}
+
+/** Diff and Preview buttons for a file that can be previewed and still has a readable diff. */
+function previewSwitch(file: FileDiff, showPreview: boolean): HTMLElement {
+  const mode = el('span', 'seg');
+  mode.hidden = previewKind(file) === undefined || previewOnly(file);
+  for (const [text, on] of [['Diff', false], ['Preview', true]] as const) {
+    const option = button(text, () => {
+      if (on) previewing.add(file.path);
+      else previewing.delete(file.path);
+      save();
+      renderFiles([file.path]);
+    });
+    option.setAttribute('aria-pressed', String(showPreview === on));
+    mode.append(option);
+  }
+  return mode;
 }
 
 function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
@@ -1532,27 +1769,17 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
     renderFiles([file.path]);
   });
   const kind = previewKind(file);
-  const showPreview = kind !== undefined && previewing.has(file.path);
+  const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
   full.hidden = showPreview || file.binary || file.change === 'added' || file.change === 'deleted' || !file.hunks.length;
-  const mode = el('span', 'seg');
-  mode.hidden = kind === undefined;
-  for (const [text, on] of [['Diff', false], ['Preview', true]] as const) {
-    const option = button(text, () => {
-      if (on) previewing.add(file.path);
-      else previewing.delete(file.path);
-      save();
-      renderFiles([file.path]);
-    });
-    option.setAttribute('aria-pressed', String(showPreview === on));
-    mode.append(option);
-  }
+  const mode = previewSwitch(file, showPreview);
   const unresolved = threads.filter((thread) => !thread.resolved).length;
   const comments = el('span', 'muted comments', !threads.length ? '' : threads.length + (threads.length === 1 ? ' comment' : ' comments') + (unresolved === threads.length ? '' : ', ' + unresolved + ' open'));
   head.append(chevron, name, badge, stats, comments, mode, label, full, open);
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set<string>();
-  if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  if (showPreview && kind === 'media') diff.append(mediaNode(file));
+  else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, placed));
   else if (!file.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
   else diff.append(table(file, threads, placed));
@@ -1656,7 +1883,7 @@ function renderPeek(): void {
   setHighlight('lr-name');
   const peek = peeks[peekAt];
   if (!peek) return;
-  $('peek-title').textContent = peek.location;
+  $('peek-title').textContent = peek.guessed ? peek.location + ' · same name in this file' : peek.location;
   $<HTMLButtonElement>('peek-back').disabled = peekAt < 1;
   $<HTMLButtonElement>('peek-forward').disabled = peekAt >= peeks.length - 1;
   const body = el('table');
@@ -1681,9 +1908,29 @@ function renderPeek(): void {
   if (first) codeBox.scrollTop = Math.max(0, first.getBoundingClientRect().top - codeBox.getBoundingClientRect().top - 3 * first.offsetHeight);
 }
 
+/** Switch between the file list and the guide; the sidebar follows. */
+function setView(next: View): void {
+  view = next;
+  save();
+  renderFiles();
+  post({ action: 'view', view: next });
+}
+
+/** The Guide tab's count: steps once a guide exists, a pulse while Claude builds it. Build guide shows only in the guide. */
+function showGuideTab(): void {
+  const analysis = current?.analysis;
+  const count = $('guide-count');
+  const steps = analysis?.result?.groups.reduce((sum, group) => sum + group.steps.length, 0);
+  count.className = analysis?.running ? 'count working' : 'count';
+  count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
+  count.hidden = !analysis?.running && steps === undefined;
+  $('files-count').textContent = files ? String(files.length) : '';
+  for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
+}
+
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
 function revealStep(key: string): void {
-  layout = 'guided';
+  view = 'guide';
   const result = current?.analysis.result;
   if (files && result) {
     guide ??= buildGuide(result, files);
@@ -1698,10 +1945,27 @@ function revealStep(key: string): void {
   document.querySelector('.step-wrap[data-key="' + CSS.escape(key) + '"]')?.scrollIntoView({ block: 'start' });
 }
 
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Show a hint that clears itself after a few seconds, on the next click, or on Escape. */
+function showNotice(notice: NonNullable<ExtensionMessage['notice']>): void {
+  const box = $('notice');
+  const { extension } = notice;
+  box.replaceChildren(el('span', '', notice.text), ...extension === undefined ? [] : [button('Find extension', () => { post({ action: 'find-extension', extension }); clearNotice(); }, 'small')]);
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(clearNotice, extension === undefined ? 4000 : 8000);
+}
+
+function clearNotice(): void {
+  clearTimeout(noticeTimer);
+  $('notice').replaceChildren();
+}
+
 function onExtensionMessage(data: ExtensionMessage): void {
   if (data.state) render(data.state);
   if (data.files) { files = data.files; guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
   if (data.preview) { previews.set(data.preview.path, data.preview); loading.delete('preview:' + data.preview.path); renderFiles([data.preview.path]); }
+  if (data.media) { medias.set(data.media.path, data.media); loading.delete('media:' + data.media.path); renderFiles([data.media.path]); }
   if (data.context) { contextLines.set(data.context.path, data.context.lines); loading.delete(data.context.path); renderFiles([data.context.path]); }
   if (data.definition) { peeks.length = peekAt + 1; peeks.push(data.definition); peekAt = peeks.length - 1; renderPeek(); }
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
@@ -1714,6 +1978,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
     document.querySelector('[data-path="' + CSS.escape(data.reveal) + '"]')?.scrollIntoView({ block: 'start' });
   }
   if (data.filesError) $('files').replaceChildren(el('p', 'bad', 'Could not read the changes: ' + data.filesError));
+  if (data.notice) showNotice(data.notice);
   if (data.error) {
     loading.clear();
     $('error').textContent = data.error;
@@ -1729,16 +1994,19 @@ function onExtensionMessage(data: ExtensionMessage): void {
     renderFiles([path]);
   }
   if (data.done?.startsWith('reply:')) {
+    const id = data.done.slice(6);
     sending.delete(data.done);
-    replies.delete(data.done.slice(6));
+    replies.delete(id);
     save();
-    renderFiles();
+    renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
   }
   if (data.idle) setBusy(false);
 }
 
 for (const [id, action] of [['pr', 'pr'], ['log', 'log'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
 $('error').addEventListener('click', () => { $('error').textContent = ''; });
+document.addEventListener('pointerdown', (event) => { if (!(event.target instanceof Node && $('notice').contains(event.target))) clearNotice(); });
+window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });
 document.addEventListener('mousemove', (event) => {
   pointer = event;
   if (event.metaKey || event.ctrlKey) probeAt(event);
@@ -1766,6 +2034,32 @@ for (const type of ['keydown', 'keyup'] as const) {
 window.addEventListener('blur', () => { hovered = undefined; showLink(); });
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && peeks.length && !(event.target instanceof HTMLTextAreaElement)) closePeek(); });
 $('peek-close').addEventListener('click', closePeek);
+/** Drag the definition panel's left edge to resize it; double-click restores the default width. */
+function showPeekWidth(): void {
+  if (peekWidth === undefined) document.body.style.removeProperty('--peek-width');
+  else document.body.style.setProperty('--peek-width', peekWidth + 'px');
+}
+showPeekWidth();
+$('peek-resize').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const handle = $('peek-resize');
+  handle.setPointerCapture(event.pointerId);
+  document.body.classList.add('resizing');
+  const move = (moved: PointerEvent): void => {
+    peekWidth = Math.round(Math.min(window.innerWidth - 16, Math.max(320, window.innerWidth - moved.clientX - 8)));
+    showPeekWidth();
+  };
+  const stop = (): void => {
+    handle.removeEventListener('pointermove', move);
+    document.body.classList.remove('resizing');
+    save();
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', stop, { once: true });
+  handle.addEventListener('pointercancel', stop, { once: true });
+});
+$('peek-resize').addEventListener('dblclick', () => { peekWidth = undefined; showPeekWidth(); save(); });
 $('peek-back').addEventListener('click', () => { if (peekAt > 0) { peekAt -= 1; renderPeek(); } });
 $('peek-forward').addEventListener('click', () => { if (peekAt < peeks.length - 1) { peekAt += 1; renderPeek(); } });
 $('peek-open').addEventListener('click', () => {
@@ -1774,12 +2068,12 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
-$('guided').addEventListener('click', () => { layout = 'guided'; save(); renderFiles(); });
+for (const name of ['files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
 $('folders').addEventListener('click', () => { folders = !folders; save(); renderFiles(); });
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
 for (const [id, value] of [['collapse', true], ['expand', false]] as const) {
   $(id).addEventListener('click', () => {
-    if (layout === 'guided') {
+    if (view === 'guide') {
       for (const group of guide ?? []) {
         if (!value) collapsed.set(guideState('group', group.key), false);
         for (const step of group.steps) collapsed.set(guideState('step', step.key), value);
@@ -1811,6 +2105,19 @@ for (const review of reviewButtons) {
     post({ action: 'review', event: review.dataset.event as ReviewEvent, body: $<HTMLTextAreaElement>('review').value });
   });
 }
+$('conflict-send').addEventListener('click', () => {
+  const answer = $<HTMLTextAreaElement>('conflict-answer');
+  if (!answer.value.trim()) { answer.focus(); return; }
+  $('error').textContent = '';
+  post({ action: 'fix-conflicts', text: answer.value });
+  answer.value = '';
+});
+$('conflict-cancel').addEventListener('click', () => post({ action: 'dismiss-conflict-question' }));
+$('fix-conflicts').addEventListener('click', () => {
+  $('error').textContent = '';
+  $<HTMLButtonElement>('fix-conflicts').disabled = true;
+  post({ action: 'fix-conflicts' });
+});
 $('edit-title').addEventListener('click', () => changePullRequest({ action: 'edit-title' }));
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels'] as const) $('pick-' + what).addEventListener('click', () => changePullRequest({ action: 'pick', what }));
