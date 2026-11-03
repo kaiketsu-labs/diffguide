@@ -9,7 +9,7 @@ import { codicons } from './codicons.js';
 import { codePreviewStyles } from './codePreview.js';
 import { type MarkdownBlock, markdownHtml } from './markdown.js';
 import { parseSuggestions, withoutSuggestions } from './suggestions.js';
-import type { FileDiff } from './unifiedDiff.js';
+import { type FileDiff, highlightSource } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
@@ -50,9 +50,10 @@ export interface OverviewState {
     /** Set when the thread holds a note from Claude's analysis. */
     readonly origin?: 'analysis';
     /** The commented code, shown as the lines a suggestion replaces. */
-    readonly original: string;
-    /** Rendered from Markdown with escaped text only; `suggestions` holds each ```suggestion block's code, shown as options. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly suggestions?: readonly string[] }[];
+    /** The commented lines as highlighted HTML, sent when a message has suggestions. */
+    readonly original?: readonly string[];
+    /** Rendered from Markdown with escaped text only; `suggestions` holds each ```suggestion block's lines as highlighted HTML, shown as options. */
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly suggestions?: readonly (readonly string[])[] }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];
@@ -471,11 +472,11 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .claude-live{margin-top:var(--space-8)}
-.suggestion{margin:var(--space-8) 0 0 36px;border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
-.suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line)}
+.suggestion{margin-top:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
+.suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line-strong)}
 .suggestion-diff .add{background:var(--diff-add)}.suggestion-diff .del{background:var(--diff-del)}
-.suggestion-diff{margin:0;padding:var(--space-4) 0;font:12px/18px var(--font-code);overflow:auto}.suggestion-diff div{padding:0 var(--space-8);white-space:pre}
-.suggestion .actions{padding:var(--space-6) var(--space-8);border-top:1px solid var(--line)}
+.suggestion-diff{margin:0;padding:var(--space-4) 0;font:12px/18px var(--font-code);overflow:auto}.suggestion-diff div{padding:0 var(--space-8);white-space:pre}.suggestion-diff .sign{display:inline-block;width:16px;color:var(--ink-muted);user-select:none}
+.suggestion .actions{margin:0;padding:var(--space-6) var(--space-8);border-top:1px solid var(--line-strong)}
 .media{display:flex;flex-wrap:wrap;gap:var(--space-12);padding:var(--space-12)}
 .media-side{flex:1 1 280px;min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-6)}
 .media-side figcaption{font-size:12px}
@@ -681,9 +682,9 @@ export function buildOverviewState(
         endLine: thread.anchor.endLine,
         resolved: thread.resolved,
         ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        original: thread.anchor.selectedText,
+        ...(thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
         messages: thread.messages.map(({ author, text, createdAt }) => {
-          const suggestions = parseSuggestions(text).map((suggestion) => suggestion.code);
+          const suggestions = parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
           return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
         }),
         ...(publication === undefined ? {} : { url: publication.url }),

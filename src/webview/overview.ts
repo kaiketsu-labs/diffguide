@@ -700,9 +700,10 @@ function threadBox(thread: Thread): HTMLElement {
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
     status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
   thread.messages.forEach((entry, index) => {
-    box.append(message(entry));
+    const item = message(entry);
     const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
-    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) box.append(suggestionCard(thread, index, suggestions));
+    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
+    box.append(item);
   });
   const working = thread.source === 'local' ? thread.working : undefined;
   if (working) {
@@ -743,7 +744,7 @@ function threadBox(thread: Thread): HTMLElement {
 const pickedOptions = new Map<string, number>();
 
 /** A message's suggestions as a small diff against the commented lines; several suggestions are options to switch between. */
-function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: number, suggestions: readonly string[]): HTMLElement {
+function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: number, suggestions: readonly (readonly string[])[]): HTMLElement {
   const key = thread.id + ':' + index;
   const picked = Math.min(pickedOptions.get(key) ?? 0, suggestions.length - 1);
   const card = el('div', 'suggestion');
@@ -759,9 +760,14 @@ function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: num
     head.append(tabs);
   }
   const lines = el('pre', 'suggestion-diff');
-  const original = thread.original.replace(/\n$/u, '');
-  for (const text of original ? original.split('\n') : []) lines.append(el('div', 'del', '- ' + text));
-  for (const text of (suggestions[picked] ?? '').split('\n')) lines.append(el('div', 'add', '+ ' + text));
+  const line = (kind: 'add' | 'del', html: string): HTMLElement => {
+    const row = el('div', kind);
+    row.innerHTML = html;
+    row.prepend(el('span', 'sign', kind === 'add' ? '+' : '-'));
+    return row;
+  };
+  for (const html of thread.original ?? []) lines.append(line('del', html));
+  for (const html of suggestions[picked] ?? []) lines.append(line('add', html));
   const actions = el('div', 'row actions');
   const where = { id: thread.id, message: index, option: picked };
   const publish = button('Publish suggestion', () => post({ action: 'publish-suggestion', ...where }));
