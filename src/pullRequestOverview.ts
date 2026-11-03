@@ -12,6 +12,7 @@ import type { FileDiff } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
+import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
@@ -114,6 +115,8 @@ export interface OverviewActions {
   readContext(path: string): Promise<readonly string[]>;
   /** A Markdown file as rendered blocks, or an HTML file's source for a sandboxed frame. */
   readPreview(path: string): Promise<FilePreview>;
+  /** A changed image, SVG or PDF before and after the PR. */
+  readMedia(path: string): Promise<MediaPreview>;
   /** Definition of the name at a position in a PR file, or in an earlier definition result. */
   findDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<DefinitionPeek | undefined>;
   /** Whether the name at a position has a definition, to underline it while Cmd or Ctrl is held. */
@@ -156,7 +159,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 export type PageMessage =
   | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
-  | { readonly action: 'context' | 'preview' | 'editor'; readonly path: string }
+  | { readonly action: 'context' | 'preview' | 'media' | 'editor'; readonly path: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
   | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
@@ -186,6 +189,7 @@ export interface ExtensionMessage {
   readonly revealStep?: string | undefined;
   readonly filesError?: string;
   readonly preview?: FilePreview & { readonly path: string };
+  readonly media?: MediaPreview & { readonly path: string };
   readonly context?: { readonly path: string; readonly lines: readonly string[] };
   readonly definition?: DefinitionPeek;
   readonly probe?: { readonly id: string; readonly found: boolean };
@@ -231,7 +235,7 @@ export async function showPullRequestOverview(
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'));
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'), resource('dist', 'pdf.js'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (): void => {
     void actions.readFiles().then((files) => {
@@ -292,6 +296,7 @@ export async function showPullRequestOverview(
         }
         else if (action === 'context' && typeof path === 'string') post({ context: { path, lines: await actions.readContext(path) } });
         else if (action === 'preview' && typeof path === 'string') post({ preview: { path, ...await actions.readPreview(path) } });
+        else if (action === 'media' && typeof path === 'string') post({ media: { path, ...await actions.readMedia(path) } });
         else if (action === 'definition' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0) {
           const at = typeof peek === 'string' ? { peek } : { path: path as string };
           const found = await actions.findDefinition(at, line, column as number);
@@ -363,7 +368,8 @@ export async function showPullRequestOverview(
 }
 
 /** The review page: PR overview on top, every changed file below. `script` (src/webview/overview.ts) draws it from state and file messages. */
-export function overviewHtml(state: OverviewState, script: string, claudeIcon = ''): string {
+/** `pdfScript` is the URL of pdf.js, which the page loads on its first PDF. */
+export function overviewHtml(state: OverviewState, script: string, claudeIcon = '', pdfScript?: string): string {
   const nonce = randomUUID().replaceAll('-', '');
   // Inline styles are allowed because an HTML preview frame inherits this policy; its sandbox still blocks scripts.
   return `<!doctype html>
@@ -454,6 +460,11 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 #peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:var(--peek-width,min(560px,92vw));max-width:calc(100vw - 2 * var(--space-8));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.media{display:flex;flex-wrap:wrap;gap:var(--space-12);padding:var(--space-12)}
+.media-side{flex:1 1 280px;min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-6)}
+.media-side figcaption{font-size:12px}
+.media-side img{max-width:100%;max-height:600px;align-self:flex-start;border:1px solid var(--line);border-radius:var(--radius-sm);background:repeating-conic-gradient(color-mix(in srgb,var(--ink) 10%,transparent) 0 25%,transparent 0 50%) 0 0/16px 16px}
+.pdf-pages{display:flex;flex-direction:column;gap:var(--space-8);max-height:900px;overflow:auto}.pdf-pages canvas{max-width:100%;height:auto;border:1px solid var(--line);border-radius:var(--radius-sm)}
 #peek-code{flex:1;overflow:auto}
 #peek-resize{position:absolute;left:0;top:0;bottom:0;z-index:1;width:6px;cursor:ew-resize}#peek-resize:hover,body.resizing #peek-resize{background:var(--brand-line)}body.resizing{cursor:ew-resize;user-select:none}tr.focus td{background:var(--vscode-editor-rangeHighlightBackground,rgba(255,213,0,.12))}
 .note{padding:10px 14px}
@@ -468,7 +479,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .md-block table{border-collapse:collapse}.md-block th,.md-block td{padding:4px 10px;border:1px solid var(--line)}
 .md-block blockquote,.msg-text blockquote{margin:var(--space-8) 0;padding-left:var(--space-12);border-left:3px solid var(--line);color:var(--ink-muted)}.md-block img,.msg-text img{max-width:100%}
 .md-block hr{border:0;border-top:1px solid var(--line)}
-.html-preview{display:block;width:100%;border:0;background:#fff}
+.html-preview{display:block;width:100%;border:0}
 .html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
 td.num.pick{cursor:pointer;position:relative}
@@ -576,7 +587,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <button id="expand" class="icon-button" data-tip="Expand all files" aria-label="Expand all files">${codicons.expandAll}</button>
 <button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button></span></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
-<script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon }).replaceAll('<', '\\u003c')}</script>
+<script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon, pdfScript }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
 </body></html>`;
 }

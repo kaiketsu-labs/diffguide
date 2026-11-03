@@ -7,6 +7,8 @@ import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLin
 import type { LineRange } from '../reviewedFiles.js';
 import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
 import { codicons } from '../codicons.js';
+import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
+import type * as PdfJs from 'pdfjs-dist';
 
 declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; getState(): unknown; setState(state: Saved): void };
 
@@ -42,7 +44,7 @@ type CheckState = PullRequestDetails['checks'][number]['state'];
 const api = acquireVsCodeApi();
 const post = (message: PageMessage): void => api.postMessage(message);
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly claudeIcon: string };
+const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly claudeIcon: string; readonly pdfScript?: string };
 const { claudeIcon } = initial;
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
@@ -53,6 +55,10 @@ let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
 const previewing = new Set(saved.previewing ?? []);
 const previews = new Map<string, Preview>();
+const medias = new Map<string, MediaPreview>();
+/** Rendered PDF pages per file side, kept so redrawing a file box does not render them again. */
+const pdfViews = new Map<string, HTMLElement>();
+let pdfLibrary: Promise<typeof PdfJs> | undefined;
 const frameHeight = new Map<string, number>();
 const frameTops = new Map<string, Record<string, number>>();
 const frameAnchors = new Map<string, Anchor[]>();
@@ -788,9 +794,95 @@ function expand(file: FileDiff, index: number, top: number, bottom: number): voi
   renderFiles([file.path]);
 }
 
-function previewKind(file: FileDiff): 'markdown' | 'html' | undefined {
+function previewKind(file: FileDiff): 'markdown' | 'html' | 'media' | undefined {
+  if (mediaType(file.path) !== undefined) return 'media';
   if (file.binary || file.change === 'deleted') return undefined;
   return /\.(md|markdown)$/iu.test(file.path) ? 'markdown' : /\.html?$/iu.test(file.path) ? 'html' : undefined;
+}
+
+/** Images and PDFs have no readable diff, so they always show as a preview; SVG keeps its Diff and Preview switch. */
+function previewOnly(file: FileDiff): boolean {
+  return previewKind(file) === 'media' && (file.binary || mediaType(file.path) === 'application/pdf');
+}
+
+function loadMedia(file: FileDiff): void {
+  const key = 'media:' + file.path;
+  if (!medias.has(file.path) && !loading.has(key)) {
+    loading.add(key);
+    post({ action: 'media', path: file.path });
+  }
+}
+
+/** The file before and after the PR, side by side: images as pictures, PDFs as pages. */
+function mediaNode(file: FileDiff): HTMLElement {
+  const data = medias.get(file.path);
+  if (!data) { loadMedia(file); return el('div', 'note muted', 'Loading preview…'); }
+  const wrap = el('div', 'media');
+  for (const [label, side] of [['Before', data.old], ['After', data.new]] as const) {
+    if (!side) continue;
+    const pane = el('figure', 'media-side');
+    const caption = el('figcaption', 'muted', label);
+    pane.append(caption);
+    if ('tooBig' in side) pane.append(el('div', 'note muted', 'Too large to preview.'));
+    else if (side.mime === 'application/pdf') pane.append(pdfView(file.path + '\0' + label, side));
+    else {
+      const image = el('img');
+      image.alt = label + ': ' + file.path;
+      image.addEventListener('load', () => { caption.textContent = label + ' · ' + image.naturalWidth + ' × ' + image.naturalHeight; }, { once: true });
+      image.src = 'data:' + side.mime + ';base64,' + side.data;
+      pane.append(image);
+    }
+    wrap.append(pane);
+  }
+  return wrap;
+}
+
+/** Load pdf.js once, on the first PDF the page shows. */
+function loadPdfLibrary(): Promise<typeof PdfJs> {
+  const source = initial.pdfScript;
+  if (!source) return Promise.reject(new Error('PDF preview is not available here.'));
+  pdfLibrary ??= new Promise((resolve, reject) => {
+    const tag = el('script');
+    tag.nonce = nonce;
+    tag.src = source;
+    tag.addEventListener('load', () => { resolve((window as unknown as { pdfjsLib: typeof PdfJs }).pdfjsLib); });
+    tag.addEventListener('error', () => { reject(new Error('Could not load the PDF viewer.')); });
+    document.head.append(tag);
+  });
+  return pdfLibrary;
+}
+
+/** Pages shown per PDF; longer files say how many more there are. */
+const maxPdfPages = 10;
+
+function pdfView(key: string, side: Extract<MediaSide, { data: string }>): HTMLElement {
+  const known = pdfViews.get(key);
+  if (known) return known;
+  const pages = el('div', 'pdf-pages');
+  pages.append(el('div', 'note muted', 'Rendering PDF…'));
+  pdfViews.set(key, pages);
+  void (async () => {
+    const library = await loadPdfLibrary();
+    const bytes = Uint8Array.from(atob(side.data), (char) => char.charCodeAt(0));
+    const pdf = await library.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    const shown: HTMLElement[] = [];
+    for (let number = 1; number <= Math.min(pdf.numPages, maxPdfPages); number += 1) {
+      const page = await pdf.getPage(number);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = el('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+      await page.render({ canvasContext: context, viewport }).promise;
+      shown.push(canvas);
+    }
+    if (pdf.numPages > maxPdfPages) shown.push(el('div', 'note muted', (pdf.numPages - maxPdfPages) + ' more pages. Open the file to see them.'));
+    pages.replaceChildren(...shown);
+  })().catch((error: unknown) => {
+    pages.replaceChildren(el('div', 'note bad', 'Could not show this PDF: ' + (error instanceof Error ? error.message : String(error))));
+  });
+  return pages;
 }
 
 function loadPreview(file: FileDiff): void {
@@ -1502,7 +1594,9 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
     renderFiles([step.path]);
   });
   label.append(check, 'Viewed');
-  head.append(chevron, name, badge, stats, label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
+  const kind = previewKind(file);
+  const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
+  head.append(chevron, name, badge, stats, previewSwitch(file, showPreview), label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
   box.append(head);
   const diff = el('div', 'diff');
   if (step.fileNote) {
@@ -1512,12 +1606,31 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   }
   if (note) diff.append(threadBox(note));
   else if (step.note) diff.append(el('div', 'step-note', step.note));
-  if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  if (showPreview && kind === 'media') diff.append(mediaNode(file));
+  else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  else if (showPreview) diff.append(previewNode(file, threads, new Set()));
   else if (!slice.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
   else diff.append(table(slice, threads, new Set(), hasDraft ? composer : null));
   box.append(diff);
   wrap.append(box);
   return wrap;
+}
+
+/** Diff and Preview buttons for a file that can be previewed and still has a readable diff. */
+function previewSwitch(file: FileDiff, showPreview: boolean): HTMLElement {
+  const mode = el('span', 'seg');
+  mode.hidden = previewKind(file) === undefined || previewOnly(file);
+  for (const [text, on] of [['Diff', false], ['Preview', true]] as const) {
+    const option = button(text, () => {
+      if (on) previewing.add(file.path);
+      else previewing.delete(file.path);
+      save();
+      renderFiles([file.path]);
+    });
+    option.setAttribute('aria-pressed', String(showPreview === on));
+    mode.append(option);
+  }
+  return mode;
 }
 
 function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
@@ -1555,27 +1668,17 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
     renderFiles([file.path]);
   });
   const kind = previewKind(file);
-  const showPreview = kind !== undefined && previewing.has(file.path);
+  const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
   full.hidden = showPreview || file.binary || file.change === 'added' || file.change === 'deleted' || !file.hunks.length;
-  const mode = el('span', 'seg');
-  mode.hidden = kind === undefined;
-  for (const [text, on] of [['Diff', false], ['Preview', true]] as const) {
-    const option = button(text, () => {
-      if (on) previewing.add(file.path);
-      else previewing.delete(file.path);
-      save();
-      renderFiles([file.path]);
-    });
-    option.setAttribute('aria-pressed', String(showPreview === on));
-    mode.append(option);
-  }
+  const mode = previewSwitch(file, showPreview);
   const unresolved = threads.filter((thread) => !thread.resolved).length;
   const comments = el('span', 'muted comments', !threads.length ? '' : threads.length + (threads.length === 1 ? ' comment' : ' comments') + (unresolved === threads.length ? '' : ', ' + unresolved + ' open'));
   head.append(chevron, name, badge, stats, comments, mode, label, full, open);
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set<string>();
-  if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  if (showPreview && kind === 'media') diff.append(mediaNode(file));
+  else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, placed));
   else if (!file.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
   else diff.append(table(file, threads, placed));
@@ -1761,6 +1864,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
   if (data.state) render(data.state);
   if (data.files) { files = data.files; guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
   if (data.preview) { previews.set(data.preview.path, data.preview); loading.delete('preview:' + data.preview.path); renderFiles([data.preview.path]); }
+  if (data.media) { medias.set(data.media.path, data.media); loading.delete('media:' + data.media.path); renderFiles([data.media.path]); }
   if (data.context) { contextLines.set(data.context.path, data.context.lines); loading.delete(data.context.path); renderFiles([data.context.path]); }
   if (data.definition) { peeks.length = peekAt + 1; peeks.push(data.definition); peekAt = peeks.length - 1; renderPeek(); }
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
