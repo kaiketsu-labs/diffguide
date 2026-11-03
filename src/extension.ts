@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -10,12 +10,14 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
+import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
+import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
 import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
-import { fenceFilePaths, markdownBlocks } from './markdown.js';
+import { fenceFilePaths, inlineLocalImages, markdownBlocks, markdownHtml } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
@@ -26,7 +28,9 @@ import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from '
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
-import { getHeadRevision } from './git.js';
+import { getHeadRevision, readGitBase, readGitBaseBytes } from './git.js';
+import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
+import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
 import { anchorFromText } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
@@ -83,6 +87,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const folder = worktreePath(storageRoot, repository, pullRequest.number);
       const listed = provider.listFiles(pullRequest.number).then((files) => files.map((file) => file.path), () => undefined);
       let diffPaths: readonly string[] = [];
+      /** Changed files from the latest diff read, so media previews need no second read. */
+      let diffFiles: readonly FileDiff[] = [];
       const definitions = new DefinitionPeeks(folder);
       const readBase = async (): Promise<string> => {
         const base = await readPullRequestBase(folder, pullRequest.baseBranch);
@@ -104,6 +110,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const readFiles = async (): Promise<readonly FileDiff[]> => {
         const files = await readPullRequestDiff(folder, await readBase());
         diffPaths = files.map((file) => file.path);
+        diffFiles = files;
         return files;
       };
       const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
@@ -132,6 +139,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return details;
       };
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
+      /** What Claude asked when it last stopped fixing conflicts without pushing. */
+      let conflictQuestion: string | undefined;
+      /** Suggestion options written to the worktree while this page is open, by thread. */
+      const applied = new Map<string, { readonly message: number; readonly option: number; readonly pushed: boolean }>();
+      /** File contents around each suggestion applied without committing, so Discard can put the file back. */
+      const undo = new Map<string, { readonly path: string; readonly before: string; readonly after: string }>();
+      /** Where to push the PR's branch: `origin`, or the fork's URL when the branch lives in a fork. */
+      const pushTarget = (loaded: PullRequestDetails): string => loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
       const loadThreads = (): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
@@ -154,8 +169,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
         const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
-        await prepareHighlighting(opened.session.store.threads.flatMap((thread) => thread.messages.flatMap((entry) => fenceFilePaths(entry.text))));
-        return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
+        await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
+        const state = buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
+        const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
+        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }) };
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -173,7 +190,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         readPreview: async (path) => {
           if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
           const text = await readFile(join(folder, path), 'utf8');
-          return /\.html?$/iu.test(path) ? { kind: 'html', ...htmlPreview(text) } : { kind: 'markdown', blocks: markdownBlocks(text) };
+          if (/\.html?$/iu.test(path)) return { kind: 'html', ...htmlPreview(text) };
+          const readImage = async (image: string): Promise<Buffer | undefined> => {
+            const file = join(folder, image);
+            const info = await lstat(file).catch(() => undefined);
+            return info?.isFile() === true && info.size <= maxMediaBytes ? await readFile(file) : undefined;
+          };
+          const blocks = await Promise.all(markdownBlocks(text).map(async (block) => ({ ...block, html: await inlineLocalImages(block.html, path, readImage) })));
+          return { kind: 'markdown', blocks };
+        },
+        readMedia: async (path) => {
+          const file = diffFiles.find((each) => each.path === path);
+          const mime = mediaType(path);
+          if (file === undefined || mime === undefined) throw new Error(`${path} is not an image or PDF in this PR's changes.`);
+          const side = async (read: () => Promise<Buffer>, size: () => Promise<number>): Promise<MediaSide> =>
+            await size() > maxMediaBytes ? { mime, tooBig: true } : { mime, data: (await read()).toString('base64') };
+          const base = await readBase();
+          const oldPath = file.oldPath ?? path;
+          const [before, after] = await Promise.all([
+            file.change === 'added' ? undefined : side(() => readGitBaseBytes(folder, oldPath, base, maxMediaBytes), async () => Number((await git(folder, ['cat-file', '-s', `${base}:${oldPath}`])).trim())),
+            file.change === 'deleted' ? undefined : side(() => readFile(join(folder, path)), async () => (await stat(join(folder, path))).size),
+          ]);
+          return { ...before === undefined ? {} : { old: before }, ...after === undefined ? {} : { new: after } };
         },
         findDefinition: async (at, line, column) => {
           if ('peek' in at) return definitions.find(definitions.location(at.peek).uri, line, column);
@@ -184,6 +222,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if ('peek' in at) return definitions.has(definitions.location(at.peek).uri, line, column);
           if (!diffPaths.includes(at.path)) return false;
           return definitions.has(vscode.Uri.file(join(folder, at.path)), line, column);
+        },
+        missingLanguage: async (at) => {
+          if ('peek' in at) return definitions.missingLanguage(definitions.location(at.peek).uri);
+          return diffPaths.includes(at.path) ? definitions.missingLanguage(vscode.Uri.file(join(folder, at.path))) : undefined;
         },
         openDefinition: async (peek) => {
           const { uri, range } = definitions.location(peek);
@@ -235,6 +277,66 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
+        },
+        applySuggestion: async (id, message, option) => {
+          const { anchor, messages } = findThread(id);
+          const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
+          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
+          if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Apply the suggestion when it is done.');
+          const loaded = await currentDetails();
+          const file = join(folder, anchor.path);
+          if (loaded.canEdit) {
+            if ((await git(folder, ['status', '--porcelain', '--', anchor.path])).trim() !== '') throw new Error(`${anchor.path} has uncommitted changes. Commit or discard them first.`);
+            await syncToPullRequestHead(folder, pullRequest.number);
+          }
+          const before = await readFile(file, 'utf8');
+          const after = applySuggestion(before, anchor, suggestion);
+          await writeFile(file, after);
+          if (loaded.canEdit) {
+            await commitAndPush(folder, { path: anchor.path, message: 'Apply suggestion from code review', pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer' });
+            changedOnGitHub();
+          } else undo.set(id, { path: anchor.path, before, after });
+          applied.set(id, { message, option, pushed: loaded.canEdit });
+          detailsChanged.fire();
+        },
+        discardSuggestion: async (id) => {
+          const change = undo.get(id);
+          if (change === undefined) throw new Error('There is no applied suggestion to discard.');
+          const file = join(folder, change.path);
+          if (await readFile(file, 'utf8') !== change.after) throw new Error(`${change.path} changed since the suggestion was applied, so it was not discarded.`);
+          await writeFile(file, change.before);
+          undo.delete(id);
+          applied.delete(id);
+          detailsChanged.fire();
+        },
+        publishSuggestion: async (id, message, option) => {
+          const { anchor, messages } = findThread(id);
+          const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
+          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (anchor.side !== 'working') throw new Error('GitHub takes suggestions only on the PR\'s version of a file.');
+          const head = await readHead();
+          const lines = suggestionLines(await readGitBase(folder, anchor.path, head), anchor);
+          await provider.publishComment(pullRequest.number, { path: anchor.path, body: suggestionMarkdown(suggestion), commitId: head, side: 'RIGHT', lines }, true);
+          void loadThreads();
+          void loadDetails();
+        },
+        fixConflicts: async (answer) => {
+          const loaded = await currentDetails();
+          if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
+          const base = await prepareConflictFix(folder, pullRequest.number, pullRequest.baseBranch);
+          const head = (await git(folder, ['rev-parse', 'HEAD'])).trim();
+          conflictQuestion = undefined;
+          const pushTo = pushTarget(loaded);
+          const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch: pullRequest.baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
+          const pushedNothing = (await git(folder, ['rev-parse', 'HEAD'])).trim() === head;
+          if (error === undefined && pushedNothing && reply !== undefined) conflictQuestion = reply;
+          changedOnGitHub();
+          if (error !== undefined) throw new Error(`Claude did not fix the conflicts: ${error}`);
+        },
+        dismissConflictQuestion: () => {
+          conflictQuestion = undefined;
+          detailsChanged.fire();
         },
         merge: async (method) => {
           const merge = 'Merge';
@@ -339,6 +441,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
       };
     };
+    const cleanUp = async (manual: boolean): Promise<void> => {
+      const days = vscode.workspace.getConfiguration('pairReview').get<number>('worktreeCleanupDays', 14);
+      const results = await Promise.all((await checkouts.list()).map((checkout) => cleanUpWorktrees({
+        root: checkout.root, storageRoot: checkout.storageRoot, connect: checkout.connect, remove: worktreesOf(checkout).remove,
+      }, days)));
+      const removed = results.flatMap((result) => result.removed);
+      const kept = results.flatMap((result) => result.kept);
+      if (removed.length > 0) {
+        void vscode.window.showInformationMessage(`Removed worktrees of merged, closed or unused PRs: ${removed.join(', ')}`);
+        void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+      }
+      if (!manual) return;
+      if (kept.length > 0) void vscode.window.showInformationMessage(`Kept ${kept.join(', ')}: uncommitted changes or unpushed commits.`);
+      else if (removed.length === 0) void vscode.window.showInformationMessage('No PR worktrees to clean up.');
+    };
+    if (!mockPullRequests()) void cleanUp(false).catch(() => undefined);
     context.subscriptions.push(
       registerPullRequestView(
         async () => (await checkouts.list()).map((checkout) => ({
@@ -352,6 +470,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.workspaceState,
       ),
       watchGitHubSessions(() => { void vscode.commands.executeCommand('pairReview.refreshPullRequests'); }),
+      vscode.commands.registerCommand('pairReview.cleanUpWorktrees', async () => {
+        try {
+          await cleanUp(true);
+        } catch (error: unknown) {
+          void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+        }
+      }),
       vscode.commands.registerCommand('pairReview.signInToGitHub', async (provider: unknown) => {
         try {
           await signInToGitHub(provider === 'github' || provider === 'github-enterprise' ? provider : undefined);

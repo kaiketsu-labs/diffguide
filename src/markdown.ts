@@ -1,5 +1,8 @@
+import { posix } from 'node:path';
+
 import MarkdownIt from 'markdown-it';
 import { codePreviewHtml, escapeCode } from './codePreview.js';
+import { mediaType } from './media.js';
 
 const fenceFiles: Readonly<Record<string, string>> = {
   ts: 'x.ts', typescript: 'x.ts', tsx: 'x.tsx', js: 'x.js', javascript: 'x.js', jsx: 'x.jsx', json: 'x.json',
@@ -151,4 +154,34 @@ function inline(text: string): string {
       .replaceAll(/(^|[^\w*])\*([^*\s][^*]*)\*(?![\w*])/gu, '$1<em>$2</em>')
       .replaceAll(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/gu, '$1<em>$2</em>');
   }).join('');
+}
+
+/**
+ * Embed Markdown images that point into the repository as data URIs, since the review page loads only https and data images.
+ * `readImage` gets a repository path and returns its bytes, or undefined to leave the image as it is.
+ */
+export async function inlineLocalImages(html: string, documentPath: string, readImage: (path: string) => Promise<Buffer | undefined>): Promise<string> {
+  const sources = [...new Set([...html.matchAll(/<img src="([^"]*)"/gu)].map((match) => match[1] ?? ''))];
+  const inlined = new Map<string, string>();
+  await Promise.all(sources.map(async (source) => {
+    const path = repositoryPath(source, documentPath);
+    const mime = path === undefined ? undefined : mediaType(path);
+    if (path === undefined || !mime?.startsWith('image/')) return;
+    const bytes = await readImage(path);
+    if (bytes !== undefined) inlined.set(source, `data:${mime};base64,${bytes.toString('base64')}`);
+  }));
+  return html.replace(/<img src="([^"]*)"/gu, (tag, source: string) => {
+    const data = inlined.get(source);
+    return data === undefined ? tag : `<img src="${data}"`;
+  });
+}
+
+/** The repository path a relative image link names, or undefined for links with a scheme and paths outside the repository. */
+function repositoryPath(source: string, documentPath: string): string | undefined {
+  const link = source.replaceAll('&amp;', '&').replace(/[?#].*$/u, '');
+  if (link === '' || /^[a-z][a-z0-9+.-]*:|^\/\//iu.test(link)) return undefined;
+  let decoded: string;
+  try { decoded = decodeURIComponent(link); } catch { return undefined; }
+  const path = posix.normalize(decoded.startsWith('/') ? decoded.slice(1) : posix.join(posix.dirname(documentPath), decoded));
+  return path.startsWith('../') || path === '..' || posix.isAbsolute(path) ? undefined : path;
 }

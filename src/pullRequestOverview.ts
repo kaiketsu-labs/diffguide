@@ -8,10 +8,13 @@ import { webviewStyles } from './webviewStyles.js';
 import { codicons } from './codicons.js';
 import { codePreviewStyles } from './codePreview.js';
 import { type MarkdownBlock, markdownHtml } from './markdown.js';
-import type { FileDiff } from './unifiedDiff.js';
+import { parseSuggestions, withoutSuggestions } from './suggestions.js';
+import { type FileDiff, highlightSource } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
+import { conflictFixLabel } from './conflicts.js';
+import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
@@ -20,17 +23,25 @@ export interface OverviewState {
   readonly headBranch: string;
   readonly baseBranch: string;
   readonly url: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly changes?: { readonly additions: number; readonly deletions: number; readonly files: number };
   readonly reviewed?: { readonly done: number; readonly total: number };
   /** Paths of files marked reviewed. */
   readonly viewed: readonly string[];
   /** Line ranges marked read, collapsed in the diff. */
   readonly read: readonly ReadRange[];
-  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean };
+  /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
+  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string };
   readonly threads: readonly {
     readonly id: string;
     readonly location: string;
     readonly text: string;
     readonly status: string;
+    /** What Claude is doing with this thread right now, while it waits for or works on it. */
+    readonly working?: string;
+    /** The suggestion option written to the worktree from this thread, while the page is open. */
+    readonly applied?: { readonly message: number; readonly option: number; readonly pushed: boolean };
     readonly url?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
@@ -40,8 +51,11 @@ export interface OverviewState {
     readonly resolved: boolean;
     /** Set when the thread holds a note from Claude's analysis. */
     readonly origin?: 'analysis';
-    /** Rendered from Markdown with escaped text only. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string }[];
+    /** The commented code, shown as the lines a suggestion replaces. */
+    /** The commented lines as highlighted HTML, sent when a message has suggestions. */
+    readonly original?: readonly string[];
+    /** Rendered from Markdown with escaped text only; `suggestions` holds each ```suggestion block's lines as highlighted HTML, shown as options. */
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly suggestions?: readonly (readonly string[])[] }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];
@@ -50,6 +64,8 @@ export interface OverviewState {
   readonly details?: PullRequestDetails;
   readonly detailsError?: string;
   readonly analysis: AnalysisView;
+  /** Claude's question, as HTML, when it stopped fixing conflicts without pushing. */
+  readonly conflictQuestion?: string;
 }
 
 /** Claude's guided-review analysis: whether it runs, and the last result. */
@@ -111,11 +127,15 @@ export interface OverviewActions {
   readContext(path: string): Promise<readonly string[]>;
   /** A Markdown file as rendered blocks, or an HTML file's source for a sandboxed frame. */
   readPreview(path: string): Promise<FilePreview>;
+  /** A changed image, SVG or PDF before and after the PR. */
+  readMedia(path: string): Promise<MediaPreview>;
   /** Definition of the name at a position in a PR file, or in an earlier definition result. */
   findDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<DefinitionPeek | undefined>;
   /** Whether the name at a position has a definition, to underline it while Cmd or Ctrl is held. */
   hasDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<boolean>;
   openDefinition(peek: string): Promise<void>;
+  /** The file extension to search language extensions for, when VS Code has no language support for the file. */
+  missingLanguage(at: { readonly path: string } | { readonly peek: string }): Promise<string | undefined>;
   setViewed(path: string, viewed: boolean): Promise<void>;
   /** Mark lines read; `fileDone` also marks the whole file reviewed. */
   markRead(range: LineRange, fileDone: boolean): Promise<void>;
@@ -126,6 +146,16 @@ export interface OverviewActions {
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   merge(method: MergeMethod): Promise<void>;
+  /** Replace a local thread's lines in the worktree with one option of a message's suggestions. */
+  applySuggestion(threadId: string, message: number, option: number): Promise<void>;
+  /** Post one option of a message's suggestions on GitHub as a suggestion on the thread's lines, in the pending review. */
+  publishSuggestion(threadId: string, message: number, option: number): Promise<void>;
+  /** Put back the file an uncommitted suggestion changed. */
+  discardSuggestion(threadId: string): Promise<void>;
+  /** Have the PR's Claude merge the base branch, resolve the conflicts and push; resolves when Claude is done. */
+  fixConflicts(answer?: string): Promise<void>;
+  /** Hide Claude's question about the conflicts. */
+  dismissConflictQuestion(): void;
   /** Ask for a new title in VS Code and save it. */
   editTitle(): Promise<void>;
   editBody(body: string): Promise<void>;
@@ -151,7 +181,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 export type PageMessage =
   | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
-  | { readonly action: 'context' | 'preview' | 'editor'; readonly path: string }
+  | { readonly action: 'context' | 'preview' | 'media' | 'editor'; readonly path: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
   | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
@@ -159,13 +189,18 @@ export type PageMessage =
   | { readonly action: 'reply' | 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
+  | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
+  | { readonly action: 'discard-suggestion'; readonly id: string }
   | { readonly action: 'viewed'; readonly path: string; readonly viewed: boolean }
   | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
   | { readonly action: 'open-definition'; readonly peek: string }
+  | { readonly action: 'view'; readonly view: 'files' | 'guide' }
+  | { readonly action: 'find-extension'; readonly extension: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
   | { readonly action: 'merge'; readonly method: MergeMethod }
-  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' }
+  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
+  | { readonly action: 'fix-conflicts'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
   | { readonly action: 'pick'; readonly what: PickTarget }
   | { readonly action: 'draft'; readonly draft: boolean };
@@ -179,10 +214,13 @@ export interface ExtensionMessage {
   readonly revealStep?: string | undefined;
   readonly filesError?: string;
   readonly preview?: FilePreview & { readonly path: string };
+  readonly media?: MediaPreview & { readonly path: string };
   readonly context?: { readonly path: string; readonly lines: readonly string[] };
   readonly definition?: DefinitionPeek;
   readonly probe?: { readonly id: string; readonly found: boolean };
   readonly error?: string;
+  /** A passing hint that clears itself; `extension` offers to search language extensions for that file extension. */
+  readonly notice?: { readonly text: string; readonly extension?: string };
   /** The form whose send failed, so the page can enable it again. */
   readonly form?: string | undefined;
   /** The form whose send succeeded, or 'review'. */
@@ -222,7 +260,7 @@ export async function showPullRequestOverview(
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'));
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'), resource('dist', 'pdf.js'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (): void => {
     void actions.readFiles().then((files) => {
@@ -256,7 +294,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -283,14 +321,36 @@ export async function showPullRequestOverview(
         }
         else if (action === 'context' && typeof path === 'string') post({ context: { path, lines: await actions.readContext(path) } });
         else if (action === 'preview' && typeof path === 'string') post({ preview: { path, ...await actions.readPreview(path) } });
+        else if (action === 'media' && typeof path === 'string') post({ media: { path, ...await actions.readMedia(path) } });
         else if (action === 'definition' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0) {
-          const found = await actions.findDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number);
-          post(found === undefined ? { error: 'No definition found here. VS Code needs a language extension for this file type.' } : { definition: found });
+          const at = typeof peek === 'string' ? { peek } : { path: path as string };
+          const found = await actions.findDefinition(at, line, column as number);
+          if (found !== undefined) post({ definition: found });
+          else {
+            const missing = await actions.missingLanguage(at).catch(() => undefined);
+            post({ notice: missing === undefined ? { text: 'No definition found here.' } : { text: `No definition found. VS Code has no language support for .${missing} files.`, extension: missing } });
+          }
         } else if (action === 'probe' && (typeof path === 'string' || typeof peek === 'string') && isLine(line) && Number.isSafeInteger(column) && (column as number) >= 0
           && typeof id === 'string' && id.length <= 400) {
           const found = await actions.hasDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number).catch(() => false);
           post({ probe: { id, found } });
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
+        else if (action === 'view' && (view === 'files' || view === 'guide')) {
+          await vscode.commands.executeCommand(view === 'guide' ? 'pairReview.showGuideInTree' : 'pairReview.showFilesInTree');
+        } else if ((action === 'apply-suggestion' || action === 'publish-suggestion') && typeof id === 'string' && state.threads.some((thread) => thread.id === id)
+          && Number.isSafeInteger(message) && (message as number) >= 0 && Number.isSafeInteger(option) && (option as number) >= 0) {
+          await (action === 'apply-suggestion' ? actions.applySuggestion : actions.publishSuggestion)(id, message as number, option as number);
+          if (action === 'apply-suggestion') sendFiles();
+        } else if (action === 'discard-suggestion' && typeof id === 'string' && state.threads.some((thread) => thread.id === id)) {
+          await actions.discardSuggestion(id);
+          sendFiles();
+        } else if (action === 'dismiss-conflict-question') actions.dismissConflictQuestion();
+        else if (action === 'fix-conflicts' && (text === undefined || isText(text))) {
+          void actions.fixConflicts(text?.trim()).catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
+        }
+        else if (action === 'find-extension' && typeof extension === 'string' && /^[\w+-]{1,20}$/u.test(extension)) {
+          await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
+        }
         else if (action === 'log') actions.showLog();
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
@@ -343,7 +403,8 @@ export async function showPullRequestOverview(
 }
 
 /** The review page: PR overview on top, every changed file below. `script` (src/webview/overview.ts) draws it from state and file messages. */
-export function overviewHtml(state: OverviewState, script: string, claudeIcon = ''): string {
+/** `pdfScript` is the URL of pdf.js, which the page loads on its first PDF. */
+export function overviewHtml(state: OverviewState, script: string, claudeIcon = '', pdfScript?: string): string {
   const nonce = randomUUID().replaceAll('-', '');
   // Inline styles are allowed because an HTML preview frame inherits this policy; its sandbox still blocks scripts.
   return `<!doctype html>
@@ -358,8 +419,8 @@ body{margin:0;padding:var(--space-24) var(--space-24) 48px}
 h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
-.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}.head{justify-content:space-between}
-.byline{margin-top:var(--space-6)}
+.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}#conflict-row{flex-wrap:nowrap}#conflict-row>button{margin-left:auto;flex-shrink:0}#conflict-note{min-width:0;max-width:100%}#conflict-note::before{flex-shrink:0}#conflict-note>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#conflict-ask{margin-top:var(--space-8)}#conflict-reply{margin-top:var(--space-8)}.head{justify-content:space-between}
+.byline,.facts{margin-top:var(--space-6)}
 .status{margin-top:var(--space-12);font-size:12px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
 @media (max-width:760px){.layout{grid-template-columns:minmax(0,1fr)}}
@@ -384,21 +445,29 @@ ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px
 #body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
-.review-actions{justify-content:flex-end}
+.review-actions{justify-content:flex-end}#review-note{flex:1 1 160px}#review-note:empty{display:none}.state-actions{justify-content:flex-end}
 .title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-8)}.section-head h3{margin:0}.section-head .icon-button{width:22px;height:22px;min-height:22px;margin:-2px 0}
 .labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}.label::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--label)}
 .state-actions:not(:empty){margin-top:var(--space-8)}.state-actions .gap{flex:1}#body textarea{width:100%;min-height:120px}
 .verdict{display:inline-flex;align-items:center;height:24px;box-sizing:border-box;padding:0 var(--space-12);border:1px solid currentColor;border-radius:var(--radius-pill);font-size:12px;font-weight:600}
 .verdict.muted{color:var(--ink-muted)}
+#notice{position:fixed;left:var(--space-24);bottom:var(--space-16);z-index:5;display:flex;align-items:center;gap:var(--space-12);max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-lg);color:var(--ink);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}#notice:empty{display:none}
 #error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
 #files-bar{position:sticky;top:0;z-index:2;margin-top:var(--space-24);padding:var(--space-8) 0;background:var(--surface);border-bottom:1px solid var(--line)}
 #files-bar h2 .muted{font-weight:400}
-.file{margin-top:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + 10px)}
-.file-head{position:sticky;top:var(--bar-height,46px);z-index:1;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-12);background:var(--surface-raised);border-bottom:1px solid var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
-.file.collapsed .file-head{border-bottom:0;border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
+.view-head{gap:var(--space-12)}.tabs{display:flex;gap:var(--space-4)}
+.tabs button{display:inline-flex;align-items:center;gap:var(--space-6);min-height:28px;padding:0 var(--space-8);border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--ink-muted);background:none;font-size:14px;font-weight:600}
+.tabs button:hover{color:var(--ink);filter:none}.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
+.tabs svg{width:16px;height:16px;fill:currentColor}
+.tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty:not(.working){display:none}
+.tabs .count.working{min-width:0;width:8px;height:8px;padding:0;background:var(--claude);animation:pulse 1.2s ease-in-out infinite}
+.off-view{display:none}
+.file{margin-top:var(--space-12);border:1px solid var(--line-strong);border-top:0;border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + 10px)}
+.file-head{position:sticky;top:var(--bar-height,46px);z-index:1;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);margin:0 -1px;padding:var(--space-6) var(--space-12);background:var(--surface-raised);border:1px solid var(--line-strong);border-bottom-color:var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
+.file.collapsed{border:0}.file.collapsed .file-head{margin:0;border-bottom-color:var(--line-strong);border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
 .file-head .name{font-family:var(--font-code);font-size:12px;overflow-wrap:anywhere;flex:1;cursor:pointer}
-.chevron,.thread>summary::before{display:inline-block;flex-shrink:0;width:16px;height:16px;vertical-align:-3px;color:var(--ink-muted);background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;transition:transform .1s}.chevron{cursor:pointer}.chevron.closed,.thread:not([open])>summary::before{transform:rotate(-90deg)}.badge{width:14px;font:700 11px var(--font-code);text-align:center}
+.chevron{display:inline-block;flex-shrink:0;width:16px;height:16px;vertical-align:-3px;color:var(--ink-muted);background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;transition:transform .1s}.chevron{cursor:pointer}.chevron.closed{transform:rotate(-90deg)}.badge{width:14px;font:700 11px var(--font-code);text-align:center}
 .badge.added{color:var(--git-added)}.badge.modified{color:var(--git-modified)}.badge.deleted{color:var(--git-deleted)}.badge.renamed{color:var(--git-renamed)}
 .stats{font:12px var(--font-code)}.stat-add{color:var(--git-added)}.stat-del{color:var(--git-deleted)}
 label.viewed{display:inline-flex;align-items:center;gap:var(--space-4);height:22px;box-sizing:border-box;padding:0 var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-sm);font-size:12px;cursor:pointer}
@@ -423,10 +492,22 @@ tr.read-run button,.expand button{min-height:18px;padding:0 var(--space-8);font-
 label.check{display:flex;align-items:center;gap:var(--space-6);padding-left:var(--space-12);border-left:1px solid var(--line);cursor:pointer;font-size:12px}.strip label.check{padding-left:10px;margin-left:2px}.strip .muted:has(+label.check){margin-left:auto}
 td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground));text-decoration:underline}
 ::highlight(lr-name){background-color:var(--vscode-editor-wordHighlightStrongBackground,rgba(255,213,0,.3))}
-#peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:min(560px,92vw);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
+#peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:var(--peek-width,min(560px,92vw));max-width:calc(100vw - 2 * var(--space-8));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-#peek-code{flex:1;overflow:auto}tr.focus td{background:var(--vscode-editor-rangeHighlightBackground,rgba(255,213,0,.12))}
+.claude-live{margin-top:var(--space-8)}
+.suggestion{margin-top:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
+.suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line-strong)}
+.suggestion-diff .add{background:var(--diff-add)}.suggestion-diff .del{background:var(--diff-del)}
+.suggestion-diff{margin:0;padding:var(--space-4) 0;font:12px/18px var(--font-code);overflow:auto}.suggestion-diff div{padding:0 var(--space-8);white-space:pre}.suggestion-diff .sign{display:inline-block;width:16px;color:var(--ink-muted);user-select:none}
+.suggestion .actions{margin:0;padding:var(--space-6) var(--space-8);border-top:1px solid var(--line-strong)}
+.media{display:flex;flex-wrap:wrap;gap:var(--space-12);padding:var(--space-12)}
+.media-side{flex:1 1 280px;min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-6)}
+.media-side figcaption{font-size:12px}
+.media-side img{max-width:100%;max-height:600px;align-self:flex-start;border:1px solid var(--line);border-radius:var(--radius-sm);background:repeating-conic-gradient(color-mix(in srgb,var(--ink) 10%,transparent) 0 25%,transparent 0 50%) 0 0/16px 16px}
+.pdf-pages{display:flex;flex-direction:column;gap:var(--space-8);max-height:900px;overflow:auto}.pdf-pages canvas{max-width:100%;height:auto;border:1px solid var(--line);border-radius:var(--radius-sm)}
+#peek-code{flex:1;overflow:auto}
+#peek-resize{position:absolute;left:0;top:0;bottom:0;z-index:1;width:6px;cursor:ew-resize}#peek-resize:hover,body.resizing #peek-resize{background:var(--brand-line)}body.resizing{cursor:ew-resize;user-select:none}tr.focus td{background:var(--vscode-editor-rangeHighlightBackground,rgba(255,213,0,.12))}
 .note{padding:10px 14px}
 .preview.md{padding:var(--space-8) 20px var(--space-12);font-family:var(--font-ui);line-height:1.6;overflow-wrap:anywhere}
 .md-block{margin:0 -10px;padding:1px 10px;border-left:2px solid transparent;border-radius:var(--radius-sm);cursor:pointer}
@@ -440,20 +521,21 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .md-block blockquote,.msg-text blockquote{margin:var(--space-8) 0;padding-left:var(--space-12);border-left:3px solid var(--line);color:var(--ink-muted)}.md-block img,.msg-text img{max-width:100%}
 .msg-text table{display:block;width:auto;max-width:100%;overflow-x:auto;margin:var(--space-6) 0;table-layout:auto;font:inherit}.msg-text th,.msg-text td{padding:var(--space-4) var(--space-8);border:1px solid var(--line);text-align:left;white-space:normal}.msg-text th{font-weight:600;background:var(--surface-sunken)}.msg-text .right{text-align:right}.msg-text .center{text-align:center}
 .md-block hr{border:0;border-top:1px solid var(--line)}
-.html-preview{display:block;width:100%;border:0;background:#fff}
+.html-preview{display:block;width:100%;border:0}
 .html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
-td.num.pick{cursor:pointer}td.num.pick:hover{color:var(--brand);background:color-mix(in srgb,var(--ink) 10%,transparent)}
+td.num.pick{cursor:pointer;position:relative}
+td.num.pick:hover::after,td.num.pick:has(+td.code:hover)::after,td.num.pick:has(+td.num:not(.pick)+td.code:hover)::after{content:'+';position:absolute;top:50%;right:-16px;z-index:1;width:20px;height:20px;margin-top:-10px;border-radius:var(--radius-sm);font:600 15px/20px var(--font-ui);text-align:center;color:var(--on-brand);background:var(--brand)}td.num.pick:hover{color:var(--brand);background:color-mix(in srgb,var(--ink) 10%,transparent)}
 td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--brand-soft)}
 td.sel-start{box-shadow:inset 2px 0 0 var(--brand-line),inset 0 0 0 999px var(--brand-soft)}
 tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
-.thread{--accent:var(--claude);--tint:var(--claude-soft);max-width:860px;box-sizing:border-box;padding:0 var(--space-12) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-raised);font:13px/20px var(--font-ui)}
+.thread{--accent:var(--claude);--tint:var(--claude-soft);max-width:860px;box-sizing:border-box;padding:0 var(--space-12) var(--space-12);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-raised);font:13px/20px var(--font-ui)}
 .thread.github{--accent:var(--github);--tint:var(--github-soft)}.thread.pending,.thread.draft{border:1px dashed var(--accent)}
 .thread+.thread{margin-top:var(--space-6)}
-.thread>summary,.thread>.strip{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;margin:0 calc(-1 * var(--space-12));padding:var(--space-4) var(--space-12);font-size:12px;line-height:18px;background:var(--tint);border-bottom:1px solid var(--line)}
+.thread>summary,.thread>.strip{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;margin:0 calc(-1 * var(--space-12));padding:var(--space-4) var(--space-12);font-size:12px;line-height:18px;background:var(--tint);border-bottom:1px solid var(--line-strong)}
 .thread:not([open])>summary{border-bottom:0}
 .thread>summary{cursor:pointer;list-style:none}.thread>summary::-webkit-details-marker{display:none}
-.thread>summary::before{content:''}details.thread:not([open]){padding-bottom:0}
+details.thread:not([open]){padding-bottom:0}
 .source{display:inline-flex;align-items:center;gap:var(--space-4);font-weight:600;color:var(--accent)}.source svg{width:14px;height:14px;fill:currentColor}
 .strip .muted:last-child{margin-left:auto}
 .thread textarea{margin-top:var(--space-12);min-height:64px}
@@ -506,9 +588,11 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 </style></head><body>
 <div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
+<div id="facts" class="muted facts"></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
-<aside id="peek" hidden aria-label="Definition"><div class="peek-head">
+<p id="notice" role="status"></p>
+<aside id="peek" hidden aria-label="Definition"><div id="peek-resize" title="Drag to resize. Double-click to reset."></div><div class="peek-head">
 <button id="peek-back" title="Back" aria-label="Back"><svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg></button>
 <button id="peek-forward" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></svg></button>
 <span id="peek-title" class="where"></span>
@@ -527,22 +611,24 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <section id="review-box"><h3>Finish your review</h3>
 <p class="muted" id="pending-note"></p>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
-<div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
-<p class="muted" id="review-note"></p></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row state-actions" id="state-actions"></div></section>
+<div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
-<div id="files-bar" class="row head"><h2 id="files-title">Files</h2><span class="toolbar">
+<div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
+<button id="view-files" role="tab">Files<span id="files-count" class="count"></span></button>
+<button id="view-guide" role="tab">${codicons.map}Guide<span id="guide-count" class="count" hidden></span></button></span>
+<span id="files-title" class="muted"></span></span><span class="toolbar">
 <span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
-<span class="divider"></span>
-<span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button><button id="guided" data-tip="Guided: files in the order of Claude's guide" aria-label="Guided by Claude's guide">${codicons.map}</button></span>
+<span id="analyze-divider" class="divider"></span>
+<span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button></span>
 <button id="folders" class="icon-button" data-tip="Group files by folder" aria-label="Group files by folder">${codicons.listTree}</button>
 <span class="divider"></span>
 <button id="collapse" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
 <button id="expand" class="icon-button" data-tip="Expand all files" aria-label="Expand all files">${codicons.expandAll}</button>
 <button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button></span></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
-<script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon }).replaceAll('<', '\\u003c')}</script>
+<script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon, pdfScript }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
 </body></html>`;
 }
@@ -589,17 +675,24 @@ export function buildOverviewState(
     headBranch: pullRequest.headBranch,
     baseBranch: pullRequest.baseBranch,
     url: pullRequest.url,
+    ...(pullRequest.createdAt === undefined ? {} : { createdAt: pullRequest.createdAt }),
+    ...(pullRequest.updatedAt === undefined ? {} : { updatedAt: pullRequest.updatedAt }),
+    ...(pullRequest.changes === undefined ? {} : { changes: pullRequest.changes }),
     viewed,
     read,
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),
     ...(details === undefined ? {} : details instanceof Error ? { detailsError: details.message } : { details }),
     ...(remote === undefined ? {} : remote instanceof Error ? { githubError: remote.message } : { github: remote.map(githubThreadView) }),
-    claude: { text: claude.text, running: runner.activity.running, retry: claude.retry },
+    claude: { text: claude.text, running: runner.activity.running, retry: claude.retry,
+      ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}) },
     analysis,
     threads: session.store.threads.map((thread) => {
       const publication = session.publication?.(thread.id);
+      const activity = session.activity?.(thread.id);
+      const working = thread.resolved ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
+        : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
       const status = [
-        thread.resolved ? 'Resolved' : session.activity?.(thread.id) ?? threadStatus[thread.status],
+        thread.resolved ? 'Resolved' : working !== undefined ? undefined : activity ?? threadStatus[thread.status],
         publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
       ].filter(Boolean).join(' · ');
       return {
@@ -607,13 +700,18 @@ export function buildOverviewState(
         location: `${thread.anchor.path}:${thread.anchor.startLine}`,
         text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
         status,
+        ...(working === undefined ? {} : { working }),
         path: thread.anchor.path,
         side: thread.anchor.side === 'original' ? 'old' : 'new',
         startLine: thread.anchor.startLine,
         endLine: thread.anchor.endLine,
         resolved: thread.resolved,
         ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        messages: thread.messages.map(({ author, text, createdAt }) => ({ author, html: markdownHtml(text), createdAt })),
+        ...(thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
+        messages: thread.messages.map(({ author, text, createdAt }) => {
+          const suggestions = parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
+          return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
+        }),
         ...(publication === undefined ? {} : { url: publication.url }),
       };
     }),
