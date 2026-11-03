@@ -25,4 +25,15 @@ await build({
   logLevel: 'info'
 });
 
+await build({
+  entryPoints: { pdf: 'src/webview/pdf.ts' },
+  outdir: 'dist',
+  bundle: true,
+  minify: true,
+  platform: 'browser',
+  target: 'chrome120',
+  format: 'iife',
+  logLevel: 'warning'
+});
+
 await copyFile('node_modules/vscode-oniguruma/release/onig.wasm', 'dist/onig.wasm');

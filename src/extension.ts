@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -26,7 +26,8 @@ import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from '
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
-import { getHeadRevision } from './git.js';
+import { getHeadRevision, readGitBaseBytes } from './git.js';
+import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
 import { anchorFromText } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
@@ -83,6 +84,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const folder = worktreePath(storageRoot, repository, pullRequest.number);
       const listed = provider.listFiles(pullRequest.number).then((files) => files.map((file) => file.path), () => undefined);
       let diffPaths: readonly string[] = [];
+      /** Changed files from the latest diff read, so media previews need no second read. */
+      let diffFiles: readonly FileDiff[] = [];
       const definitions = new DefinitionPeeks(folder);
       const readBase = async (): Promise<string> => {
         const base = await readPullRequestBase(folder, pullRequest.baseBranch);
@@ -104,6 +107,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const readFiles = async (): Promise<readonly FileDiff[]> => {
         const files = await readPullRequestDiff(folder, await readBase());
         diffPaths = files.map((file) => file.path);
+        diffFiles = files;
         return files;
       };
       const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
@@ -174,6 +178,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
           const text = await readFile(join(folder, path), 'utf8');
           return /\.html?$/iu.test(path) ? { kind: 'html', ...htmlPreview(text) } : { kind: 'markdown', blocks: markdownBlocks(text) };
+        },
+        readMedia: async (path) => {
+          const file = diffFiles.find((each) => each.path === path);
+          const mime = mediaType(path);
+          if (file === undefined || mime === undefined) throw new Error(`${path} is not an image or PDF in this PR's changes.`);
+          const side = async (read: () => Promise<Buffer>, size: () => Promise<number>): Promise<MediaSide> =>
+            await size() > maxMediaBytes ? { mime, tooBig: true } : { mime, data: (await read()).toString('base64') };
+          const base = await readBase();
+          const oldPath = file.oldPath ?? path;
+          const [before, after] = await Promise.all([
+            file.change === 'added' ? undefined : side(() => readGitBaseBytes(folder, oldPath, base, maxMediaBytes), async () => Number((await git(folder, ['cat-file', '-s', `${base}:${oldPath}`])).trim())),
+            file.change === 'deleted' ? undefined : side(() => readFile(join(folder, path)), async () => (await stat(join(folder, path))).size),
+          ]);
+          return { ...before === undefined ? {} : { old: before }, ...after === undefined ? {} : { new: after } };
         },
         findDefinition: async (at, line, column) => {
           if ('peek' in at) return definitions.find(definitions.location(at.peek).uri, line, column);
