@@ -9,6 +9,7 @@ import { codePreviewStyles } from './codePreview.js';
 import { type MarkdownBlock, markdownHtml } from './markdown.js';
 import type { FileDiff } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
+import type { LineRange, ReadRange } from './reviewedFiles.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
@@ -19,6 +20,8 @@ export interface OverviewState {
   readonly reviewed?: { readonly done: number; readonly total: number };
   /** Paths of files marked reviewed. */
   readonly viewed: readonly string[];
+  /** Line ranges marked read, collapsed in the diff. */
+  readonly read: readonly ReadRange[];
   readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean };
   readonly threads: readonly {
     readonly id: string;
@@ -96,6 +99,9 @@ export interface OverviewActions {
   hasDefinition(at: { readonly path: string } | { readonly peek: string }, line: number, column: number): Promise<boolean>;
   openDefinition(peek: string): Promise<void>;
   setViewed(path: string, viewed: boolean): Promise<void>;
+  /** Mark lines read; `fileDone` also marks the whole file reviewed. */
+  markRead(range: LineRange, fileDone: boolean): Promise<void>;
+  unmarkRead(ids: readonly string[]): Promise<void>;
   openInEditor(path: string): Promise<void>;
   showLog(): void;
   retry(): void;
@@ -155,7 +161,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, event, body, method, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -196,6 +202,9 @@ export async function showPullRequestOverview(
         } else if (action === 'pr') await vscode.env.openExternal(vscode.Uri.parse(state.url));
         else if (action === 'thread' && typeof id === 'string') await actions.revealThread(id);
         else if (action === 'viewed' && typeof path === 'string' && typeof viewed === 'boolean') await actions.setViewed(path, viewed);
+        else if (action === 'read' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
+          && startLine <= endLine && typeof viewed === 'boolean') await actions.markRead({ path, side, startLine, endLine }, viewed);
+        else if (action === 'unread' && Array.isArray(ids) && ids.length <= 1000 && ids.every((item) => typeof item === 'string')) await actions.unmarkRead(ids as string[]);
         else if (action === 'editor' && typeof path === 'string') await actions.openInEditor(path);
         else if (action === 'github' && typeof id === 'string') {
           const url = [...state.threads, ...state.github ?? []].find((thread) => thread.id === id)?.url;
@@ -289,6 +298,16 @@ tr.add td,td.add{background:var(--vscode-diffEditor-insertedLineBackground,rgba(
 tr.del td,td.del{background:var(--vscode-diffEditor-removedLineBackground,rgba(248,81,73,.18))}
 td.empty{background:rgba(128,128,128,.08)}
 tr.hunk td{padding:2px 10px;color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.1);font-size:11px}
+tr.read-run td{padding:2px 10px;color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.05);font-family:var(--review-font-ui);font-size:11px}
+.composer-actions{gap:8px;margin-top:10px}.composer-actions button.quiet:last-child{padding-right:0}div.thread.draft{--soft:color-mix(in srgb,var(--vscode-foreground) 25%,transparent);padding-bottom:12px}
+.thread.draft .switch{border-color:color-mix(in srgb,currentColor 25%,transparent)}.thread.draft .switch button.on{color:var(--vscode-editor-background);font-weight:600}.composer-actions .gap{flex:1}
+.composer-actions button,.composer-actions select{box-sizing:border-box;height:28px;padding:0 12px}.thread textarea:focus{outline-offset:-1px}
+.thread.draft button.primary{color:var(--vscode-editor-background);background:var(--accent);font-weight:600}.thread.draft button.primary:hover{background:color-mix(in srgb,var(--accent) 85%,white)}
+.composer-actions button:not(.primary):not(.quiet){border-color:var(--soft)}
+button.quiet{background:none;color:var(--vscode-descriptionForeground)}button.quiet:hover{background:none;color:var(--vscode-foreground);text-decoration:underline}
+.hint{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--vscode-descriptionForeground)}kbd{display:inline-flex;align-items:center;height:18px;box-sizing:border-box;line-height:1;padding:0 4px;border:1px solid var(--soft,var(--border));border-bottom-width:2px;border-radius:3px;font:11px var(--review-font-code);background:none}
+label.check{display:flex;align-items:center;gap:6px;padding-left:12px;border-left:1px solid var(--soft);cursor:pointer;font-size:12px}.strip label.check{padding-left:10px;margin-left:2px}.strip .muted:has(+label.check){margin-left:auto}
+tr.read-run .read-label{cursor:pointer;margin-right:10px}tr.read-run button{padding:0 8px;font-size:11px;line-height:1.6}
 .expand{display:inline-flex;gap:2px;margin-right:10px}.expand button{padding:0 8px;font-size:11px;line-height:1.6}
 td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground));text-decoration:underline}
 ::highlight(lr-name){background-color:var(--vscode-editor-wordHighlightStrongBackground,rgba(255,213,0,.3))}
@@ -409,7 +428,7 @@ function frameMain(){
     if(Array.isArray(data.select))for(const node of document.querySelectorAll('[data-lr-lines]')){const [start,end]=lines(node);
       if(start>=data.select[0]&&end<=data.select[1]&&!(node.parentElement&&node.parentElement.closest('[data-lr-sel]')))node.setAttribute('data-lr-sel','');}});
   parent.postMessage({lrReady:true},'*');}
-let files;let viewed=new Set();let current;
+let files;let viewed=new Set();let current;let readRanges=[];const openReads=new Set();const fileKeys=new Map();
 const claudeIcon=${JSON.stringify(claudeIcon).replaceAll('<', '\\u003c')};
 let composer=saved.composer;
 const replies=new Map(Object.entries(saved.replies||{}));
@@ -480,7 +499,8 @@ function render(state){
   for(const path of next)if(!viewed.has(path))collapsed.set(path,true);
   for(const path of viewed)if(!next.has(path))collapsed.set(path,false);
   viewed=next;save();
-  renderFiles();
+  readRanges=state.read;
+  renderFiles('state');
 }
 function code(line,side){const cell=el('td','code'+(side?' '+side:''));cell.innerHTML=line.html;if(line.kind!=='del'&&line.newLine!==undefined)cell.dataset.line=String(line.newLine);return cell;}
 function num(value,path,side){const cell=el('td','num',value===undefined?'':String(value));
@@ -496,11 +516,11 @@ function paintDrag(){for(const cell of document.querySelectorAll('.drag-sel'))ce
     cell.classList.add('drag-sel');const code=layout==='split'?cell.nextElementSibling:cell.parentElement.lastElementChild;if(code)code.classList.add('drag-sel');}}
 document.addEventListener('mouseup',(event)=>{if(!drag)return;const {path,side,from,to}=drag;drag=undefined;paintDrag();
   if(from===to)pick(path,side,from,event.shiftKey);
-  else{pick(path,side,Math.min(from,to),false);composer.end=Math.max(from,to);save();renderFiles();}});
-function pick(path,side,line,extend){
+  else{pick(path,side,Math.min(from,to),false);composer.end=Math.max(from,to);save();renderFiles([path]);}});
+function pick(path,side,line,extend){const before=composer&&composer.path;
   if(extend&&composer&&composer.path===path&&composer.side===side){composer.start=Math.min(composer.start,line);composer.end=Math.max(composer.end,line);}
   else composer={path,side,start:line,end:line,text:composer?composer.text:'',intent:composer?composer.intent:'ask',target:composer?composer.target:'claude'};
-  focusNext='composer';save();renderFiles();}
+  focusNext='composer';save();renderFiles([before,path]);}
 function range(start,end){return start===end?'Line '+start:'Lines '+start+'–'+end;}
 function textarea(key,value,placeholder,onInput,onSubmit,onCancel){const area=el('textarea');area.value=value;area.placeholder=placeholder;area.dataset.draft=key;area.setAttribute('aria-label',placeholder);
   area.addEventListener('input',()=>onInput(area.value));
@@ -511,31 +531,45 @@ function composerBox(){
   const github=composer.target==='github';
   const box=el('div','thread draft'+(github?' github':''));
   const head=el('div','strip');const toggle=el('span','switch');
-  for(const [value,label] of [['claude','Claude'],['github','GitHub']]){const option=button(label,()=>{composer.target=value;focusNext='composer';save();renderFiles();},composer.target===value||(!composer.target&&value==='claude')?'on':'');
+  for(const [value,label] of [['claude','Claude'],['github','GitHub']]){const option=button(label,()=>{composer.target=value;focusNext='composer';save();renderFiles([composer.path]);},composer.target===value||(!composer.target&&value==='claude')?'on':'');
     option.setAttribute('aria-pressed',String(option.className==='on'));toggle.append(option);}
   head.append(el('span','tag','New comment'),toggle,el('span','muted',github?'everyone on the PR sees it':'only you and Claude see it'),
     el('span','muted',(composer.side==='old'?'Base · ':'')+range(composer.start,composer.end)));
   box.append(head);
-  const cancel=()=>{composer=undefined;save();renderFiles();};
-  const send=(pending)=>{if(!composer.text.trim()||sending.has('composer'))return;sending.add('composer');sentPending=pending;$('error').textContent='';renderFiles();
+  const cancel=()=>{const path=composer.path;composer=undefined;save();renderFiles([path]);};
+  const send=(pending)=>{if(!composer.text.trim()||sending.has('composer'))return;sending.add('composer');sentPending=pending;$('error').textContent='';renderFiles([composer.path]);
     const where={form:'composer',path:composer.path,side:composer.side,startLine:composer.start,endLine:composer.end,text:composer.text};
     api.postMessage(github?{action:'github-comment',pending,...where}:{action:'comment',intent:composer.intent,...where});};
   const submit=()=>send(true);
+  const selection={path:composer.path,side:composer.side,startLine:composer.start,endLine:composer.end};
+  const file=files&&files.find((item)=>item.path===selection.path);
+  const covered=file?selectedReadIds(file,selection):undefined;
+  const read=el('label','check');const readBox=el('input');readBox.type='checkbox';readBox.checked=covered!==undefined;
+  read.title='Collapse these lines. When every change in the file is read, the file is marked Viewed.';read.append(readBox,'Viewed');
+  readBox.addEventListener('change',()=>{
+    if(readBox.checked){const done=!!file&&!viewed.has(file.path)&&fullyRead(file,[...readRanges,selection]);
+      readRanges=[...readRanges,{id:'pending',...selection}];if(done)markViewed(selection.path,true);
+      api.postMessage({action:'read',...selection,viewed:done});}
+    else if(covered)unmarkRead(covered);
+    if(readBox.checked&&!composer.text.trim())composer=undefined;save();renderFiles([selection.path]);});
+  const hint=(label)=>{const node=el('span','hint');node.append(el('kbd','','⌘/Ctrl'),'+',el('kbd','','Enter'),' '+label);return node;};
+  const cancelLink=button('Cancel',cancel,'quiet');
   const area=textarea('composer',composer.text,github?'Comment on GitHub':'Ask Claude about these lines',(value)=>{composer.text=value;save();},submit,cancel);
-  const busy=sending.has('composer');const row=el('div','row actions');
+  const busy=sending.has('composer');const row=el('div','row actions composer-actions');
   if(github){
     const review=button(busy&&sentPending?'Sending…':'Add to review',()=>send(true),'primary');review.disabled=busy;review.title='Goes into your pending review. Nobody sees it until you submit the review.';
     const reviewing=current&&current.details&&current.details.pendingComments!==undefined;
     const now=button(busy&&!sentPending?'Sending…':'Post now',()=>send(false));now.disabled=busy||reviewing;
     now.title=reviewing?'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.':'Posts on GitHub right away.';
-    row.append(review,now,button('Cancel',cancel),el('span','muted',reviewing?'Your review is in progress, so comments go into it.':'⌘/Ctrl+Enter adds to review'));
+    row.append(review,now,reviewing?el('span','hint','Your review is in progress, so comments go into it.'):hint('adds to review'),el('span','gap'),cancelLink);
   }else{
     const intent=el('select');intent.setAttribute('aria-label','What Claude should do');
     for(const [value,label] of [['ask','Ask a question'],['implement','Ask for a change']]){const option=el('option','',label);option.value=value;intent.append(option);}
     intent.value=composer.intent;intent.addEventListener('change',()=>{composer.intent=intent.value;save();});
     const ask=button(busy?'Sending…':'Ask Claude',submit,'primary');ask.disabled=busy;
-    row.append(intent,ask,button('Cancel',cancel),el('span','muted','⌘/Ctrl+Enter sends'));
+    row.append(intent,ask,hint('sends'),el('span','gap'),cancelLink);
   }
+  head.append(read);
   box.append(area,row);return box;}
 function message(entry,github){const item=el('div','msg');const who=el('div','who');
   if(!github&&entry.author==='claude'&&claudeIcon){const icon=el('img');icon.src=claudeIcon;icon.alt='';who.append(icon);}
@@ -556,13 +590,13 @@ function threadBox(thread){
   const key='reply:'+thread.id;
   const actions=el('div','row actions');
   if(replies.has(thread.id)&&!thread.resolved){
-    const cancel=()=>{replies.delete(thread.id);save();renderFiles();};
-    const submit=()=>{const text=replies.get(thread.id)||'';if(!text.trim()||sending.has(key))return;sending.add(key);$('error').textContent='';renderFiles();
+    const cancel=()=>{replies.delete(thread.id);save();renderFiles([thread.path]);};
+    const submit=()=>{const text=replies.get(thread.id)||'';if(!text.trim()||sending.has(key))return;sending.add(key);$('error').textContent='';renderFiles([thread.path]);
       api.postMessage({action:github?'github-reply':'reply',form:key,id:thread.id,text});};
     box.append(textarea(key,replies.get(thread.id),github?'Reply on GitHub, visible to everyone':'Reply to Claude',(value)=>{replies.set(thread.id,value);save();},submit,cancel));
     const send=button(sending.has(key)?'Sending…':github?'Post on GitHub':'Reply',submit,'primary');send.disabled=sending.has(key);
     actions.append(send,button('Cancel',cancel));
-  }else if(!thread.resolved)actions.append(button('Reply',()=>{replies.set(thread.id,'');focusNext=key;save();renderFiles();}));
+  }else if(!thread.resolved)actions.append(button('Reply',()=>{replies.set(thread.id,'');focusNext=key;save();renderFiles([thread.path]);}));
   actions.append(button(thread.resolved?'Reopen':'Resolve',()=>api.postMessage({action:github?'github-resolve':'resolve',id:thread.id,resolved:!thread.resolved})));
   actions.append(thread.url?button('Open on GitHub ↗',()=>api.postMessage({action:'github',id:thread.id})):button('Publish to GitHub…',()=>api.postMessage({action:'publish',id:thread.id})));
   box.append(actions);return box;}
@@ -570,7 +604,7 @@ function inline(content,width){const row=el('tr','inline');const cell=el('td');c
 function jump(thread){
   const known=files&&files.some((file)=>file.path===thread.path);
   if(!known){api.postMessage({action:thread.source==='github'?'github':'thread',id:thread.id});return;}
-  if(collapsed.get(thread.path)){collapsed.set(thread.path,false);save();renderFiles();}
+  if(collapsed.get(thread.path)){collapsed.set(thread.path,false);save();renderFiles([thread.path]);}
   const target=document.getElementById('thread-'+thread.id);if(!target)return;
   target.open=true;threadOpen.set(thread.id,true);target.scrollIntoView({block:'center'});}
 function pairs(hunk){const out=[];let dels=[];let adds=[];
@@ -586,7 +620,7 @@ function gapsOf(file){const lines=contextLines.get(file.path);const out=[];let n
   out.push({from:newEnd+1,to:lines?lines.length:Infinity,offset:oldEnd-newEnd,last:true});return out;}
 function expansion(path,index){const byFile=expanded.get(path);return byFile&&byFile.get(index)||{top:0,bottom:0};}
 function expand(file,index,top,bottom){if(!expanded.has(file.path))expanded.set(file.path,new Map());const current=expansion(file.path,index);
-  expanded.get(file.path).set(index,{top:current.top+top,bottom:current.bottom+bottom});loadContext(file);renderFiles();}
+  expanded.get(file.path).set(index,{top:current.top+top,bottom:current.bottom+bottom});loadContext(file);renderFiles([file.path]);}
 function previewKind(file){if(file.binary||file.change==='deleted')return undefined;return /\.(md|markdown)$/i.test(file.path)?'markdown':/\.html?$/i.test(file.path)?'html':undefined;}
 function loadPreview(file){const key='preview:'+file.path;if(!previews.has(file.path)&&!loading.has(key)){loading.add(key);api.postMessage({action:'preview',path:file.path});}}
 function previewNode(file,threads,placed){const data=previews.get(file.path);
@@ -609,8 +643,8 @@ function previewNode(file,threads,placed){const data=previews.get(file.path);
   for(const block of data.blocks){const node=el('div','md-block');node.innerHTML=block.html;node.title=range(block.startLine,block.endLine)+'. Click to comment, Shift-click to extend.';
     if(drafting&&composer.start<=block.endLine&&composer.end>=block.startLine)node.classList.add('sel');
     node.addEventListener('click',(event)=>{if(event.target.closest('a'))return;
-      if(event.shiftKey&&drafting){composer.start=Math.min(composer.start,block.startLine);composer.end=Math.max(composer.end,block.endLine);focusNext='composer';save();renderFiles();}
-      else{pick(file.path,'new',block.startLine,false);composer.end=block.endLine;save();renderFiles();}});
+      if(event.shiftKey&&drafting){composer.start=Math.min(composer.start,block.startLine);composer.end=Math.max(composer.end,block.endLine);focusNext='composer';save();renderFiles([file.path]);}
+      else{pick(file.path,'new',block.startLine,false);composer.end=block.endLine;save();renderFiles([file.path]);}});
     wrap.append(node);
     for(const thread of threads)if(!placed.has(thread.id)&&!thread.outdated&&thread.side==='new'&&block.startLine<=thread.endLine&&thread.endLine<=block.endLine){placed.add(thread.id);wrap.append(threadBox(thread));}
     if(drafting&&block.startLine<=composer.end&&composer.end<=block.endLine)wrap.append(composerBox());}
@@ -623,8 +657,8 @@ function frameMessage(frame,data){const path=frame.dataset.path;if(!data||typeof
   else if(data.lrPick&&Number.isSafeInteger(data.lrPick.start)&&Number.isSafeInteger(data.lrPick.end)&&data.lrPick.start>0&&data.lrPick.start<=data.lrPick.end){
     const {start,end,extend,top}=data.lrPick;const tops={...frameTops.get(path)};
     if(Number.isFinite(top))tops.composer=extend&&Number.isFinite(tops.composer)?Math.min(tops.composer,top):top;frameTops.set(path,tops);
-    if(extend&&composer&&composer.path===path&&composer.side==='new'){composer.start=Math.min(composer.start,start);composer.end=Math.max(composer.end,end);focusNext='composer';save();renderFiles();}
-    else{pick(path,'new',start,false);composer.end=end;save();renderFiles();}}}
+    if(extend&&composer&&composer.path===path&&composer.side==='new'){composer.start=Math.min(composer.start,start);composer.end=Math.max(composer.end,end);focusNext='composer';save();renderFiles([path]);}
+    else{pick(path,'new',start,false);composer.end=end;save();renderFiles([path]);}}}
 /** Line each margin card up with its element, pushing cards down so they never overlap. */
 function layoutMargin(frame,tops){const margin=frame.nextElementSibling;if(!margin||!margin.classList.contains('html-margin'))return;
   const cards=[...margin.children].sort((a,b)=>(Number.isFinite(tops[a.dataset.anchor])?tops[a.dataset.anchor]:Infinity)-(Number.isFinite(tops[b.dataset.anchor])?tops[b.dataset.anchor]:Infinity));
@@ -632,25 +666,51 @@ function layoutMargin(frame,tops){const margin=frame.nextElementSibling;if(!marg
   margin.style.minHeight=next+'px';}
 function loadContext(file){if(!contextLines.has(file.path)&&!loading.has(file.path)){loading.add(file.path);api.postMessage({action:'context',path:file.path});}}
 function fullFile(file){const gaps=gapsOf(file);return contextLines.has(file.path)&&gaps.every((gap,index)=>{const shown=expansion(file.path,index);return shown.top+shown.bottom>=gap.to-gap.from+1;});}
+/** Show a file as viewed right away; the extension's next state confirms it. */
+function markViewed(path,on){if(on)viewed.add(path);else viewed.delete(path);collapsed.set(path,on);save();}
+function unmarkRead(ids){readRanges=readRanges.filter((range)=>!ids.includes(range.id));api.postMessage({action:'unread',ids});}
+/** What a file's box shows from extension state, so a state update redraws only the files it changed. */
+function fileKey(path,threads){return JSON.stringify([viewed.has(path),collapsed.get(path)===true,readRanges.filter((range)=>range.path===path),threads,
+  composer&&composer.path===path?[author,current&&current.details&&current.details.pendingComments]:null]);}
+/** Diff lines inside read ranges, with the ids of the ranges covering each; marking added lines also covers the lines they replace, and the reverse. */
+function readLines(file,ranges){const lines=file.hunks.flatMap((hunk)=>hunk.lines);const read=new Map();
+  for(const range of ranges){if(range.path!==file.path)continue;const key=range.side==='old'?'oldLine':'newLine';let first=-1,last=-1;
+    lines.forEach((line,index)=>{const number=line[key];if(number!==undefined&&number>=range.startLine&&number<=range.endLine){if(first<0)first=index;last=index;}});
+    if(first<0)continue;
+    if(range.side==='new'&&lines[first].kind==='add')while(first>0&&lines[first-1].kind==='del')first--;
+    if(range.side==='old'&&lines[last].kind==='del')while(last<lines.length-1&&lines[last+1].kind==='add')last++;
+    for(let index=first;index<=last;index++){const line=lines[index];if(!read.has(line))read.set(line,[]);if(range.id)read.get(line).push(range.id);}}
+  return read;}
+/** Ids of the read ranges covering every selected diff line, or undefined when some selected line is unread. */
+function selectedReadIds(file,range){const read=readLines(file,readRanges);const key=range.side==='old'?'oldLine':'newLine';
+  const lines=file.hunks.flatMap((hunk)=>hunk.lines).filter((line)=>line[key]!==undefined&&line[key]>=range.startLine&&line[key]<=range.endLine);
+  return lines.length&&lines.every((line)=>read.has(line))?[...new Set(lines.flatMap((line)=>read.get(line)))]:undefined;}
+function fullyRead(file,ranges){const read=readLines(file,ranges);return file.hunks.every((hunk)=>hunk.lines.every((line)=>line.kind==='context'||read.has(line)));}
 function table(file,threads,placed){
   const node=el('table');const columns=el('colgroup');
   const widths=layout==='split'?['num','','num','']:['num','num',''];
   for(const name of widths){const column=el('col',name);columns.append(column);}node.append(columns);
-  const add=(row,covers)=>{node.append(row);
+  const add=(row,covers,hidden)=>{if(!hidden)node.append(row);
     for(const [side,line] of covers){if(line===undefined)continue;
       if(composer&&composer.path===file.path&&composer.side===side&&composer.start<=line&&line<=composer.end){
         const cells=[...row.children].slice(layout==='split'&&side==='new'?2:0,layout==='split'&&side==='old'?2:undefined);
         for(const cell of cells)cell.classList.add('sel');cells[0].classList.add('sel-start');}
       for(const thread of threads)if(!placed.has(thread.id)&&!thread.outdated&&thread.side===side&&thread.endLine===line){placed.add(thread.id);node.append(inline(threadBox(thread),widths.length));}
       if(composer&&composer.path===file.path&&composer.side===side&&composer.end===line)node.append(inline(composerBox(),widths.length));}};
-  const lineRow=(line)=>{const row=el('tr',line.kind);row.append(num(line.oldLine,file.path,'old'),num(line.newLine,file.path,'new'),code(line,''));add(row,[['old',line.oldLine],['new',line.newLine]]);};
-  const pairRow=(left,right)=>{const row=el('tr');const same=left===right;
+  const lineRow=(line,hidden)=>{const row=el('tr',line.kind);row.append(num(line.oldLine,file.path,'old'),num(line.newLine,file.path,'new'),code(line,''));add(row,[['old',line.oldLine],['new',line.newLine]],hidden);};
+  const pairRow=(left,right,hidden)=>{const row=el('tr');const same=left===right;
     if(left){row.append(num(left.oldLine,file.path,'old'),code(left,same?'':'del'));}else row.append(el('td','num empty'),el('td','code empty'));
     if(right){row.append(num(right.newLine,file.path,'new'),code(right,same?'':'add'));}else row.append(el('td','num empty'),el('td','code empty'));
-    add(row,[['old',left&&left.oldLine],['new',right&&right.newLine]]);};
+    add(row,[['old',left&&left.oldLine],['new',right&&right.newLine]],hidden);};
   const contextRow=(newLine,offset)=>{const html=(contextLines.get(file.path)||[])[newLine-1];if(html===undefined)return;
     const line={kind:'context',oldLine:newLine+offset,newLine,html};if(layout==='split')pairRow(line,line);else lineRow(line);};
   const gaps=gapsOf(file);
+  const read=readLines(file,readRanges);
+  const readRow=(lines,key,open)=>{const row=el('tr','read-run');const cell=el('td');cell.colSpan=widths.length;row.append(cell);
+    const label=el('span','read-label',(open?'▾ ':'▸ ')+'✓ '+lines.length+(lines.length===1?' line read':' lines read'));label.title=open?'Hide these lines':'Show these lines';
+    label.addEventListener('click',()=>{if(open)openReads.delete(key);else openReads.add(key);renderFiles([file.path]);});
+    const ids=[...new Set(lines.flatMap((line)=>read.get(line)))];
+    cell.append(label,button('Unmark',()=>{unmarkRead(ids);renderFiles([file.path]);}));return row;};
   const expander=(gap,index,header)=>{const size=gap.to-gap.from+1;const shown=expansion(file.path,index);const hidden=size-shown.top-shown.bottom;
     const row=el('tr','hunk');const cell=el('td');cell.colSpan=widths.length;row.append(cell);
     if(hidden>0){const tools=el('span','expand');
@@ -671,13 +731,23 @@ function table(file,threads,placed){
   file.hunks.forEach((hunk,index)=>{
     if(gaps[index])gapRows(gaps[index],index,hunk.header);
     else{const header=el('tr','hunk');const cell=el('td','',hunk.header);cell.colSpan=widths.length;header.append(cell);node.append(header);}
-    if(layout==='split')for(const [left,right] of pairs(hunk))pairRow(left,right);
-    else for(const line of hunk.lines)lineRow(line);
+    const rows=layout==='split'?pairs(hunk):hunk.lines.map((line)=>[line]);
+    const draw=(row,hidden)=>layout==='split'?pairRow(row[0],row[1],hidden):lineRow(row[0],hidden);
+    const isRead=(row)=>row.every((line)=>!line||read.has(line));
+    for(let at=0;at<rows.length;){
+      if(!isRead(rows[at])){draw(rows[at],false);at+=1;continue;}
+      let end=at;while(end<rows.length&&isRead(rows[end]))end+=1;
+      const run=rows.slice(at,end);const lines=[...new Set(run.flat().filter(Boolean))];
+      const key=file.path+':'+(lines[0].oldLine??'')+':'+(lines[0].newLine??'');const open=openReads.has(key);
+      node.append(readRow(lines,key,open));
+      for(const row of run)draw(row,!open);
+      at=end;}
   });
   const last=gaps[file.hunks.length];if(last&&file.change!=='added'&&file.change!=='deleted')gapRows(last,file.hunks.length);
   return node;
 }
-function renderFiles(){
+/** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
+function renderFiles(only){
   $('unified').className=layout==='unified'?'on':'';$('split').className=layout==='split'?'on':'';
   if(!files)return;
   const container=$('files');
@@ -687,29 +757,43 @@ function renderFiles(){
   const threadsByFile=new Map();
   for(const thread of allThreads()){if(!threadsByFile.has(thread.path))threadsByFile.set(thread.path,[]);threadsByFile.get(thread.path).push(thread);}
   $('files-title').textContent='Files ('+files.length+') · '+files.filter((file)=>viewed.has(file.path)).length+' viewed';
-  container.replaceChildren();
-  if(!files.length)container.append(el('p','muted','No changes against the base branch.'));
-  for(const file of files){
+  const boxes=new Map([...container.children].filter((node)=>node.classList.contains('file')).map((node)=>[node.dataset.path,node]));
+  const threadsOf=(path)=>threadsByFile.get(path)||[];
+  const changed=only==='state'?files.map((file)=>file.path).filter((path)=>fileKeys.get(path)!==fileKey(path,threadsOf(path))):only;
+  const targets=changed&&boxes.size===files.length?[...new Set(changed.filter(Boolean))]:undefined;
+  const draw=(file)=>{fileKeys.set(file.path,fileKey(file.path,threadsOf(file.path)));return fileBox(file,threadsOf(file.path));};
+  if(targets&&targets.every((path)=>boxes.has(path))){
+    for(const path of targets)boxes.get(path).replaceWith(draw(files.find((file)=>file.path===path)));
+  }else{
+    container.replaceChildren();fileKeys.clear();
+    if(!files.length)container.append(el('p','muted','No changes against the base branch.'));
+    for(const file of files)container.append(draw(file));
+  }
+  for(const frame of container.querySelectorAll('iframe.html-preview'))layoutMargin(frame,frameTops.get(frame.dataset.path)||{});
+  if(focus){const area=container.querySelector('[data-draft="'+CSS.escape(focus.key)+'"]');if(area){area.focus({preventScroll:true});area.setSelectionRange(focus.start,focus.end);}}
+  window.scrollTo(0,scroll);
+  if(focusNext){const area=container.querySelector('[data-draft="'+CSS.escape(focusNext)+'"]');focusNext=undefined;if(area)area.focus();}
+}
+function fileBox(file,threads){
     const isCollapsed=collapsed.get(file.path)===true;
     const box=el('div','file'+(isCollapsed?' collapsed':''));box.dataset.path=file.path;
     const head=el('div','file-head');
     const chevron=el('span','chevron',isCollapsed?'▸':'▾');
     const name=el('span','name',file.oldPath?file.oldPath+' → '+file.path:file.path);
-    const toggle=()=>{collapsed.set(file.path,!isCollapsed);save();renderFiles();};
+    const toggle=()=>{collapsed.set(file.path,!isCollapsed);save();renderFiles([file.path]);};
     chevron.addEventListener('click',toggle);name.addEventListener('click',toggle);
     const badge=el('span','badge '+file.change,changeLetters[file.change]);badge.title=file.change;
     const stats=el('span','');stats.append(el('span','stat-add','+'+file.additions),' ',el('span','stat-del','−'+file.deletions));
     const label=el('label','viewed');const box2=el('input');box2.type='checkbox';box2.checked=viewed.has(file.path);
-    box2.addEventListener('change',()=>api.postMessage({action:'viewed',path:file.path,viewed:box2.checked}));
+    box2.addEventListener('change',()=>{markViewed(file.path,box2.checked);api.postMessage({action:'viewed',path:file.path,viewed:box2.checked});renderFiles([file.path]);});
     label.append(box2,'Viewed');
     const open=el('button','','Open in editor');open.addEventListener('click',()=>api.postMessage({action:'editor',path:file.path}));
     const whole=fullFile(file);const full=button(whole?'Diff only':'Full file',()=>{
-      expanded.set(file.path,whole?new Map():new Map(file.hunks.concat([null]).map((_,index)=>[index,{top:Infinity,bottom:0}])));loadContext(file);renderFiles();});
+      expanded.set(file.path,whole?new Map():new Map(file.hunks.concat([null]).map((_,index)=>[index,{top:Infinity,bottom:0}])));loadContext(file);renderFiles([file.path]);});
     const kind=previewKind(file);const showPreview=kind!==undefined&&previewing.has(file.path);
     full.hidden=showPreview||file.binary||file.change==='added'||file.change==='deleted'||!file.hunks.length;
     const mode=el('span','seg');mode.hidden=kind===undefined;
-    for(const [label,on] of [['Diff',false],['Preview',true]]){const option=button(label,()=>{if(on)previewing.add(file.path);else previewing.delete(file.path);save();renderFiles();});option.className=showPreview===on?'on':'';mode.append(option);}
-    const threads=threadsByFile.get(file.path)||[];
+    for(const [label,on] of [['Diff',false],['Preview',true]]){const option=button(label,()=>{if(on)previewing.add(file.path);else previewing.delete(file.path);save();renderFiles([file.path]);});option.className=showPreview===on?'on':'';mode.append(option);}
     const unresolved=threads.filter((thread)=>!thread.resolved).length;
     const comments=el('span','muted comments',!threads.length?'':threads.length+(threads.length===1?' comment':' comments')+(unresolved===threads.length?'':', '+unresolved+' open'));
     head.append(chevron,name,badge,stats,comments,mode,label,full,open);box.append(head);
@@ -720,12 +804,7 @@ function renderFiles(){
     else diff.append(table(file,threads,placed));
     const outside=threads.filter((thread)=>!placed.has(thread.id));
     if(outside.length){const block=el('div','outside');block.append(el('div','muted','Comments on lines this diff does not show'),...outside.map(threadBox));diff.prepend(block);}
-    box.append(diff);container.append(box);
-  }
-  for(const frame of container.querySelectorAll('iframe.html-preview'))layoutMargin(frame,frameTops.get(frame.dataset.path)||{});
-  if(focus){const area=container.querySelector('[data-draft="'+CSS.escape(focus.key)+'"]');if(area){area.focus({preventScroll:true});area.setSelectionRange(focus.start,focus.end);}}
-  window.scrollTo(0,scroll);
-  if(focusNext){const area=container.querySelector('[data-draft="'+CSS.escape(focusNext)+'"]');focusNext=undefined;if(area)area.focus();}
+    box.append(diff);return box;
 }
 for(const [id,action] of [['pr','pr'],['log','log'],['retry','retry'],['refresh','refresh']])$(id).addEventListener('click',()=>api.postMessage({action}));
 $('error').addEventListener('click',()=>{$('error').textContent='';});
@@ -786,15 +865,15 @@ window.addEventListener('message',(event)=>{const data=event.data;
   if(frame){frameMessage(frame,data);return;}
   if(data.state)render(data.state);
   if(data.files){files=data.files;contextLines.clear();loading.clear();renderFiles();}
-  if(data.preview){previews.set(data.preview.path,data.preview);loading.delete('preview:'+data.preview.path);renderFiles();}
-  if(data.context){contextLines.set(data.context.path,data.context.lines);loading.delete(data.context.path);renderFiles();}
+  if(data.preview){previews.set(data.preview.path,data.preview);loading.delete('preview:'+data.preview.path);renderFiles([data.preview.path]);}
+  if(data.context){contextLines.set(data.context.path,data.context.lines);loading.delete(data.context.path);renderFiles([data.context.path]);}
   if(data.definition){peeks.length=peekAt+1;peeks.push(data.definition);peekAt=peeks.length-1;renderPeek();}
   if(data.probe){probes.set(data.probe.id,data.probe.found);showLink();}
   if(data.reveal&&files){collapsed.set(data.reveal,false);save();renderFiles();const target=document.querySelector('[data-path="'+CSS.escape(data.reveal)+'"]');if(target)target.scrollIntoView({block:'start'});}
   if(data.filesError)$('files').replaceChildren(el('p','bad','Could not read the changes: '+data.filesError));
   if(data.error){loading.clear();$('error').textContent=String(data.error);if(data.form&&sending.delete(data.form))renderFiles();}
   if(data.done==='review')$('review').value='';
-  if(data.done==='composer'){sending.delete('composer');composer=undefined;save();renderFiles();}
+  if(data.done==='composer'){sending.delete('composer');const path=composer&&composer.path;composer=undefined;save();renderFiles([path]);}
   if(typeof data.done==='string'&&data.done.startsWith('reply:')){sending.delete(data.done);replies.delete(data.done.slice(6));save();renderFiles();}
   if(data.idle)setBusy(false);});
 render(${JSON.stringify(state).replaceAll('<', '\\u003c')});
@@ -834,7 +913,7 @@ const threadStatus: Record<ReviewThread['status'], string> = {
 
 /** Collect a PR's overview from its summary, file progress and review session. */
 export function buildOverviewState(
-  pullRequest: PullRequestSummary, opened: PullRequestSession, viewed: readonly string[], total: number | undefined,
+  pullRequest: PullRequestSummary, opened: PullRequestSession, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
   details?: PullRequestDetails | Error, remote?: readonly RemoteThread[] | Error,
 ): OverviewState {
   const { session, runner } = opened;
@@ -844,6 +923,7 @@ export function buildOverviewState(
     subtitle: `${pullRequest.author} · ${pullRequest.headBranch} → ${pullRequest.baseBranch}`,
     url: pullRequest.url,
     viewed,
+    read,
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),
     ...(details === undefined ? {} : details instanceof Error ? { detailsError: details.message } : { details }),
     ...(remote === undefined ? {} : remote instanceof Error ? { githubError: remote.message } : { github: remote.map(githubThreadView) }),

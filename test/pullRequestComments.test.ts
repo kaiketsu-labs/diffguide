@@ -26,7 +26,7 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
   } as unknown as PullRequestSession;
   const state = buildOverviewState({
     number: 3, title: 'Mock data', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'feature', baseBranch: 'main',
-  }, opened, ['src/a.ts'], 3, undefined, [{
+  }, opened, ['src/a.ts'], [], 3, undefined, [{
     id: 'PRRT_1', path: 'src/b.ts', side: 'LEFT', startLine: 4, endLine: 5, outdated: true, resolved: false, url: 'https://github.com/acme/app/pull/3#discussion_r9',
     pending: true, comments: [{ author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Rename &amp; </p><script>x</script><u>' }],
   }]);

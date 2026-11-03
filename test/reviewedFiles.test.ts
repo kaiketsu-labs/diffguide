@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import type { PullRequestProvider } from '../src/pullRequests.js';
-import { FileReviews, readReviewedFiles, setFileReviewed } from '../src/reviewedFiles.js';
+import { FileReviews, markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../src/reviewedFiles.js';
 import { worktreePath } from '../src/worktrees.js';
 
 test('keeps a file reviewed until its content changes, and clears it on untick', async (t) => {
@@ -66,4 +66,29 @@ test('merges local ticks with the code host\'s Viewed flags and sends ticks to i
   reviews.forget();
   await reviews.reviewed(provider, 'acme/app', 3, ['a.ts']);
   assert.equal(reads, 2);
+});
+
+test('keeps read ranges on their code as lines shift, drops them once that code changes, and keeps file ticks', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'local-review-read-'));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const worktree = path.join(root, 'pr-4');
+  await mkdir(worktree, { recursive: true });
+  await writeFile(path.join(worktree, 'a.ts'), 'one\ntwo\nthree\nfour\n');
+  await setFileReviewed(worktree, 'a.ts', true);
+
+  await markRangeRead(worktree, 'base', { path: 'a.ts', side: 'new', startLine: 2, endLine: 3 });
+  const [marked] = await readReadRanges(worktree, 'base');
+  assert.deepEqual({ ...marked, id: undefined }, { id: undefined, path: 'a.ts', side: 'new', startLine: 2, endLine: 3 });
+
+  await writeFile(path.join(worktree, 'a.ts'), 'zero\none\ntwo\nthree\nfour\n');
+  assert.deepEqual((await readReadRanges(worktree, 'base')).map(({ startLine, endLine }) => [startLine, endLine]), [[3, 4]]);
+  assert.deepEqual([...await readReviewedFiles(worktree, ['a.ts'])], []);
+
+  await writeFile(path.join(worktree, 'a.ts'), 'zero\none\nTWO\nthree\nfour\n');
+  assert.deepEqual(await readReadRanges(worktree, 'base'), []);
+
+  await markRangeRead(worktree, 'base', { path: 'a.ts', side: 'new', startLine: 1, endLine: 1 });
+  await unmarkRangesRead(worktree, (await readReadRanges(worktree, 'base')).map((range) => range.id));
+  assert.deepEqual(await readReadRanges(worktree, 'base'), []);
+  await assert.rejects(markRangeRead(worktree, 'base', { path: '../outside.ts', side: 'new', startLine: 1, endLine: 1 }));
 });
