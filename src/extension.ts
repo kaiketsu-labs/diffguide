@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -16,7 +16,7 @@ import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequest
 import { buildGuide, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
 import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
-import { fenceFilePaths, markdownBlocks } from './markdown.js';
+import { fenceFilePaths, inlineLocalImages, markdownBlocks } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
@@ -179,7 +179,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         readPreview: async (path) => {
           if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
           const text = await readFile(join(folder, path), 'utf8');
-          return /\.html?$/iu.test(path) ? { kind: 'html', ...htmlPreview(text) } : { kind: 'markdown', blocks: markdownBlocks(text) };
+          if (/\.html?$/iu.test(path)) return { kind: 'html', ...htmlPreview(text) };
+          const readImage = async (image: string): Promise<Buffer | undefined> => {
+            const file = join(folder, image);
+            const info = await lstat(file).catch(() => undefined);
+            return info?.isFile() === true && info.size <= maxMediaBytes ? await readFile(file) : undefined;
+          };
+          const blocks = await Promise.all(markdownBlocks(text).map(async (block) => ({ ...block, html: await inlineLocalImages(block.html, path, readImage) })));
+          return { kind: 'markdown', blocks };
         },
         readMedia: async (path) => {
           const file = diffFiles.find((each) => each.path === path);
