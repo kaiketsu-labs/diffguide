@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Re-read GitHub state after PR management actions even when a write fails partway through, so saved reviewer requests and completed merges do not leave a stale review page. Report potentially saved requests when withdrawal fails.
+- Reject PR management messages without edit permission, and correctly preselect users whose login matches a team display name.
+
 - The PR rows in the sidebar no longer show inline buttons. Open review page, Show Claude activity, Open in browser and Remove worktree moved to the row's right-click menu, and the review page has a Remove worktree link next to Refresh.
 - Manage the PR from the review page: edit the title and description, request or withdraw reviewers (people and teams), set assignees and labels, mark a draft ready for review or turn the PR back into a draft, close and reopen it, and delete its branch when merging or afterwards. Reviewers, assignees and labels open a VS Code picker. These controls show only when GitHub lets you edit the PR.
 - The review page shows the description, reviewers and checks again. GitHub refused that request because reading team reviewer names needs the `read:org` scope. Pair Review now asks for it, so VS Code asks you to sign in to GitHub once more.

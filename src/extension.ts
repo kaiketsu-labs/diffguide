@@ -243,9 +243,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const answer = await vscode.window.showWarningMessage(`Merge #${pullRequest.number} into ${pullRequest.baseBranch}?`, { modal: true },
             ...branchDeletable ? [merge, mergeAndDelete] : [merge]);
           if (answer === undefined) return;
-          await provider.merge(pullRequest.number, method);
-          if (answer === mergeAndDelete) await provider.deleteBranch(pullRequest.headBranch);
-          changedOnGitHub();
+          try {
+            await provider.merge(pullRequest.number, method);
+            if (answer === mergeAndDelete) await provider.deleteBranch(pullRequest.headBranch);
+          } finally {
+            changedOnGitHub();
+          }
         },
         editTitle: async () => {
           const { title } = await currentDetails();
