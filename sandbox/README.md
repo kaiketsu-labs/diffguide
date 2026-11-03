@@ -9,8 +9,8 @@ It gives up early on errors that won't go away, such as `401` or `404`.
 
 | Setting | Value |
 |---|---|
-| Attempts | 5 |
-| First delay | 100 ms |
+| Attempts | 4 |
+| First delay | 200 ms |
 | Max delay | 5 s |
 
 ## Try it

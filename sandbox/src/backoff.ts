@@ -1,4 +1,4 @@
-const firstDelay = 100;
+const firstDelay = 200;
 const maxDelay = 5000;
 
 /** Wait time before the next attempt: doubles each time, with up to 20% jitter. */

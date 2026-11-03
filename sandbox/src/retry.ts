@@ -1,6 +1,6 @@
 import { backoffDelay } from './backoff';
 
-const maxAttempts = 5;
+const maxAttempts = 4;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
