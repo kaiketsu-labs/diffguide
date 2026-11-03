@@ -10,13 +10,14 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
+import { conflictTask, prepareConflictFix } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
 import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
-import { fenceFilePaths, inlineLocalImages, markdownBlocks } from './markdown.js';
+import { fenceFilePaths, inlineLocalImages, markdownBlocks, markdownHtml } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
@@ -137,6 +138,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return details;
       };
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
+      /** What Claude asked when it last stopped fixing conflicts without pushing. */
+      let conflictQuestion: string | undefined;
       const loadThreads = (): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
@@ -160,7 +163,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ]);
         const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => thread.messages.flatMap((entry) => fenceFilePaths(entry.text))));
-        return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
+        const state = buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
+        return conflictQuestion === undefined ? state : { ...state, conflictQuestion: markdownHtml(conflictQuestion) };
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -265,6 +269,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
+        },
+        fixConflicts: async (answer) => {
+          const loaded = await currentDetails();
+          if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
+          const base = await prepareConflictFix(folder, pullRequest.number, pullRequest.baseBranch);
+          const head = (await git(folder, ['rev-parse', 'HEAD'])).trim();
+          conflictQuestion = undefined;
+          const pushTo = loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
+          const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch: pullRequest.baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
+          const pushedNothing = (await git(folder, ['rev-parse', 'HEAD'])).trim() === head;
+          if (error === undefined && pushedNothing && reply !== undefined) conflictQuestion = reply;
+          changedOnGitHub();
+          if (error !== undefined) throw new Error(`Claude did not fix the conflicts: ${error}`);
+        },
+        dismissConflictQuestion: () => {
+          conflictQuestion = undefined;
+          detailsChanged.fire();
         },
         merge: async (method) => {
           const merge = 'Merge';

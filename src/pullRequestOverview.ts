@@ -12,6 +12,7 @@ import type { FileDiff } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
+import { conflictFixLabel } from './conflicts.js';
 import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
@@ -29,12 +30,15 @@ export interface OverviewState {
   readonly viewed: readonly string[];
   /** Line ranges marked read, collapsed in the diff. */
   readonly read: readonly ReadRange[];
-  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean };
+  /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
+  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string };
   readonly threads: readonly {
     readonly id: string;
     readonly location: string;
     readonly text: string;
     readonly status: string;
+    /** What Claude is doing with this thread right now, while it waits for or works on it. */
+    readonly working?: string;
     readonly url?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
@@ -54,6 +58,8 @@ export interface OverviewState {
   readonly details?: PullRequestDetails;
   readonly detailsError?: string;
   readonly analysis: AnalysisView;
+  /** Claude's question, as HTML, when it stopped fixing conflicts without pushing. */
+  readonly conflictQuestion?: string;
 }
 
 /** Claude's guided-review analysis: whether it runs, and the last result. */
@@ -134,6 +140,10 @@ export interface OverviewActions {
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   merge(method: MergeMethod): Promise<void>;
+  /** Have the PR's Claude merge the base branch, resolve the conflicts and push; resolves when Claude is done. */
+  fixConflicts(answer?: string): Promise<void>;
+  /** Hide Claude's question about the conflicts. */
+  dismissConflictQuestion(): void;
   /** Ask for a new title in VS Code and save it. */
   editTitle(): Promise<void>;
   editBody(body: string): Promise<void>;
@@ -175,7 +185,8 @@ export type PageMessage =
   | { readonly action: 'find-extension'; readonly extension: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
   | { readonly action: 'merge'; readonly method: MergeMethod }
-  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' }
+  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
+  | { readonly action: 'fix-conflicts'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
   | { readonly action: 'pick'; readonly what: PickTarget }
   | { readonly action: 'draft'; readonly draft: boolean };
@@ -312,6 +323,9 @@ export async function showPullRequestOverview(
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
         else if (action === 'view' && (view === 'files' || view === 'guide')) {
           await vscode.commands.executeCommand(view === 'guide' ? 'pairReview.showGuideInTree' : 'pairReview.showFilesInTree');
+        } else if (action === 'dismiss-conflict-question') actions.dismissConflictQuestion();
+        else if (action === 'fix-conflicts' && (text === undefined || isText(text))) {
+          void actions.fixConflicts(text?.trim()).catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
         }
         else if (action === 'find-extension' && typeof extension === 'string' && /^[\w+-]{1,20}$/u.test(extension)) {
           await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
@@ -384,7 +398,7 @@ body{margin:0;padding:var(--space-24) var(--space-24) 48px}
 h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
-.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}.head{justify-content:space-between}
+.row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}#conflict-row{flex-wrap:nowrap}#conflict-row>button{margin-left:auto;flex-shrink:0}#conflict-note{min-width:0;max-width:100%}#conflict-note::before{flex-shrink:0}#conflict-note>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#conflict-ask{margin-top:var(--space-8)}#conflict-reply{margin-top:var(--space-8)}.head{justify-content:space-between}
 .byline,.facts{margin-top:var(--space-6)}
 .status{margin-top:var(--space-12);font-size:12px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
@@ -410,7 +424,7 @@ ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px
 #body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
-.review-actions{justify-content:flex-end}
+.review-actions{justify-content:flex-end}#review-note{flex:1 1 160px}#review-note:empty{display:none}.state-actions{justify-content:flex-end}
 .title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-8)}.section-head h3{margin:0}.section-head .icon-button{width:22px;height:22px;min-height:22px;margin:-2px 0}
 .labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}.label::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--label)}
@@ -460,6 +474,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 #peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:var(--peek-width,min(560px,92vw));max-width:calc(100vw - 2 * var(--space-8));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.claude-live{margin-top:var(--space-8)}
 .media{display:flex;flex-wrap:wrap;gap:var(--space-12);padding:var(--space-12)}
 .media-side{flex:1 1 280px;min-width:0;margin:0;display:flex;flex-direction:column;gap:var(--space-6)}
 .media-side figcaption{font-size:12px}
@@ -569,9 +584,8 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <section id="review-box"><h3>Finish your review</h3>
 <p class="muted" id="pending-note"></p>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
-<div class="row actions review-actions"><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div>
-<p class="muted" id="review-note"></p></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row state-actions" id="state-actions"></div></section>
+<div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
 <div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
@@ -642,12 +656,16 @@ export function buildOverviewState(
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),
     ...(details === undefined ? {} : details instanceof Error ? { detailsError: details.message } : { details }),
     ...(remote === undefined ? {} : remote instanceof Error ? { githubError: remote.message } : { github: remote.map(githubThreadView) }),
-    claude: { text: claude.text, running: runner.activity.running, retry: claude.retry },
+    claude: { text: claude.text, running: runner.activity.running, retry: claude.retry,
+      ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}) },
     analysis,
     threads: session.store.threads.map((thread) => {
       const publication = session.publication?.(thread.id);
+      const activity = session.activity?.(thread.id);
+      const working = thread.resolved ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
+        : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
       const status = [
-        thread.resolved ? 'Resolved' : session.activity?.(thread.id) ?? threadStatus[thread.status],
+        thread.resolved ? 'Resolved' : working !== undefined ? undefined : activity ?? threadStatus[thread.status],
         publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
       ].filter(Boolean).join(' · ');
       return {
@@ -655,6 +673,7 @@ export function buildOverviewState(
         location: `${thread.anchor.path}:${thread.anchor.startLine}`,
         text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
         status,
+        ...(working === undefined ? {} : { working }),
         path: thread.anchor.path,
         side: thread.anchor.side === 'original' ? 'old' : 'new',
         startLine: thread.anchor.startLine,

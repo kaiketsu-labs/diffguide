@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Comments Claude is waiting on or working on show a pulsing line inside the thread with Claude's current step, such as "Reading src/app.ts". The Threads card shows the same step. Sending a reply redraws only that file instead of the whole review page.
+- **Fix conflicts** in the Merge box, when GitHub reports conflicts on a PR you can push to. The PR's Claude merges the base branch in its own conversation, resolves the conflicts, commits and pushes. It may run only the Git commands this needs. The worktree must have no uncommitted changes or unpushed commits. On someone else's PR, Git hooks stay off while Claude works. While Claude works, the Merge box shows its current step, such as "Running git merge". On your own PR, the review box shows only Comment, since GitHub lets you only comment there; the Merge box buttons line up on the right. When Claude stops because a conflict needs your decision, the Merge box shows its question with an answer box; **Fix conflicts** there sends your answer to the same conversation and tries again.
 - The review page previews changed images, SVGs and PDFs, before and after side by side. Images show their size on a checkerboard so transparency is visible; SVGs keep their Diff and Preview switch; PDFs show their first 10 pages. Files over 20 MB are not previewed. PDF previews load pdf.js the first time a page needs it, which adds about 1.6 MB to the extension.
 - Markdown, HTML, SVG, image and PDF files have their Diff and Preview switch in the Guide too.
 - Markdown previews show images the file links from the repository, such as `![Chart](assets/chart.png)`. They showed a broken image before.

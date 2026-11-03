@@ -69,6 +69,8 @@ export interface PullRequestDetails {
   readonly labels: readonly Label[];
   readonly assignees: readonly string[];
   readonly mergeable: 'yes' | 'no' | 'unknown';
+  /** `owner/name` of the fork the head branch lives in; absent when it lives in this repository. */
+  readonly headRepository?: string;
   readonly viewerIsAuthor: boolean;
   /** The signed-in user's GitHub avatar; empty when GitHub sent none. */
   readonly viewerAvatarUrl: string;
@@ -214,7 +216,7 @@ const searchFields = 'number title url isDraft headRefName baseRefName createdAt
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
 const viewerField = 'viewer{avatarUrl(size:40)}';
-const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id}
+const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id} headRepository{nameWithOwner}
   labels(first:50){nodes{name color}} assignees(first:20){nodes{login}}
   reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
   reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name slug} ... on Bot{login}}}}
@@ -682,7 +684,9 @@ export function parseDetails(repository: Record<string, unknown>, viewer: Record
   const pending = pullRequest['reviews'] === undefined ? undefined
     : list(object(pullRequest['reviews'])['nodes']).map(object).find((review) => review['viewerDidAuthor'] === true);
   const pendingComments = pending === undefined ? undefined : object(pending['comments'])['totalCount'];
+  const fork = object(pullRequest['headRepository'] ?? {})['nameWithOwner'];
   return {
+    ...(pullRequest['isCrossRepository'] === true && typeof fork === 'string' && /^[\w.-]+\/[\w.-]+$/u.test(fork) ? { headRepository: fork } : {}),
     ...(typeof pendingComments === 'number' ? { pendingComments } : {}),
     bodyHtml: typeof pullRequest['bodyHTML'] === 'string' ? pullRequest['bodyHTML'] : '',
     title: typeof pullRequest['title'] === 'string' ? pullRequest['title'] : '',
