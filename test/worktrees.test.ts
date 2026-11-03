@@ -63,6 +63,7 @@ const provider = (checkouts: string[]): PullRequestProvider => ({
   overview: async () => { throw new Error('not used'); },
   replyToThread: async () => { throw new Error('not used'); },
   resolveThread: async () => { throw new Error('not used'); },
+  deleteComment: async () => { throw new Error('not used'); },
   submitReview: async () => { throw new Error('not used'); },
   merge: async () => { throw new Error('not used'); },
   checkout: async (number, worktree) => {

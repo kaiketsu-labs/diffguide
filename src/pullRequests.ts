@@ -75,7 +75,8 @@ export interface RemoteThread {
   /** Still in the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
   /** Bodies come rendered and sanitized by GitHub. */
-  readonly comments: readonly { readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string }[];
+  /** `canDelete` when the viewer may delete the comment, usually because they wrote it. */
+  readonly comments: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean }[];
 }
 
 export type ReviewEvent = 'approve' | 'requestChanges' | 'comment';
@@ -101,6 +102,8 @@ export interface PullRequestProvider {
   /** Post a reply to a code host thread right away, visible to everyone. */
   replyToThread(threadId: string, body: string): Promise<void>;
   resolveThread(threadId: string, resolved: boolean): Promise<void>;
+  /** Delete one review comment; deleting a thread's only comment removes the thread. */
+  deleteComment(commentId: string): Promise<void>;
   /** Submit the user's review, including comments already in their pending review. */
   submitReview(number: number, event: ReviewEvent, body: string): Promise<void>;
   merge(number: number, method: MergeMethod): Promise<void>;
@@ -171,7 +174,7 @@ const detailsFields = `bodyHTML state mergeable viewerDidAuthor
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
 const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
-  comments(first:100){nodes{url bodyHTML state author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
+  comments(first:100){nodes{id viewerCanDelete url bodyHTML state author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
 
 /** Group search hits by repository, in the shape `parsePullRequestList` reads. */
 export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
@@ -389,6 +392,10 @@ export class GitHubApiProvider implements PullRequestProvider {
   async resolveThread(threadId: string, resolved: boolean): Promise<void> {
     const mutation = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
     await this.#graphql(`mutation($thread:ID!){${mutation}(input:{threadId:$thread}){thread{id}}}`, { thread: threadId });
+  }
+
+  async deleteComment(commentId: string): Promise<void> {
+    await this.#graphql('mutation($id:ID!){deletePullRequestReviewComment(input:{id:$id}){clientMutationId}}', { id: commentId });
   }
 
   async submitReview(number: number, event: ReviewEvent, body: string): Promise<void> {
@@ -610,10 +617,12 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
       comments: comments.map((comment) => {
         const author = comment['author'] === null ? {} : object(comment['author']);
         return {
+          id: text(comment['id']),
           author: typeof author['login'] === 'string' ? author['login'] : 'ghost',
           avatarUrl: optionalHttpsUrl(author['avatarUrl']),
           pending: comment['state'] === 'PENDING',
           bodyHtml: typeof comment['bodyHTML'] === 'string' ? comment['bodyHTML'] : '',
+          canDelete: comment['viewerCanDelete'] === true,
         };
       }),
     });

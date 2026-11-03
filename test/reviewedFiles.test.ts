@@ -92,3 +92,18 @@ test('keeps read ranges on their code as lines shift, drops them once that code 
   assert.deepEqual(await readReadRanges(worktree, 'base'), []);
   await assert.rejects(markRangeRead(worktree, 'base', { path: '../outside.ts', side: 'new', startLine: 1, endLine: 1 }));
 });
+
+test('keeps every tick and read mark when they are written at the same time', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-concurrent-'));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const worktree = path.join(root, 'pr-5');
+  await mkdir(worktree, { recursive: true });
+  const paths = ['a.ts', 'b.ts', 'c.ts', 'd.ts'];
+  await Promise.all(paths.map((file) => writeFile(path.join(worktree, file), 'one\ntwo\n')));
+  await Promise.all([
+    ...paths.map((file) => setFileReviewed(worktree, file, true)),
+    ...paths.map((file) => markRangeRead(worktree, 'base', { path: file, side: 'new', startLine: 1, endLine: 1 })),
+  ]);
+  assert.deepEqual([...await readReviewedFiles(worktree, paths)], paths);
+  assert.equal((await readReadRanges(worktree, 'base')).length, paths.length);
+});

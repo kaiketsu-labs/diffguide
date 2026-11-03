@@ -1,16 +1,20 @@
 import type { DefinitionPeek } from '../definitions.js';
+import { buildGuide, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffSide, ExtensionMessage, FilePreview, GitHubThreadView, OverviewState, PageMessage } from '../pullRequestOverview.js';
 import type { MergeMethod, PullRequestDetails, ReviewEvent } from '../pullRequests.js';
+import { fileTree, type FileFolder } from '../fileTree.js';
+import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLines.js';
 import type { LineRange } from '../reviewedFiles.js';
 import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
 
 declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; getState(): unknown; setState(state: Saved): void };
 
-type Layout = 'unified' | 'split';
+type Layout = 'unified' | 'split' | 'guided';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; intent: Intent; target?: 'claude' | 'github' }
 interface Saved {
   readonly layout?: Layout;
+  readonly folders?: boolean;
   readonly collapsed?: Record<string, boolean>;
   readonly previewing?: readonly string[];
   readonly composer?: Composer | undefined;
@@ -20,8 +24,6 @@ type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; re
   | (GitHubThreadView & { readonly source: 'github' });
 type Message = Thread['messages'][number];
 type Preview = FilePreview & { readonly path: string };
-/** A read range, or a selection about to become one. */
-type MarkedRange = LineRange & { readonly id?: string };
 interface Anchor { readonly key: string; readonly start: number; readonly end: number; readonly source: 'local' | 'github' | 'draft' }
 /** Unchanged new-side lines between hunks; `offset` maps them to old-side lines. */
 interface Gap { readonly from: number; readonly to: number; readonly offset: number; readonly last?: true }
@@ -38,6 +40,7 @@ const { claudeIcon } = initial;
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
 let layout: Layout = saved.layout ?? 'unified';
+let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
 const previewing = new Set(saved.previewing ?? []);
 const previews = new Map<string, Preview>();
@@ -73,6 +76,10 @@ const labels: Record<ReviewerState | CheckState, readonly [string, string, strin
 };
 const methodLabels: Record<MergeMethod, string> = { squash: 'Squash and merge', merge: 'Create a merge commit', rebase: 'Rebase and merge' };
 const changeLetters: Record<FileDiff['change'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
+const severityLabels: Record<Severity | 'unclassified', string> = { critical: 'Critical', significant: 'Significant', routine: 'Routine', trivial: 'Trivial', unclassified: 'Unclassified' };
+let guide: GuideGroup[] | undefined;
+let guideStamp = '';
+const stepKeys = new Map<string, string>();
 const verdictText = { changes: ['bad', 'Changes requested by '], approved: ['ok', 'Approved by '], commented: ['muted', 'Commented: '] } as const;
 
 /**
@@ -160,7 +167,7 @@ function frameMain(): void {
 }
 
 function save(): void {
-  api.setState({ layout, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies) });
+  api.setState({ layout, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies) });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -249,28 +256,7 @@ function render(state: OverviewState): void {
   claude.textContent = state.claude.text;
   claude.className = state.claude.running ? 'spin muted' : 'muted';
   $('retry').hidden = !state.claude.retry;
-  const threads = allThreads();
-  $('threads-title').textContent = 'Threads (' + threads.length + ')';
-  const list = $('threads');
-  list.replaceChildren();
-  if (threads.length === 0) list.append(el('li', 'muted', state.github || state.githubError ? 'No comments yet.' : 'No local comments yet. Loading GitHub comments…'));
-  if (state.githubError) list.append(el('li', 'bad', 'Could not load GitHub comments: ' + state.githubError));
-  for (const thread of threads) {
-    const item = el('li', 'card-thread ' + thread.source);
-    const head = el('div', 'row');
-    const where = el('a', 'where', thread.location);
-    where.addEventListener('click', () => jump(thread));
-    head.append(el('span', 'tag', thread.source === 'github' ? 'GitHub' : 'Local'), where, el('span', 'text', thread.text));
-    const line = el('div', 'muted', thread.status);
-    if (thread.url) {
-      const link = el('a', '', ' ↗');
-      link.title = 'Open on GitHub';
-      link.addEventListener('click', () => post({ action: 'github', id: thread.id }));
-      line.append(link);
-    }
-    item.append(head, line);
-    list.append(item);
-  }
+  renderThreadList();
   author = !details || details.viewerIsAuthor;
   setBusy(busy);
   for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.title = author ? 'GitHub does not let you approve or request changes on your own PR.' : '';
@@ -305,6 +291,17 @@ function render(state: OverviewState): void {
   viewed = next;
   save();
   readRanges = state.read;
+  const { analysis } = state;
+  const analyze = $<HTMLButtonElement>('analyze');
+  analyze.textContent = analysis.running ? 'Stop analysis' : analysis.result ? 'Analyze again' : 'Analyze';
+  $('analysis-status').textContent = analysis.running ? 'Analyzing · ' + (analysis.step ?? 'Working') : analysis.error ? 'Analysis failed: ' + analysis.error : '';
+  $('analysis-status').className = analysis.running ? 'spin muted' : analysis.error ? 'bad' : 'muted';
+  const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.result ? null : [analysis.running, analysis.error]]);
+  if (stamp !== guideStamp) {
+    guideStamp = stamp;
+    guide = undefined;
+    if (layout === 'guided') { renderFiles(); return; }
+  }
   renderFiles('state');
 }
 
@@ -493,31 +490,55 @@ function message(entry: Message): HTMLElement {
   }
   who.append(github ? entry.author : entry.author === 'claude' ? 'Claude' : 'You');
   if (github && entry.pending) who.append(el('span', 'pill', 'Pending'));
+  if (github && entry.canDelete) {
+    const remove = button('', () => post({ action: 'github-delete', id: entry.id }), 'quiet delete');
+    remove.innerHTML = '<svg viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.8 7v4M9.2 7v4"/></svg>';
+    remove.title = 'Delete on GitHub';
+    remove.setAttribute('aria-label', 'Delete on GitHub');
+    who.append(remove);
+  }
   const body = el('div', 'msg-text');
   body.innerHTML = entry.html;
   item.append(who, body);
   return item;
 }
 
-function strip<K extends keyof HTMLElementTagNameMap>(tag: K, label: string, note: string, right: string): HTMLElementTagNameMap[K] {
+const kindMarks: Record<'github' | 'local', string> = {
+  github: '<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>',
+  local: '<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
+};
+
+function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | 'local' | 'analysis', label: string, note: string, status: readonly string[], right: string): HTMLElementTagNameMap[K] {
   const node = el(tag, 'strip');
-  node.append(el('span', 'tag', label), el('span', 'muted', note), el('span', 'muted', right));
+  const mark = el('span', 'kind');
+  if (kind !== 'analysis') mark.innerHTML = kindMarks[kind];
+  else if (claudeIcon) {
+    const icon = el('img');
+    icon.src = claudeIcon;
+    icon.alt = '';
+    mark.append(icon);
+  }
+  const name = el('span', 'tag', label);
+  name.title = note;
+  node.append(mark, name, el('span', 'gap'), ...(status.length ? [el('span', 'pill state', status.join(' · '))] : []), el('span', 'muted', right));
   return node;
 }
 
 function threadBox(thread: Thread): HTMLElement {
   const github = thread.source === 'github';
-  const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : ''));
+  const fromAnalysis = thread.source === 'local' && thread.origin === 'analysis';
+  const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : ''));
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
   box.addEventListener('toggle', () => threadOpen.set(thread.id, box.open));
-  const suffix = thread.pending ? (thread.outdated ? ' · Outdated' : '') : ' · ' + thread.status;
-  box.append(strip('summary', github ? 'GitHub' : 'Local',
-    github ? (thread.pending ? 'only you see it until you submit your review' : 'everyone on the PR sees it') : 'only you and Claude see it',
-    (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine) + suffix));
+  const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
+    : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
+  box.append(strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local', github ? 'GitHub' : fromAnalysis ? 'Analysis' : 'Local',
+    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s analysis. Reply to ask about it.' : 'Only you and Claude see it.',
+    status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
   for (const entry of thread.messages) box.append(message(entry));
   const key = 'reply:' + thread.id;
-  const actions = el('div', 'row actions');
+  const actions = el('div', 'row actions composer-actions');
   const reply = replies.get(thread.id);
   if (reply !== undefined && !thread.resolved) {
     const cancel = (): void => { replies.delete(thread.id); save(); renderFiles([thread.path]); };
@@ -532,12 +553,15 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(textarea(key, reply, github ? 'Reply on GitHub, visible to everyone' : 'Reply to Claude', (value) => { replies.set(thread.id, value); save(); }, submit, cancel));
     const send = button(sending.has(key) ? 'Sending…' : github ? 'Post on GitHub' : 'Reply', submit, 'primary');
     send.disabled = sending.has(key);
-    actions.append(send, button('Cancel', cancel));
-  } else if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
-  actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
+    actions.append(send, el('span', 'gap'), button('Cancel', cancel, 'quiet'));
+    box.append(actions);
+    return box;
+  }
+  if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }, 'primary'));
+  actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })), el('span', 'gap'));
   actions.append(thread.url
-    ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }))
-    : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id })));
+    ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
+    : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
   box.append(actions);
   return box;
 }
@@ -556,7 +580,13 @@ function jump(thread: Thread): void {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
   }
-  if (collapsed.get(thread.path)) { collapsed.set(thread.path, false); save(); renderFiles([thread.path]); }
+  if (layout === 'guided' && !document.getElementById('thread-' + thread.id)) { layout = 'unified'; save(); renderFiles(); }
+  if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
+    collapsed.set(thread.path, false);
+    openFolders(thread.path);
+    save();
+    renderFiles();
+  }
   const target = document.getElementById('thread-' + thread.id) as HTMLDetailsElement | null;
   if (!target) return;
   target.open = true;
@@ -787,57 +817,17 @@ function fileKey(path: string, threads: readonly Thread[]): string {
     composer?.path === path ? [author, current?.details?.pendingComments] : null]);
 }
 
-/** Diff lines inside read ranges, with the ids of the ranges covering each; marking added lines also covers the lines they replace, and the reverse. */
-function readLines(file: FileDiff, ranges: readonly MarkedRange[]): Map<DiffLine, string[]> {
-  const lines = file.hunks.flatMap((hunk) => hunk.lines);
-  const read = new Map<DiffLine, string[]>();
-  for (const marked of ranges) {
-    if (marked.path !== file.path) continue;
-    const key = marked.side === 'old' ? 'oldLine' : 'newLine';
-    let first = -1;
-    let last = -1;
-    lines.forEach((line, index) => {
-      const number = line[key];
-      if (number !== undefined && number >= marked.startLine && number <= marked.endLine) {
-        if (first < 0) first = index;
-        last = index;
-      }
-    });
-    if (first < 0) continue;
-    if (marked.side === 'new' && lines[first]?.kind === 'add') while (first > 0 && lines[first - 1]?.kind === 'del') first--;
-    if (marked.side === 'old' && lines[last]?.kind === 'del') while (last < lines.length - 1 && lines[last + 1]?.kind === 'add') last++;
-    for (const line of lines.slice(first, last + 1)) {
-      const ids = read.get(line) ?? [];
-      read.set(line, ids);
-      if (marked.id) ids.push(marked.id);
-    }
-  }
-  return read;
-}
-
 /** Ids of the read ranges covering every selected diff line, or undefined when some selected line is unread. */
 function selectedReadIds(file: FileDiff, selection: LineRange): string[] | undefined {
-  const read = readLines(file, readRanges);
-  const key = selection.side === 'old' ? 'oldLine' : 'newLine';
-  const lines = file.hunks.flatMap((hunk) => hunk.lines).filter((line) => {
-    const number = line[key];
-    return number !== undefined && number >= selection.startLine && number <= selection.endLine;
-  });
-  return lines.length > 0 && lines.every((line) => read.has(line)) ? [...new Set(lines.flatMap((line) => read.get(line) ?? []))] : undefined;
+  return rangeReadIds(file, readRanges, selection);
 }
 
-function fullyRead(file: FileDiff, ranges: readonly MarkedRange[]): boolean {
-  const read = readLines(file, ranges);
-  return file.hunks.every((hunk) => hunk.lines.every((line) => line.kind === 'context' || read.has(line)));
-}
-
-function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>): HTMLTableElement {
+function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined = composer?.path === file.path ? composer : undefined): HTMLTableElement {
   const node = el('table');
   const columns = el('colgroup');
   const widths = layout === 'split' ? ['num', '', 'num', ''] : ['num', 'num', ''];
   for (const name of widths) columns.append(el('col', name));
   node.append(columns);
-  const draft = composer?.path === file.path ? composer : undefined;
   const add = (row: HTMLTableRowElement, covers: readonly (readonly [DiffSide, number | undefined])[], hidden = false): void => {
     if (!hidden) node.append(row);
     for (const [side, line] of covers) {
@@ -971,14 +961,15 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>):
 
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
-  $('unified').className = layout === 'unified' ? 'on' : '';
-  $('split').className = layout === 'split' ? 'on' : '';
+  for (const name of ['unified', 'split', 'guided'] as const) $(name).className = layout === name ? 'on' : '';
+  const folderButton = $('folders');
+  folderButton.hidden = layout === 'guided';
+  folderButton.className = folders ? 'on' : '';
+  folderButton.setAttribute('aria-pressed', String(folders));
   if (!files) return;
+  if (layout === 'guided') { keepView(() => renderGuide(only)); return; }
   const shownFiles = files;
   const container = $('files');
-  const scroll = window.scrollY;
-  const active = document.activeElement;
-  const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
   const threadsByFile = new Map<string, Thread[]>();
   for (const thread of allThreads()) {
     const list = threadsByFile.get(thread.path) ?? [];
@@ -986,26 +977,81 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     list.push(thread);
   }
   $('files-title').textContent = 'Files (' + shownFiles.length + ') · ' + shownFiles.filter((file) => viewed.has(file.path)).length + ' viewed';
-  const boxes = new Map([...container.querySelectorAll<HTMLElement>(':scope > .file')].map((node) => [node.dataset.path, node]));
+  const tree = fileTree(shownFiles);
+  const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
+  const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
   const threadsOf = (path: string): Thread[] => threadsByFile.get(path) ?? [];
-  const changed = only === 'state' ? shownFiles.map((file) => file.path).filter((path) => fileKeys.get(path) !== fileKey(path, threadsOf(path))) : only;
-  const targets = changed && boxes.size === shownFiles.length ? [...new Set(changed.filter((path): path is string => path !== undefined))] : undefined;
+  const changed = only === 'state' ? visible.map((file) => file.path).filter((path) => fileKeys.get(path) !== fileKey(path, threadsOf(path))) : only;
+  const targets = changed && boxes.size === visible.length ? [...new Set(changed.filter((path): path is string => path !== undefined))] : undefined;
   const draw = (file: FileDiff): HTMLElement => {
     fileKeys.set(file.path, fileKey(file.path, threadsOf(file.path)));
     return fileBox(file, threadsOf(file.path));
   };
-  if (targets?.every((path) => boxes.has(path))) {
-    for (const path of targets) {
-      const file = shownFiles.find((item) => item.path === path);
-      if (file) boxes.get(path)?.replaceWith(draw(file));
+  keepView(() => {
+    if (targets?.every((path) => boxes.has(path))) {
+      for (const path of targets) {
+        const file = shownFiles.find((item) => item.path === path);
+        if (file) boxes.get(path)?.replaceWith(draw(file));
+      }
+    } else {
+      container.replaceChildren();
+      fileKeys.clear();
+      if (!shownFiles.length) container.append(el('p', 'muted', 'No changes against the base branch.'));
+      const append = (parent: HTMLElement, folder: FileFolder<FileDiff>, depth: number): void => {
+        for (const child of folder.folders) {
+          const isCollapsed = collapsed.get('folder:' + child.path) === true;
+          const head = el('div', 'folder-head');
+          head.dataset.folder = child.path;
+          head.append(el('span', 'name', child.name), el('span', 'muted progress'));
+          const { node, rail } = railNode(head, depth, isCollapsed, () => { collapsed.set('folder:' + child.path, !isCollapsed); save(); renderFiles(); });
+          put(parent, depth, node);
+          if (!isCollapsed) append(rail, child, depth + 1);
+        }
+        for (const file of folder.files) put(parent, depth, draw(file));
+      };
+      const put = (parent: HTMLElement, depth: number, child: HTMLElement): void => { parent.append(depth === 0 ? child : railItem(child)); };
+      if (folders) append(container, tree, 0);
+      else for (const file of shownFiles) container.append(draw(file));
     }
-  } else {
-    container.replaceChildren();
-    fileKeys.clear();
-    if (!shownFiles.length) container.append(el('p', 'muted', 'No changes against the base branch.'));
-    for (const file of shownFiles) container.append(draw(file));
-  }
-  for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
+    if (folders) updateFolderProgress(tree);
+    for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
+  });
+}
+
+/** Folders a path sits in, outermost first: every prefix, so compacted folder rows match too. */
+function folderOf(path: string): string[] {
+  const parts = path.split('/').slice(0, -1);
+  return parts.map((_part, index) => parts.slice(0, index + 1).join('/'));
+}
+
+function updateFolderProgress(tree: FileFolder<FileDiff>): void {
+  const count = (folder: FileFolder<FileDiff>): { done: number; total: number } => folder.folders.map(count).reduce(
+    (sum, next) => ({ done: sum.done + next.done, total: sum.total + next.total }),
+    { done: folder.files.filter((file) => viewed.has(file.path)).length, total: folder.files.length },
+  );
+  const walk = (folder: FileFolder<FileDiff>): void => {
+    for (const child of folder.folders) {
+      const { done, total } = count(child);
+      const progress = document.querySelector('[data-folder="' + CSS.escape(child.path) + '"] .progress');
+      if (progress) progress.textContent = done + '/' + total + ' viewed';
+      walk(child);
+    }
+  };
+  walk(tree);
+}
+
+/** Open the folders around a file so its box is on the page. */
+function openFolders(path: string): void {
+  for (const folder of folderOf(path)) collapsed.delete('folder:' + folder);
+}
+
+/** Redraw the file list without losing the scroll position or the draft being typed. */
+function keepView(draw: () => void): void {
+  const container = $('files');
+  const scroll = window.scrollY;
+  const active = document.activeElement;
+  const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
+  draw();
   if (focus) {
     const area = container.querySelector<HTMLTextAreaElement>('[data-draft="' + CSS.escape(focus.key) + '"]');
     if (area) { area.focus({ preventScroll: true }); area.setSelectionRange(focus.start, focus.end); }
@@ -1018,13 +1064,316 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   }
 }
 
+/** Where a step's or group's open state is saved; tied to the analysis so a new one starts fresh. */
+function guideState(kind: 'step' | 'group', key: string): string {
+  return kind + ':' + (current?.analysis.result?.createdAt ?? '') + ':' + key;
+}
+
+/** A step's change blocks with up to three unchanged lines around each, without reaching into other changes. */
+function sliceOf(step: GuideStep): FileDiff | undefined {
+  const file = files?.find((item) => item.path === step.path);
+  if (!file) return undefined;
+  const spans: { hunk: number; from: number; to: number }[] = [];
+  for (const block of step.blocks) {
+    const lines = file.hunks[block.hunk]?.lines ?? [];
+    let from = block.first;
+    let to = block.last;
+    while (from > 0 && block.first - from < 3 && lines[from - 1]?.kind === 'context') from -= 1;
+    while (to < lines.length - 1 && to - block.last < 3 && lines[to + 1]?.kind === 'context') to += 1;
+    const previous = spans.at(-1);
+    if (previous && previous.hunk === block.hunk && from <= previous.to + 1) previous.to = Math.max(previous.to, to);
+    else spans.push({ hunk: block.hunk, from, to });
+  }
+  return {
+    ...file,
+    hunks: spans.map(({ hunk, from, to }) => {
+      const lines = file.hunks[hunk]?.lines.slice(from, to + 1) ?? [];
+      const numbers = lines.map((line) => line.newLine ?? line.oldLine).filter((value): value is number => value !== undefined);
+      return { header: range(numbers[0] ?? 0, numbers.at(-1) ?? 0), lines };
+    }),
+  };
+}
+
+function hasLine(slice: FileDiff, side: DiffSide, line: number): boolean {
+  const key = side === 'old' ? 'oldLine' : 'newLine';
+  return slice.hunks.some((hunk) => hunk.lines.some((item) => item[key] === line));
+}
+
+function stepViewed(step: GuideStep): boolean {
+  return isStepViewed(step, files?.find((item) => item.path === step.path), readRanges, viewed.has(step.path));
+}
+
+function stepCollapsed(step: GuideStep): boolean {
+  return collapsed.get(guideState('step', step.key)) ?? stepViewed(step);
+}
+
+function groupCollapsed(group: GuideGroup): boolean {
+  return collapsed.get(guideState('group', group.key)) ?? group.severity === 'trivial';
+}
+
+/** Which step shows each thread and the draft: a note's own step, otherwise the first step whose lines include it. */
+function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, FileDiff>): { threads: Map<string, Thread[]>; notes: Map<string, Thread>; draft?: string } {
+  const threads = new Map<string, Thread[]>();
+  const notes = new Map<string, Thread>();
+  const all = allThreads();
+  const steps = groups.flatMap((group) => group.steps);
+  for (const step of steps) {
+    const note = step.threadId === undefined ? undefined : all.find((thread) => thread.source === 'local' && thread.id === step.threadId);
+    if (note) notes.set(step.key, note);
+  }
+  const noted = new Set([...notes.values()].map((thread) => thread.id));
+  const owner = (path: string, side: DiffSide, line: number): string | undefined => steps.find((step) => {
+    const slice = slices.get(step.key);
+    return step.path === path && slice !== undefined && hasLine(slice, side, line);
+  })?.key;
+  for (const thread of all) {
+    if (noted.has(thread.id) || thread.outdated) continue;
+    const key = owner(thread.path, thread.side, thread.endLine);
+    if (key !== undefined) threads.set(key, [...threads.get(key) ?? [], thread]);
+  }
+  const draft = composer ? owner(composer.path, composer.side, composer.end) : undefined;
+  return draft === undefined ? { threads, notes } : { threads, notes, draft };
+}
+
+function guideIntro(): HTMLElement {
+  const analysis = current?.analysis;
+  const card = el('section', 'card guide-intro');
+  card.append(el('h3', '', 'Guided review'), el('p', '', 'Claude reads the changes, groups them by severity, puts them in reading order and explains each step. '
+    + 'Each note is a thread you can reply to. Every change lands in exactly one step, so once every step is Viewed, the whole PR is.'));
+  const row = el('div', 'row');
+  const start = button(analysis?.running ? 'Stop analysis' : 'Analyze', () => post({ action: analysis?.running ? 'analysis-stop' : 'analyze' }), analysis?.running ? '' : 'primary');
+  row.append(start);
+  if (analysis?.running) row.append(el('span', 'spin muted', 'Analyzing · ' + (analysis.step ?? 'Working')));
+  else if (analysis?.error) row.append(el('span', 'bad', 'Analysis failed: ' + analysis.error));
+  else row.append(el('span', 'muted', 'Runs Claude read-only on this PR. Large PRs take a few minutes.'));
+  card.append(row);
+  return card;
+}
+
+function guideSummary(overview: string, stale: boolean): HTMLElement {
+  const card = el('section', 'card guide-intro');
+  card.append(el('h3', '', 'Analysis'));
+  if (overview) card.append(el('p', 'text', overview));
+  if (stale) card.append(el('p', 'wait', 'Made for an older commit. Steps whose code changed since then moved to Unclassified. Analyze again to update.'));
+  card.append(el('p', 'muted', 'Every change is in exactly one step. Viewed on every step marks the whole PR viewed.'));
+  return card;
+}
+
+type ThreadKind = 'github' | 'local' | 'analysis';
+const threadKinds: readonly (readonly [ThreadKind, string])[] = [['github', 'GitHub'], ['local', 'Local'], ['analysis', 'Analysis']];
+
+function threadKind(thread: Thread): ThreadKind {
+  return thread.source === 'github' ? 'github' : thread.origin === 'analysis' ? 'analysis' : 'local';
+}
+
+/** The Threads card: one foldable group per kind, one line per thread. Analysis starts folded because its notes already sit in the diff. */
+function renderThreadList(): void {
+  const threads = allThreads();
+  $('threads-title').textContent = 'Threads (' + threads.length + ')';
+  const list = $('threads');
+  list.replaceChildren();
+  if (threads.length === 0) list.append(el('li', 'muted', current?.github || current?.githubError ? 'No comments yet.' : 'No local comments yet. Loading GitHub comments…'));
+  if (current?.githubError) list.append(el('li', 'bad', 'Could not load GitHub comments: ' + current.githubError));
+  for (const [kind, label] of threadKinds) {
+    const members = threads.filter((thread) => threadKind(thread) === kind);
+    if (!members.length) continue;
+    const key = 'threads:' + kind;
+    const isCollapsed = collapsed.get(key) ?? kind === 'analysis';
+    const group = el('li', 'thread-group ' + kind);
+    const head = el('div', 'thread-group-head');
+    head.append(el('span', 'chevron', isCollapsed ? '▸' : '▾'), el('span', 'tag', label), el('span', 'muted', String(members.length)));
+    head.addEventListener('click', () => { collapsed.set(key, !isCollapsed); save(); renderThreadList(); });
+    group.append(head);
+    if (!isCollapsed) {
+      const rows = el('ul');
+      for (const thread of members) rows.append(threadRow(thread, kind));
+      group.append(rows);
+    }
+    list.append(group);
+  }
+}
+
+function threadRow(thread: Thread, kind: ThreadKind): HTMLElement {
+  const item = el('li', 'card-thread ' + kind);
+  const where = el('a', 'where', thread.location.split('/').pop() ?? thread.location);
+  where.title = thread.location;
+  where.addEventListener('click', () => jump(thread));
+  const text = el('span', 'text', thread.text);
+  text.title = thread.text;
+  item.append(where, el('span', 'muted state', thread.status), text);
+  if (thread.url) {
+    const link = el('a', '', '↗');
+    link.title = 'Open on GitHub';
+    link.addEventListener('click', () => post({ action: 'github', id: thread.id }));
+    item.append(link);
+  }
+  return item;
+}
+
+function groupHead(group: GuideGroup): HTMLElement {
+  const head = el('div', 'guide-group sev-' + group.severity);
+  head.dataset.group = group.key;
+  head.append(el('span', 'sev', severityLabels[group.severity]), el('span', 'title', group.title), el('span', 'muted progress'));
+  return head;
+}
+
+/** A foldable level of the file list: its head, then its children beside a rail that folds them when clicked, like a threaded discussion. */
+function railNode(head: HTMLElement, depth: number, isCollapsed: boolean, toggle: () => void): { node: HTMLElement; rail: HTMLElement } {
+  const node = el('section', 'tree-node');
+  node.style.setProperty('--depth', String(depth));
+  head.classList.add('node-head');
+  head.prepend(foldToggle(isCollapsed));
+  head.addEventListener('click', toggle);
+  const rail = el('div', 'fold-rail');
+  rail.style.setProperty('--depth', String(depth + 1));
+  const line = el('div', 'fold-line');
+  line.title = 'Fold';
+  line.addEventListener('click', toggle);
+  rail.append(line);
+  node.append(head);
+  if (!isCollapsed) node.append(rail);
+  return { node, rail };
+}
+
+/** A child hanging off a rail, joined to it by a curved elbow. */
+function railItem(child: HTMLElement): HTMLElement {
+  const item = el('div', 'rail-item');
+  item.append(child);
+  return item;
+}
+
+function foldToggle(isCollapsed: boolean): HTMLElement {
+  const button = el('span', 'fold-toggle');
+  button.title = isCollapsed ? 'Unfold' : 'Fold';
+  button.innerHTML = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5 8h6' + (isCollapsed ? 'M8 5v6' : '') + '"/></svg>';
+  return button;
+}
+
+function updateGuideProgress(groups: readonly GuideGroup[]): void {
+  const steps = groups.flatMap((group) => group.steps);
+  $('files-title').textContent = 'Steps (' + steps.length + ') · ' + steps.filter(stepViewed).length + ' viewed';
+  for (const group of groups) {
+    const progress = document.querySelector('[data-group="' + CSS.escape(group.key) + '"] .progress');
+    if (progress) progress.textContent = group.steps.filter(stepViewed).length + '/' + group.steps.length + ' viewed';
+  }
+}
+
+/** The guided layout: Claude's steps by severity, each a slice of the diff with its note and a Viewed checkbox. */
+function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
+  const container = $('files');
+  const result = current?.analysis.result;
+  if (!files || !result) {
+    $('files-title').textContent = 'Guided review';
+    container.replaceChildren(guideIntro());
+    return;
+  }
+  const shownFiles = files;
+  guide ??= buildGuide(result, shownFiles);
+  const groups = guide;
+  const slices = new Map(groups.flatMap((group) => group.steps).flatMap((step) => {
+    const slice = sliceOf(step);
+    return slice ? [[step.key, slice] as const] : [];
+  }));
+  const owners = guideOwners(groups, slices);
+  const visible = groups.filter((group) => !groupCollapsed(group)).flatMap((group) => group.steps);
+  const keyOf = (step: GuideStep): string => JSON.stringify([stepViewed(step), stepCollapsed(step), readRanges.filter((marked) => marked.path === step.path),
+    owners.threads.get(step.key) ?? [], owners.notes.get(step.key) ?? null, owners.draft === step.key ? [author, current?.details?.pendingComments] : null]);
+  const numbers = new Map(groups.flatMap((group) => group.steps.map((step, index) => [step.key, index + 1] as const)));
+  const draw = (step: GuideStep): HTMLElement => {
+    stepKeys.set(step.key, keyOf(step));
+    return stepBox(step, numbers.get(step.key) ?? 0, slices.get(step.key), owners.threads.get(step.key) ?? [], owners.notes.get(step.key), owners.draft === step.key);
+  };
+  const boxes = new Map([...container.querySelectorAll<HTMLElement>('.step-wrap')].map((node) => [node.dataset.key, node]));
+  const targets = only === 'state' ? visible.filter((step) => stepKeys.get(step.key) !== keyOf(step))
+    : only ? visible.filter((step) => only.includes(step.path)) : undefined;
+  if (targets && boxes.size === visible.length && targets.every((step) => boxes.has(step.key))) {
+    for (const step of targets) boxes.get(step.key)?.replaceWith(draw(step));
+  } else {
+    stepKeys.clear();
+    container.replaceChildren(guideSummary(result.overview, current?.analysis.stale === true));
+    for (const group of groups) {
+      const isCollapsed = groupCollapsed(group);
+      const { node, rail } = railNode(groupHead(group), 0, isCollapsed, () => { collapsed.set(guideState('group', group.key), !isCollapsed); save(); renderFiles(); });
+      container.append(node);
+      if (!isCollapsed) for (const step of group.steps) rail.append(railItem(draw(step)));
+    }
+  }
+  updateGuideProgress(groups);
+}
+
+function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, threads: readonly Thread[], note: Thread | undefined, hasDraft: boolean): HTMLElement {
+  const wrap = el('div', 'step-wrap');
+  wrap.dataset.key = step.key;
+  if (step.transition) wrap.append(el('div', 'transition', '↓ ' + step.transition));
+  const file = files?.find((item) => item.path === step.path);
+  if (!file || !slice) return wrap;
+  const isCollapsed = stepCollapsed(step);
+  const box = el('div', 'file step' + (isCollapsed ? ' collapsed' : ''));
+  box.dataset.path = step.path;
+  const head = el('div', 'file-head');
+  const chevron = el('span', 'chevron', isCollapsed ? '▸' : '▾');
+  const name = el('span', 'name');
+  name.append(el('span', 'step-title', number + '.' + (step.title ? ' ' + step.title : '')), el('span', 'step-path', file.oldPath ? file.oldPath + ' → ' + file.path : file.path));
+  const toggle = (): void => { collapsed.set(guideState('step', step.key), !isCollapsed); save(); renderFiles([step.path]); };
+  chevron.addEventListener('click', toggle);
+  name.addEventListener('click', toggle);
+  const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
+  badge.title = file.change;
+  const lines = step.blocks.flatMap((block) => file.hunks[block.hunk]?.lines.slice(block.first, block.last + 1) ?? []);
+  const stats = el('span', '');
+  stats.append(el('span', 'stat-add', '+' + lines.filter((line) => line.kind === 'add').length), ' ', el('span', 'stat-del', '−' + lines.filter((line) => line.kind === 'del').length));
+  const label = el('label', 'viewed');
+  const check = el('input');
+  check.type = 'checkbox';
+  check.checked = stepViewed(step);
+  label.title = 'Mark this step\'s changes read. When every change in the file is read, the file is marked Viewed.';
+  check.addEventListener('change', () => {
+    collapsed.delete(guideState('step', step.key));
+    if (!step.blocks.length) {
+      markViewed(step.path, check.checked);
+      post({ action: 'viewed', path: step.path, viewed: check.checked });
+    } else if (check.checked) {
+      const unread = step.blocks.map((block) => block.range).filter((marked) => selectedReadIds(file, marked) === undefined);
+      const done = !viewed.has(step.path) && fullyRead(file, [...readRanges, ...unread]);
+      readRanges = [...readRanges, ...unread.map((marked) => ({ id: 'pending', ...marked }))];
+      if (done) markViewed(step.path, true);
+      unread.forEach((marked, index) => post({ action: 'read', ...marked, viewed: done && index === unread.length - 1 }));
+    } else {
+      unmarkRead([...new Set(step.blocks.flatMap((block) => selectedReadIds(file, block.range) ?? []))]);
+      if (viewed.has(step.path)) { markViewed(step.path, false); post({ action: 'viewed', path: step.path, viewed: false }); }
+    }
+    save();
+    renderFiles([step.path]);
+  });
+  label.append(check, 'Viewed');
+  head.append(chevron, name, badge, stats, label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
+  box.append(head);
+  const diff = el('div', 'diff');
+  if (step.fileNote) {
+    const about = el('div', 'file-note');
+    about.append(el('span', 'tag', 'About this file'), ' ', step.fileNote);
+    diff.append(about);
+  }
+  if (note) diff.append(threadBox(note));
+  else if (step.note) diff.append(el('div', 'step-note', step.note));
+  if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
+  else if (!slice.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
+  else diff.append(table(slice, threads, new Set(), hasDraft ? composer : null));
+  box.append(diff);
+  wrap.append(box);
+  return wrap;
+}
+
 function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   const isCollapsed = collapsed.get(file.path) === true;
   const box = el('div', 'file' + (isCollapsed ? ' collapsed' : ''));
   box.dataset.path = file.path;
   const head = el('div', 'file-head');
   const chevron = el('span', 'chevron', isCollapsed ? '▸' : '▾');
-  const name = el('span', 'name', file.oldPath ? file.oldPath + ' → ' + file.path : file.path);
+  const base = file.path.split('/').at(-1) ?? file.path;
+  const shown = folders ? base : file.path;
+  const name = el('span', 'name', file.oldPath ? file.oldPath + ' → ' + shown : shown);
+  name.title = file.path;
   const toggle = (): void => { collapsed.set(file.path, !isCollapsed); save(); renderFiles([file.path]); };
   chevron.addEventListener('click', toggle);
   name.addEventListener('click', toggle);
@@ -1199,15 +1548,34 @@ function renderPeek(): void {
   if (first) codeBox.scrollTop = Math.max(0, first.getBoundingClientRect().top - codeBox.getBoundingClientRect().top - 3 * first.offsetHeight);
 }
 
+/** Show the guided layout with a step's group and the step open, scrolled to it. */
+function revealStep(key: string): void {
+  layout = 'guided';
+  const result = current?.analysis.result;
+  if (files && result) {
+    guide ??= buildGuide(result, files);
+    const group = guide.find((item) => item.steps.some((step) => step.key === key));
+    if (group) {
+      collapsed.set(guideState('group', group.key), false);
+      collapsed.set(guideState('step', key), false);
+    }
+  }
+  save();
+  renderFiles();
+  document.querySelector('.step-wrap[data-key="' + CSS.escape(key) + '"]')?.scrollIntoView({ block: 'start' });
+}
+
 function onExtensionMessage(data: ExtensionMessage): void {
   if (data.state) render(data.state);
-  if (data.files) { files = data.files; contextLines.clear(); loading.clear(); renderFiles(); }
+  if (data.files) { files = data.files; guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
   if (data.preview) { previews.set(data.preview.path, data.preview); loading.delete('preview:' + data.preview.path); renderFiles([data.preview.path]); }
   if (data.context) { contextLines.set(data.context.path, data.context.lines); loading.delete(data.context.path); renderFiles([data.context.path]); }
   if (data.definition) { peeks.length = peekAt + 1; peeks.push(data.definition); peekAt = peeks.length - 1; renderPeek(); }
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
+  if (data.revealStep) revealStep(data.revealStep);
   if (data.reveal && files) {
     collapsed.set(data.reveal, false);
+    openFolders(data.reveal);
     save();
     renderFiles();
     document.querySelector('[data-path="' + CSS.escape(data.reveal) + '"]')?.scrollIntoView({ block: 'start' });
@@ -1272,8 +1640,26 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
-$('collapse').addEventListener('click', () => { for (const file of files ?? []) collapsed.set(file.path, true); save(); renderFiles(); });
-$('expand').addEventListener('click', () => { for (const file of files ?? []) collapsed.set(file.path, false); save(); renderFiles(); });
+$('guided').addEventListener('click', () => { layout = 'guided'; save(); renderFiles(); });
+$('folders').addEventListener('click', () => { folders = !folders; save(); renderFiles(); });
+$('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
+for (const [id, value] of [['collapse', true], ['expand', false]] as const) {
+  $(id).addEventListener('click', () => {
+    if (layout === 'guided') {
+      for (const group of guide ?? []) {
+        if (!value) collapsed.set(guideState('group', group.key), false);
+        for (const step of group.steps) collapsed.set(guideState('step', step.key), value);
+      }
+    } else {
+      for (const file of files ?? []) {
+        collapsed.set(file.path, value);
+        if (!value) openFolders(file.path);
+      }
+    }
+    save();
+    renderFiles();
+  });
+}
 for (const [id, open] of [['collapse-comments', false], ['expand-comments', true]] as const) {
   $(id).addEventListener('click', () => { for (const thread of allThreads()) threadOpen.set(thread.id, open); renderFiles(); });
 }

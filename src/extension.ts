@@ -11,13 +11,15 @@ import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
-import { type PullRequestRole, ensureWorktree, hasWorktree, readPullRequestBase, removeWorktree, worktreePath } from './worktrees.js';
-import { highlightSource, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
+import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
+import { buildGuide, guideOutline } from './prAnalysis.js';
+import { readSavedAnalysis } from './prAnalysisRunner.js';
+import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
 import { markdownBlocks } from './markdown.js';
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
-import { buildOverviewState, showPullRequestOverview, type PageComment } from './pullRequestOverview.js';
+import { buildOverviewState, showPullRequestOverview, type AnalysisView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
@@ -73,7 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const store = await createReviewStore(join(storage.fsPath, 'review.json'), folder.uri.fsPath);
     activeStore = store;
     activePullRequests = checkouts;
-    const showOverview = async (checkout: Checkout, provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, revealPath?: string): Promise<void> => {
+    const showOverview = async (checkout: Checkout, provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, reveal?: OverviewReveal): Promise<void> => {
       const { storageRoot, sessions: pullRequestSessions, fileReviews } = checkout;
       await ensureWorktree(checkout.root, storageRoot, provider, repository, pullRequest, role);
       const opened = await pullRequestSessions.open(repository, pullRequest.number);
@@ -102,6 +104,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const files = await readPullRequestDiff(folder, await readBase());
         diffPaths = files.map((file) => file.path);
         return files;
+      };
+      const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
+      const readAnalysis = async (): Promise<AnalysisView> => {
+        const result = await opened.analysis.result();
+        const { running, step, error } = opened.analysis.activity;
+        const stale = result !== undefined && result.head !== await readHead().catch(() => result.head);
+        return { running, stale, ...(step === undefined ? {} : { step }), ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }) };
       };
       const detailsChanged = new vscode.EventEmitter<void>();
       let details: Promise<PullRequestDetails | Error> | undefined;
@@ -133,8 +142,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           fileReviews.reviewed(provider, repository, pullRequest.number, all),
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
-        const [loadedDetails, loadedThreads] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads()]);
-        return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads);
+        const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
+        return buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -194,6 +203,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await provider.resolveThread(id, resolved);
           await loadThreads();
         },
+        deleteOnGitHub: async (id) => {
+          const choice = await vscode.window.showWarningMessage('Delete this comment on GitHub?', { modal: true, detail: 'Everyone on the PR loses it. This cannot be undone.' }, 'Delete');
+          if (choice !== 'Delete') return;
+          await provider.deleteComment(id);
+          await Promise.all([loadThreads(), loadDetails()]);
+        },
         setViewed: (path, viewed) => fileReviews.set(provider, repository, pullRequest.number, path, viewed),
         markRead: async (range, fileDone) => {
           if (!diffPaths.includes(range.path)) throw new Error(`${range.path} is not part of this PR's changes.`);
@@ -218,13 +233,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.commands.executeCommand('pairReview.refreshPullRequests');
         },
         refresh: () => { void loadDetails(); void loadThreads(); },
-      }, context.extensionUri, revealPath);
+        analyze: async () => {
+          const [files, head] = await Promise.all([readFiles(), readHead()]);
+          opened.analysis.start({
+            files, head,
+            about: `#${pullRequest.number} ${pullRequest.title} (${pullRequest.headBranch} into ${pullRequest.baseBranch})`,
+            anchor: async ({ range }) => (await pageAnchor({ ...range, endLine: Math.min(range.endLine, range.startLine + 49) })).anchor,
+          });
+        },
+        stopAnalysis: () => { opened.analysis.stop(); },
+      }, context.extensionUri, reveal);
     };
     const worktreesOf = (checkout: Checkout): PullRequestWorktrees => {
       const { root: checkoutRoot, storageRoot, sessions, fileReviews } = checkout;
       return {
         exists: (repository, number) => hasWorktree(storageRoot, repository, number),
-        open: (...arguments_) => showOverview(checkout, ...arguments_),
+        open: (provider, repository, pullRequest, role, revealPath) => showOverview(checkout, provider, repository, pullRequest, role, revealPath === undefined ? undefined : { path: revealPath }),
         showClaude: async (provider, repository, pullRequest, role) => {
           await ensureWorktree(checkoutRoot, storageRoot, provider, repository, pullRequest, role);
           showClaude(await sessions.open(repository, pullRequest.number));
@@ -240,7 +264,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
         forget: () => { fileReviews.forget(); GitHubApiProvider.forget(); checkouts.rescan(); },
-        showOverview: (provider, repository, pullRequest, role) => showOverview(checkout, provider, repository, pullRequest, role),
+        showOverview: (provider, repository, pullRequest, role, step) => showOverview(checkout, provider, repository, pullRequest, role, step === undefined ? undefined : { step }),
+        guide: async (provider, repository, pullRequest) => {
+          const folder = worktreePath(storageRoot, repository, pullRequest.number);
+          const analysis = await readSavedAnalysis(reviewDataPath(folder));
+          const base = analysis === undefined ? undefined : await readPullRequestBase(folder, pullRequest.baseBranch);
+          if (analysis === undefined || base === undefined) return undefined;
+          const files = await readPlainPullRequestDiff(folder, base);
+          const [read, viewed] = await Promise.all([
+            fileReviews.readRanges(repository, pullRequest.number, base),
+            fileReviews.reviewed(provider, repository, pullRequest.number, files.map((file) => file.path)),
+          ]);
+          return guideOutline(buildGuide(analysis, files), files, read, viewed);
+        },
       };
     };
     context.subscriptions.push(

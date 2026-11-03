@@ -139,6 +139,7 @@ class FileReviewStore implements ReviewStore {
         resolved: false,
         outdated: existing?.outdated ?? false,
         latestEventId: event.id,
+        ...(existing?.origin === undefined ? {} : { origin: existing.origin }),
       };
       return [
         {
@@ -221,6 +222,42 @@ class FileReviewStore implements ReviewStore {
       return thread.outdated === value
         ? [snapshot, undefined]
         : [replaceThread(snapshot, { ...thread, outdated: value }), undefined];
+    });
+  }
+
+  /** Open each analysis note as a thread that starts with Claude's message, after dropping earlier notes nobody touched. */
+  replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]> {
+    const captured = notes.map(({ anchor, text }) => {
+      const capturedAnchor = readAnchor(anchor);
+      validateNewAnchor(capturedAnchor);
+      return { anchor: capturedAnchor, text: readBoundedText(text, 'Note', maximumReplyLength, true) };
+    });
+    // Dropping notes without adding any could remove the newest events and let event sequence numbers repeat.
+    if (captured.length === 0) return Promise.resolve([]);
+    return this.#mutate((snapshot) => {
+      const untouched = new Set(snapshot.threads
+        .filter((thread) => thread.origin === 'analysis' && !thread.resolved && thread.messages.length === 1)
+        .map((thread) => thread.id));
+      let sequence = snapshot.events.at(-1)?.sequence ?? 0;
+      if (sequence + captured.length > Number.MAX_SAFE_INTEGER) {
+        throw new ReviewStoreError('Review event sequence is exhausted.', 409);
+      }
+      const createdAt = new Date().toISOString();
+      const added = captured.map(({ anchor, text }) => {
+        const threadId = randomUUID();
+        sequence += 1;
+        const event: ReviewEvent = { id: randomUUID(), sequence, threadId, intent: 'ask', text, anchor, createdAt, acknowledged: true };
+        const thread: ReviewThread = {
+          id: threadId, anchor, intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: event.id, origin: 'analysis',
+          messages: [{ id: randomUUID(), eventId: event.id, author: 'claude', text, createdAt }],
+        };
+        return { event, thread };
+      });
+      return [{
+        ...snapshot,
+        threads: [...snapshot.threads.filter((thread) => !untouched.has(thread.id)), ...added.map(({ thread }) => thread)],
+        events: [...snapshot.events.filter((event) => !untouched.has(event.threadId)), ...added.map(({ event }) => event)],
+      }, added.map(({ thread }) => thread.id)];
     });
   }
 
@@ -344,12 +381,17 @@ function readSnapshot(value: unknown, workspaceRoot: string): ReviewSnapshot {
 /** Validate a stored review thread and its nested messages. */
 function readThread(value: unknown): ReviewThread {
   const record = readObject(value, 'thread');
-  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId']);
+  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin']);
   const messages = readArray(record['messages'], 'messages').map(readMessage);
-  if (messages.length === 0 || messages[0]?.author !== 'human') {
+  if (record['origin'] !== undefined && record['origin'] !== 'analysis') {
+    throw new ReviewStoreError('Invalid thread origin.');
+  }
+  const analysis = record['origin'] === 'analysis';
+  if (messages.length === 0 || messages[0]?.author !== (analysis ? 'claude' : 'human')) {
     throw new ReviewStoreError('Review threads must start with a human comment.');
   }
   return {
+    ...(analysis ? { origin: 'analysis' as const } : {}),
     id: readId(record['id']), anchor: readAnchor(record['anchor']), messages,
     intent: readIntent(record['intent']), status: readStatus(record['status']),
     resolved: readBoolean(record['resolved'], 'resolved'),

@@ -32,7 +32,7 @@ function fixture(text: string, selectedText = 'value();'): { store: ReviewStore;
   const unavailable = async (): Promise<never> => { throw new Error('Persistence is outside this navigation test.'); };
   const store: ReviewStore = {
     workspaceRoot: '/workspace', threads, events: [], pendingEvents: [],
-    submit: unavailable, updateFromAgent: unavailable, resolve: unavailable, setOutdated: unavailable,
+    submit: unavailable, updateFromAgent: unavailable, resolve: unavailable, setOutdated: unavailable, replaceAnalysisNotes: unavailable,
     onChange: () => ({ dispose(): void {} }), flush: async () => undefined,
   };
   return { store, threads, thread, message };

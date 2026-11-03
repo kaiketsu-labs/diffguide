@@ -5,9 +5,10 @@ import type * as vscode from 'vscode';
 import { parseDetails, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
 import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githubApi.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { fileTree, registerPullRequestView } from '../src/pullRequestView.js';
+import { fileTree, type FileFolder } from '../src/fileTree.js';
+import { registerPullRequestView } from '../src/pullRequestView.js';
 import { groupSearchResults, parseGitRemote, pickGitHubRemote } from '../src/pullRequests.js';
-import type { FileFolder, PullRequestWorktrees } from '../src/pullRequestView.js';
+import type { PullRequestWorktrees } from '../src/pullRequestView.js';
 import { EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
 
 const ghEntry = {
@@ -78,6 +79,7 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
     reviewedFiles: async (_provider, _repository, _number, paths) => new Set(paths.filter((file) => reviewed.has(file))),
     setReviewed: async (_provider, _repository, _number, file, done) => { if (done) reviewed.add(file); else reviewed.delete(file); },
     showOverview: async () => undefined,
+    guide: async () => undefined,
     forget: () => undefined,
   };
 }
@@ -112,7 +114,7 @@ test('parses PR details into reviewers, checks and allowed merge methods', () =>
 });
 
 test('reads GitHub review threads, using original lines for outdated ones and skipping file-level threads', () => {
-  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ url, bodyHTML: `<p>${body}</p>`, state, author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
+  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
   const threads = parseReviewThreads([
     { id: 'T1', path: 'src/a.ts', diffSide: 'RIGHT', line: 12, startLine: 10, originalLine: 3, originalStartLine: 1, isOutdated: false, isResolved: true,
       comments: { nodes: [comment('alice', 'Why?'), comment(null, 'Because.')] } },
@@ -123,9 +125,9 @@ test('reads GitHub review threads, using original lines for outdated ones and sk
   ]);
   assert.deepEqual(threads, [
     { id: 'T1', path: 'src/a.ts', side: 'RIGHT', startLine: 10, endLine: 12, outdated: false, resolved: true, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>' }, { author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>' }] },
+      comments: [{ id: 'C-Why?', author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false }] },
     { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>' }] },
+      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false }] },
   ]);
   assert.throws(() => parseReviewThreads([{ id: 'T4', path: 'a', line: 1, isOutdated: false, comments: { nodes: [comment('x', 'y', 'javascript:alert(1)')] } }]), /invalid link/u);
 });
@@ -153,6 +155,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
     overview: async () => { throw new Error('not used'); },
     replyToThread: async () => { throw new Error('not used'); },
     resolveThread: async () => { throw new Error('not used'); },
+    deleteComment: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
   };
@@ -215,7 +218,7 @@ test('groups changed files into folders and folds single-folder chains into one 
   const file = (path: string) => ({ path, change: 'modified' as const, additions: 1, deletions: 0 });
   const root = fileTree([file('Modules/Sources/Todos/Notes/Note.swift'), file('Modules/Sources/Todos/Notes/Link.swift'),
     file('Modules/Sources/Todos/TodoList.swift'), file('Tests/NoteTests.swift'), file('README.md')]);
-  const names = (folder: FileFolder): unknown => ({ [folder.name]: [...folder.folders.map(names), ...folder.files.map((entry) => entry.path.split('/').at(-1))] });
+  const names = (folder: FileFolder<{ readonly path: string }>): unknown => ({ [folder.name]: [...folder.folders.map(names), ...folder.files.map((entry) => entry.path.split('/').at(-1))] });
   assert.deepEqual(names(root), { '': [
     { 'Modules/Sources/Todos': [{ Notes: ['Link.swift', 'Note.swift'] }, 'TodoList.swift'] },
     { Tests: ['NoteTests.swift'] },
@@ -282,6 +285,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
     overview: async () => { throw new Error('not used'); },
     replyToThread: async () => { throw new Error('not used'); },
     resolveThread: async () => { throw new Error('not used'); },
+    deleteComment: async () => { throw new Error('not used'); },
     submitReview: async () => { throw new Error('not used'); },
     merge: async () => { throw new Error('not used'); },
   });
@@ -432,3 +436,41 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   status.fire('acme/other#1');
   assert.deepEqual(redrawn, [pr?.node, undefined]);
 });
+
+test('lists a checked-out PR\'s guide steps above its files and opens the review page at a step', async (t) => {
+  window.trees.length = 0;
+  const provider = {
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [summary],
+    listReviewRequested: async () => [],
+    listFiles: async () => [{ path: 'src/a.ts', additions: 1, deletions: 0, change: 'added' }],
+  } as unknown as PullRequestProvider;
+  const worktrees = recordingWorktrees();
+  worktrees.checkedOut.add(7);
+  const shown: (string | undefined)[] = [];
+  worktrees.showOverview = async (_provider, _repository, _pullRequest, _role, step) => { shown.push(step); };
+  worktrees.guide = async () => [
+    { key: 'g0', severity: 'critical', title: 'Auth', steps: [{ key: 'g0.0', path: 'src/a.ts', title: 'Check tokens', note: 'Rejects expired tokens.', viewed: true }, { key: 'g0.1', path: 'src/b.ts', viewed: false }] },
+    { key: 'g1', severity: 'trivial', title: 'Format', steps: [{ key: 'g1.0', path: 'README.md', viewed: false }] },
+  ];
+  const settings = new FakeMemento();
+  await settings.update('pairReview.groupBy', 'repository');
+  await settings.update('pairReview.fileView', 'list');
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+
+  const [repository] = await level(tree);
+  const [section] = await level(tree, repository?.node);
+  const [pr] = await level(tree, section?.node);
+  const [guide, file] = await level(tree, pr?.node);
+  assert.deepEqual([guide?.item.label, guide?.item.description, file?.item.label], ['Guided review', '1/3 viewed', 'a.ts']);
+  const groups = await level(tree, guide?.node);
+  assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
+  const steps = await level(tree, groups[0]?.node);
+  assert.deepEqual(steps.map(({ item }) => [item.label, item.description, (item.iconPath as vscode.ThemeIcon).id]), [['1. Check tokens', 'a.ts', 'pass-filled'], ['2. b.ts', 'src', 'circle-large-outline']]);
+  const command = steps[0]?.item.command;
+  await commands.executeCommand(command?.command ?? '', ...command?.arguments ?? []);
+  assert.deepEqual(shown, ['g0.0']);
+});
+
