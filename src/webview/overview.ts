@@ -775,11 +775,13 @@ function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: num
   const where = { id: thread.id, message: index, option: picked };
   const publish = button('Publish suggestion', () => post({ action: 'publish-suggestion', ...where }));
   publish.title = 'Adds it to your pending review as a GitHub suggestion the author can commit.';
-  const apply = button('Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
-  apply.title = 'Changes the file in the PR worktree. Nothing is committed.';
-  const done = thread.applied?.message === index ? thread.applied.option : undefined;
+  const canPush = current?.details?.canEdit === true;
+  const apply = button(canPush ? 'Commit suggestion' : 'Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
+  apply.title = canPush ? 'Commits the change to the PR branch and pushes it.' : 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.';
+  const done = thread.applied?.message === index ? thread.applied : undefined;
   if (done === undefined) actions.append(el('span', 'gap'), publish, apply);
-  else actions.append(el('span', 'muted gap', 'Option ' + (done + 1) + ' applied to the worktree, not committed yet.'), publish);
+  else if (done.pushed) actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed and pushed.'));
+  else actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' applied to the worktree, not committed.'), button('Discard', () => post({ action: 'discard-suggestion', id: thread.id })), publish);
   card.append(head, lines, actions);
   return card;
 }

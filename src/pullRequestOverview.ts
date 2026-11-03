@@ -41,7 +41,7 @@ export interface OverviewState {
     /** What Claude is doing with this thread right now, while it waits for or works on it. */
     readonly working?: string;
     /** The suggestion option written to the worktree from this thread, while the page is open. */
-    readonly applied?: { readonly message: number; readonly option: number };
+    readonly applied?: { readonly message: number; readonly option: number; readonly pushed: boolean };
     readonly url?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
@@ -148,6 +148,8 @@ export interface OverviewActions {
   applySuggestion(threadId: string, message: number, option: number): Promise<void>;
   /** Post one option of a message's suggestions on GitHub as a suggestion on the thread's lines, in the pending review. */
   publishSuggestion(threadId: string, message: number, option: number): Promise<void>;
+  /** Put back the file an uncommitted suggestion changed. */
+  discardSuggestion(threadId: string): Promise<void>;
   /** Have the PR's Claude merge the base branch, resolve the conflicts and push; resolves when Claude is done. */
   fixConflicts(answer?: string): Promise<void>;
   /** Hide Claude's question about the conflicts. */
@@ -186,6 +188,7 @@ export type PageMessage =
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
   | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
+  | { readonly action: 'discard-suggestion'; readonly id: string }
   | { readonly action: 'viewed'; readonly path: string; readonly viewed: boolean }
   | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
@@ -328,6 +331,9 @@ export async function showPullRequestOverview(
           && Number.isSafeInteger(message) && (message as number) >= 0 && Number.isSafeInteger(option) && (option as number) >= 0) {
           await (action === 'apply-suggestion' ? actions.applySuggestion : actions.publishSuggestion)(id, message as number, option as number);
           if (action === 'apply-suggestion') sendFiles();
+        } else if (action === 'discard-suggestion' && typeof id === 'string' && state.threads.some((thread) => thread.id === id)) {
+          await actions.discardSuggestion(id);
+          sendFiles();
         } else if (action === 'dismiss-conflict-question') actions.dismissConflictQuestion();
         else if (action === 'fix-conflicts' && (text === undefined || isText(text))) {
           void actions.fixConflicts(text?.trim()).catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });

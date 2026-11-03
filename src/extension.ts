@@ -10,7 +10,7 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
-import { conflictTask, prepareConflictFix } from './conflicts.js';
+import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, guideOutline } from './prAnalysis.js';
@@ -141,7 +141,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       /** What Claude asked when it last stopped fixing conflicts without pushing. */
       let conflictQuestion: string | undefined;
       /** Suggestion options written to the worktree while this page is open, by thread. */
-      const applied = new Map<string, { readonly message: number; readonly option: number }>();
+      const applied = new Map<string, { readonly message: number; readonly option: number; readonly pushed: boolean }>();
+      /** File contents around each suggestion applied without committing, so Discard can put the file back. */
+      const undo = new Map<string, { readonly path: string; readonly before: string; readonly after: string }>();
+      /** Where to push the PR's branch: `origin`, or the fork's URL when the branch lives in a fork. */
+      const pushTarget = (loaded: PullRequestDetails): string => loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
       const loadThreads = (): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
@@ -274,9 +278,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
           if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
           if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
+          if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Apply the suggestion when it is done.');
+          const loaded = await currentDetails();
           const file = join(folder, anchor.path);
-          await writeFile(file, applySuggestion(await readFile(file, 'utf8'), anchor, suggestion));
-          applied.set(id, { message, option });
+          if (loaded.canEdit) {
+            if ((await git(folder, ['status', '--porcelain', '--', anchor.path])).trim() !== '') throw new Error(`${anchor.path} has uncommitted changes. Commit or discard them first.`);
+            await syncToPullRequestHead(folder, pullRequest.number);
+          }
+          const before = await readFile(file, 'utf8');
+          const after = applySuggestion(before, anchor, suggestion);
+          await writeFile(file, after);
+          if (loaded.canEdit) {
+            await commitAndPush(folder, { path: anchor.path, message: 'Apply suggestion from code review', pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer' });
+            changedOnGitHub();
+          } else undo.set(id, { path: anchor.path, before, after });
+          applied.set(id, { message, option, pushed: loaded.canEdit });
+          detailsChanged.fire();
+        },
+        discardSuggestion: async (id) => {
+          const change = undo.get(id);
+          if (change === undefined) throw new Error('There is no applied suggestion to discard.');
+          const file = join(folder, change.path);
+          if (await readFile(file, 'utf8') !== change.after) throw new Error(`${change.path} changed since the suggestion was applied, so it was not discarded.`);
+          await writeFile(file, change.before);
+          undo.delete(id);
+          applied.delete(id);
           detailsChanged.fire();
         },
         publishSuggestion: async (id, message, option) => {
@@ -296,7 +322,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const base = await prepareConflictFix(folder, pullRequest.number, pullRequest.baseBranch);
           const head = (await git(folder, ['rev-parse', 'HEAD'])).trim();
           conflictQuestion = undefined;
-          const pushTo = loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
+          const pushTo = pushTarget(loaded);
           const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch: pullRequest.baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
           const pushedNothing = (await git(folder, ['rev-parse', 'HEAD'])).trim() === head;
           if (error === undefined && pushedNothing && reply !== undefined) conflictQuestion = reply;
