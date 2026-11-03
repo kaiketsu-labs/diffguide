@@ -12,6 +12,11 @@ export interface PullRequestSummary {
   readonly baseBranch: string;
   /** Strongest verdict among reviewers' latest reviews; absent when nobody reviewed yet. */
   readonly review?: ReviewVerdict;
+  /** ISO times; absent in lists saved before they were read. */
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  /** Lines and files changed across the whole PR. */
+  readonly changes?: { readonly additions: number; readonly deletions: number; readonly files: number };
 }
 
 export type ReviewVerdict = 'approved' | 'changes' | 'commented';
@@ -205,7 +210,7 @@ export function pickGitHubRemote(config: string): GitHubRemote | undefined {
 /** Open PRs by the viewer and requesting the viewer's review, keyed by lowercase `owner/name`. */
 type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>;
 
-const searchFields = 'number title url isDraft headRefName baseRefName author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
+const searchFields = 'number title url isDraft headRefName baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
 const viewerField = 'viewer{avatarUrl(size:40)}';
@@ -247,6 +252,7 @@ export class GitHubApiProvider implements PullRequestProvider {
   /** One provider per repository keeps its remotes, PR ids and Viewed flags until `forget`. */
   static readonly #providers = new Map<string, GitHubApiProvider>();
   #repository: Promise<{ readonly owner: string; readonly name: string; readonly host: string }> | undefined;
+  #renamed: Promise<string> | undefined;
   #remotes: Promise<string> | undefined;
   readonly #ids = new Map<number, Promise<string>>();
   /** Viewed flags from the latest file list of each PR, so reading them needs no second request. */
@@ -290,7 +296,16 @@ export class GitHubApiProvider implements PullRequestProvider {
       search.catch(() => { GitHubApiProvider.#searches.delete(host); });
       GitHubApiProvider.#searches.set(host, search);
     }
-    return (await search).get(`${owner}/${name}`.toLowerCase()) ?? { mine: [], reviewRequested: [] };
+    const results = await search;
+    return results.get(`${owner}/${name}`.toLowerCase()) ?? results.get(await this.#currentName()) ?? { mine: [], reviewRequested: [] };
+  }
+
+  /** The repository's name on GitHub now, which search reports, when the remote still uses a name from before a rename or transfer. */
+  #currentName(): Promise<string> {
+    this.#renamed ??= this.#graphql('query($owner:String!,$name:String!){repository(owner:$owner,name:$name){nameWithOwner}}', {})
+      .then((data) => text(object(data['repository'])['nameWithOwner']).toLowerCase())
+      .catch(() => '');
+    return this.#renamed;
   }
 
   async #search(host: string): Promise<SearchResults> {
@@ -578,6 +593,9 @@ export function parsePullRequestList(value: unknown): readonly PullRequestSummar
     }
     const reviews = Array.isArray(record['latestReviews']) ? record['latestReviews'] as readonly unknown[] : [];
     const review = strongestVerdict(reviews.map((entry) => String(typeof entry === 'object' && entry !== null ? (entry as { state?: unknown }).state : '')));
+    const createdAt = isoTime(record['createdAt']);
+    const updatedAt = isoTime(record['updatedAt']);
+    const [additions, deletions, files] = [record['additions'], record['deletions'], record['changedFiles']].map(count);
     return {
       number,
       title: text(record['title']),
@@ -587,6 +605,9 @@ export function parsePullRequestList(value: unknown): readonly PullRequestSummar
       headBranch: text(record['headRefName']),
       baseBranch: text(record['baseRefName']),
       ...(review === undefined ? {} : { review }),
+      ...createdAt === undefined ? {} : { createdAt },
+      ...updatedAt === undefined ? {} : { updatedAt },
+      ...additions === undefined || deletions === undefined || files === undefined ? {} : { changes: { additions, deletions, files } },
     };
   });
 }
@@ -755,6 +776,16 @@ function list(value: unknown): readonly unknown[] {
 }
 
 /** Require a non-empty string without coercion. */
+/** A non-negative count from GitHub, or undefined. */
+function count(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/** An ISO time from GitHub, or undefined when it does not parse. */
+function isoTime(value: unknown): string | undefined {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : undefined;
+}
+
 function text(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error('GitHub returned incomplete data.');
   return value;

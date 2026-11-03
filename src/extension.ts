@@ -11,6 +11,7 @@ import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
+import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
@@ -343,6 +344,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
       };
     };
+    const cleanUp = async (manual: boolean): Promise<void> => {
+      const days = vscode.workspace.getConfiguration('pairReview').get<number>('worktreeCleanupDays', 14);
+      const results = await Promise.all((await checkouts.list()).map((checkout) => cleanUpWorktrees({
+        root: checkout.root, storageRoot: checkout.storageRoot, connect: checkout.connect, remove: worktreesOf(checkout).remove,
+      }, days)));
+      const removed = results.flatMap((result) => result.removed);
+      const kept = results.flatMap((result) => result.kept);
+      if (removed.length > 0) {
+        void vscode.window.showInformationMessage(`Removed worktrees of merged, closed or unused PRs: ${removed.join(', ')}`);
+        void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+      }
+      if (!manual) return;
+      if (kept.length > 0) void vscode.window.showInformationMessage(`Kept ${kept.join(', ')}: uncommitted changes or unpushed commits.`);
+      else if (removed.length === 0) void vscode.window.showInformationMessage('No PR worktrees to clean up.');
+    };
+    if (!mockPullRequests()) void cleanUp(false).catch(() => undefined);
     context.subscriptions.push(
       registerPullRequestView(
         async () => (await checkouts.list()).map((checkout) => ({
@@ -356,6 +373,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.workspaceState,
       ),
       watchGitHubSessions(() => { void vscode.commands.executeCommand('pairReview.refreshPullRequests'); }),
+      vscode.commands.registerCommand('pairReview.cleanUpWorktrees', async () => {
+        try {
+          await cleanUp(true);
+        } catch (error: unknown) {
+          void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+        }
+      }),
       vscode.commands.registerCommand('pairReview.signInToGitHub', async (provider: unknown) => {
         try {
           await signInToGitHub(provider === 'github' || provider === 'github-enterprise' ? provider : undefined);

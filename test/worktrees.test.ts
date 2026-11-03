@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 
 import { listChangedFiles } from '../src/git.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { ensureWorktree, hasWorktree, readPullRequestBase, readWorktree, removeWorktree, worktreePath } from '../src/worktrees.js';
+import { ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/worktrees.js';
+import { cleanUpWorktrees } from '../src/worktreeCleanup.js';
 import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/pullRequestDiff.js';
 import { commands, Uri, workspace } from './fakes/vscode.js';
 
@@ -48,6 +49,8 @@ async function fixture(t: { after(callback: () => Promise<void>): void }): Promi
   await git(scratch, ['clone', '--quiet', origin, source]);
   return { source, storage: path.join(scratch, 'storage') };
 }
+
+const detached = async (_number: number, worktree: string): Promise<void> => { await git(worktree, ['switch', '--quiet', '--detach', 'origin/feature']); };
 
 /** Check out the PR branch the way a code host CLI would. */
 const provider = (checkouts: string[]): PullRequestProvider => ({
@@ -99,6 +102,57 @@ test('creates a PR worktree once, reviews it against the merge base and removes 
   await removeWorktree(source, storage, 'acme/app', 5);
   assert.equal(await hasWorktree(storage, 'acme/app', 5), false);
   await assert.rejects(stat(folder));
+});
+
+test('keeps PR worktrees under the checkout\'s .claude/worktrees, hidden from Git without touching .gitignore', async (t) => {
+  const { source } = await fixture(t);
+  const storage = await repositoryStorage(source);
+  assert.equal(storage, path.join(await realpath(source), '.claude', 'worktrees', 'pair-review'));
+
+  await ensureWorktree(source, storage, { ...provider([]), checkout: detached }, 'acme/app', pullRequest, 'author');
+  await ensureWorktree(source, storage, { ...provider([]), checkout: detached }, 'acme/app', { ...pullRequest, number: 6 }, 'author');
+  const exclude = await readFile(path.join(source, '.git', 'info', 'exclude'), 'utf8');
+  assert.equal(exclude.split('\n').filter((line) => line === '/.claude/worktrees/pair-review/').length, 1);
+  const { stdout } = await executeFile('git', ['-C', source, 'status', '--porcelain'], { encoding: 'utf8' });
+  assert.equal(stdout, '');
+});
+
+test('moves worktrees out of the Git folder with their changes and comments', async (t) => {
+  const { source } = await fixture(t);
+  const storage = await repositoryStorage(source);
+  assert.ok(storage !== undefined);
+  const legacy = path.join(source, '.git', 'pair-review', 'worktrees');
+  const old = await ensureWorktree(source, legacy, provider([]), 'acme/app', pullRequest, 'author');
+  await writeFile(path.join(old, 'feature.ts'), 'export const feature = 2;\n');
+  await mkdir(reviewDataPath(old), { recursive: true });
+  await writeFile(path.join(reviewDataPath(old), 'review.json'), JSON.stringify({ version: 1, workspaceRoot: old, threads: [], events: [] }));
+  await writeFile(path.join(reviewDataPath(old), 'claude-session.json'), '{}');
+
+  assert.deepEqual(await migrateWorktrees(source, storage), []);
+  const moved = worktreePath(storage, 'acme/app', 5);
+  assert.equal((await readWorktree(storage, moved))?.pullRequest.number, 5);
+  assert.equal(await readFile(path.join(moved, 'feature.ts'), 'utf8'), 'export const feature = 2;\n');
+  assert.equal(JSON.parse(await readFile(path.join(reviewDataPath(moved), 'review.json'), 'utf8')).workspaceRoot, moved);
+  await assert.rejects(stat(path.join(reviewDataPath(moved), 'claude-session.json')));
+  await assert.rejects(stat(old));
+  assert.deepEqual(await migrateWorktrees(source, storage), []);
+});
+
+test('cleans up worktrees of finished or unused PRs, but never one holding work', async (t) => {
+  const { source } = await fixture(t);
+  const storage = await repositoryStorage(source);
+  assert.ok(storage !== undefined);
+  const state = new Map([[5, { open: false, merged: true }], [6, { open: true, merged: false }], [7, { open: true, merged: false }], [8, { open: false, merged: false }]]);
+  const host: PullRequestProvider = { ...provider([]), checkout: detached, details: async (number) => ({ ...state.get(number) }) as never };
+  for (const number of state.keys()) await ensureWorktree(source, storage, host, 'acme/app', { ...pullRequest, number }, 'author');
+  const longAgo = new Date(Date.now() - 30 * 86_400_000);
+  await utimes(`${worktreePath(storage, 'acme/app', 7)}.json`, longAgo, longAgo);
+  await writeFile(path.join(worktreePath(storage, 'acme/app', 8), 'feature.ts'), 'unsaved work\n');
+  const target = { root: source, storageRoot: storage, connect: async () => host, remove: (repository: string, number: number) => removeWorktree(source, storage, repository, number) };
+
+  assert.deepEqual(await cleanUpWorktrees(target, 14), { removed: ['#5', '#7'], kept: ['#8'] });
+  assert.equal(await hasWorktree(storage, 'acme/app', 6), true);
+  assert.equal(await hasWorktree(storage, 'acme/app', 8), true);
 });
 
 test('cleans up the worktree when checkout fails', async (t) => {

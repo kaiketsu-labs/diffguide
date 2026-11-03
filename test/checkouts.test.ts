@@ -30,7 +30,7 @@ function fixture(roots: readonly string[], storage: Record<string, string>) {
 
 test('lists the workspace folder first, then its nested repositories once each', async (t) => {
   const { checkouts, restored } = fixture(
-    ['/work/service-a', '/elsewhere/repo', '/work/service-b', '/work/.git/pair-review/worktrees/acme__service-b/pr-1', '/work/service-b/.worktrees/fix', '/work/plain'],
+    ['/work/service-a', '/elsewhere/repo', '/work/service-b', '/work/.git/pair-review/worktrees/acme__service-b/pr-1', '/work/service-b/.claude/worktrees/pair-review/acme__service-b/pr-2', '/work/service-b/.worktrees/fix', '/work/plain'],
     { '/work/service-a': '/work/service-a/.git/pair-review', '/work/service-b': '/work/service-b/.git/pair-review', '/work/service-b/.worktrees/fix': '/work/service-b/.git/pair-review' },
   );
   t.after(() => { checkouts.dispose(); });

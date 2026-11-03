@@ -221,10 +221,40 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "pairReview.cleanUpWorktrees",
+        "title": "Clean up worktrees",
+        "category": "Pair Review",
+        "icon": "$(trash)"
+      },
+      {
         "command": "pairReview.signInToGitHub",
         "title": "Sign in to GitHub",
         "category": "Pair Review",
         "icon": "$(account)"
+      },
+      {
+        "command": "pairReview.filterByAuthor",
+        "title": "Filter by author",
+        "category": "Pair Review",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "pairReview.filterByAuthorActive",
+        "title": "Filter by author",
+        "category": "Pair Review",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "pairReview.showGuideInTree",
+        "title": "Show guide steps under PRs",
+        "category": "Pair Review",
+        "icon": "$(map)"
+      },
+      {
+        "command": "pairReview.showFilesInTree",
+        "title": "Show files under PRs",
+        "category": "Pair Review",
+        "icon": "$(files)"
       },
       {
         "command": "pairReview.viewFilesAsTree",
@@ -375,6 +405,26 @@
           "command": "pairReview.refreshPullRequests",
           "when": "view == pairReview.pullRequests",
           "group": "navigation@1"
+        },
+        {
+          "command": "pairReview.filterByAuthor",
+          "when": "view == pairReview.pullRequests && !pairReview.authorFiltered",
+          "group": "navigation@0"
+        },
+        {
+          "command": "pairReview.filterByAuthorActive",
+          "when": "view == pairReview.pullRequests && pairReview.authorFiltered",
+          "group": "navigation@0"
+        },
+        {
+          "command": "pairReview.showGuideInTree",
+          "when": "view == pairReview.pullRequests && !pairReview.treeShowsGuide",
+          "group": "navigation@3"
+        },
+        {
+          "command": "pairReview.showFilesInTree",
+          "when": "view == pairReview.pullRequests && pairReview.treeShowsGuide",
+          "group": "navigation@3"
         },
         {
           "command": "pairReview.viewFilesAsTree",
@@ -542,6 +592,10 @@
       ],
       "commandPalette": [
         {
+          "command": "pairReview.filterByAuthorActive",
+          "when": "false"
+        },
+        {
           "command": "pairReview.openPullRequestInBrowser",
           "when": "false"
         },
@@ -646,6 +700,12 @@
           ],
           "default": "hooks",
           "description": "Automatische Zustellung im Hintergrund (Standard: hooks). channels ist eine experimentelle Alternative mit zusätzlichen Voraussetzungen."
+        },
+        "pairReview.worktreeCleanupDays": {
+          "type": "number",
+          "default": 14,
+          "minimum": 0,
+          "description": "Remove a PR worktree that was not opened for this many days. Worktrees of merged or closed PRs are removed regardless. Worktrees with uncommitted changes or unpushed commits are always kept. 0 removes only merged or closed ones."
         },
         "pairReview.mockPullRequests": {
           "type": "boolean",

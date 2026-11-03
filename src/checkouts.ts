@@ -149,10 +149,11 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
   }
 }
 
-/** Whether `root` lies inside the workspace folder and not inside a Git folder, where PR worktrees live. */
+/** Whether `root` lies inside the workspace folder and not inside a Git or Claude folder, where worktrees live. */
 function isNested(workspaceRoot: string, root: string): boolean {
   const inside = relative(workspaceRoot, root);
-  return inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) && !inside.split(sep).includes('.git');
+  const parts = inside.split(sep);
+  return inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) && !parts.includes('.git') && !parts.includes('.claude');
 }
 
 /** Git repositories inside the workspace folder, found like VS Code's Git extension does but without waiting for its full scan. */
