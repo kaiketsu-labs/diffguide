@@ -16,7 +16,7 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
   'surface-sunken': { vscode: 'textCodeBlock-background', dark: '#181818', light: '#f2f3f3' },
   ink: { vscode: 'foreground', dark: '#cccccc', light: '#2b2b2b' },
   'ink-muted': { vscode: 'descriptionForeground', dark: '#9d9d9d', light: '#636669' },
-  line: { vscode: 'panel-border', dark: '#3c3c3c', light: '#d9dcde' },
+  line: { vscode: 'input-border', dark: '#73777c', light: '#8a8f94' },
   'line-strong': { vscode: 'input-border', dark: '#73777c', light: '#8a8f94' },
   focus: { vscode: 'focusBorder', dark: '#3b9cf0', light: '#005fb8' },
   'action-secondary': { vscode: 'button-secondaryBackground', dark: '#313335', light: '#e6e8ea' },
