@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Filter the Pull Requests sidebar by author with the filter button in its title bar. The view's title shows the active author, and the filled filter icon clears it.
+- PR rows in the sidebar list either their files or their guide steps, not both. The map and files buttons in the title bar switch between them; a PR without a guide always lists its files.
+- PRs show their size and age. Sidebar rows end in lines added and removed, and their tooltip says when the PR was opened and last updated. The review page shows the same under the byline: Opened 3d ago · Updated 2h ago · +312 −48 in 14 files.
 - The PR rows in the sidebar no longer show inline buttons. Open review page, Show Claude activity, Open in browser and Remove worktree moved to the row's right-click menu, and the review page has a Remove worktree link next to Refresh.
 - Manage the PR from the review page: edit the title and description, request or withdraw reviewers (people and teams), set assignees and labels, mark a draft ready for review or turn the PR back into a draft, close and reopen it, and delete its branch when merging or afterwards. Reviewers, assignees and labels open a VS Code picker. These controls show only when GitHub lets you edit the PR.
 - The review page shows the description, reviewers and checks again. GitHub refused that request because reading team reviewer names needs the `read:org` scope. Pair Review now asks for it, so VS Code asks you to sign in to GitHub once more.

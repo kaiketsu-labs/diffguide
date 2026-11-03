@@ -2,7 +2,11 @@ import type { PullRequestProvider, PullRequestSummary, ReviewVerdict } from './p
 
 /** Build a sample PR whose link points at a placeholder repository. */
 function sample(number: number, title: string, author: string, draft: boolean, headBranch: string, review?: ReviewVerdict): PullRequestSummary {
-  return { number, title, url: `https://github.com/mock/sample-repo/pull/${number}`, author, draft, headBranch, baseBranch: 'main', ...(review === undefined ? {} : { review }) };
+  return {
+    number, title, url: `https://github.com/mock/sample-repo/pull/${number}`, author, draft, headBranch, baseBranch: 'main', ...(review === undefined ? {} : { review }),
+    createdAt: new Date(Date.now() - number * 3_600_000).toISOString(), updatedAt: new Date(Date.now() - number * 60_000).toISOString(),
+    changes: { additions: 60, deletions: 15, files: 3 },
+  };
 }
 
 /** Fixed sample data that fills every sidebar section without contacting a code host. */

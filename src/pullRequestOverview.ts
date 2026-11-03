@@ -20,6 +20,9 @@ export interface OverviewState {
   readonly headBranch: string;
   readonly baseBranch: string;
   readonly url: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly changes?: { readonly additions: number; readonly deletions: number; readonly files: number };
   readonly reviewed?: { readonly done: number; readonly total: number };
   /** Paths of files marked reviewed. */
   readonly viewed: readonly string[];
@@ -359,7 +362,7 @@ h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhe
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
 .row{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}.head{justify-content:space-between}
-.byline{margin-top:var(--space-6)}
+.byline,.facts{margin-top:var(--space-6)}
 .status{margin-top:var(--space-12);font-size:12px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
 @media (max-width:760px){.layout{grid-template-columns:minmax(0,1fr)}}
@@ -505,6 +508,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 </style></head><body>
 <div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
+<div id="facts" class="muted facts"></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
 <aside id="peek" hidden aria-label="Definition"><div class="peek-head">
@@ -588,6 +592,9 @@ export function buildOverviewState(
     headBranch: pullRequest.headBranch,
     baseBranch: pullRequest.baseBranch,
     url: pullRequest.url,
+    ...(pullRequest.createdAt === undefined ? {} : { createdAt: pullRequest.createdAt }),
+    ...(pullRequest.updatedAt === undefined ? {} : { updatedAt: pullRequest.updatedAt }),
+    ...(pullRequest.changes === undefined ? {} : { changes: pullRequest.changes }),
     viewed,
     read,
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),

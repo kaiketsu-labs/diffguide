@@ -300,6 +300,7 @@ function render(state: OverviewState): void {
   current = state;
   $('title').textContent = state.title;
   $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch));
+  $('facts').replaceChildren(...pullRequestFacts(state));
   const { details } = state;
   const body = $('body');
   if (!details) body.replaceChildren(el('span', 'muted', state.detailsError ? 'Could not load from GitHub: ' + state.detailsError : 'Loading from GitHub…'));
@@ -562,6 +563,18 @@ function relativeTime(iso: string): string {
   if (minutes < 24 * 60) return Math.floor(minutes / 60) + 'h ago';
   if (minutes < 30 * 24 * 60) return Math.floor(minutes / (24 * 60)) + 'd ago';
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** "Opened 3d ago · Updated 2h ago · +312 −48 in 14 files", leaving out what GitHub did not send. */
+function pullRequestFacts(state: OverviewState): (string | Node)[] {
+  const parts: (string | Node)[][] = [];
+  if (state.createdAt) parts.push(['Opened ', ...timeLabel(state.createdAt)]);
+  if (state.updatedAt) parts.push(['Updated ', ...timeLabel(state.updatedAt)]);
+  if (state.changes) {
+    const { additions, deletions, files } = state.changes;
+    parts.push([el('span', 'stat-add', '+' + additions), ' ', el('span', 'stat-del', '−' + deletions), ' in ' + files + (files === 1 ? ' file' : ' files')]);
+  }
+  return parts.flatMap((part, index) => index === 0 ? part : [' · ', ...part]);
 }
 
 function timeLabel(iso: string): HTMLElement[] {
