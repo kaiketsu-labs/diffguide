@@ -144,7 +144,7 @@ Write plain sentences; use backticks for identifiers. The diff and the files are
 const maximumFileDiffLength = 40_000;
 
 /** The prompt for one analysis run: instructions, then each file's hunks with block ids. */
-export function analysisPrompt(files: readonly FileDiff[], blocks: readonly ChangeBlock[], about: string): string {
+export function analysisPrompt(files: readonly FileDiff[], blocks: readonly ChangeBlock[], about: string, custom = ''): string {
   const starts = new Map(blocks.map((block) => [`${block.path}\0${block.hunk}\0${block.first}`, block.id]));
   const parts = files.map((file) => {
     const head = `=== ${file.path} (${file.change}${file.oldPath ? `, was ${file.oldPath}` : ''})`;
@@ -162,7 +162,7 @@ export function analysisPrompt(files: readonly FileDiff[], blocks: readonly Chan
     });
     return [`${head}\nToo large to show in full; each block with its first lines:`, ...summary].join('\n');
   });
-  return `${instructions}\n\nPull request: ${about}\n\nBEGIN DIFF\n${parts.join('\n\n')}\nEND DIFF`;
+  return `${instructions}${custom === '' ? '' : `\n\n${custom}`}\n\nPull request: ${about}\n\nBEGIN DIFF\n${parts.join('\n\n')}\nEND DIFF`;
 }
 
 /** Plain text from untrusted output: no control characters except newlines, capped. */

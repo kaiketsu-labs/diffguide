@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
+import { readCustomInstructions, type InstructionKind } from './customInstructions.js';
 import type { ReviewBridge } from './contracts.js';
 import { parsePullRequestFileUri, pullRequestFileUri } from './pullRequestDiff.js';
 import { placeComment, readPublications, writePublications } from './pullRequestComments.js';
@@ -154,8 +155,13 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       const mcpPath = (await prepareConnection(this.context, bridge, dataPath, nodePath)).mcpPath;
       return shell === undefined ? { executable, mcpPath } : { executable, mcpPath, shell };
     };
-    const runner = new ClaudeRunner({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, ...this.claude });
-    const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, log, resolve, ...this.claude });
+    const instructions = (kind: InstructionKind) => async (): Promise<string> => {
+      const revision = metadata.role === 'reviewer' ? await readPullRequestBase(worktree, metadata.pullRequest.baseBranch) : undefined;
+      if (metadata.role === 'reviewer' && revision === undefined) log('Skipping the repository\'s review instructions: could not find the base branch.');
+      return readCustomInstructions(kind, { projectRoot: this.sourceRoot, repository: { cwd: worktree, ...(revision === undefined ? {} : { revision }) } });
+    };
+    const runner = new ClaudeRunner({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('ask'), ...this.claude });
+    const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('analysis'), ...this.claude });
     const session: ReviewSession = {
       key: key(repository, number),
       label: `#${number}`,

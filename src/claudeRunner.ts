@@ -30,10 +30,14 @@ export interface ClaudeRunnerOptions {
   readonly resolve: () => Promise<{ readonly executable: string; readonly mcpPath: string; readonly shell?: string }>;
   readonly log: (line: string) => void;
   readonly spawn?: typeof spawnProcess;
+  /** The user's own instructions for answering comments, read fresh for each run. */
+  readonly instructions?: () => Promise<string>;
 }
 
 const reviewerNote = 'This is someone else\'s pull request. You cannot edit files or run commands. For implement requests, reply with the proposed change as a diff code block instead.';
 const reviewerBlockedTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash'];
+/** On someone else's PR the checkout is the author's: skip its CLAUDE.md, skills, hooks, settings and MCP servers. */
+export const untrustedCheckoutFlags = ['--setting-sources', 'user', '--strict-mcp-config'];
 
 /** One resumable background Claude conversation per PR that answers comments as they are sent. */
 export class ClaudeRunner implements vscode.Disposable {
@@ -109,10 +113,10 @@ export class ClaudeRunner implements vscode.Disposable {
     const saved = await readPrivateJson(sessionPath).catch(() => undefined) as { sessionId?: unknown } | undefined;
     const resume = typeof saved?.sessionId === 'string' && /^[\da-f-]{36}$/u.test(saved.sessionId) ? saved.sessionId : undefined;
     const sessionId = resume ?? randomUUID();
-    const prompt = buildReviewBatchPrompt(events, this.options.store.threads);
+    const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
     const args = [
       '-p', this.options.role === 'reviewer' ? `${reviewerNote}\n\n${prompt}` : prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__local-review',
-      ...(this.options.role === 'author' ? ['--permission-mode', 'acceptEdits'] : ['--disallowedTools', ...reviewerBlockedTools]),
+      ...(this.options.role === 'author' ? ['--permission-mode', 'acceptEdits'] : [...untrustedCheckoutFlags, '--disallowedTools', ...reviewerBlockedTools]),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
     this.options.log(`Starting Claude for ${events.length} comment${events.length === 1 ? '' : 's'} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);

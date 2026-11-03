@@ -47,3 +47,11 @@ test('hook summaries bound long feedback and escape terminal controls without tr
   const data = JSON.parse(match?.[1] ?? '') as Record<string, unknown>;
   assert.equal(data['currentHumanFeedback'], feedback);
 });
+
+test('custom instructions follow the built-in ones and are left out when empty', () => {
+  const captured = event('custom', 'Why?');
+  assert.equal(buildReviewPrompt(captured, undefined, ''), buildReviewPrompt(captured));
+  const prompt = buildReviewBatchPrompt([captured], [], 'Prefer short answers.');
+  assert.ok(prompt.indexOf(reviewInstructions) < prompt.indexOf('Prefer short answers.'));
+  assert.ok(prompt.indexOf('Prefer short answers.') < prompt.indexOf('BEGIN REVIEW DATA'));
+});
