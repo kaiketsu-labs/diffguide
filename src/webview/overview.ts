@@ -935,8 +935,9 @@ function rangeFacts(shown: DiffRange): (Node | string)[] {
   if (files) {
     const added = files.reduce((sum, file) => sum + file.additions, 0);
     const removed = files.reduce((sum, file) => sum + file.deletions, 0);
-    facts.push(el('span', 'stat-add', '+' + added), ' ', el('span', 'stat-del', '−' + removed), ' in ' + files.length + (files.length === 1 ? ' file' : ' files') + ' · ');
+    facts.push(el('span', 'stat-add', '+' + added), ' ', el('span', 'stat-del', '−' + removed), ' in ' + files.length + (files.length === 1 ? ' file' : ' files'));
   }
+  if (facts.at(-1) === ' · ') facts.pop();
   return facts;
 }
 
@@ -959,10 +960,12 @@ function renderRangeControls(): void {
     const title = el('div', 'range-title');
     title.append(...rangeTitle(diffRange));
     const facts = el('div', 'muted range-facts');
-    facts.append(...rangeFacts(diffRange), why);
+    facts.append(...rangeFacts(diffRange));
     const text = el('div', 'gap');
     text.append(title, facts);
-    note.replaceChildren(icon(codicons.gitCommit), text, button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small'));
+    const all = button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small');
+    all.title = why;
+    note.replaceChildren(icon(codicons.gitCommit), text, all);
   }
 }
 
