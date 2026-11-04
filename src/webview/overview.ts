@@ -85,7 +85,8 @@ let atHead = true;
 let fileFilter = saved.filter ?? '';
 let hideViewed = saved.hideViewed === true;
 const hiddenTypes = new Set(saved.hiddenTypes ?? []);
-let filterPop: HTMLElement | undefined;
+/** The open menu under a Files toolbar button: the range or the file filter. */
+let toolbarMenu: { readonly anchor: string; readonly node: HTMLElement } | undefined;
 let conversationDraft = saved.conversationDraft ?? '';
 /** Comment edits in progress, by comment id. */
 const edits = new Map<string, string>();
@@ -839,14 +840,26 @@ function commitRow(commit: Extract<TimelineItem, { kind: 'commit' }>, selectable
   const row = el('div', 'commit-row');
   row.dataset.oid = commit.oid;
   row.title = commit.message ? commit.headline + '\n\n' + commit.message : commit.headline;
-  row.append(el('code', '', commit.oid.slice(0, 7)), el('span', 'text', commit.headline));
+  const hash = selectable ? el('code', '', commit.oid.slice(0, 7)) : button(commit.oid.slice(0, 7), () => { showCommits(commit.oid, commit.oid); }, 'ref');
+  if (!selectable) hash.title = 'Show this commit\'s changes';
+  row.append(hash, el('span', 'text', commit.headline));
   if (commit.checks) {
     const [mark, tone] = checkMarks[commit.checks];
     row.append(el('span', tone, mark));
   }
-  if (selectable) row.append(el('span', 'muted', commit.author), ...timeLabel(commit.createdAt));
-  else row.append(button('Changes', () => { showCommits(commit.oid, commit.oid); }, 'quiet'));
+  if (selectable) row.append(...commitStats(commit), el('span', 'muted', commit.author), ...timeLabel(commit.createdAt));
   return row;
+}
+
+function commitStats(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement[] {
+  const stats: HTMLElement[] = [];
+  if (commit.files !== undefined) stats.push(el('span', 'muted', commit.files + (commit.files === 1 ? ' file' : ' files')));
+  if (commit.additions !== undefined && commit.deletions !== undefined) {
+    const lines = el('span', 'commit-lines');
+    lines.append(el('span', 'ok', '+' + commit.additions), el('span', 'bad', '−' + commit.deletions));
+    stats.push(lines);
+  }
+  return stats;
 }
 
 function commitsOf(state = current): Extract<TimelineItem, { kind: 'commit' }>[] {
@@ -871,38 +884,95 @@ function sameRange(a: DiffRange, b: DiffRange): boolean {
   return a.kind === b.kind && (a.kind !== 'commits' || (b.kind === 'commits' && a.from === b.from && a.to === b.to));
 }
 
+/** What the Files tab shows, for the range button. */
 function rangeLabel(shown: DiffRange): string {
-  if (shown.kind === 'all') return 'all changes';
-  if (shown.kind === 'since') return 'changes since your last review';
-  const commits = commitsOf();
-  const from = commits.findIndex((commit) => commit.oid === shown.from);
-  const to = commits.findIndex((commit) => commit.oid === shown.to);
-  if (shown.from === shown.to) return 'commit ' + shown.from.slice(0, 7) + (commits[from] ? ' ' + commits[from].headline : '');
-  return (to - from + 1 > 0 ? to - from + 1 + ' commits, ' : 'commits ') + shown.from.slice(0, 7) + ' to ' + shown.to.slice(0, 7);
+  if (shown.kind === 'all') return 'All changes';
+  if (shown.kind === 'since') return 'Since your last review';
+  if (shown.from !== shown.to) return rangeCount(shown) + ' commits';
+  return shown.from.slice(0, 7) + ' ' + (commitsOf().find((commit) => commit.oid === shown.from)?.headline ?? '');
 }
 
-/** The range picker, whitespace toggle and the note above the files while they show part of the PR. */
-function renderRangeControls(): void {
-  const select = $<HTMLSelectElement>('range');
+function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
   const commits = commitsOf();
-  const options: [string, string][] = [['all', 'All changes']];
-  if (current?.conversation?.lastReviewedCommit) options.push(['since', 'Since your last review']);
-  for (const commit of commits) options.push(['c:' + commit.oid, commit.oid.slice(0, 7) + ' ' + commit.headline]);
-  const value = diffRange.kind === 'commits' ? (diffRange.from === diffRange.to ? 'c:' + diffRange.from : 'r') : diffRange.kind;
-  if (value === 'r') options.push(['r', rangeLabel(diffRange)]);
-  const stamp = JSON.stringify([options, value]);
-  if (select.dataset.stamp !== stamp) {
-    select.dataset.stamp = stamp;
-    select.replaceChildren(...options.map(([key, label]) => { const option = el('option', '', label.length > 60 ? label.slice(0, 59) + '…' : label); option.value = key; return option; }));
-    select.value = value;
-  }
+  return commits.findIndex((commit) => commit.oid === shown.to) - commits.findIndex((commit) => commit.oid === shown.from) + 1;
+}
+
+/** What the Files tab shows, for the note above the files: hashes as code, the headline in bold. */
+function rangeTitle(shown: DiffRange): (Node | string)[] {
+  if (shown.kind === 'all') return ['All changes'];
+  if (shown.kind === 'since') return ['Changes since your last review'];
+  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits ', el('code', '', shown.from.slice(0, 7)), ' to ', el('code', '', shown.to.slice(0, 7))];
+  return ['Commit ', el('code', '', shown.from.slice(0, 7)), ' ', el('b', '', commitsOf().find((commit) => commit.oid === shown.from)?.headline ?? '')];
+}
+
+/** The range button, whitespace toggle and the note above the files while they show part of the PR. */
+function renderRangeControls(): void {
+  const label = rangeLabel(diffRange);
+  const range = $('range');
+  range.title = label;
+  range.querySelector('.range-text')?.replaceChildren(label);
+  range.classList.toggle('on', diffRange.kind !== 'all');
   $('whitespace').setAttribute('aria-pressed', String(whitespace));
   const note = $('range-note');
   note.hidden = diffRange.kind === 'all' || view === 'commits';
   if (!note.hidden) {
-    const why = atHead ? ' Read marks and comments on the base need all changes.' : ' Comments and read marks need all changes.';
-    note.replaceChildren(el('span', 'gap', 'Showing ' + rangeLabel(diffRange) + '.' + why), button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small'));
+    const why = atHead ? 'Read marks and comments on the base need all changes.' : 'Comments and read marks need all changes.';
+    const title = el('div', 'range-title');
+    title.append(...rangeTitle(diffRange));
+    const text = el('div', 'gap');
+    text.append(title, el('div', 'muted', why));
+    note.replaceChildren(icon(codicons.gitCommit), text, button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small'));
   }
+}
+
+/** A checkable row of a toolbar menu; `radio` rows close the menu when picked. */
+function menuRow(content: (Node | string)[], checked: boolean, change: (on: boolean) => void, radio = false): HTMLElement {
+  const label = el('label', 'picker-row');
+  const box = el('input');
+  box.type = radio ? 'radio' : 'checkbox';
+  box.name = radio ? 'menu' : '';
+  box.checked = checked;
+  box.addEventListener('change', () => { change(box.checked); });
+  const mark = icon(codicons.check);
+  mark.classList.add('check');
+  const text = el('span', 'text');
+  text.append(...content);
+  label.append(box, mark, text);
+  return label;
+}
+
+/** Open a menu under the toolbar button `anchor`, or close it when it is already open. */
+function openToolbarMenu(anchor: string, rows: HTMLElement[], className = ''): void {
+  const again = toolbarMenu?.anchor === anchor;
+  closeToolbarMenu();
+  if (again) return;
+  const node = el('div', ('picker toolbar-menu ' + className).trim());
+  const list = el('div', 'picker-list');
+  list.append(...rows);
+  node.append(list);
+  $(anchor).after(node);
+  $(anchor).setAttribute('aria-expanded', 'true');
+  toolbarMenu = { anchor, node };
+  (node.querySelector<HTMLInputElement>('input:checked') ?? node.querySelector<HTMLInputElement>('input'))?.focus();
+}
+
+function closeToolbarMenu(): void {
+  if (!toolbarMenu) return;
+  toolbarMenu.node.remove();
+  $(toolbarMenu.anchor).setAttribute('aria-expanded', 'false');
+  toolbarMenu = undefined;
+}
+
+function openRangeMenu(): void {
+  const pick = (next: DiffRange) => (on: boolean): void => { if (on) { closeToolbarMenu(); requestFiles(next, whitespace); } };
+  const rows = [menuRow(['All changes'], diffRange.kind === 'all', pick({ kind: 'all' }), true)];
+  if (current?.conversation?.lastReviewedCommit) rows.push(menuRow(['Since your last review'], diffRange.kind === 'since', pick({ kind: 'since' }), true));
+  if (diffRange.kind === 'commits' && diffRange.from !== diffRange.to) rows.push(menuRow([rangeLabel(diffRange)], true, () => undefined, true));
+  for (const commit of commitsOf()) {
+    const picked = diffRange.kind === 'commits' && diffRange.from === commit.oid && diffRange.to === commit.oid;
+    rows.push(menuRow([el('code', '', commit.oid.slice(0, 7)), ' ' + commit.headline], picked, pick({ kind: 'commits', from: commit.oid, to: commit.oid }), true));
+  }
+  openToolbarMenu('range', rows, 'range-menu');
 }
 
 /** Whether lines on `side` can take comments, read marks and threads in the shown range. */
@@ -923,36 +993,35 @@ function filteredFiles(list: readonly FileDiff[]): readonly FileDiff[] {
     && !hiddenTypes.has(fileType(file.path)) && !(hideViewed && viewed.has(file.path)));
 }
 
-function openFilterMenu(): void {
-  if (filterPop) { closeFilterMenu(); return; }
-  const node = el('div', 'picker filter-pop');
-  const list = el('div', 'picker-list');
-  const types = [...new Set((files ?? []).map((file) => fileType(file.path)))].sort();
-  const row = (text: string, checked: boolean, change: (on: boolean) => void): HTMLElement => {
-    const label = el('label', 'picker-row');
-    const box = el('input');
-    box.type = 'checkbox';
-    box.checked = checked;
-    box.addEventListener('change', () => { change(box.checked); save(); renderFiles(); });
-    const mark = icon(codicons.check);
-    mark.classList.add('check');
-    label.append(box, mark, el('span', 'text', text));
-    return label;
-  };
-  for (const type of types) {
-    list.append(row(type + ' · ' + (files ?? []).filter((file) => fileType(file.path) === type).length, !hiddenTypes.has(type), (on) => { if (on) hiddenTypes.delete(type); else hiddenTypes.add(type); }));
-  }
-  list.append(row('Hide viewed files', hideViewed, (on) => { hideViewed = on; }));
-  node.append(list);
-  $('filter-menu').after(node);
-  $('filter-menu').setAttribute('aria-pressed', 'true');
-  filterPop = node;
+function filtersOn(): boolean {
+  return fileFilter.trim() !== '' || hiddenTypes.size > 0 || hideViewed;
 }
 
-function closeFilterMenu(): void {
-  filterPop?.remove();
-  filterPop = undefined;
-  $('filter-menu').setAttribute('aria-pressed', String(hiddenTypes.size > 0 || hideViewed));
+function applyFilters(): void {
+  save();
+  renderFiles();
+  $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
+  $('filter-clear').hidden = fileFilter === '';
+}
+
+function openFilterMenu(): void {
+  const types = [...new Set((files ?? []).map((file) => fileType(file.path)))].sort();
+  const rows = types.map((type) => menuRow([type, el('span', 'muted', String((files ?? []).filter((file) => fileType(file.path) === type).length))], !hiddenTypes.has(type),
+    (on) => { if (on) hiddenTypes.delete(type); else hiddenTypes.add(type); applyFilters(); }));
+  rows.push(menuRow(['Hide viewed files'], hideViewed, (on) => { hideViewed = on; applyFilters(); }));
+  const reset = button('Clear filters', () => { clearFilters(); closeToolbarMenu(); }, 'small');
+  reset.disabled = !filtersOn();
+  const foot = el('div', 'menu-foot');
+  foot.append(reset);
+  openToolbarMenu('filter-menu', [...rows, foot]);
+}
+
+function clearFilters(): void {
+  fileFilter = '';
+  $<HTMLInputElement>('file-filter').value = '';
+  hiddenTypes.clear();
+  hideViewed = false;
+  applyFilters();
 }
 
 /** The Commits tab: each commit of the PR; click one to see its changes, Shift-click another to see the commits between. */
@@ -1117,13 +1186,56 @@ function onShortcut(event: KeyboardEvent): void {
   else return;
 }
 
+function baseButton(): HTMLElement {
+  const edit = toolButton(codicons.edit, 'Change base branch', openBaseMenu);
+  edit.id = 'change-base';
+  edit.classList.add('icon-button');
+  edit.dataset.prAction = '';
+  edit.setAttribute('aria-haspopup', 'true');
+  const anchor = el('span', 'menu-anchor');
+  anchor.append(edit);
+  return anchor;
+}
+
+/** The base branch menu: a filter over the branches the PR could merge into; GitHub's list arrives after it opens. */
+function openBaseMenu(): void {
+  if (busy) return;
+  const search = el('input');
+  search.type = 'text';
+  search.placeholder = 'Filter branches';
+  search.setAttribute('aria-label', 'Filter branches');
+  search.addEventListener('input', () => renderBaseMenu());
+  openToolbarMenu('change-base', [search, el('div', 'muted picker-note', 'Loading…')], 'base-menu');
+  if (toolbarMenu?.anchor !== 'change-base') return;
+  search.focus();
+  baseBranches = undefined;
+  post({ action: 'branches' });
+}
+
+let baseBranches: readonly string[] | string | undefined;
+
+function renderBaseMenu(): void {
+  const list = toolbarMenu?.anchor === 'change-base' ? toolbarMenu.node.querySelector('.picker-list') : null;
+  const search = list?.querySelector('input');
+  if (!list || !search) return;
+  const query = search.value.trim().toLowerCase();
+  const names = typeof baseBranches === 'string' || baseBranches === undefined ? [] : baseBranches.filter((name) => name.toLowerCase().includes(query));
+  const rows = names.slice(0, 200).map((name) => menuRow([name], false, (on) => { if (on) { closeToolbarMenu(); changePullRequest({ action: 'change-base', branch: name }); } }, true));
+  const note = typeof baseBranches === 'string' ? 'Could not load branches: ' + baseBranches : baseBranches === undefined ? 'Loading…' : names.length ? '' : query ? 'No matches.' : 'No other branches.';
+  list.replaceChildren(search, ...rows, ...note ? [el('div', 'muted picker-note', note)] : []);
+}
+
 function render(state: OverviewState): void {
   current = state;
   $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
   $('title').textContent = state.heading ?? state.title;
-  const editBase = state.details?.canEdit === true && state.details.open ? [toolButton(codicons.edit, 'Change base branch', () => changePullRequest({ action: 'change-base' }))] : [];
-  for (const node of editBase) { node.classList.add('icon-button'); node.dataset.prAction = ''; }
-  $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch), ...editBase);
+  const canChangeBase = state.details?.canEdit === true && state.details.open;
+  const byline = JSON.stringify([state.author, state.headBranch, state.baseBranch, canChangeBase]);
+  if ($('byline').dataset.stamp !== byline) {
+    $('byline').dataset.stamp = byline;
+    if (toolbarMenu?.anchor === 'change-base') closeToolbarMenu();
+    $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
+  }
   $('facts').replaceChildren(...pullRequestFacts(state));
   const { details } = state;
   const body = $('body');
@@ -2849,7 +2961,7 @@ function renderPeek(): void {
 /** Switch between the file list and the guide; the sidebar follows. */
 function setView(next: View): void {
   view = next;
-  closeFilterMenu();
+  closeToolbarMenu();
   if (next === 'guide' && (diffRange.kind !== 'all' || whitespace)) requestFiles({ kind: 'all' }, false);
   save();
   renderFiles();
@@ -2867,7 +2979,7 @@ function showGuideTab(): void {
   $('files-count').textContent = files ? String(files.length) : '';
   $('commits-count').textContent = current?.conversation ? String(commitsOf().length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
-  for (const id of ['range', 'whitespace', 'file-filter', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
+  for (const id of ['range', 'whitespace', 'filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
 }
 
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
@@ -2980,6 +3092,8 @@ function onExtensionMessage(data: ExtensionMessage): void {
     save();
     renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
   }
+  if (data.branches) { baseBranches = data.branches; renderBaseMenu(); }
+  if (data.branchesError !== undefined) { baseBranches = data.branchesError; renderBaseMenu(); }
   if (data.pickerOptions) { pickerOptions = data.pickerOptions; pickerError = undefined; renderPicker(); }
   if (data.pickerError !== undefined) { pickerError = data.pickerError; renderPicker(); }
   if (data.idle) setBusy(false);
@@ -3051,19 +3165,17 @@ $('peek-open').addEventListener('click', () => {
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
 for (const name of ['files', 'commits', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
-$('range').addEventListener('change', () => {
-  const value = $<HTMLSelectElement>('range').value;
-  if (value === 'all' || value === 'since') requestFiles({ kind: value }, whitespace);
-  else if (value.startsWith('c:')) requestFiles({ kind: 'commits', from: value.slice(2), to: value.slice(2) }, whitespace);
-});
+$('range').addEventListener('click', openRangeMenu);
 $('whitespace').addEventListener('click', () => requestFiles(diffRange, !whitespace));
 $<HTMLInputElement>('file-filter').value = fileFilter;
-$('file-filter').addEventListener('input', () => { fileFilter = $<HTMLInputElement>('file-filter').value; save(); renderFiles(); });
-$('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Escape') { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; save(); renderFiles(); $('file-filter').blur(); } });
+$('file-filter').addEventListener('input', () => { fileFilter = $<HTMLInputElement>('file-filter').value; applyFilters(); });
+$('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Escape') { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; applyFilters(); $('file-filter').blur(); } });
+$('filter-clear').addEventListener('click', () => { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; applyFilters(); $('file-filter').focus(); });
+$('filter-clear').hidden = fileFilter === '';
 $('filter-menu').addEventListener('click', openFilterMenu);
-$('filter-menu').setAttribute('aria-pressed', String(hiddenTypes.size > 0 || hideViewed));
+$('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
 document.addEventListener('pointerdown', (event) => {
-  if (filterPop && event.target instanceof Node && !filterPop.contains(event.target) && !$('filter-menu').contains(event.target)) closeFilterMenu();
+  if (toolbarMenu && event.target instanceof Node && !toolbarMenu.node.contains(event.target) && !$(toolbarMenu.anchor).contains(event.target)) closeToolbarMenu();
   if (emojiFor !== undefined && event.target instanceof Element && !event.target.closest('.reactions')) {
     emojiFor = undefined;
     renderFiles();
@@ -3141,7 +3253,10 @@ for (const what of ['reviewers', 'assignees', 'labels', 'milestone'] as const) $
 document.addEventListener('pointerdown', (event) => {
   if (picker && event.target instanceof Node && !picker.node.contains(event.target) && !$('pick-' + picker.what).contains(event.target)) closePicker(true);
 });
-window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && picker) closePicker(false); });
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && picker) closePicker(false);
+  if (event.key === 'Escape' && toolbarMenu) closeToolbarMenu();
+});
 $('merge').addEventListener('click', () => {
   if (current?.conversation?.merge.mergeQueue) changePullRequest({ action: 'enqueue' });
   else openMergeForm(false);

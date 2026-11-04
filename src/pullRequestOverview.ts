@@ -204,8 +204,10 @@ export interface OverviewActions {
   restoreBranch(): Promise<void>;
   rerun(runId: number): Promise<void>;
   approveRuns(): Promise<void>;
-  /** Ask for a new base branch in VS Code and save it. */
-  changeBase(): Promise<void>;
+  /** Branches the PR could merge into instead, for the base menu. */
+  branches(): Promise<readonly string[]>;
+  /** Confirm and save a new base branch. */
+  changeBase(branch: string): Promise<void>;
   renderMarkdown(text: string): Promise<string>;
   /** Commit GitHub suggestions to the PR branch in one commit and push it. */
   commitSuggestions(picked: readonly PickedSuggestion[]): Promise<void>;
@@ -266,7 +268,8 @@ export type PageMessage =
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
   | { readonly action: 'merge' | 'auto-merge'; readonly method: MergeMethod; readonly headline?: string; readonly body?: string }
   | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
-  | { readonly action: 'discard-review' | 'update-branch' | 'auto-merge-off' | 'enqueue' | 'dequeue' | 'revert' | 'restore-branch' | 'approve-runs' | 'change-base' }
+  | { readonly action: 'discard-review' | 'update-branch' | 'auto-merge-off' | 'enqueue' | 'dequeue' | 'revert' | 'restore-branch' | 'approve-runs' | 'branches' }
+  | { readonly action: 'change-base'; readonly branch: string }
   | { readonly action: 'dismiss-review' | 'rerequest'; readonly login: string }
   | { readonly action: 'rerun'; readonly run: number }
   | { readonly action: 'files'; readonly range: DiffRange; readonly whitespace: boolean }
@@ -313,6 +316,8 @@ export interface ExtensionMessage {
   readonly idle?: true;
   readonly pickerOptions?: PickerOptions;
   readonly pickerError?: string;
+  readonly branches?: readonly string[];
+  readonly branchesError?: string;
 }
 
 const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comment'];
@@ -409,7 +414,7 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option,
-        range, whitespace, kind, hide, content, on, login, run, headline, picked } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, content, on, login, run, headline, picked, branch } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -484,6 +489,9 @@ export async function showPullRequestOverview(
         } else if (action === 'markdown' && typeof text === 'string' && text.length <= maximumReviewLength && formKey !== undefined) {
           post({ markdown: { form: formKey, html: text.trim() ? await actions.renderMarkdown(text) : '' } });
         }
+        else if (action === 'branches') {
+          try { post({ branches: await actions.branches() }); } catch (error: unknown) { post({ branchesError: error instanceof Error ? error.message : String(error) }); }
+        }
         else if (action === 'picker-options') {
           try { post({ pickerOptions: await actions.pickerOptions() }); } catch (error: unknown) { post({ pickerError: error instanceof Error ? error.message : String(error) }); }
         }
@@ -531,8 +539,8 @@ export async function showPullRequestOverview(
             else if (action === 'approve-runs' && (conversation()?.awaitingApproval.length ?? 0) > 0) await actions.approveRuns();
             else if (action === 'revert' && state.details?.merged === true) await actions.revert();
             else if (action === 'restore-branch' && merge?.headDeleted === true) await actions.restoreBranch();
-            else if (action === 'change-base' && state.details?.open === true) {
-              await actions.changeBase();
+            else if (action === 'change-base' && state.details?.open === true && typeof branch === 'string' && branch.length <= 255) {
+              await actions.changeBase(branch);
               sendFiles();
             } else if (action === 'commit-suggestions' && Array.isArray(picked) && picked.length > 0 && picked.length <= 100) {
               const valid = (picked as unknown[]).every((item) => {
@@ -759,14 +767,15 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .card-thread .name,.card-thread .text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card-thread .where{display:flex;min-width:0;font-family:var(--font-code);color:var(--ink-muted)}.card-thread .state{color:var(--ink-muted)}
 .card-thread code{font-family:var(--font-code);font-size:.92em}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
-.toolbar select{height:24px;max-width:220px;font-size:12px}#file-filter{width:150px;height:24px;padding:0 var(--space-8);font-size:12px}
-.toolbar{position:relative;flex-wrap:wrap;justify-content:flex-end}.filter-pop{position:absolute;top:30px;right:0;z-index:6;min-width:200px}
-.range-note{margin-top:var(--space-12);padding:var(--space-6) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);font-size:12px;background:color-mix(in srgb,var(--ink) 4%,transparent)}.range-note .gap{flex:1}
+.filter-box{position:relative;display:inline-flex}#file-filter{width:150px;height:24px;padding:0 var(--space-24) 0 var(--space-8);font-size:12px}#filter-clear{position:absolute;top:2px;right:2px;width:20px;height:20px;min-height:20px}#filter-clear svg{width:14px;height:14px}
+.toolbar{flex-wrap:wrap;justify-content:flex-end}.menu-anchor{position:relative;display:inline-flex}.toolbar-menu{top:calc(100% + var(--space-4));left:auto;right:0;width:max-content;min-width:180px;max-width:420px}.toolbar-menu .picker-row .text{display:flex;gap:var(--space-8);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar-menu .picker-row .text .muted{margin-left:auto}.toolbar-menu code{font-family:var(--font-code);color:var(--ink-muted)}.range-menu .picker-row .text,.base-menu .picker-row .text{display:block}.base-menu{left:0;right:auto;width:300px;max-width:none}.base-menu .picker-list{gap:var(--space-2)}.base-menu input[type=text]{position:sticky;top:0;z-index:1;flex:none;width:100%;height:26px;margin-bottom:var(--space-4);padding:0 var(--space-8);font-size:12px}.menu-foot{display:flex;justify-content:flex-end;padding-top:var(--space-4);border-top:1px solid var(--line)}
+.range-button{gap:var(--space-4);min-height:24px;height:24px;max-width:240px;padding:0 var(--space-4) 0 var(--space-8);font-size:12px}.range-button .range-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-button.on{color:var(--brand);background:var(--brand-soft)}
+.range-note{flex-wrap:nowrap;align-items:center;gap:var(--space-12);margin-top:var(--space-12);padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:var(--radius-md);font-size:12px;line-height:18px;background:var(--brand-soft)}.range-note>svg{flex:none;width:16px;height:16px;fill:var(--brand)}.range-note .gap{flex:1;min-width:0}.range-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}.range-title code{font-family:var(--font-code)}.range-note>button{flex:none}
 .timeline-item{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);padding:var(--space-8) 0;font-size:13px;line-height:20px}.timeline-item+.timeline-item{border-top:1px solid var(--line)}
 .timeline-item .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.timeline-item .avatar svg{width:16px;height:16px;fill:currentColor}.timeline-item .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
 .timeline-item.event,.timeline-item.commits{font-size:12px;color:var(--ink-muted)}.timeline-item.event b,.timeline-item.commits b{color:var(--ink);font-weight:600}
 .commit-list{margin-top:var(--space-4)}.commit-row{display:flex;align-items:baseline;gap:var(--space-8);padding:var(--space-2) 0;font-size:12px}.commit-row code{font-family:var(--font-code);color:var(--ink-muted)}.commit-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
-.commit-row button{min-height:18px;padding:0 var(--space-6);font-size:11px}
+.commit-row .ref{flex:none}.commit-lines{display:inline-flex;gap:var(--space-4);font-family:var(--font-code);font-size:11px}
 .msg-tools{display:flex;align-items:center;gap:var(--space-2);margin-left:auto}.msg-tools button{min-height:20px;width:22px;padding:0;border:0;background:none;color:var(--ink-muted)}.msg-tools button:hover{color:var(--ink);filter:none}.msg-tools svg{width:14px;height:14px;fill:currentColor}
 .edited{font-size:12px;color:var(--ink-muted)}.verb{color:var(--ink-muted)}
 .reactions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4);margin-top:var(--space-6)}.reactions:empty{display:none}
@@ -791,7 +800,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 .commits-view{margin-top:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md)}.commits-view .commit-row{padding:var(--space-6) var(--space-12);cursor:pointer}.commits-view .commit-row+.commit-row{border-top:1px solid var(--line)}.commits-view .commit-row:hover{background:color-mix(in srgb,var(--ink) 5%,transparent)}.commits-view .commit-row.sel{box-shadow:inset 2px 0 0 var(--brand);background:var(--brand-soft)}
 .byline .icon-button{width:20px;height:20px;min-height:20px}
 </style></head><body>
-<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
+<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button" data-tip="Open on GitHub" aria-label="Open on GitHub">${codicons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${codicons.refresh}</button><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree">${codicons.trash}</button></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div id="facts" class="muted facts"></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
@@ -834,9 +843,9 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
 <span id="analyze-divider" class="divider"></span>
 <button id="commit-batch" class="primary small" data-pr-action hidden></button>
-<input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files">
-<button id="filter-menu" class="icon-button" data-tip="Filter by file type" aria-label="Filter by file type">${codicons.filter}</button>
-<select id="range" aria-label="Changes from"></select>
+<span id="filter-box" class="filter-box"><input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files"><button id="filter-clear" class="icon-button" aria-label="Clear filter" hidden>${codicons.close}</button></span>
+<span class="menu-anchor"><button id="filter-menu" class="icon-button" data-tip="Filter files" aria-label="Filter files" aria-haspopup="true" aria-expanded="false">${codicons.filter}</button></span>
+<span class="menu-anchor"><button id="range" class="range-button" aria-label="Changes from" aria-haspopup="true" aria-expanded="false"><span class="range-text">All changes</span>${codicons.chevronDown}</button></span>
 <button id="whitespace" class="icon-button" data-tip="Hide whitespace changes" aria-label="Hide whitespace changes">${codicons.whitespace}</button>
 <span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button></span>
 <button id="folders" class="icon-button" data-tip="Group files by folder" aria-label="Group files by folder">${codicons.listTree}</button>

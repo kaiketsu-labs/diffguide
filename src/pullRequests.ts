@@ -116,7 +116,9 @@ export interface GitHubComment {
 export type TimelineItem =
   | (GitHubComment & { readonly kind: 'comment' })
   | (GitHubComment & { readonly kind: 'review'; readonly state: 'approved' | 'changes' | 'commented' | 'dismissed' | 'pending'; readonly commit?: string })
-  | { readonly kind: 'commit'; readonly id: string; readonly oid: string; readonly headline: string; readonly message: string; readonly author: string; readonly avatarUrl: string; readonly createdAt: string; readonly checks?: 'success' | 'failure' | 'pending' }
+  | { readonly kind: 'commit'; readonly id: string; readonly oid: string; readonly headline: string; readonly message: string; readonly author: string; readonly avatarUrl: string; readonly createdAt: string; readonly checks?: 'success' | 'failure' | 'pending'
+    /** Lines added and removed; `files` is missing when GitHub could not count them. */
+    readonly additions?: number; readonly deletions?: number; readonly files?: number }
   | { readonly kind: 'event'; readonly id: string; readonly actor: string; readonly avatarUrl: string; readonly createdAt: string; readonly text: string };
 
 export type MergeState = 'behind' | 'blocked' | 'clean' | 'dirty' | 'hasHooks' | 'unknown' | 'unstable';
@@ -366,7 +368,7 @@ const timelineTypes = ['ISSUE_COMMENT', 'PULL_REQUEST_REVIEW', 'PULL_REQUEST_COM
 const timelineField = `timelineItems(first:100,after:$after,itemTypes:[${timelineTypes}]){pageInfo{hasNextPage endCursor} nodes{__typename
   ... on IssueComment{${commentFields}}
   ... on PullRequestReview{${commentFields} state submittedAt commit{oid}}
-  ... on PullRequestCommit{id pushed:commit{oid messageHeadline messageBody committedDate statusCheckRollup{state} author{name avatarUrl(size:40) user{login}}}}
+  ... on PullRequestCommit{id pushed:commit{oid messageHeadline messageBody committedDate additions deletions changedFilesIfAvailable statusCheckRollup{state} author{name avatarUrl(size:40) user{login}}}}
   ... on HeadRefForcePushedEvent{id createdAt ${actorField} beforeCommit{abbreviatedOid} afterCommit{abbreviatedOid}}
   ... on LabeledEvent{id createdAt ${actorField} label{name}}
   ... on UnlabeledEvent{id createdAt ${actorField} label{name}}
@@ -1151,6 +1153,8 @@ export function parseTimeline(nodes: readonly unknown[]): readonly TimelineItem[
         avatarUrl: optionalHttpsUrl(author['avatarUrl']),
         createdAt: typeof commit['committedDate'] === 'string' ? commit['committedDate'] : '',
         ...checks === undefined ? {} : { checks },
+        ...typeof commit['additions'] === 'number' && typeof commit['deletions'] === 'number' ? { additions: commit['additions'], deletions: commit['deletions'] } : {},
+        ...typeof commit['changedFilesIfAvailable'] === 'number' ? { files: commit['changedFilesIfAvailable'] } : {},
       });
     } else {
       const said = eventText(node);

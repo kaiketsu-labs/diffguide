@@ -31,7 +31,7 @@ export interface PageContext {
 
 export type GitHubPageActions = Pick<OverviewActions, 'addComment' | 'editComment' | 'deleteIssueComment' | 'hideComment' | 'react' | 'discardReview' | 'dismissReview'
   | 'rerequestReview' | 'updateBranch' | 'enableAutoMerge' | 'disableAutoMerge' | 'enqueue' | 'dequeue' | 'revert' | 'restoreBranch' | 'rerun' | 'approveRuns'
-  | 'changeBase' | 'renderMarkdown' | 'commitSuggestions'>;
+  | 'branches' | 'changeBase' | 'renderMarkdown' | 'commitSuggestions'>;
 
 /** GitHub's reasons for hiding a comment, as its menu names them. */
 const hideReasons: readonly { readonly label: string; readonly classifier: string }[] = [
@@ -136,11 +136,11 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       for (const run of awaitingApproval) await provider.approveWorkflowRun(run);
       context.reload();
     },
-    changeBase: async () => {
-      const current = context.baseBranch();
-      const branches = (await provider.branches()).filter((name) => name !== current && name !== context.headBranch);
-      const picked = await vscode.window.showQuickPick(branches, { title: 'Change base branch', placeHolder: `Now ${current}. Pick the branch to merge into.` });
-      if (picked === undefined) return;
+    branches: async () => (await provider.branches()).filter((name) => name !== context.baseBranch() && name !== context.headBranch),
+    changeBase: async (picked) => {
+      const branches = (await provider.branches()).filter((name) => name !== context.baseBranch() && name !== context.headBranch);
+      if (!branches.includes(picked)) throw new Error(`${picked} is not a branch this PR can merge into.`);
+      if (!await confirm(`Change the base branch to ${picked}?`, 'Change base', `The PR then merges into ${picked} instead of ${context.baseBranch()}. Its diff and checks follow.`)) return;
       await provider.changeBase(number, picked);
       await context.useBase(picked);
       context.reload(true);

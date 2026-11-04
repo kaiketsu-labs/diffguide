@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import * as vscode from 'vscode';
 import { showPullRequestOverview, type OverviewActions, type OverviewState } from '../src/pullRequestOverview.js';
-import { suggestionEdits } from '../src/pullRequestPageActions.js';
+import { githubPageActions, suggestionEdits, type PageContext } from '../src/pullRequestPageActions.js';
 import { parseConversation, type PullRequestConversation, type PullRequestDetails, type RemoteThread } from '../src/pullRequests.js';
 import { applyLineSuggestions } from '../src/suggestions.js';
 import { generatedPaths, readPullRequestDiff } from '../src/unifiedDiff.js';
@@ -21,7 +21,7 @@ test('reads the Conversation tab: comments, reviews, pushes and events, and the 
     { __typename: 'IssueComment', id: 'IC1', url: 'https://github.com/acme/app/pull/7#issuecomment-1', body: 'Looks **good**', bodyHTML: '<p>Looks <b>good</b></p>', createdAt: '2026-01-01T00:00:00Z',
       lastEditedAt: '2026-01-02T00:00:00Z', viewerCanUpdate: true, viewerCanDelete: true, viewerCanMinimize: false, viewerCanReact: true, isMinimized: false, author: { ...author('alice'), name: 'Alice' }, reactionGroups: reactions },
     { __typename: 'IssueComment', id: 'IC2', body: 'spam', bodyHTML: '<p>spam</p>', createdAt: '2026-01-01T01:00:00Z', isMinimized: true, minimizedReason: 'OFF_TOPIC', author: null, reactionGroups: [] },
-    { __typename: 'PullRequestCommit', id: 'PC1', pushed: { oid: oid('a'), messageHeadline: 'Add feature', messageBody: 'Details', committedDate: '2026-01-01T02:00:00Z', statusCheckRollup: { state: 'FAILURE' }, author: { name: 'Bob B', avatarUrl: '', user: { login: 'bob' } } } },
+    { __typename: 'PullRequestCommit', id: 'PC1', pushed: { oid: oid('a'), messageHeadline: 'Add feature', messageBody: 'Details', committedDate: '2026-01-01T02:00:00Z', additions: 12, deletions: 3, changedFilesIfAvailable: null, statusCheckRollup: { state: 'FAILURE' }, author: { name: 'Bob B', avatarUrl: '', user: { login: 'bob' } } } },
     { __typename: 'PullRequestCommit', id: 'PC2', pushed: { oid: 'not-an-oid', messageHeadline: 'Broken' } },
     { __typename: 'PullRequestReview', id: 'R1', body: '', bodyHTML: '', state: 'APPROVED', createdAt: '2026-01-01T03:00:00Z', submittedAt: '2026-01-01T03:05:00Z', commit: { oid: oid('a') }, author: author('viewer'), reactionGroups: [] },
     { __typename: 'PullRequestReview', id: 'R2', body: 'later', bodyHTML: '<p>later</p>', state: 'PENDING', createdAt: '2026-01-01T04:00:00Z', commit: { oid: oid('b') }, author: author('viewer'), reactionGroups: [] },
@@ -57,7 +57,7 @@ test('reads the Conversation tab: comments, reviews, pushes and events, and the 
   });
   assert.equal(hidden?.kind === 'comment' && hidden.author, 'ghost');
   assert.equal(hidden?.kind === 'comment' && hidden.hidden, 'off topic');
-  assert.deepEqual(commit, { kind: 'commit', id: 'PC1', oid: oid('a'), headline: 'Add feature', message: 'Details', author: 'bob', avatarUrl: '', createdAt: '2026-01-01T02:00:00Z', checks: 'failure' });
+  assert.deepEqual(commit, { kind: 'commit', id: 'PC1', oid: oid('a'), headline: 'Add feature', message: 'Details', author: 'bob', avatarUrl: '', createdAt: '2026-01-01T02:00:00Z', checks: 'failure', additions: 12, deletions: 3 });
   assert.equal(review?.kind === 'review' && review.createdAt, '2026-01-01T03:05:00Z');
   assert.deepEqual(conversation.timeline.slice(5).map((item) => item.kind === 'event' ? item.text : ''), [
     'force-pushed the branch from aaaaaaa to bbbbbbb', 'added the bug label', 'mentioned this in acme/app#12 Crash on start',
@@ -160,6 +160,7 @@ test('the page reaches GitHub only for commits, comments and reactions the PR ha
     editComment: async () => { calls.push('edit'); },
     react: async (id: string, content: string, on: boolean) => { calls.push(`react ${id} ${content} ${String(on)}`); },
     commitSuggestions: async () => { calls.push('suggestions'); },
+    changeBase: async (branch: string) => { calls.push('base ' + branch); },
     refresh: () => undefined,
   } as unknown as OverviewActions;
   await showPullRequestOverview('conversation-test', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
@@ -174,6 +175,8 @@ test('the page reaches GitHub only for commits, comments and reactions the PR ha
     { action: 'react', id: 'PR_7', content: 'NOPE', on: true },
     { action: 'react', id: 'PR_7', content: 'HEART', on: false },
     { action: 'commit-suggestions', picked: [{ thread: 'T1', comment: 'C1' }] },
+    { action: 'change-base', branch: ['main'] },
+    { action: 'change-base', branch: 'release' },
   ]) {
     panel.receive(message);
     await tick();
@@ -183,8 +186,19 @@ test('the page reaches GitHub only for commits, comments and reactions the PR ha
     'comment Thanks',
     'react IC1 ROCKET true',
     'react PR_7 HEART false',
+    'base release',
+    `files ${JSON.stringify(null)}`,
   ]);
   assert.ok(panel.sent.some((sent) => (sent as { done?: string }).done === 'conversation'));
   assert.ok(panel.sent.some((sent) => String((sent as { error?: string }).error).includes('no longer on this PR')));
   panel.dispose();
+});
+
+test('changes the base only to a branch GitHub lists, never the head or the current base', async () => {
+  const changed: string[] = [];
+  const provider = { branches: async () => ['main', 'feature', 'release'], changeBase: async (_: number, branch: string) => { changed.push(branch); } };
+  const actions = githubPageActions({ provider, number: 7, headBranch: 'feature', baseBranch: () => 'main' } as unknown as PageContext);
+  assert.deepEqual(await actions.branches(), ['release']);
+  for (const branch of ['main', 'feature', 'evil']) await assert.rejects(actions.changeBase(branch), /not a branch this PR can merge into/u);
+  assert.deepEqual(changed, []);
 });
