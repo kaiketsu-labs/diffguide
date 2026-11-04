@@ -286,10 +286,13 @@ export async function showPullRequestOverview(
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** Bumped by each read and each mark write; a read that is no longer the latest may predate a write, so it is dropped. */
   let generation = 0;
+  /** Mark writes still running. A read during one would undo the page's own ticks, so the last write to finish redraws. */
+  let writing = 0;
   const redraw = (): void => {
     if (timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
+      if (writing > 0) return;
       const started = ++generation;
       void read().then((next) => {
         if (started !== generation) return;
@@ -300,7 +303,8 @@ export async function showPullRequestOverview(
   };
   const marking = async (write: Promise<void>): Promise<void> => {
     generation++;
-    try { await write; } finally { redraw(); }
+    writing++;
+    try { await write; } finally { writing--; redraw(); }
   };
   let busy = false;
   const subscriptions = [

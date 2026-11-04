@@ -122,3 +122,27 @@ test('local replies carry the intent the user picked', async () => {
   assert.deepEqual(replies, [['t1', 'Do it', 'implement'], ['t1', 'Why?', 'ask']]);
   panel.dispose();
 });
+
+test('a state read never lands while a Viewed tick is still being written', async () => {
+  resetFakeWindow();
+  const changed = new EventEmitter<void>();
+  let viewed: string[] = [];
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const actions = {
+    setViewed: async (path: string) => {
+      await wait(path === 'a.ts' ? 10 : 500);
+      viewed = [...viewed, path];
+      changed.fire();
+    },
+  } as unknown as OverviewActions;
+  await showPullRequestOverview('viewed-race', async () => ({ ...base, viewed }), changed.event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'viewed', path: 'a.ts', viewed: true });
+  await wait(50);
+  const sentBefore = panel.sent.length;
+  panel.receive({ action: 'viewed', path: 'b.ts', viewed: true });
+  await wait(800);
+  const states = panel.sent.slice(sentBefore).flatMap((m) => 'state' in (m as object) ? [(m as { state: OverviewState }).state.viewed] : []);
+  assert.deepEqual(states, [['a.ts', 'b.ts']]);
+  panel.dispose();
+});
