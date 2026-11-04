@@ -771,7 +771,7 @@ function message(entry: Message): HTMLElement {
   const github = 'avatarUrl' in entry;
   const author = github ? entry.author : entry.author === 'claude' ? 'Claude' : 'You';
   const meta = el('span', 'msg-meta');
-  if (github && entry.pending) meta.append(el('span', 'chip warning', 'Pending'));
+  if (github && entry.pending) meta.append(el('span', 'chip pending', 'Pending'));
   if (!github) meta.append(...timeLabel(entry.createdAt));
   if (github && entry.canDelete) {
     const remove = button('', () => post({ action: 'github-delete', id: entry.id }), 'quiet delete');

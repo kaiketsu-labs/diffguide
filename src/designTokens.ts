@@ -41,6 +41,9 @@ const brandTokens: Readonly<Record<string, BrandToken>> = {
   'on-claude': { dark: '#2a130a', light: '#ffffff' },
   github: { dark: '#7fa8f0', light: '#2f5fc4' },
   'github-soft': { dark: '#7fa8f024', light: '#2f5fc41a' },
+  // GitHub's attention yellow (Primer), so pending review comments look like they do on GitHub.
+  pending: { dark: '#d29922', light: '#9a6700' },
+  'pending-soft': { dark: '#d2992226', light: '#9a67001a' },
   'danger-soft': { dark: '#f0726a26', light: '#c4322a14' },
   'shadow-overlay': { dark: '0 4px 16px rgba(0,0,0,.35)', light: '0 4px 16px rgba(0,0,0,.12)' },
 };
@@ -65,7 +68,7 @@ const fixedTokens: Readonly<Record<string, string>> = {
 
 /** High-contrast themes carry contrast in their own variables: tints go transparent and lines use the contrast border. */
 const highContrast: Readonly<Record<string, string>> = {
-  'brand-soft': 'transparent', 'claude-soft': 'transparent', 'github-soft': 'transparent', 'danger-soft': 'transparent',
+  'brand-soft': 'transparent', 'claude-soft': 'transparent', 'github-soft': 'transparent', 'pending-soft': 'transparent', 'danger-soft': 'transparent',
   line: 'var(--vscode-contrastBorder)', 'line-strong': 'var(--vscode-contrastBorder)', 'shadow-overlay': 'none',
 };
 

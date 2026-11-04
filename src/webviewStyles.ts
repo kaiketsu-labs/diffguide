@@ -34,6 +34,7 @@ kbd.on-fill{height:16px;border-color:currentColor;color:inherit;opacity:.7}
 .chip.claude{color:var(--claude);background:var(--claude-soft)}
 .chip.working::before{animation:pulse 1.2s ease-in-out infinite}
 .chip.warning{color:var(--warning);background:color-mix(in srgb,var(--warning) 14%,transparent)}
+.chip.pending{color:var(--pending);background:var(--pending-soft)}
 .chip.success{color:var(--success);background:color-mix(in srgb,var(--success) 14%,transparent)}
 .chip.danger{color:var(--danger);background:var(--danger-soft)}
 [data-tip]{position:relative}
