@@ -917,9 +917,9 @@ function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
 function rangeTitle(shown: DiffRange): (Node | string)[] {
   if (shown.kind === 'all') return ['All changes'];
   if (shown.kind === 'since') return ['Changes since your last review'];
-  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits, ', commitRef(shown.from), ' to ', commitRef(shown.to)];
+  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits,', commitRef(shown.from), 'to', commitRef(shown.to)];
   const commit = commitsOf().find((each) => each.oid === shown.from);
-  return [commitRef(shown.from), ' ', ...commit ? [commit.headline, ...checkMark(commit)] : []];
+  return [commitRef(shown.from), ...commit ? [el('span', 'headline', commit.headline), ...checkMark(commit)] : []];
 }
 
 function commitRef(oid: string): HTMLButtonElement {
