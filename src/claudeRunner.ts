@@ -157,7 +157,7 @@ export class ClaudeRunner implements vscode.Disposable {
 
   /**
    * Run Claude once in the PR's conversation; resolves with an error message, or undefined on success.
-   * `edits` lets Claude change files; without it, edits and commands are blocked.
+   * `edits` lets Claude change files; without it, edits and commands are blocked. On the author's own PR, auto mode also lets it run commands.
    */
   async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly edits: boolean; readonly env: Readonly<Record<string, string>> }): Promise<string | undefined> {
     const { executable, mcpPath, shell } = await this.options.resolve();
@@ -168,7 +168,7 @@ export class ClaudeRunner implements vscode.Disposable {
     const args = [
       '-p', run.prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...run.allowedTools,
       ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
-      ...(run.edits ? ['--permission-mode', 'acceptEdits'] : ['--disallowedTools', ...reviewerBlockedTools]),
+      ...(!run.edits ? ['--disallowedTools', ...reviewerBlockedTools] : ['--permission-mode', this.options.role === 'author' ? 'auto' : 'acceptEdits']),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
     this.#reply = undefined;
