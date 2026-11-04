@@ -35,7 +35,7 @@ import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
 import { anchorFromText } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
-import { placeComment } from './pullRequestComments.js';
+import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
 
 let activeStore: ReviewStore | undefined;
@@ -297,6 +297,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         replyOnGitHub: async (id, text) => {
           await provider.replyToThread(id, text);
           await loadThreads();
+        },
+        askAboutGitHub: async (id, note, intent) => {
+          const loaded = await (remote ?? loadThreads());
+          const thread = loaded instanceof Error ? undefined : loaded.find((each) => each.id === id);
+          if (thread === undefined) throw new Error('This GitHub thread no longer exists.');
+          if (thread.outdated) throw new Error('The code changed since this comment, so Claude would read the wrong lines. Comment on the current lines instead.');
+          const { anchor } = await pageAnchor({ path: thread.path, side: thread.side === 'LEFT' ? 'old' : 'new', startLine: thread.startLine, endLine: thread.endLine });
+          const comments = thread.comments.filter((comment) => comment.hidden === undefined);
+          const created = await opened.session.store.submit(anchor, githubFeedbackRequest(note, intent, comments), intent);
+          await opened.session.linkToGitHub?.(created.id, { id: thread.id, url: thread.url });
         },
         resolveOnGitHub: async (id, resolved) => {
           await provider.resolveThread(id, resolved);

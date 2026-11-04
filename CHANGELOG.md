@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Replies to a GitHub thread on the review page offer **Ask Claude** and **Implement** next to **Post on GitHub**. Claude gets the thread's comments and your note, which may be empty, in a Local thread on the same lines; nothing reaches GitHub. That thread's **Reply on GitHub…** posts Claude's answer inside the colleague's thread after you edit it. Outdated GitHub threads can't be handed to Claude, since their lines no longer match the code.
 - The review page has a **Conversation** card like GitHub's Conversation tab: comments on the PR, reviews with their summaries, pushed commits, force pushes, label, reviewer, assignee, title, base branch, milestone and merge events, and mentions from other issues. A box at the bottom posts a comment on the PR outside any review. The card folds from its heading, and on long PRs it shows the latest six entries with **Show N earlier entries** above them.
 - GitHub comments in the Conversation card and in diff threads can be edited by their author, quoted into a reply, hidden for a reason such as Outdated or Spam, shown again, and deleted. Hidden comments fold to one line with **Show**. Comments, reviews and the description take GitHub's eight reactions.
 - Text boxes that post to GitHub have **Write** and **Preview** tabs, rendered by GitHub, and complete `@` mentions from the repository's people and everyone on the PR.

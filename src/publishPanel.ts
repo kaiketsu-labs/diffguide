@@ -9,6 +9,8 @@ export interface PublishDraft {
   /** Where the comment lands, such as "Lines 12–14". */
   readonly placement: string;
   readonly body: string;
+  /** Replying inside an existing thread posts right away, so only one button shows. */
+  readonly reply?: boolean;
 }
 
 const maximumLength = 60_000;
@@ -55,17 +57,20 @@ textarea{width:100%;height:45vh;min-height:180px;max-height:none;field-sizing:fi
 <h1>${escapeHtml(draft.title)}</h1>
 <p class="muted">${escapeHtml(draft.placement)} · Markdown</p>
 <textarea id="body" spellcheck="true" aria-label="Comment">${escapeHtml(draft.body)}</textarea>
-<div class="actions"><button id="direct">Comment now</button><button id="pending" class="primary">Add to pending review</button></div>
-<p id="status" class="muted" role="status" aria-live="polite">A pending comment stays private until you submit your review on GitHub.</p>
+${draft.reply === true
+    ? '<div class="actions"><button id="direct" class="primary">Reply on GitHub</button></div>\n<p id="status" class="muted" role="status" aria-live="polite">Everyone on the PR sees the reply.</p>'
+    : '<div class="actions"><button id="direct">Comment now</button><button id="pending" class="primary">Add to pending review</button></div>\n<p id="status" class="muted" role="status" aria-live="polite">A pending comment stays private until you submit your review on GitHub.</p>'}
 <script nonce="${nonce}">
 const api=acquireVsCodeApi();
 const body=document.getElementById('body');
-const buttons=[document.getElementById('pending'),document.getElementById('direct')];
+const pendingButton=document.getElementById('pending');
+const directButton=document.getElementById('direct');
+const buttons=[pendingButton,directButton].filter(Boolean);
 const status=document.getElementById('status');
 function update(busy){const length=body.value.trim().length;for(const button of buttons)button.disabled=busy||length===0||length>${maximumLength};}
 function send(pending){update(true);status.className='muted';status.textContent='Posting to GitHub…';api.postMessage({body:body.value,pending});}
-buttons[0].addEventListener('click',()=>send(true));
-buttons[1].addEventListener('click',()=>send(false));
+pendingButton?.addEventListener('click',()=>send(true));
+directButton.addEventListener('click',()=>send(false));
 body.addEventListener('input',()=>update(false));
 window.addEventListener('message',(event)=>{status.className='error';status.textContent=String(event.data.error);update(false);});
 update(false);

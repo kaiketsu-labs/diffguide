@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
-import { diffRanges } from '../src/pullRequestComments.js';
+import { diffRanges, githubFeedbackRequest, readGitHubLinks, writeGitHubLinks } from '../src/pullRequestComments.js';
 import { buildOverviewState, overviewHtml } from '../src/pullRequestOverview.js';
 import type { PullRequestSession } from '../src/pullRequestSessions.js';
 
@@ -41,4 +44,19 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
   }]);
   const html = overviewHtml(state, 'overview.js', 'https://example.test/</script><i>.svg');
   assert.ok(!html.includes('</script><b>') && !html.includes('</script><i>') );
+});
+
+test('quotes a GitHub thread for Claude after the user\'s note, or a default for the intent', () => {
+  const comments = [{ author: 'bob', body: 'Rename x\n\nto userId.' }, { author: 'alice', body: 'Agreed ' }];
+  assert.equal(githubFeedbackRequest(' Also the tests ', 'implement', comments),
+    'Also the tests\n\nGitHub thread:\n\n> **@bob:**\n> Rename x\n>\n> to userId.\n>\n> **@alice:**\n> Agreed');
+  assert.match(githubFeedbackRequest('', 'implement', comments), /^Address this feedback from GitHub\./u);
+  assert.match(githubFeedbackRequest('  ', 'ask', comments), /^What do you think of this feedback from GitHub\?/u);
+});
+
+test('keeps links from local threads to GitHub threads across restarts and drops malformed ones', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'links-'));
+  assert.equal((await readGitHubLinks(dataPath)).size, 0);
+  await writeGitHubLinks(dataPath, new Map([['local-1', { id: 'PRRT_1', url: 'https://github.com/acme/app/pull/7#discussion_r1' }], ['bad', { id: 'x', url: 'http://evil' }]]));
+  assert.deepEqual([...await readGitHubLinks(dataPath)], [['local-1', { id: 'PRRT_1', url: 'https://github.com/acme/app/pull/7#discussion_r1' }]]);
 });

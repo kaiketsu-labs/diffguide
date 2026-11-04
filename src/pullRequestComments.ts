@@ -61,3 +61,39 @@ export async function readPublications(dataPath: string): Promise<Map<string, Pu
 export async function writePublications(dataPath: string, publications: ReadonlyMap<string, Publication>): Promise<void> {
   await writePrivateJson(publicationsPath(dataPath), { threads: Object.fromEntries(publications) });
 }
+
+/** The GitHub thread a local thread answers, so publishing replies inside it. */
+export interface GitHubLink {
+  readonly id: string;
+  readonly url: string;
+}
+
+function linksPath(dataPath: string): string {
+  return join(dataPath, 'github-links.json');
+}
+
+/** Local threads opened from a GitHub thread, by local thread id. */
+export async function readGitHubLinks(dataPath: string): Promise<Map<string, GitHubLink>> {
+  const value = await readPrivateJson(linksPath(dataPath)).catch(() => undefined);
+  const threads = typeof value === 'object' && value !== null ? (value as { threads?: unknown }).threads : undefined;
+  const found = new Map<string, GitHubLink>();
+  if (typeof threads !== 'object' || threads === null) return found;
+  for (const [id, entry] of Object.entries(threads)) {
+    const record = typeof entry === 'object' && entry !== null ? entry as Partial<GitHubLink> : {};
+    if (typeof record.id === 'string' && record.id !== '' && typeof record.url === 'string' && record.url.startsWith('https://')) {
+      found.set(id, { id: record.id, url: record.url });
+    }
+  }
+  return found;
+}
+
+export async function writeGitHubLinks(dataPath: string, links: ReadonlyMap<string, GitHubLink>): Promise<void> {
+  await writePrivateJson(linksPath(dataPath), { threads: Object.fromEntries(links) });
+}
+
+/** The request Claude gets for a GitHub thread: the user's note, or a default for the intent, then the thread's comments quoted. */
+export function githubFeedbackRequest(note: string, intent: 'ask' | 'implement', comments: readonly { readonly author: string; readonly body: string }[]): string {
+  const request = note.trim() || (intent === 'implement' ? 'Address this feedback from GitHub.' : 'What do you think of this feedback from GitHub?');
+  const quoted = comments.map(({ author, body }) => `> **@${author}:**\n${body.trim().split('\n').map((line) => `> ${line}`.trimEnd()).join('\n')}`);
+  return `${request}\n\nGitHub thread:\n\n${quoted.join('\n>\n')}`;
+}

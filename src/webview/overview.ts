@@ -1741,35 +1741,48 @@ function threadBox(thread: Thread): HTMLElement {
   const reply = replies.get(thread.id);
   if (reply !== undefined && !thread.resolved) {
     const cancel = (): void => { replies.delete(thread.id); save(); renderFiles([thread.path]); };
-    const submit = (intent: Intent = 'ask'): void => {
-      const text = replies.get(thread.id) ?? '';
-      if (!text.trim() || sending.has(key)) return;
+    const send = (message: PageMessage): void => {
       sending.add(key);
       $('error').textContent = '';
       renderFiles([thread.path]);
-      post(github ? { action: 'github-reply', form: key, id: thread.id, text } : { action: 'reply', form: key, id: thread.id, text, intent });
+      post(message);
+    };
+    const submit = (intent: Intent = 'ask'): void => {
+      const text = replies.get(thread.id) ?? '';
+      if (!text.trim() || sending.has(key)) return;
+      send(github ? { action: 'github-reply', form: key, id: thread.id, text } : { action: 'reply', form: key, id: thread.id, text, intent });
+    };
+    const askClaude = (intent: Intent): void => {
+      if (sending.has(key)) return;
+      send({ action: 'github-ask', form: key, id: thread.id, text: replies.get(thread.id) ?? '', intent });
     };
     const onReply = (value: string): void => { replies.set(thread.id, value); save(); };
-    box.append(github ? githubField(key, reply, 'Reply on GitHub, visible to everyone', onReply, () => submit(), cancel)
+    box.append(github ? githubField(key, reply, 'Reply on GitHub, or tell Claude what to do', onReply, () => submit(), cancel)
       : textarea(key, reply, 'Reply to Claude', onReply, () => submit(), cancel));
     const busySending = sending.has(key);
-    const send = button(busySending ? 'Sending…' : github ? 'Post on GitHub' : 'Ask Claude', () => submit(), github ? 'primary' : 'claude');
-    send.disabled = busySending;
+    const primary = button(busySending ? 'Sending…' : github ? 'Post on GitHub' : 'Ask Claude', () => submit(), github ? 'primary' : 'claude');
+    primary.disabled = busySending;
     actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'));
-    if (!github) {
-      send.title = 'Claude answers without editing';
+    if (github) {
+      const ask = button('Ask Claude', () => askClaude('ask'));
+      ask.title = 'Only Claude sees it. Claude answers in a local thread without editing';
+      const implement = button('Implement', () => askClaude('implement'));
+      implement.title = 'Only Claude sees it. Claude changes the code';
+      for (const each of [ask, implement]) { each.disabled = busySending; actions.append(each); }
+    } else {
+      primary.title = 'Claude answers without editing';
       const implement = button('Implement', () => submit('implement'));
       implement.disabled = busySending;
       implement.title = 'Claude changes the code';
       actions.append(implement);
     }
-    actions.append(send);
+    actions.append(primary);
     box.append(actions);
     return box;
   }
   actions.append(el('span', 'gap'), thread.url
     ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
-    : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
+    : button(thread.source === 'local' && thread.linked ? 'Reply on GitHub…' : 'Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
   actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);

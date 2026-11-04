@@ -48,6 +48,8 @@ export interface OverviewState {
     /** The suggestion option written to the worktree from this thread, while the page is open. */
     readonly applied?: { readonly message: number; readonly option: number; readonly pushed: boolean };
     readonly url?: string;
+    /** Set when the thread answers a GitHub thread, so publishing replies inside it. */
+    readonly linked?: true;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
     readonly side: DiffSide;
@@ -155,6 +157,8 @@ export interface OverviewActions {
   /** Comment on the PR diff on GitHub, into the pending review or posted right away. */
   commentOnGitHub(comment: Omit<PageComment, 'intent'>, pending: boolean): Promise<void>;
   replyOnGitHub(threadId: string, text: string): Promise<void>;
+  /** Hand a GitHub thread to Claude in a linked local thread; an empty `note` asks Claude to answer or implement the feedback as is. */
+  askAboutGitHub(threadId: string, note: string, intent: CommentIntent): Promise<void>;
   resolveOnGitHub(threadId: string, resolved: boolean): Promise<void>;
   /** Delete one of the viewer's GitHub comments after they confirm. */
   deleteOnGitHub(commentId: string): Promise<void>;
@@ -258,6 +262,7 @@ export type PageMessage =
   | { readonly action: 'unread'; readonly ids: readonly string[] }
   | { readonly action: 'reply'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
+  | { readonly action: 'github-ask'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
   | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
@@ -436,6 +441,9 @@ export async function showPullRequestOverview(
         else if (action === 'publish' && typeof id === 'string') await actions.publish(id);
         else if (action === 'github-reply' && typeof id === 'string' && isText(text) && state.github?.some((thread) => thread.id === id)) {
           await actions.replyOnGitHub(id, text.trim());
+          post({ done: formKey });
+        } else if (action === 'github-ask' && typeof id === 'string' && isOptionalText(text) && commentIntents.includes(intent) && state.github?.some((thread) => thread.id === id)) {
+          await actions.askAboutGitHub(id, text ?? '', intent as CommentIntent);
           post({ done: formKey });
         } else if (action === 'github-resolve' && typeof id === 'string' && typeof resolved === 'boolean' && state.github?.some((thread) => thread.id === id)) {
           await actions.resolveOnGitHub(id, resolved);
@@ -960,6 +968,7 @@ export function buildOverviewState(
           return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
         }),
         ...(publication === undefined ? {} : { url: publication.url }),
+        ...(session.linkedToGitHub?.(thread.id) === true ? { linked: true as const } : {}),
       };
     }),
   };

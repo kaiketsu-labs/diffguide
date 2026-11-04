@@ -1,6 +1,6 @@
 import type * as vscode from 'vscode';
 import type { CodeAnchor, ReviewStore } from './contracts.js';
-import type { Publication } from './pullRequestComments.js';
+import type { GitHubLink, Publication } from './pullRequestComments.js';
 
 /** Where a document sits inside a review: its path, and whether it shows the original side at `revision`. */
 export interface SessionLocation {
@@ -25,6 +25,10 @@ export interface ReviewSession {
   publication?(threadId: string): Publication | undefined;
   /** Let the user edit the thread's comment and post it to the code host. */
   publish?(threadId: string): Promise<void>;
+  /** Remember the GitHub thread a local thread answers, so publishing replies inside it. */
+  linkToGitHub?(threadId: string, link: GitHubLink): Promise<void>;
+  /** Whether publishing the thread replies inside a GitHub thread. */
+  linkedToGitHub?(threadId: string): boolean;
 }
 
 /** PR sessions that join the review UI next to local changes. */

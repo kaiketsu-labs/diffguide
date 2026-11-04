@@ -5,7 +5,7 @@ import { createReviewBridge } from './bridge.js';
 import { readCustomInstructions, type InstructionKind } from './customInstructions.js';
 import type { ReviewBridge } from './contracts.js';
 import { parsePullRequestFileUri, pullRequestFileUri } from './pullRequestDiff.js';
-import { placeComment, readPublications, writePublications } from './pullRequestComments.js';
+import { placeComment, readGitHubLinks, readPublications, writeGitHubLinks, writePublications } from './pullRequestComments.js';
 import type { PullRequestProvider } from './pullRequests.js';
 import { showPublishPanel } from './publishPanel.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
@@ -144,6 +144,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       throw error;
     }
     const publications = await readPublications(dataPath);
+    const links = await readGitHubLinks(dataPath);
     const publishing = new Map<string, vscode.WebviewPanel>();
     const output = vscode.window.createOutputChannel(`Claude · #${number}`);
     const configuration = vscode.workspace.getConfiguration('pairReview');
@@ -201,12 +202,29 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
           open.reveal();
           return;
         }
-        const base = await readPullRequestBase(worktree, metadata.pullRequest.baseBranch);
-        if (base === undefined) throw new Error(`Could not find where #${number} branched off ${metadata.pullRequest.baseBranch}.`);
-        const placement = await placeComment(worktree, base, thread.anchor);
         const { startLine, endLine, path } = thread.anchor;
         const lines = endLine === startLine ? `${startLine}` : `${startLine}–${endLine}`;
         const answer = [...thread.messages].reverse().find((message) => message.author === 'claude') ?? thread.messages[0];
+        const announce = (url: string, pending: boolean): void => {
+          void vscode.window.showInformationMessage(pending ? 'Added to your pending review on GitHub.' : 'Posted on GitHub.', 'Open')
+            .then((choice) => { if (choice !== undefined) void vscode.env.openExternal(vscode.Uri.parse(url)); });
+        };
+        const link = links.get(threadId);
+        if (link !== undefined) {
+          const panel = showPublishPanel({ title: `#${number} · ${path}:${lines}`, placement: 'Reply in the GitHub thread', body: answer?.text ?? '', reply: true }, async (body) => {
+            await (await this.connect()).replyToThread(link.id, body);
+            publications.set(threadId, { url: link.url, pending: false });
+            await writePublications(dataPath, publications);
+            this.#stateChanged.fire(result);
+            announce(link.url, false);
+          });
+          publishing.set(threadId, panel);
+          panel.onDidDispose(() => { publishing.delete(threadId); });
+          return;
+        }
+        const base = await readPullRequestBase(worktree, metadata.pullRequest.baseBranch);
+        if (base === undefined) throw new Error(`Could not find where #${number} branched off ${metadata.pullRequest.baseBranch}.`);
+        const placement = await placeComment(worktree, base, thread.anchor);
         const panel = showPublishPanel({
           title: `#${number} · ${path}:${lines}`,
           placement: placement.lines === undefined ? `Whole file: line ${lines} is outside the PR diff` : `${endLine === startLine ? 'Line' : 'Lines'} ${lines}`,
@@ -216,12 +234,16 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
           publications.set(threadId, { url, pending });
           await writePublications(dataPath, publications);
           this.#stateChanged.fire(result);
-          void vscode.window.showInformationMessage(pending ? 'Added to your pending review on GitHub.' : 'Posted on GitHub.', 'Open')
-            .then((choice) => { if (choice !== undefined) void vscode.env.openExternal(vscode.Uri.parse(url)); });
+          announce(url, pending);
         });
         publishing.set(threadId, panel);
         panel.onDidDispose(() => { publishing.delete(threadId); });
       },
+      linkToGitHub: async (threadId, link) => {
+        links.set(threadId, link);
+        await writeGitHubLinks(dataPath, links);
+      },
+      linkedToGitHub: (threadId) => links.has(threadId),
     };
     const result: PullRequestSession = { session, bridge, runner, analysis, output };
     return result;

@@ -146,3 +146,19 @@ test('a state read never lands while a Viewed tick is still being written', asyn
   assert.deepEqual(states, [['a.ts', 'b.ts']]);
   panel.dispose();
 });
+
+test('hands a GitHub thread to Claude only with a known thread and a valid intent', async () => {
+  resetFakeWindow();
+  const asked: unknown[] = [];
+  const github = { id: 'g1', location: 'a.ts:3', text: '', status: 'Open', url: 'https://github.com/acme/app/pull/7#discussion_r1', path: 'a.ts', side: 'new', startLine: 3, endLine: 3, outdated: false, resolved: false, pending: false, messages: [] };
+  const actions = { askAboutGitHub: async (...args: unknown[]) => { asked.push(args); } } as unknown as OverviewActions;
+  await showPullRequestOverview('github-ask', async () => ({ ...base, github: [github] }) as OverviewState, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'ready' }); await tick();
+  panel.receive({ action: 'github-ask', form: 'reply:g1', id: 'g1', text: '', intent: 'implement' }); await tick();
+  panel.receive({ action: 'github-ask', form: 'reply:g1', id: 'g1', text: 'Why?', intent: 'ask' }); await tick();
+  panel.receive({ action: 'github-ask', form: 'reply:g1', id: 'other', text: 'x', intent: 'ask' }); await tick();
+  panel.receive({ action: 'github-ask', form: 'reply:g1', id: 'g1', text: 'x', intent: 'summarize' }); await tick();
+  assert.deepEqual(asked, [['g1', '', 'implement'], ['g1', 'Why?', 'ask']]);
+  panel.dispose();
+});
