@@ -398,11 +398,12 @@ const timelineField = `timelineItems(first:100,after:$after,itemTypes:[${timelin
   ... on AutoMergeDisabledEvent{id createdAt ${actorField}}
   ... on MilestonedEvent{id createdAt ${actorField} milestoneTitle}
   ... on DemilestonedEvent{id createdAt ${actorField} milestoneTitle}}}`;
+/** `latestOpinionatedReviews` comes first: after `reviewDecision`, GitHub lists only reviews by people with write access. */
 const conversationFields = `viewerPermission squashMergeCommitTitle squashMergeCommitMessage mergeCommitTitle mergeCommitMessage pullRequest(number:$number){
+  latestOpinionatedReviews(first:30){nodes{id author{login}}}
   id viewerCanReact ${reactionFields} mergeStateStatus reviewDecision viewerCanUpdateBranch viewerCanMergeAsAdmin viewerCanEnableAutoMerge viewerCanDisableAutoMerge
   isMergeQueueEnabled mergeQueueEntry{position} headRefOid headRef{id} isCrossRepository autoMergeRequest{mergeMethod enabledBy{login}}
   closingIssuesReferences(first:10){nodes{number title url state}}
-  latestOpinionatedReviews(first:30){nodes{id author{login}}}
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name isRequired(pullRequestNumber:$number) checkSuite{workflowRun{databaseId}} annotations(first:50){nodes{path annotationLevel title message location{start{line} end{line}}}}}
     ... on StatusContext{context isRequired(pullRequestNumber:$number)}}}}}}}
