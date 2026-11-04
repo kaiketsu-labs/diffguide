@@ -22,8 +22,9 @@ import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
 import { saveSelection } from './pullRequestEdits.js';
-import { buildOverviewState, showPullRequestOverview, type AnalysisView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
-import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
+import { buildOverviewState, showPullRequestOverview, type AnalysisView, type DiffSelection, type FilesView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
+import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
+import { githubPageActions } from './pullRequestPageActions.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
@@ -90,11 +91,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       /** Changed files from the latest diff read, so media previews need no second read. */
       let diffFiles: readonly FileDiff[] = [];
       const definitions = new DefinitionPeeks(folder);
+      /** The base branch, which the page can change. */
+      let baseBranch = pullRequest.baseBranch;
+      const current = (): PullRequestSummary => ({ ...pullRequest, baseBranch });
       const readBase = async (): Promise<string> => {
-        const base = await readPullRequestBase(folder, pullRequest.baseBranch);
-        if (base === undefined) throw new Error(`Could not find where #${pullRequest.number} branched off ${pullRequest.baseBranch}.`);
+        const base = await readPullRequestBase(folder, baseBranch);
+        if (base === undefined) throw new Error(`Could not find where #${pullRequest.number} branched off ${baseBranch}.`);
         return base;
       };
+      /** What the Files tab shows; comments and read marks need the whole PR at its latest version. */
+      let selection: DiffSelection = { range: { kind: 'all' }, whitespace: false };
+      let selectionAtHead = true;
       const findThread = (id: string): ReviewThread => {
         const thread = opened.session.store.threads.find((candidate) => candidate.id === id);
         if (thread === undefined) throw new Error('This thread no longer exists.');
@@ -102,18 +109,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
       const pageAnchor = async ({ path, side, startLine, endLine }: Omit<PageComment, 'text' | 'intent'>): Promise<{ anchor: CodeAnchor; base: string }> => {
         if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
+        if (!selectionAtHead || (side === 'old' && selection.range.kind !== 'all')) throw new Error('Show all changes to comment on these lines.');
         const base = await readBase();
         const content = side === 'old' ? await readBaseContent(folder, path, base) : await readFile(join(folder, path), 'utf8');
         const anchor = anchorFromText(content, { path, startLine, endLine, side: side === 'old' ? 'original' : 'working', baseRevision: base });
         return { anchor, base };
       };
-      const readFiles = async (): Promise<readonly FileDiff[]> => {
-        const files = await readPullRequestDiff(folder, await readBase());
+      const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
+      /** A commit the diff needs, fetched when a force push left it out of the worktree. */
+      const haveCommit = async (oid: string): Promise<void> => {
+        if (await git(folder, ['cat-file', '-e', `${oid}^{commit}`]).then(() => true, () => false)) return;
+        await git(folder, ['fetch', '--quiet', 'origin', oid]).catch(() => { throw new Error('That commit is no longer on GitHub, probably after a force push.'); });
+      };
+      const readFiles = async (select?: DiffSelection): Promise<FilesView> => {
+        const wanted = select ?? selection;
+        const { range } = wanted;
+        let base: string;
+        let to: string | undefined;
+        if (range.kind === 'all') base = await readBase();
+        else if (range.kind === 'since') {
+          const since = (await currentConversation()).lastReviewedCommit;
+          if (since === undefined) throw new Error('You have not reviewed this PR yet.');
+          await haveCommit(since);
+          base = since;
+        } else {
+          await haveCommit(range.from);
+          await haveCommit(range.to);
+          base = (await git(folder, ['rev-parse', `${range.from}^`])).trim();
+          to = range.to === await readHead() ? undefined : range.to;
+        }
+        const files = await readPullRequestDiff(folder, base, { ...to === undefined ? {} : { to }, ignoreWhitespace: wanted.whitespace });
+        selection = wanted;
+        selectionAtHead = to === undefined;
         diffPaths = files.map((file) => file.path);
         diffFiles = files;
-        return files;
+        return { files, selection, atHead: selectionAtHead };
       };
-      const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
       const readAnalysis = async (): Promise<AnalysisView> => {
         const result = await opened.analysis.result();
         const { running, step, error } = opened.analysis.activity;
@@ -131,6 +162,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       /** Reload the page's details and the sidebar after a change it lists, such as title, draft or open state. */
       const changedOnGitHub = (): void => {
         void loadDetails();
+        void loadConversation();
         void vscode.commands.executeCommand('pairReview.refreshPullRequests');
       };
       const loadDetails = (): Promise<PullRequestDetails | Error> => {
@@ -139,6 +171,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return details;
       };
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
+      let conversation: Promise<PullRequestConversation | Error> | undefined;
+      const loadConversation = (): Promise<PullRequestConversation | Error> => {
+        conversation = provider.conversation(pullRequest.number).catch(asError);
+        void conversation.then(() => { detailsChanged.fire(); });
+        return conversation;
+      };
+      const currentConversation = async (): Promise<PullRequestConversation> => {
+        const loaded = await (conversation ?? loadConversation());
+        if (loaded instanceof Error) throw loaded;
+        return loaded;
+      };
       /** What Claude asked when it last stopped fixing conflicts without pushing. */
       let conflictQuestion: string | undefined;
       /** Suggestion options written to the worktree while this page is open, by thread. */
@@ -168,9 +211,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           fileReviews.reviewed(provider, repository, pullRequest.number, all),
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
-        const [loadedDetails, loadedThreads, analysis] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis()]);
+        const [loadedDetails, loadedThreads, analysis, loadedConversation] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis(), conversation ?? loadConversation()]);
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
-        const state = buildOverviewState(pullRequest, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis);
+        const state = buildOverviewState(current(), opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
         const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
         return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }) };
       };
@@ -266,11 +309,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         setViewed: (path, viewed) => fileReviews.set(provider, repository, pullRequest.number, path, viewed),
         markRead: async (range, fileDone) => {
           if (!diffPaths.includes(range.path)) throw new Error(`${range.path} is not part of this PR's changes.`);
+          if (selection.range.kind !== 'all') throw new Error('Show all changes to mark lines read.');
           await fileReviews.markRead(repository, pullRequest.number, await readBase(), range);
           if (fileDone) await fileReviews.set(provider, repository, pullRequest.number, range.path, true);
         },
         unmarkRead: (ids) => fileReviews.unmarkRead(repository, pullRequest.number, ids),
-        openInEditor: (path) => openPullRequestFile(storageRoot, repository, pullRequest, path),
+        openInEditor: (path) => openPullRequestFile(storageRoot, repository, current(), path),
         showLog: () => { opened.output.show(true); },
         retry: () => { opened.runner.retry(); },
         revealThread: async (id) => { await vscode.commands.executeCommand('pairReview.revealThread', id); },
@@ -324,11 +368,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         fixConflicts: async (answer) => {
           const loaded = await currentDetails();
           if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
-          const base = await prepareConflictFix(folder, pullRequest.number, pullRequest.baseBranch);
+          const base = await prepareConflictFix(folder, pullRequest.number, baseBranch);
           const head = (await git(folder, ['rev-parse', 'HEAD'])).trim();
           conflictQuestion = undefined;
           const pushTo = pushTarget(loaded);
-          const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch: pullRequest.baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
+          const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
           const pushedNothing = (await git(folder, ['rev-parse', 'HEAD'])).trim() === head;
           if (error === undefined && pushedNothing && reply !== undefined) conflictQuestion = reply;
           changedOnGitHub();
@@ -338,15 +382,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           conflictQuestion = undefined;
           detailsChanged.fire();
         },
-        merge: async (method) => {
+        merge: async (method, message) => {
           const merge = 'Merge';
           const mergeAndDelete = 'Merge and delete branch';
           const { branchDeletable } = await currentDetails();
-          const answer = await vscode.window.showWarningMessage(`Merge #${pullRequest.number} into ${pullRequest.baseBranch}?`, { modal: true },
+          const answer = await vscode.window.showWarningMessage(`Merge #${pullRequest.number} into ${baseBranch}?`, { modal: true },
             ...branchDeletable ? [merge, mergeAndDelete] : [merge]);
           if (answer === undefined) return;
           try {
-            await provider.merge(pullRequest.number, method);
+            await provider.merge(pullRequest.number, method, message);
             await vscode.commands.executeCommand('pairReview.markPullRequestMerged', `${repository}#${pullRequest.number}`);
             if (answer === mergeAndDelete) await provider.deleteBranch(pullRequest.headBranch);
           } finally {
@@ -399,9 +443,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.commands.executeCommand('pairReview.refreshPullRequests');
           return true;
         },
-        refresh: () => { void loadDetails(); void loadThreads(); },
+        refresh: () => { void loadDetails(); void loadThreads(); void loadConversation(); },
+        ...githubPageActions({
+          provider, number: pullRequest.number, headBranch: pullRequest.headBranch, baseBranch: () => baseBranch, folder, hooksOff: role === 'reviewer',
+          details: currentDetails, conversation: currentConversation,
+          threads: async () => { const loaded = await loadThreads(); if (loaded instanceof Error) throw loaded; return loaded; },
+          pushTarget, claudeBusy: () => opened.runner.activity.running,
+          reload: (listed) => { if (listed === true) changedOnGitHub(); else { void loadDetails(); void loadConversation(); } void loadThreads(); },
+          useBase: async (branch) => {
+            await git(folder, ['fetch', '--quiet', 'origin', branch]).catch(() => undefined);
+            baseBranch = branch;
+          },
+        }),
         analyze: async () => {
-          const [files, head] = await Promise.all([readFiles(), readHead()]);
+          const [files, head] = await Promise.all([readPullRequestDiff(folder, await readBase()), readHead()]);
           opened.analysis.start({
             files, head,
             about: `#${pullRequest.number} ${pullRequest.title} (${pullRequest.headBranch} into ${pullRequest.baseBranch})`,

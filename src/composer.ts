@@ -385,7 +385,7 @@ textarea { display: block; width: 100%; min-height: 90px; border: 0; border-radi
 <button type="button" class="mode" data-mode="summarize" aria-pressed="false">Zusammenfassen <kbd>/r</kbd></button></div></div>
 <p id="modeHint" class="sr-only" role="status" aria-live="polite"></p><label for="feedback" class="sr-only">Dein Feedback</label>
 <textarea id="feedback" maxlength="${maximumReviewTextLength}" placeholder="Was möchtest du Claude mitgeben?" aria-describedby="modeHint error deliveryHint" spellcheck="true"></textarea>
-<div class="footer"><span id="saved" class="muted" role="status">Entwurf bleibt lokal</span><div class="actions"><span id="shortcut" class="muted"></span><button type="button" id="discard" title="Entwurf verwerfen">Verwerfen</button><button id="send" type="button">Frage senden</button></div></div>
+<div class="footer"><span id="saved" class="muted" role="status">Entwurf bleibt lokal</span><div class="actions"><button type="button" id="discard" title="Entwurf verwerfen">Verwerfen</button><button id="send" type="button">Frage senden</button></div></div>
 </section><p id="error" role="alert"></p>
 <p id="deliveryHint" class="sr-only">Markiere weiteren Code, um hier neues Feedback zu schreiben. Sobald du schreibst, bleibt der Entwurf an seiner Auswahl. Erst beim Senden geht dein Feedback an Claude. Beim Schließen bleibt dein Entwurf lokal gespeichert.</p>
 </main><script nonce="${nonce}">
@@ -550,8 +550,7 @@ window.addEventListener('message', event => {
     }
   }
 });
-document.getElementById('shortcut').textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ ↵' : 'Strg ↵';
-document.getElementById('shortcut').setAttribute('title', 'Senden · /a fragen · /i umsetzen · /r zusammenfassen');
+document.getElementById('send').setAttribute('title', '/a fragen · /i umsetzen · /r zusammenfassen');
 paint();
 vscode.postMessage({ type: 'ready' });
 </script></body></html>`;

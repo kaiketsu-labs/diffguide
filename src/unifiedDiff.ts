@@ -25,7 +25,12 @@ export interface FileDiff {
   readonly additions: number;
   readonly deletions: number;
   readonly hunks: readonly DiffHunk[];
+  /** Marked `linguist-generated` or a well-known lockfile or bundle, which GitHub folds by default. */
+  readonly generated?: true;
 }
+
+/** Which changes to read: `to` ends at a commit instead of the worktree, `ignoreWhitespace` leaves out whitespace-only changes. */
+export interface DiffOptions { readonly to?: string; readonly ignoreWhitespace?: boolean }
 
 interface RawLine { readonly kind: DiffLine['kind']; readonly oldLine?: number; readonly newLine?: number; readonly text: string }
 interface RawFile { path: string; oldPath?: string; change: FileDiff['change']; binary: boolean; hunks: { header: string; lines: RawLine[] }[] }
@@ -39,23 +44,53 @@ interface WholeFile { readonly lines: readonly string[]; readonly html: readonly
 const maxWholeFileLength = 200_000;
 
 /** A PR worktree's tracked changes against its base, highlighted per line; yields between files so a large PR does not block the extension host. */
-export async function readPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
-  const output = await diffOutput(worktree, base);
+export async function readPullRequestDiff(worktree: string, base: string, options: DiffOptions = {}): Promise<readonly FileDiff[]> {
+  const output = await diffOutput(worktree, base, options);
   await prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
   const raw = parseRawDiff(output);
   const oldPaths = raw.filter((file) => wholeFileColors(file) && file.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'del'))).map((file) => file.oldPath ?? file.path);
   const oldContents = await readBlobs(worktree, base, oldPaths).catch(() => new Map<string, string>());
+  const { to } = options;
+  const newContents = to === undefined ? undefined : await readBlobs(worktree, to, raw.filter(wholeFileColors).map((file) => file.path)).catch(() => new Map<string, string>());
+  const generated = await generatedPaths(worktree, raw.map((file) => file.path));
   const files: FileDiff[] = [];
   for (const file of raw) {
-    const current = wholeFileColors(file) ? await readFile(path.join(worktree, file.path), 'utf8').catch(() => undefined) : undefined;
-    files.push(highlightFile(file, highlightLines, { old: oldContents.get(file.oldPath ?? file.path), new: current }));
+    const current = !wholeFileColors(file) ? undefined : newContents !== undefined ? newContents.get(file.path) : await readFile(path.join(worktree, file.path), 'utf8').catch(() => undefined);
+    const diff = highlightFile(file, highlightLines, { old: oldContents.get(file.oldPath ?? file.path), new: current });
+    files.push(generated.has(file.path) ? { ...diff, generated: true } : diff);
     await new Promise((resolve) => { setImmediate(resolve); });
   }
   return files;
 }
 
-function diffOutput(worktree: string, base: string): Promise<string> {
-  return git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3', base, '--']);
+function diffOutput(worktree: string, base: string, { to, ignoreWhitespace }: DiffOptions = {}): Promise<string> {
+  return git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3',
+    ...ignoreWhitespace === true ? ['-w'] : [], base, ...to === undefined ? [] : [to], '--']);
+}
+
+/** Lockfiles and bundles GitHub's Linguist treats as generated without being told. */
+const knownGenerated = /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|flake\.lock|[^/]+\.min\.(?:js|css)|[^/]+\.(?:js|css)\.map)$/u;
+
+/** Paths marked `linguist-generated` in `.gitattributes`, or well-known generated files unless marked `-linguist-generated`. */
+export async function generatedPaths(worktree: string, paths: readonly string[]): Promise<ReadonlySet<string>> {
+  const marked = new Map<string, string>();
+  const wanted = paths.filter((file) => !file.includes('\0') && !file.includes('\n'));
+  if (wanted.length > 0) {
+    const output = await new Promise<string>((resolve) => {
+      const child = spawn('git', ['-C', worktree, 'check-attr', '-z', '--stdin', 'linguist-generated'], { stdio: ['pipe', 'pipe', 'ignore'] });
+      let text = '';
+      child.stdout.setEncoding('utf8').on('data', (chunk: string) => { text += chunk; });
+      child.on('error', () => { resolve(''); });
+      child.on('close', (code) => { resolve(code === 0 ? text : ''); });
+      child.stdin.end(wanted.join('\0') + '\0');
+    });
+    const fields = output.split('\0');
+    for (let index = 0; index + 2 < fields.length; index += 3) marked.set(fields[index] ?? '', fields[index + 2] ?? '');
+  }
+  return new Set(paths.filter((file) => {
+    const value = marked.get(file);
+    return value === 'set' || value === 'true' || ((value === undefined || value === 'unspecified') && knownGenerated.test(file));
+  }));
 }
 
 /** Added and deleted files are one whole-file hunk already; the old version is read only to color deleted lines. */

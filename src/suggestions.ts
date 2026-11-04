@@ -42,3 +42,20 @@ export function suggestionLines(text: string, anchor: CodeAnchor): { readonly st
   if (location === undefined) throw new Error('The commented code is not in the pushed version of the file, so GitHub cannot take the suggestion.');
   return { start: location.startLine, end: location.endLine };
 }
+
+/** A suggestion on fixed lines of a file, as a GitHub thread that is not outdated places it. */
+export interface LineSuggestion { readonly startLine: number; readonly endLine: number; readonly code: string }
+
+/** Replace each suggestion's lines in `text`; refuses overlapping suggestions and lines past the end, so no edit lands on other code. */
+export function applyLineSuggestions(text: string, suggestions: readonly LineSuggestion[]): string {
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(newline);
+  const ordered = [...suggestions].sort((a, b) => b.startLine - a.startLine);
+  ordered.forEach((suggestion, index) => {
+    const below = ordered[index - 1];
+    if (suggestion.startLine < 1 || suggestion.endLine < suggestion.startLine || suggestion.endLine > lines.length) throw new Error('A suggestion points past the end of its file.');
+    if (below !== undefined && suggestion.endLine >= below.startLine) throw new Error('Two suggestions change the same lines. Commit them one at a time.');
+    lines.splice(suggestion.startLine - 1, suggestion.endLine - suggestion.startLine + 1, ...suggestion.code.split('\n'));
+  });
+  return lines.join(newline);
+}

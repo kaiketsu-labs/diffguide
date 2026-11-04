@@ -2,6 +2,7 @@ import { designTokenStyles } from './designTokens.js';
 
 /**
  * Tokens plus the controls every webview shares: page text, buttons, inputs, key caps and the focus ring.
+ * Text fields get a thin inset focus line, not the offset ring; don't override it per field.
  * Give a button `data-tip` for a hover tip; icon-only buttons need one.
  * Buttons are secondary by default; add `primary` (yours, in the theme's text color), `claude` (sends to Claude, clay) or `quiet` (text only).
  */
@@ -25,7 +26,7 @@ select{box-sizing:border-box;min-height:28px;padding:0 var(--space-8);border:1px
 textarea,input[type=text]{box-sizing:border-box;padding:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-sm);color:var(--vscode-input-foreground,var(--ink));background:var(--vscode-input-background,var(--surface));font:inherit}
 textarea{resize:none;field-sizing:content;max-height:240px}
 textarea::placeholder{color:var(--vscode-input-placeholderForeground,var(--ink-muted))}
-textarea:focus{outline:2px solid var(--focus);outline-offset:-1px}
+textarea:focus,input[type=text]:focus-visible,select:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}
 kbd{display:inline-flex;align-items:center;height:18px;box-sizing:border-box;padding:0 var(--space-4);border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:var(--radius-sm);font:11px var(--font-code);color:var(--ink-muted);background:none}
 kbd.on-fill{height:16px;border-color:currentColor;color:inherit;opacity:.7}
 .hint{display:inline-flex;align-items:center;gap:var(--space-2);font-size:11px;color:var(--ink-muted)}

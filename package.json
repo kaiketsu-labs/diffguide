@@ -222,6 +222,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "pairReview.searchPullRequests",
+        "title": "Search pull requests",
+        "category": "Pair Review",
+        "icon": "$(search)"
+      },
+      {
         "command": "pairReview.cleanUpWorktrees",
         "title": "Clean up worktrees",
         "category": "Pair Review",
@@ -408,6 +414,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "pairReview.searchPullRequests",
+          "when": "view == pairReview.pullRequests",
+          "group": "navigation@-1"
+        },
         {
           "command": "pairReview.refreshPullRequests",
           "when": "view == pairReview.pullRequests",
