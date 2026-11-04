@@ -16,10 +16,10 @@ export async function writePrivateJson(path: string, value: unknown): Promise<vo
 }
 
 /** Read bounded local metadata, distinguishing missing files from invalid files. */
-export async function readPrivateJson(path: string): Promise<unknown> {
+export async function readPrivateJson(path: string, maximumBytes = 65_536): Promise<unknown> {
   try {
     const info = await stat(path);
-    if (!info.isFile() || info.size > 65_536) throw new Error('Pair Review metadata is invalid.');
+    if (!info.isFile() || info.size > maximumBytes) throw new Error('Pair Review metadata is invalid.');
     return JSON.parse(await readFile(path, 'utf8')) as unknown;
   } catch (error: unknown) {
     if (record(error)?.code === 'ENOENT') return undefined;

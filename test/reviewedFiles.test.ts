@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -106,4 +106,29 @@ test('keeps every tick and read mark when they are written at the same time', as
   ]);
   assert.deepEqual([...await readReviewedFiles(worktree, paths)], paths);
   assert.equal((await readReadRanges(worktree, 'base')).length, paths.length);
+});
+
+test('keeps every read mark once the marks outgrow a small metadata file', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-many-'));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const worktree = path.join(root, 'pr-6');
+  await mkdir(worktree, { recursive: true });
+  const lines = Array.from({ length: 400 }, (_line, index) => `const value${index} = compute(${index}, 'a fairly long line of code to fill the file');`);
+  await writeFile(path.join(worktree, 'a.ts'), lines.join('\n') + '\n');
+  for (let start = 1; start < 400; start += 10) await markRangeRead(worktree, 'base', { path: 'a.ts', side: 'new', startLine: start, endLine: start + 9 });
+  assert.ok((await stat(path.join(`${worktree}.review`, 'reviewed-files.json'))).size > 65_536);
+  assert.equal((await readReadRanges(worktree, 'base')).length, 40);
+});
+
+test('refuses to write over marks it cannot read', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-unreadable-'));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const worktree = path.join(root, 'pr-7');
+  await mkdir(`${worktree}.review`, { recursive: true });
+  await mkdir(worktree, { recursive: true });
+  await writeFile(path.join(worktree, 'a.ts'), 'one\n');
+  const marks = path.join(`${worktree}.review`, 'reviewed-files.json');
+  await writeFile(marks, '{"files":');
+  await assert.rejects(setFileReviewed(worktree, 'a.ts', true));
+  assert.equal(await readFile(marks, 'utf8'), '{"files":');
 });

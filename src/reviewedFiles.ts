@@ -55,8 +55,12 @@ function isStoredRange(value: unknown): value is StoredRange {
     && Number.isSafeInteger(fields.startLine) && Number.isSafeInteger(fields.endLine);
 }
 
+/** Each read mark keeps its code and context, so a guided review of a large PR outgrows the default metadata limit. */
+const maximumMarksBytes = 16 * 1024 * 1024;
+
+/** Rejects when the marks file is unreadable, so a write never replaces marks it could not read. */
 async function readMarks(worktree: string): Promise<Marks> {
-  const value = await readPrivateJson(marksPath(worktree)).catch(() => undefined);
+  const value = await readPrivateJson(marksPath(worktree), maximumMarksBytes);
   const { files, ranges } = typeof value === 'object' && value !== null ? value as { files?: unknown; ranges?: unknown } : {};
   return {
     files: typeof files === 'object' && files !== null
@@ -64,6 +68,10 @@ async function readMarks(worktree: string): Promise<Marks> {
       : {},
     ranges: Array.isArray(ranges) ? ranges.filter(isStoredRange) : [],
   };
+}
+
+function noMarks(): Marks {
+  return { files: {}, ranges: [] };
 }
 
 async function writeMarks(worktree: string, marks: Marks): Promise<void> {
@@ -83,7 +91,7 @@ function updateMarks(worktree: string, change: (marks: Marks) => Marks | Promise
 
 /** Paths among `paths` marked reviewed whose content is unchanged since. */
 export async function readReviewedFiles(worktree: string, paths: readonly string[]): Promise<ReadonlySet<string>> {
-  const { files } = await readMarks(worktree);
+  const { files } = await readMarks(worktree).catch(() => noMarks());
   const current = await Promise.all(paths.map(async (path) => files[path] !== undefined && files[path] === await fingerprint(worktree, path)));
   return new Set(paths.filter((_path, index) => current[index]));
 }
@@ -117,7 +125,7 @@ async function sideText(worktree: string, base: string, path: string, side: Line
 
 /** Ranges marked read whose code is still there, at its current lines against `base`. */
 export async function readReadRanges(worktree: string, base: string): Promise<readonly ReadRange[]> {
-  const { ranges } = await readMarks(worktree);
+  const { ranges } = await readMarks(worktree).catch(() => noMarks());
   const found = await Promise.all(ranges.map(async ({ id, anchor }): Promise<ReadRange | undefined> => {
     const side = anchor.side === 'original' ? 'old' : 'new';
     const text = await sideText(worktree, base, anchor.path, side);
