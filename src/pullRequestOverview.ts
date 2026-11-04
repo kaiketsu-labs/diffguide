@@ -117,7 +117,8 @@ export interface PageComment {
 /** What the page's buttons do. */
 export interface OverviewActions {
   comment(comment: PageComment): Promise<void>;
-  reply(threadId: string, text: string): Promise<void>;
+  /** Reply in a local thread; `intent` decides whether Claude answers or changes the code. */
+  reply(threadId: string, text: string, intent: CommentIntent): Promise<void>;
   resolve(threadId: string, resolved: boolean): Promise<void>;
   publish(threadId: string): Promise<void>;
   /** Comment on the PR diff on GitHub, into the pending review or posted right away. */
@@ -192,7 +193,8 @@ export type PageMessage =
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
   | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
   | { readonly action: 'unread'; readonly ids: readonly string[] }
-  | { readonly action: 'reply' | 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
+  | { readonly action: 'reply'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
+  | { readonly action: 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
   | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
@@ -317,8 +319,8 @@ export async function showPullRequestOverview(
           && startLine <= endLine && isText(text) && typeof pending === 'boolean') {
           await actions.commentOnGitHub({ path, side, startLine, endLine, text: text.trim() }, pending);
           post({ done: formKey });
-        } else if (action === 'reply' && typeof id === 'string' && isText(text)) {
-          await actions.reply(id, text.trim());
+        } else if (action === 'reply' && typeof id === 'string' && isText(text) && commentIntents.includes(intent)) {
+          await actions.reply(id, text.trim(), intent as CommentIntent);
           post({ done: formKey });
         } else if (action === 'resolve' && typeof id === 'string' && typeof resolved === 'boolean') await actions.resolve(id, resolved);
         else if (action === 'publish' && typeof id === 'string') await actions.publish(id);

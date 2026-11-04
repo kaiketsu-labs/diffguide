@@ -235,10 +235,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const { anchor } = await pageAnchor(lines);
           await opened.session.store.submit(anchor, text, intent);
         },
-        reply: async (id, text) => {
+        reply: async (id, text, intent) => {
           const thread = findThread(id);
           if (thread.resolved) throw new Error('Reopen this thread before replying.');
-          await opened.session.store.submit(thread.anchor, text, thread.intent, id);
+          await opened.session.store.submit(thread.anchor, text, intent, id);
         },
         resolve: (id, resolved) => opened.session.store.resolve(findThread(id).id, resolved),
         publish: async (id) => { await opened.session.publish?.(findThread(id).id); },

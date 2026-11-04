@@ -108,3 +108,17 @@ test('sends picker options to the page, or the reason they failed to load', asyn
   assert.ok(panel.sent.some((m) => (m as { pickerError?: string }).pickerError === 'offline'));
   panel.dispose();
 });
+
+test('local replies carry the intent the user picked', async () => {
+  resetFakeWindow();
+  const replies: unknown[] = [];
+  const actions = { reply: async (...args: unknown[]) => { replies.push(args); } } as unknown as OverviewActions;
+  await showPullRequestOverview('reply-intent', async () => base, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'reply', form: 'reply:t1', id: 't1', text: ' Do it ', intent: 'implement' }); await tick();
+  panel.receive({ action: 'reply', form: 'reply:t1', id: 't1', text: 'Why?', intent: 'ask' }); await tick();
+  panel.receive({ action: 'reply', form: 'reply:t1', id: 't1', text: 'No intent' }); await tick();
+  panel.receive({ action: 'reply', form: 'reply:t1', id: 't1', text: 'Bad', intent: 'summarize' }); await tick();
+  assert.deepEqual(replies, [['t1', 'Do it', 'implement'], ['t1', 'Why?', 'ask']]);
+  panel.dispose();
+});

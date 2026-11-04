@@ -841,18 +841,27 @@ function threadBox(thread: Thread): HTMLElement {
   const reply = replies.get(thread.id);
   if (reply !== undefined && !thread.resolved) {
     const cancel = (): void => { replies.delete(thread.id); save(); renderFiles([thread.path]); };
-    const submit = (): void => {
+    const submit = (intent: Intent = 'ask'): void => {
       const text = replies.get(thread.id) ?? '';
       if (!text.trim() || sending.has(key)) return;
       sending.add(key);
       $('error').textContent = '';
       renderFiles([thread.path]);
-      post({ action: github ? 'github-reply' : 'reply', form: key, id: thread.id, text });
+      post(github ? { action: 'github-reply', form: key, id: thread.id, text } : { action: 'reply', form: key, id: thread.id, text, intent });
     };
-    box.append(textarea(key, reply, github ? 'Reply on GitHub, visible to everyone' : 'Reply to Claude', (value) => { replies.set(thread.id, value); save(); }, submit, cancel));
-    const send = button(sending.has(key) ? 'Sending…' : github ? 'Post on GitHub' : 'Reply', submit, github ? 'primary' : 'claude');
-    send.disabled = sending.has(key);
-    actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), send);
+    box.append(textarea(key, reply, github ? 'Reply on GitHub, visible to everyone' : 'Reply to Claude', (value) => { replies.set(thread.id, value); save(); }, () => submit(), cancel));
+    const busySending = sending.has(key);
+    const send = button(busySending ? 'Sending…' : github ? 'Post on GitHub' : 'Ask Claude', () => submit(), github ? 'primary' : 'claude');
+    send.disabled = busySending;
+    actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'));
+    if (!github) {
+      send.title = 'Claude answers without editing';
+      const implement = button('Implement', () => submit('implement'));
+      implement.disabled = busySending;
+      implement.title = 'Claude changes the code';
+      actions.append(implement);
+    }
+    actions.append(send);
     box.append(actions);
     return box;
   }
