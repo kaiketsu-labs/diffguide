@@ -49,6 +49,8 @@ export interface ClaudeRunnerOptions {
   readonly spawn?: typeof spawnProcess;
   /** The user's own instructions for answering comments, read fresh for each run. */
   readonly instructions?: () => Promise<string>;
+  /** Runs before Claude answers comments, such as bringing the worktree to the PR's latest commit; a failure stops the run with its message. */
+  readonly prepare?: () => Promise<void>;
 }
 
 const reviewerNote = 'This is someone else\'s pull request. You cannot edit files or run commands. For implement requests, reply with the proposed change as suggestion blocks instead.';
@@ -141,6 +143,7 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: true, step: 'Starting', threads, skipped: 0, error: undefined });
     let error: string | undefined;
     try {
+      await this.options.prepare?.();
       const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
       error = await this.#spawn({
         prompt: `${this.options.role === 'reviewer' ? `${reviewerNote}\n\n` : ''}${prompt}\n\n${suggestionNote}`,
@@ -157,7 +160,7 @@ export class ClaudeRunner implements vscode.Disposable {
 
   /**
    * Run Claude once in the PR's conversation; resolves with an error message, or undefined on success.
-   * `edits` lets Claude change files; without it, edits and commands are blocked.
+   * `edits` lets Claude change files; without it, edits and commands are blocked. On the author's own PR, auto mode also lets it run commands.
    */
   async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly edits: boolean; readonly env: Readonly<Record<string, string>> }): Promise<string | undefined> {
     const { executable, mcpPath, shell } = await this.options.resolve();
@@ -168,7 +171,7 @@ export class ClaudeRunner implements vscode.Disposable {
     const args = [
       '-p', run.prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...run.allowedTools,
       ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
-      ...(run.edits ? ['--permission-mode', 'acceptEdits'] : ['--disallowedTools', ...reviewerBlockedTools]),
+      ...(!run.edits ? ['--disallowedTools', ...reviewerBlockedTools] : ['--permission-mode', this.options.role === 'author' ? 'auto' : 'acceptEdits']),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
     this.#reply = undefined;

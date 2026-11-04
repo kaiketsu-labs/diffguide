@@ -51,7 +51,7 @@ function fakeStore(): ReviewStore & { setPending(events: ReviewEvent[]): void } 
   } as unknown as ReviewStore & { setPending(events: ReviewEvent[]): void };
 }
 
-async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string) {
+async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string, prepare?: () => Promise<void>) {
   const dataPath = await mkdtemp(path.join(tmpdir(), 'pair-review-runner-'));
   t.after(async () => { await rm(dataPath, { recursive: true, force: true }); });
   const store = fakeStore();
@@ -66,6 +66,7 @@ async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, sh
       children.push(child);
       return child;
     }) as unknown as NonNullable<ClaudeRunnerOptions['spawn']>,
+    ...(prepare === undefined ? {} : { prepare }),
   });
   t.after(() => { instance.dispose(); });
   return { instance, store, children, log };
@@ -109,14 +110,14 @@ test('answers a sent comment in the background, shows each step, and resumes the
   assert.equal(second.args[second.args.indexOf('--resume') + 1], sessionId);
 });
 
-test('lets Claude edit only on the author\'s own PR', async (t) => {
+test('lets Claude edit and run commands only on the author\'s own PR', async (t) => {
   const { store, children } = await runner('author', t);
   store.setPending([event('one')]);
   await until(() => children.length === 1);
   const args = children[0]?.args ?? [];
   assert.ok(!args.includes('--disallowedTools'));
   assert.ok(!args.includes('--setting-sources') && !args.includes('--strict-mcp-config'));
-  assert.equal(args[args.indexOf('--permission-mode') + 1], 'acceptEdits');
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'auto');
   assert.ok(!children[0]?.args[1]?.includes('someone else'));
 });
 
@@ -131,7 +132,7 @@ test('runs a task in the PR conversation with its own tools, and keeps Git hooks
     assert.equal(child.args[1], 'Merge the base.');
     assert.equal(instance.activity.task, 'fixing merge conflicts');
     assert.deepEqual(child.args.slice(child.args.indexOf('--allowedTools') + 1, child.args.indexOf('--allowedTools') + 3), ['mcp__pair-review', 'Bash(git merge *)']);
-    assert.equal(child.args[child.args.indexOf('--permission-mode') + 1], 'acceptEdits');
+    assert.equal(child.args[child.args.indexOf('--permission-mode') + 1], role === 'author' ? 'auto' : 'acceptEdits');
     assert.ok(!child.args.includes('--disallowedTools'));
     assert.equal(child.args.includes('--setting-sources'), role === 'reviewer');
     assert.equal(child.env?.['GIT_CONFIG_VALUE_0'], role === 'reviewer' ? '/dev/null' : undefined);
@@ -165,6 +166,24 @@ test('reports a failed run with Claude\'s last error line', async (t) => {
   await children[0]?.exit(1);
   await until(() => instance.activity.error !== undefined);
   assert.equal(instance.activity.error, 'Claude exited with code 1: Not logged in');
+});
+
+test('prepares the worktree before answering comments, and stops with the reason when that fails', async (t) => {
+  const prepared: string[] = [];
+  let failure: Error | undefined = new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+  const { instance, store, children } = await runner('author', t, undefined, async () => {
+    prepared.push(`with ${children.length} runs`);
+    if (failure !== undefined) throw failure;
+  });
+  store.setPending([event('one')]);
+  await until(() => instance.activity.error !== undefined);
+  assert.equal(instance.activity.error, failure.message);
+  assert.equal(children.length, 0);
+
+  failure = undefined;
+  instance.retry();
+  await until(() => children.length === 1);
+  assert.deepEqual(prepared, ['with 0 runs', 'with 0 runs']);
 });
 
 test('starts Claude through the login shell so the user\'s own claude setup applies', async (t) => {
