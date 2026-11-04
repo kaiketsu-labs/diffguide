@@ -1,4 +1,7 @@
-import { codePreviewHtml, prepareHighlighting } from './codePreview.js';
+import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import * as path from 'node:path';
+import { codePreviewHtml, escapeCode, prepareHighlighting } from './codePreview.js';
 import { git } from './worktrees.js';
 
 export interface DiffLine {
@@ -27,13 +30,25 @@ export interface FileDiff {
 interface RawLine { readonly kind: DiffLine['kind']; readonly oldLine?: number; readonly newLine?: number; readonly text: string }
 interface RawFile { path: string; oldPath?: string; change: FileDiff['change']; binary: boolean; hunks: { header: string; lines: RawLine[] }[] }
 
+/** A changed file's content before and after, so a hunk is colored with the code above it. */
+export interface FileSources { readonly old?: string | undefined; readonly new?: string | undefined }
+
+interface WholeFile { readonly lines: readonly string[]; readonly html: readonly string[] }
+
+/** Files longer than this keep per-hunk colors, since `codePreviewHtml` leaves them plain. */
+const maxWholeFileLength = 200_000;
+
 /** A PR worktree's tracked changes against its base, highlighted per line; yields between files so a large PR does not block the extension host. */
 export async function readPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
   const output = await diffOutput(worktree, base);
   await prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
+  const raw = parseRawDiff(output);
+  const oldPaths = raw.filter((file) => wholeFileColors(file) && file.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'del'))).map((file) => file.oldPath ?? file.path);
+  const oldContents = await readBlobs(worktree, base, oldPaths).catch(() => new Map<string, string>());
   const files: FileDiff[] = [];
-  for (const file of parseRawDiff(output)) {
-    files.push(highlightFile(file));
+  for (const file of raw) {
+    const current = wholeFileColors(file) ? await readFile(path.join(worktree, file.path), 'utf8').catch(() => undefined) : undefined;
+    files.push(highlightFile(file, highlightLines, { old: oldContents.get(file.oldPath ?? file.path), new: current }));
     await new Promise((resolve) => { setImmediate(resolve); });
   }
   return files;
@@ -41,6 +56,39 @@ export async function readPullRequestDiff(worktree: string, base: string): Promi
 
 function diffOutput(worktree: string, base: string): Promise<string> {
   return git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '-M', '-U3', base, '--']);
+}
+
+/** Added and deleted files are one whole-file hunk already; the old version is read only to color deleted lines. */
+const wholeFileColors = (file: RawFile): boolean => !file.binary && file.change !== 'added' && file.change !== 'deleted';
+
+/** Files' content at `revision` in one Git call, since a process per file costs more than coloring it. */
+function readBlobs(worktree: string, revision: string, paths: readonly string[]): Promise<Map<string, string>> {
+  const wanted = paths.filter((file) => !file.includes('\n'));
+  if (wanted.length === 0) return Promise.resolve(new Map());
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['-C', worktree, 'cat-file', '--batch'], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) { reject(new Error(`git cat-file exited with ${code ?? 'a signal'}`)); return; }
+      const output = Buffer.concat(chunks);
+      const contents = new Map<string, string>();
+      let offset = 0;
+      for (const file of wanted) {
+        const headerEnd = output.indexOf(0x0a, offset);
+        if (headerEnd < 0) break;
+        const header = output.toString('utf8', offset, headerEnd).split(' ');
+        offset = headerEnd + 1;
+        if (header[1] !== 'blob') continue;
+        const size = Number(header[2]);
+        contents.set(file, output.toString('utf8', offset, offset + size));
+        offset += size + 1;
+      }
+      resolve(contents);
+    });
+    child.stdin.end(wanted.map((file) => `${revision}:./${file}\n`).join(''));
+  });
 }
 
 /** The PR's changes without syntax colors, for counting and matching lines where nothing is shown. */
@@ -54,9 +102,9 @@ export function parsePlainDiff(output: string): readonly FileDiff[] {
 
 const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-/** Parse `git diff` output; lines are highlighted per side so tokens spanning lines stay correct. */
-export function parseUnifiedDiff(output: string): readonly FileDiff[] {
-  return parseRawDiff(output).map((file) => highlightFile(file));
+/** Parse `git diff` output; lines are highlighted per side so tokens spanning lines stay correct, from the whole file when its sources are given by path. */
+export function parseUnifiedDiff(output: string, sources: ReadonlyMap<string, FileSources> = new Map()): readonly FileDiff[] {
+  return parseRawDiff(output).map((file) => highlightFile(file, highlightLines, sources.get(file.path)));
 }
 
 function parseRawDiff(output: string): readonly RawFile[] {
@@ -116,15 +164,20 @@ function parseRawDiff(output: string): readonly RawFile[] {
   return files.filter((entry) => entry.path !== '');
 }
 
-function highlightFile(file: RawFile, highlight = highlightLines): FileDiff {
+function highlightFile(file: RawFile, highlight = highlightLines, sources: FileSources = {}): FileDiff {
   let additions = 0;
   let deletions = 0;
+  const shown = file.hunks.flatMap((hunk) => hunk.lines);
+  const lastOld = shown.reduce((last, line) => Math.max(last, line.oldLine ?? 0), 0);
+  const lastNew = shown.reduce((last, line) => Math.max(last, line.newLine ?? 0), 0);
+  const oldFile = highlightWholeFile(sources.old, file.oldPath ?? file.path, lastOld);
+  const newFile = highlightWholeFile(sources.new, file.path, lastNew);
   const hunks = file.hunks.map(({ header, lines }) => {
     const oldSide = lines.filter((line) => line.kind !== 'add');
     const newSide = lines.filter((line) => line.kind !== 'del');
     const html = new Map<RawLine, string>();
-    const oldHtml = highlight(oldSide.map((line) => line.text), file.oldPath ?? file.path);
-    const newHtml = highlight(newSide.map((line) => line.text), file.path);
+    const oldHtml = fromWholeFile(oldSide, (line) => line.oldLine, oldFile) ?? highlight(oldSide.map((line) => line.text), file.oldPath ?? file.path);
+    const newHtml = fromWholeFile(newSide, (line) => line.newLine, newFile) ?? highlight(newSide.map((line) => line.text), file.path);
     oldSide.forEach((line, index) => { html.set(line, oldHtml[index] ?? ''); });
     newSide.forEach((line, index) => { html.set(line, newHtml[index] ?? ''); });
     return {
@@ -138,6 +191,30 @@ function highlightFile(file: RawFile, highlight = highlightLines): FileDiff {
     };
   });
   return { ...file, additions, deletions, hunks };
+}
+
+/** The file's highlighted lines up to `lastLine`, the last one a hunk shows; later code cannot change their colors. */
+function highlightWholeFile(text: string | undefined, filePath: string, lastLine: number): WholeFile | undefined {
+  if (text === undefined) return undefined;
+  const lines = text.split('\n').slice(0, lastLine);
+  const source = lines.join('\n');
+  if (source.length > maxWholeFileLength) return undefined;
+  const html = codePreviewHtml(source, filePath);
+  if (html === escapeCode(source)) return undefined;
+  return { lines, html: splitHighlightedLines(html) };
+}
+
+/** A side's lines cut from the whole file, or undefined when the file no longer matches the diff. */
+function fromWholeFile(side: readonly RawLine[], lineNumber: (line: RawLine) => number | undefined, file: WholeFile | undefined): readonly string[] | undefined {
+  if (file === undefined) return undefined;
+  const html: string[] = [];
+  for (const line of side) {
+    const index = (lineNumber(line) ?? 0) - 1;
+    const markup = file.html[index];
+    if (file.lines[index] !== line.text || markup === undefined) return undefined;
+    html.push(markup);
+  }
+  return html;
 }
 
 /** A whole file's lines, highlighted, for showing context the diff left out. */

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
-import { parseUnifiedDiff, splitHighlightedLines } from '../src/unifiedDiff.js';
+import { parseUnifiedDiff, readPullRequestDiff, splitHighlightedLines } from '../src/unifiedDiff.js';
 
 const output = [
   'diff --git a/src/a.ts b/src/a.ts',
@@ -51,4 +55,39 @@ test('parses changed, added, renamed and deleted binary files with line numbers'
 test('splits highlight markup at line breaks and reopens spans that cross them', () => {
   assert.deepEqual(splitHighlightedLines('a<span class="hljs-comment">/* x\ny */</span>b\nc'),
     ['a<span class="hljs-comment">/* x</span>', '<span class="hljs-comment">y */</span>b', 'c']);
+});
+
+test('colors a hunk that starts inside a docstring from the whole file', () => {
+  const source = ['def f():', '    """Doc.', '', '    More doc.', '    """', '    value = 1', ''].join('\n');
+  const diff = [
+    'diff --git a/f.py b/f.py',
+    '--- a/f.py',
+    '+++ b/f.py',
+    '@@ -4,2 +4,3 @@ def f():',
+    '     More doc.',
+    '     """',
+    '+    value = 1',
+    '',
+  ].join('\n');
+  const valueLine = (files: ReturnType<typeof parseUnifiedDiff>): string => files[0]?.hunks[0]?.lines[2]?.html ?? '';
+  assert.doesNotMatch(valueLine(parseUnifiedDiff(diff, new Map([['f.py', { old: source.replace('    value = 1\n', ''), new: source }]]))), /hljs-string/u);
+});
+
+test('reads both versions of a PR file to color hunks from the whole file', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'pair-review-diff-'));
+  try {
+    const run = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+    run('init', '-q');
+    const doc = Array.from({ length: 10 }, (_, index) => `    Line ${index}.`);
+    writeFileSync(join(repo, 'f.py'), ['def f():', '    """Doc.', ...doc, '    """', '    return 1', ''].join('\n'));
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    const base = run('rev-parse', 'HEAD').trim();
+    writeFileSync(join(repo, 'f.py'), ['def f():', '    """Doc.', ...doc, '    """', '    value = 1', '    return value', ''].join('\n'));
+    const changed = ((await readPullRequestDiff(repo, base))[0]?.hunks[0]?.lines ?? []).filter((line) => line.kind !== 'context');
+    assert.deepEqual(changed.map((line) => line.kind), ['del', 'add', 'add']);
+    for (const line of changed) assert.doesNotMatch(line.html, /hljs-string/u);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
