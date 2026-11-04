@@ -913,11 +913,31 @@ function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
 }
 
 /** What the Files tab shows, for the note above the files: hashes as code, the headline in bold. */
+/** The note's first line: the full commit title, or what the range covers; the button above already shows the hash. */
 function rangeTitle(shown: DiffRange): (Node | string)[] {
   if (shown.kind === 'all') return ['All changes'];
   if (shown.kind === 'since') return ['Changes since your last review'];
-  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits ', hashChip(shown.from), ' to ', hashChip(shown.to)];
-  return ['Commit ', hashChip(shown.from), ' ', el('b', '', commitsOf().find((commit) => commit.oid === shown.from)?.headline ?? '')];
+  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits, ', hashChip(shown.from), ' to ', hashChip(shown.to)];
+  const commit = commitsOf().find((each) => each.oid === shown.from);
+  return commit ? [commit.headline, ...checkMark(commit)] : [];
+}
+
+/** The note's second line: who made the shown commits and when, and what they change as shown. */
+function rangeFacts(shown: DiffRange): (Node | string)[] {
+  const commits = commitsOf();
+  const index = (oid: string): number => commits.findIndex((commit) => commit.oid === oid);
+  const picked = shown.kind === 'commits' ? commits.slice(index(shown.from), index(shown.to) + 1) : [];
+  const facts: (Node | string)[] = [];
+  const authors = [...new Set(picked.map((commit) => commit.author))];
+  if (authors.length) facts.push(el('b', '', authors.join(', ')), picked.length === 1 ? ' committed ' : ' committed these ');
+  const last = picked.at(-1);
+  if (last) facts.push(...timeLabel(last.createdAt), ' · ');
+  if (files) {
+    const added = files.reduce((sum, file) => sum + file.additions, 0);
+    const removed = files.reduce((sum, file) => sum + file.deletions, 0);
+    facts.push(el('span', 'stat-add', '+' + added), ' ', el('span', 'stat-del', '−' + removed), ' in ' + files.length + (files.length === 1 ? ' file' : ' files') + ' · ');
+  }
+  return facts;
 }
 
 function hashChip(oid: string): HTMLElement {
@@ -938,8 +958,10 @@ function renderRangeControls(): void {
     const why = atHead ? 'Read marks and comments on the base need all changes.' : 'Comments and read marks need all changes.';
     const title = el('div', 'range-title');
     title.append(...rangeTitle(diffRange));
+    const facts = el('div', 'muted range-facts');
+    facts.append(...rangeFacts(diffRange), why);
     const text = el('div', 'gap');
-    text.append(title, el('div', 'muted', why));
+    text.append(title, facts);
     note.replaceChildren(icon(codicons.gitCommit), text, button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small'));
   }
 }
