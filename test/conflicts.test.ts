@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from '../src/conflicts.js';
+import { catchUpWithPullRequest, commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from '../src/conflicts.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
@@ -106,6 +106,26 @@ test('stays put and names the files when local edits clash with the new commits'
   await writeFile(path.join(worktree, 'b.txt'), 'local\n');
   await assert.rejects(syncToPullRequestHead(worktree, 7), /change files with local edits: b\.txt\./u);
   assert.equal(await git(worktree, 'rev-parse', 'HEAD'), older);
+});
+
+test('catches up with the PR before Claude works, keeping local commits built on its latest commit', async (t) => {
+  const { worktree, latest } = await fixture(t);
+  assert.equal(await catchUpWithPullRequest(worktree, 7), true);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'unpushed');
+  const ahead = await git(worktree, 'rev-parse', 'HEAD');
+  await catchUpWithPullRequest(worktree, 7);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), ahead);
+  await git(worktree, 'remote', 'set-url', 'origin', path.join(worktree, 'missing'));
+  assert.equal(await catchUpWithPullRequest(worktree, 7), false);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), ahead);
+});
+
+test('refuses to catch up a worktree whose commits went another way than the PR', async (t) => {
+  const { worktree, older } = await fixture(t);
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'built on an old commit');
+  await assert.rejects(catchUpWithPullRequest(worktree, 7), /commits that are not on GitHub/u);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD^'), older);
 });
 
 test('follows a force push only from a head GitHub had', async (t) => {

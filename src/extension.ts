@@ -118,6 +118,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
       /** The PR on GitHub at the last check, so the next one can ask whether it changed. */
       let version: PullRequestVersion | undefined;
+      /** The worktree commit the page's files were last sent for, so a move by Claude's run or a sync shows up. */
+      let shownHead: string | undefined;
       /** A commit the diff needs, fetched when a force push left it out of the worktree. */
       const haveCommit = async (oid: string): Promise<void> => {
         if (await git(folder, ['cat-file', '-e', `${oid}^{commit}`]).then(() => true, () => false)) return;
@@ -460,13 +462,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const previous = version;
           version = await provider.version(pullRequest.number, previous);
           const reload = previous !== undefined && version !== previous;
-          if (opened.runner.activity.running || version.head === await readHead()) return { reload, files: false };
-          try {
-            await syncToPullRequestHead(folder, pullRequest.number, previous?.head);
-            return { reload: true, files: true };
-          } catch (error: unknown) {
-            return { reload, files: false, problem: error instanceof Error ? error.message : String(error) };
+          if (opened.runner.activity.running) return { reload, files: false };
+          const before = await readHead();
+          shownHead ??= before;
+          let problem: string | undefined;
+          if (version.head !== before) {
+            await syncToPullRequestHead(folder, pullRequest.number, previous?.head).catch((error: unknown) => { problem = error instanceof Error ? error.message : String(error); });
           }
+          const head = await readHead();
+          const files = head !== shownHead;
+          shownHead = head;
+          return { reload: reload || files, files, ...(problem === undefined ? {} : { problem }) };
         },
         ...githubPageActions({
           provider, number: pullRequest.number, headBranch: pullRequest.headBranch, baseBranch: () => baseBranch, folder, hooksOff: role === 'reviewer',

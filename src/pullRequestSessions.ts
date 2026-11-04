@@ -10,6 +10,7 @@ import type { PullRequestProvider } from './pullRequests.js';
 import { showPublishPanel } from './publishPanel.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { catchUpWithPullRequest } from './conflicts.js';
 import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
@@ -165,7 +166,13 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       if (metadata.role === 'reviewer' && revision === undefined) log('Skipping the repository\'s review instructions: could not find the base branch.');
       return readCustomInstructions(kind, { projectRoot: this.sourceRoot, repository: { cwd: worktree, ...(revision === undefined ? {} : { revision }) } });
     };
-    const runner = new ClaudeRunner({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('comments'), ...this.claude });
+    const runner = new ClaudeRunner({
+      store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('comments'),
+      prepare: async () => {
+        if (!await catchUpWithPullRequest(worktree, number)) log('Could not reach GitHub for the PR\'s latest commit; Claude works on the worktree as it is.');
+      },
+      ...this.claude,
+    });
     const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('guide'), ...this.claude });
     const session: ReviewSession = {
       key: key(repository, number),

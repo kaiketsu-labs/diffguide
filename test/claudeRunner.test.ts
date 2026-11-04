@@ -51,7 +51,7 @@ function fakeStore(): ReviewStore & { setPending(events: ReviewEvent[]): void } 
   } as unknown as ReviewStore & { setPending(events: ReviewEvent[]): void };
 }
 
-async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string) {
+async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string, prepare?: () => Promise<void>) {
   const dataPath = await mkdtemp(path.join(tmpdir(), 'pair-review-runner-'));
   t.after(async () => { await rm(dataPath, { recursive: true, force: true }); });
   const store = fakeStore();
@@ -66,6 +66,7 @@ async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, sh
       children.push(child);
       return child;
     }) as unknown as NonNullable<ClaudeRunnerOptions['spawn']>,
+    ...(prepare === undefined ? {} : { prepare }),
   });
   t.after(() => { instance.dispose(); });
   return { instance, store, children, log };
@@ -165,6 +166,24 @@ test('reports a failed run with Claude\'s last error line', async (t) => {
   await children[0]?.exit(1);
   await until(() => instance.activity.error !== undefined);
   assert.equal(instance.activity.error, 'Claude exited with code 1: Not logged in');
+});
+
+test('prepares the worktree before answering comments, and stops with the reason when that fails', async (t) => {
+  const prepared: string[] = [];
+  let failure: Error | undefined = new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+  const { instance, store, children } = await runner('author', t, undefined, async () => {
+    prepared.push(`with ${children.length} runs`);
+    if (failure !== undefined) throw failure;
+  });
+  store.setPending([event('one')]);
+  await until(() => instance.activity.error !== undefined);
+  assert.equal(instance.activity.error, failure.message);
+  assert.equal(children.length, 0);
+
+  failure = undefined;
+  instance.retry();
+  await until(() => children.length === 1);
+  assert.deepEqual(prepared, ['with 0 runs', 'with 0 runs']);
 });
 
 test('starts Claude through the login shell so the user\'s own claude setup applies', async (t) => {

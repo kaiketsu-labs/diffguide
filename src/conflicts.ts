@@ -31,6 +31,17 @@ export async function syncToPullRequestHead(worktree: string, number: number, pu
 }
 
 /**
+ * Before Claude works on a PR: move to the PR's latest commit unless the worktree already has it, keeping local commits built on top.
+ * Returns false when GitHub could not be reached, leaving the worktree as it is.
+ */
+export async function catchUpWithPullRequest(worktree: string, number: number): Promise<boolean> {
+  if (!await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]).then(() => true, () => false)) return false;
+  const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
+  if (!await git(worktree, ['merge-base', '--is-ancestor', head, 'HEAD']).then(() => true, () => false)) await syncToPullRequestHead(worktree, number);
+  return true;
+}
+
+/**
  * Commit files of a PR worktree and push them to the PR's branch. A failed push takes the commit back and restores the files.
  * `hooksOff` skips Git hooks, for someone else's PR, whose author controls the checkout.
  */

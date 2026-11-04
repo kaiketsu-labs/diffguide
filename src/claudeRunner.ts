@@ -49,6 +49,8 @@ export interface ClaudeRunnerOptions {
   readonly spawn?: typeof spawnProcess;
   /** The user's own instructions for answering comments, read fresh for each run. */
   readonly instructions?: () => Promise<string>;
+  /** Runs before Claude answers comments, such as bringing the worktree to the PR's latest commit; a failure stops the run with its message. */
+  readonly prepare?: () => Promise<void>;
 }
 
 const reviewerNote = 'This is someone else\'s pull request. You cannot edit files or run commands. For implement requests, reply with the proposed change as suggestion blocks instead.';
@@ -141,6 +143,7 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: true, step: 'Starting', threads, skipped: 0, error: undefined });
     let error: string | undefined;
     try {
+      await this.options.prepare?.();
       const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
       error = await this.#spawn({
         prompt: `${this.options.role === 'reviewer' ? `${reviewerNote}\n\n` : ''}${prompt}\n\n${suggestionNote}`,
