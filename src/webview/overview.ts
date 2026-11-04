@@ -3081,13 +3081,28 @@ function clearNotice(): void {
   $('notice').replaceChildren();
 }
 
+/** Paths whose diff differs from the one shown, or undefined when the file list or what it shows changed and every file needs drawing. */
+function changedFiles(next: readonly FileDiff[], shownAs: string): string[] | undefined {
+  const shown = files;
+  if (view !== 'files' || shown === undefined || shownAs !== JSON.stringify([diffRange, whitespace, atHead])
+    || shown.length !== next.length || next.some((file, index) => shown[index]?.path !== file.path)) return undefined;
+  return next.filter((file, index) => JSON.stringify(file) !== JSON.stringify(shown[index])).map((file) => file.path);
+}
+
 function onExtensionMessage(data: ExtensionMessage): void {
   if (data.state) render(data.state);
+  const shownAs = JSON.stringify([diffRange, whitespace, atHead]);
   if (data.selection) { diffRange = data.selection.range; whitespace = data.selection.whitespace; atHead = data.atHead !== false; save(); }
   if (data.files) {
+    const changed = changedFiles(data.files, shownAs);
     files = data.files;
     for (const file of files) if (!collapsed.has(file.path) && (file.generated || isLarge(file))) collapsed.set(file.path, true);
-    guide = undefined; contextLines.clear(); loading.clear(); renderFiles();
+    if (changed === undefined) { guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
+    else {
+      if (changed.length) guide = undefined;
+      for (const path of changed) { contextLines.delete(path); loading.delete(path); }
+      renderFiles(changed);
+    }
   }
   if (data.markdown) {
     const entry = renderedPreviews.get(data.markdown.form);

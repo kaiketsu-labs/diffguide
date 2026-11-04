@@ -13,6 +13,7 @@ import { mockPullRequestProvider } from './mockPullRequests.js';
 import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
+import { sharedPerTurn } from './autoSync.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, groupReadMarks, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
@@ -169,18 +170,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void loadConversation();
         void vscode.commands.executeCommand('pairReview.refreshPullRequests');
       };
-      const loadDetails = (): Promise<PullRequestDetails | Error> => {
+      const loadDetails = sharedPerTurn((): Promise<PullRequestDetails | Error> => {
         details = provider.details(pullRequest.number).catch(asError);
         void details.then(() => { detailsChanged.fire(); });
         return details;
-      };
+      });
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
       let conversation: Promise<PullRequestConversation | Error> | undefined;
-      const loadConversation = (): Promise<PullRequestConversation | Error> => {
+      const loadConversation = sharedPerTurn((): Promise<PullRequestConversation | Error> => {
         conversation = provider.conversation(pullRequest.number).catch(asError);
         void conversation.then(() => { detailsChanged.fire(); });
         return conversation;
-      };
+      });
       const currentConversation = async (): Promise<PullRequestConversation> => {
         const loaded = await (conversation ?? loadConversation());
         if (loaded instanceof Error) throw loaded;
@@ -194,11 +195,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const undo = new Map<string, { readonly path: string; readonly before: string; readonly after: string }>();
       /** Where to push the PR's branch: `origin`, or the fork's URL when the branch lives in a fork. */
       const pushTarget = (loaded: PullRequestDetails): string => loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
-      const loadThreads = (): Promise<readonly RemoteThread[] | Error> => {
+      const loadThreads = sharedPerTurn((): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
         return remote;
-      };
+      });
       /** Details and threads in one request on first load; a failed combined request falls back to separate ones. */
       const loadOverview = (): void => {
         const both = provider.overview(pullRequest.number);
@@ -209,6 +210,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
       const read = async (): Promise<ReturnType<typeof buildOverviewState>> => {
         if (details === undefined && remote === undefined) loadOverview();
+        if (conversation === undefined) void loadConversation();
         const paths = await listed;
         const all = [...new Set([...(paths ?? []), ...diffPaths])];
         const [viewed, read] = await Promise.all([

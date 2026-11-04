@@ -126,9 +126,12 @@ async function sideText(worktree: string, base: string, path: string, side: Line
 /** Ranges marked read whose code is still there, at its current lines against `base`. */
 export async function readReadRanges(worktree: string, base: string): Promise<readonly ReadRange[]> {
   const { ranges } = await readMarks(worktree).catch(() => noMarks());
+  const texts = new Map<string, Promise<string | undefined>>();
   const found = await Promise.all(ranges.map(async ({ id, anchor }): Promise<ReadRange | undefined> => {
     const side = anchor.side === 'original' ? 'old' : 'new';
-    const text = await sideText(worktree, base, anchor.path, side);
+    const key = `${side}:${anchor.path}`;
+    if (!texts.has(key)) texts.set(key, sideText(worktree, base, anchor.path, side));
+    const text = await texts.get(key);
     const location = text === undefined ? undefined : locateCodeAnchor(text, anchor);
     return location === undefined ? undefined : { id, path: anchor.path, side, ...location };
   }));

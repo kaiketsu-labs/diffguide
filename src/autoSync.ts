@@ -18,3 +18,15 @@ export function pollWhileFocused(intervalMs: number, active: () => boolean, chec
   const focus = vscode.window.onDidChangeWindowState((state) => { if (state.focused) now(); });
   return { now, dispose: () => { clearInterval(timer); focus.dispose(); } };
 }
+
+/** Calls of the returned function in one event-loop turn share one `load`; requests sent at the same moment read the same state. */
+export function sharedPerTurn<T>(load: () => T): () => T {
+  let shared: { readonly value: T } | undefined;
+  return () => {
+    if (shared === undefined) {
+      shared = { value: load() };
+      setImmediate(() => { shared = undefined; });
+    }
+    return shared.value;
+  };
+}

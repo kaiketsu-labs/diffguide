@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as vscode from 'vscode';
 import { showPullRequestOverview, type OverviewActions, type OverviewState } from '../src/pullRequestOverview.js';
-import type { PullRequestDetails } from '../src/pullRequests.js';
+import type { PullRequestDetails, PullRequestProvider } from '../src/pullRequests.js';
+import { githubPageActions, type PageContext } from '../src/pullRequestPageActions.js';
+import { sharedPerTurn } from '../src/autoSync.js';
 import { EventEmitter, resetFakeWindow, window } from './fakes/vscode.js';
 
 const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 200)); };
@@ -160,5 +162,30 @@ test('hands a GitHub thread to Claude only with a known thread and a valid inten
   panel.receive({ action: 'github-ask', form: 'reply:g1', id: 'other', text: 'x', intent: 'ask' }); await tick();
   panel.receive({ action: 'github-ask', form: 'reply:g1', id: 'g1', text: 'x', intent: 'summarize' }); await tick();
   assert.deepEqual(asked, [['g1', '', 'implement'], ['g1', 'Why?', 'ask']]);
+  panel.dispose();
+});
+
+test('a page action reads each part of the PR from GitHub once', async () => {
+  resetFakeWindow();
+  const reads = { details: 0, threads: 0, conversation: 0 };
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 5));
+  const provider = {
+    enqueue: wait,
+    details: async () => { reads.details++; await wait(); return details; },
+    threads: async () => { reads.threads++; await wait(); return []; },
+    conversation: async () => { reads.conversation++; await wait(); return {}; },
+  } as unknown as PullRequestProvider;
+  const load = { details: sharedPerTurn(() => provider.details(7)), threads: sharedPerTurn(() => provider.threads(7)), conversation: sharedPerTurn(() => provider.conversation(7)) };
+  const reloadAll = (): void => { void load.details(); void load.threads(); void load.conversation(); };
+  const actions = {
+    ...githubPageActions({ provider, number: 7, reload: reloadAll } as unknown as PageContext),
+    refresh: reloadAll,
+    pollGitHub: async () => ({ reload: false, files: false }),
+  } as unknown as OverviewActions;
+  const state = { ...base, details, conversation: { merge: { mergeQueue: true } } } as unknown as OverviewState;
+  await showPullRequestOverview('reads-once', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'enqueue' }); await tick();
+  assert.deepEqual(reads, { details: 1, threads: 1, conversation: 1 });
   panel.dispose();
 });
