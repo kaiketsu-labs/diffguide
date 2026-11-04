@@ -230,7 +230,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
 
   const legend = await level(window.trees.at(-2)?.provider as vscode.TreeDataProvider<unknown>);
   assert.deepEqual(legend.map(({ item }) => [item.label, (item.iconPath as vscode.ThemeIcon).id]), [
-    ['Repository', 'repo'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'],
+    ['Repository', 'repo'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'], ['Merged', 'git-merge'],
     ['Approved', 'pass'], ['Changes requested', 'request-changes'], ['Commented', 'comment-discussion'], ['Checked out in a worktree', 'git-pull-request'],
   ]);
   assert.equal(decoratePullRequest(legend.at(-1)?.item)?.badge, 'W');
@@ -263,6 +263,11 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.deepEqual(tree2.map(({ item }) => [item.label, item.description]), [['src', undefined], ['README.md', '']]);
   assert.deepEqual((await level(tree, tree2[0]?.node)).map(({ item }) => [item.label, item.description]), [['sidebar.ts', '']]);
   assert.equal(settings.get('pairReview.fileView'), 'tree');
+
+  await commands.executeCommand('pairReview.markPullRequestMerged', 'acme/app#7');
+  const [merged] = await level(tree, repository?.node);
+  assert.equal((merged?.item.iconPath as vscode.ThemeIcon).id, 'git-merge');
+  assert.equal(merged?.item.description, '#7 · octo · Merged · Worktree · 1/2 reviewed');
 });
 
 test('groups changed files into folders and folds single-folder chains into one row', () => {

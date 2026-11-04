@@ -696,7 +696,7 @@ function threadBox(thread: Thread): HTMLElement {
   const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : ''));
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
-  box.addEventListener('toggle', () => threadOpen.set(thread.id, box.open));
+  box.addEventListener('toggle', () => { if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open); });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   box.append(strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
@@ -883,10 +883,10 @@ function expansion(path: string, index: number): Shown {
   return expanded.get(path)?.get(index) ?? { top: 0, bottom: 0 };
 }
 
-function expand(file: FileDiff, index: number, top: number, bottom: number): void {
-  const shown = expansion(file.path, index);
-  const byFile = expanded.get(file.path) ?? new Map<number, Shown>();
-  expanded.set(file.path, byFile);
+function expand(file: FileDiff, key: string, index: number, top: number, bottom: number): void {
+  const shown = expansion(key, index);
+  const byFile = expanded.get(key) ?? new Map<number, Shown>();
+  expanded.set(key, byFile);
   byFile.set(index, { top: shown.top + top, bottom: shown.bottom + bottom });
   loadContext(file);
   renderFiles([file.path]);
@@ -1144,7 +1144,8 @@ function selectedReadIds(file: FileDiff, selection: LineRange): string[] | undef
   return rangeReadIds(file, readRanges, selection);
 }
 
-function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined = composer?.path === file.path ? composer : undefined): HTMLTableElement {
+/** `expandKey` names where shown context lines are kept; a guide step passes its own so its slice does not share the file's. */
+function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined = composer?.path === file.path ? composer : undefined, expandKey = file.path): HTMLTableElement {
   const node = el('table');
   const columns = el('colgroup');
   const widths = layout === 'split' ? ['num', '', 'num', ''] : ['num', 'num', ''];
@@ -1209,7 +1210,7 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
   };
   const expander = (gap: Gap, index: number, header?: string): void => {
     const size = gap.to - gap.from + 1;
-    const shown = expansion(file.path, index);
+    const shown = expansion(expandKey, index);
     const hidden = size - shown.top - shown.bottom;
     const row = el('tr', 'hunk');
     const cell = el('td');
@@ -1222,20 +1223,20 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
         node.title = title;
         tools.append(node);
       };
-      if (hidden <= step && !gap.last) tool('↕', 'Show ' + hidden + ' hidden lines', () => expand(file, index, hidden, 0));
+      if (hidden <= step && !gap.last) tool('↕', 'Show ' + hidden + ' hidden lines', () => expand(file, expandKey, index, hidden, 0));
       else {
-        if (index > 0) tool('↓', 'Show ' + step + ' more lines below', () => expand(file, index, step, 0));
-        if (!gap.last) tool('↑', 'Show ' + step + ' more lines above', () => expand(file, index, 0, step));
+        if (index > 0) tool('↓', 'Show ' + step + ' more lines below', () => expand(file, expandKey, index, step, 0));
+        if (!gap.last) tool('↑', 'Show ' + step + ' more lines above', () => expand(file, expandKey, index, 0, step));
       }
       cell.append(tools);
     }
-    if (header) cell.append(el('span', '', header));
+    if (header && shown.bottom === 0) cell.append(el('span', '', header));
     else if (hidden > 0) cell.append(el('span', '', Number.isFinite(hidden) ? hidden + ' more lines' : 'Rest of the file'));
     if (hidden > 0 || (header && size <= 0)) node.append(row);
   };
   const gapRows = (gap: Gap, index: number, header?: string): void => {
     const size = gap.to - gap.from + 1;
-    const shown = expansion(file.path, index);
+    const shown = expansion(expandKey, index);
     if (size <= 0) {
       if (header) expander({ from: 1, to: 0, offset: 0 }, index, header);
       return;
@@ -1421,14 +1422,23 @@ function sliceOf(step: GuideStep): FileDiff | undefined {
     if (previous && previous.hunk === block.hunk && from <= previous.to + 1) previous.to = Math.max(previous.to, to);
     else spans.push({ hunk: block.hunk, from, to });
   }
-  return {
-    ...file,
-    hunks: spans.map(({ hunk, from, to }) => {
-      const lines = file.hunks[hunk]?.lines.slice(from, to + 1) ?? [];
-      const numbers = lines.map((line) => line.newLine ?? line.oldLine).filter((value): value is number => value !== undefined);
-      return { header: range(numbers[0] ?? 0, numbers.at(-1) ?? 0), lines };
-    }),
-  };
+  return { ...file, hunks: spans.flatMap(({ hunk, from, to }) => { const source = file.hunks[hunk]; return source ? [subHunk(source, from, to)] : []; }) };
+}
+
+/** Lines `from` to `to` of a hunk, with a header that numbers them as git would. */
+function subHunk(source: DiffHunk, from: number, to: number): DiffHunk {
+  const lines = source.lines.slice(from, to + 1);
+  const span = hunkRange(source);
+  if (!span) {
+    const numbers = lines.map((line) => line.newLine ?? line.oldLine).filter((value): value is number => value !== undefined);
+    return { header: range(numbers[0] ?? 0, numbers.at(-1) ?? 0), lines };
+  }
+  const before = source.lines.slice(0, from);
+  const oldBefore = span.oldBefore + before.filter((line) => line.kind !== 'add').length;
+  const newBefore = span.newBefore + before.filter((line) => line.kind !== 'del').length;
+  const oldCount = lines.filter((line) => line.kind !== 'add').length;
+  const newCount = lines.filter((line) => line.kind !== 'del').length;
+  return { header: '@@ -' + (oldCount ? oldBefore + 1 : oldBefore) + ',' + oldCount + ' +' + (newCount ? newBefore + 1 : newBefore) + ',' + newCount + ' @@', lines };
 }
 
 function hasLine(slice: FileDiff, side: DiffSide, line: number): boolean {
@@ -1711,7 +1721,7 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, new Set()));
   else if (!slice.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
-  else diff.append(table(slice, threads, new Set(), hasDraft ? composer : null));
+  else diff.append(table(slice, threads, new Set(), hasDraft ? composer : null, 'step:' + step.key));
   box.append(diff);
   wrap.append(box);
   return wrap;

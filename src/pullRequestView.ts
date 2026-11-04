@@ -122,6 +122,8 @@ const severityLooks: Record<OutlineGroup['severity'], { readonly label: string; 
 
 const repositoryIcon = new vscode.ThemeIcon('repo', new vscode.ThemeColor('charts.purple'));
 
+const mergedIcon = new vscode.ThemeIcon('git-merge', new vscode.ThemeColor('charts.purple'));
+
 function pullRequestIcon(draft: boolean, review?: ReviewVerdict): vscode.ThemeIcon {
   if (review !== undefined) return new vscode.ThemeIcon(verdicts[review].icon, new vscode.ThemeColor(verdicts[review].color));
   return draft
@@ -144,6 +146,7 @@ const legendProvider: vscode.TreeDataProvider<vscode.TreeItem> = {
       row('Repository', repositoryIcon),
       row('Open', pullRequestIcon(false)),
       row('Draft', pullRequestIcon(true)),
+      row('Merged', mergedIcon),
       ...(['approved', 'changes', 'commented'] as const).map((review) => row(verdicts[review].label, pullRequestIcon(false, review))),
       row('Checked out in a worktree', pullRequestIcon(false), pullRequestRowUri('legend', 0, true)),
     ];
@@ -220,6 +223,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #checkedOut = new Map<string, Promise<boolean>>();
   readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
   readonly #guides = new Map<string, Promise<readonly OutlineGroup[] | undefined>>();
+  /** PRs merged from this window; GitHub's search keeps listing them as open for a while. */
+  readonly #merged = new Set<string>();
 
   constructor(
     private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
@@ -305,6 +310,12 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#forgetState();
     for (const checkout of this.#listed) checkout.worktrees.forget();
     this.#changed.fire(undefined);
+  }
+
+  /** Show a PR as merged from now on, keyed `repository#number`. */
+  markMerged(pullRequest: string): void {
+    this.#merged.add(pullRequest);
+    this.redraw(pullRequest);
   }
 
   /** Redraw checkout state without querying the code host again: one PR's row when it is shown, else the whole tree. */
@@ -396,9 +407,10 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
-        const verdict = pr.review === undefined ? undefined : verdicts[pr.review];
+        const merged = this.#merged.has(pullRequestKey(node));
+        const verdict = pr.review === undefined || merged ? undefined : verdicts[pr.review];
         const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;
-        item.description = [`#${pr.number}`, type, verdict?.label, pr.author, pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
+        item.description = [`#${pr.number}`, type, verdict?.label, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
         item.tooltip = [
           `#${pr.number} ${pr.title}`,
           `${pr.headBranch} → ${pr.baseBranch}`,
@@ -406,7 +418,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
           pr.changes === undefined ? undefined : `${size} in ${pr.changes.files} ${pr.changes.files === 1 ? 'file' : 'files'}`,
           [pr.createdAt === undefined ? undefined : `Opened ${new Date(pr.createdAt).toLocaleString()}`, pr.updatedAt === undefined ? undefined : `updated ${ago(pr.updatedAt)}`].filter(Boolean).join(', ') || undefined,
         ].filter(Boolean).join('\n');
-        item.iconPath = pullRequestIcon(pr.draft, pr.review);
+        item.iconPath = merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review);
         item.contextValue = checkedOut ? 'pairReview.pullRequest.checkedOut' : 'pairReview.pullRequest';
         item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node] };
         return item;
@@ -659,6 +671,9 @@ export function registerPullRequestView(
     }),
     onDidChangeStatus((pullRequest) => { tree.redraw(pullRequest); }),
     vscode.commands.registerCommand('pairReview.refreshPullRequests', () => { tree.refresh(); }),
+    vscode.commands.registerCommand('pairReview.markPullRequestMerged', (key: unknown) => {
+      if (typeof key === 'string') tree.markMerged(key);
+    }),
     vscode.commands.registerCommand('pairReview.viewFilesAsTree', async () => { await tree.setAsTree(true); showMode(); }),
     vscode.commands.registerCommand('pairReview.viewFilesAsList', async () => { await tree.setAsTree(false); showMode(); }),
     vscode.commands.registerCommand('pairReview.groupByRole', async () => { await tree.setByRole(true); showMode(); }),

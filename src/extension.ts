@@ -347,6 +347,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (answer === undefined) return;
           try {
             await provider.merge(pullRequest.number, method);
+            await vscode.commands.executeCommand('pairReview.markPullRequestMerged', `${repository}#${pullRequest.number}`);
             if (answer === mergeAndDelete) await provider.deleteBranch(pullRequest.headBranch);
           } finally {
             changedOnGitHub();

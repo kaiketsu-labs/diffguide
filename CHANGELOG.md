@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Guide steps can show the unchanged lines around their changes, with the same expand buttons as the Files tab. The buttons were missing before.
+- Resolving a thread on the review page folds it. It stayed open before.
+- The PR you merge from the review page shows as Merged in the Pull Requests sidebar right away, with a purple merge icon. GitHub's search keeps listing a merged PR as open for a while.
+- The **+** next to a hovered line number is smaller and lines up with the number, also on lines that wrap.
+- Once you expand lines above a hunk, the expand row shows how many lines are still hidden instead of the hunk's `@@` header, which no longer sat next to its lines.
 - Diff hunks on the review page take their syntax colors from the whole file. A hunk that started inside a docstring, comment or multi-line string showed the following code in string colors before.
 - Re-read GitHub state after PR management actions even when a write fails partway through, so saved reviewer requests and completed merges do not leave a stale review page. Report potentially saved requests when withdrawal fails.
 - Reject PR management messages without edit permission, and correctly preselect users whose login matches a team display name.
