@@ -1,5 +1,5 @@
 import type { LineRange } from './reviewedFiles.js';
-import { rangeReadIds, type MarkedRange } from './readLines.js';
+import { fullyRead, rangeReadIds, type MarkedRange } from './readLines.js';
 import type { DiffLine, FileDiff } from './unifiedDiff.js';
 
 /** How much a change needs the reviewer's attention, most first. */
@@ -300,6 +300,20 @@ export function stepViewed(step: GuideStep, file: FileDiff | undefined, ranges: 
   if (file === undefined) return false;
   if (step.blocks.length === 0) return fileViewed;
   return step.blocks.every((block) => rangeReadIds(file, ranges, block.range) !== undefined);
+}
+
+/** What marking a guide group read writes: its unread lines, and the files left fully read or with no lines to read. */
+export function groupReadMarks(group: GuideGroup, files: readonly FileDiff[], ranges: readonly MarkedRange[], viewed: ReadonlySet<string>): { readonly read: readonly LineRange[]; readonly viewed: readonly string[] } {
+  const read: LineRange[] = [];
+  const done = new Set<string>();
+  for (const step of group.steps) {
+    const file = files.find((item) => item.path === step.path);
+    if (file === undefined) continue;
+    if (step.blocks.length === 0) { done.add(step.path); continue; }
+    for (const { range } of step.blocks) if (rangeReadIds(file, [...ranges, ...read], range) === undefined) read.push(range);
+    if (fullyRead(file, [...ranges, ...read])) done.add(step.path);
+  }
+  return { read, viewed: [...done].filter((path) => !viewed.has(path)) };
 }
 
 /** A guide step as the sidebar lists it. */

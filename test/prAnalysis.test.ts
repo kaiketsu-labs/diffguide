@@ -7,7 +7,7 @@ import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
 import type { CodeAnchor } from '../src/contracts.js';
-import { analysisPrompt, buildGuide, changeBlocks, guideOutline, parseClaudeAnalysis, readStoredAnalysis } from '../src/prAnalysis.js';
+import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, guideOutline, parseClaudeAnalysis, readStoredAnalysis } from '../src/prAnalysis.js';
 import { PullRequestAnalysis, type AnalysisOptions } from '../src/prAnalysisRunner.js';
 import { createReviewStore } from '../src/store.js';
 import { parsePlainDiff, parseUnifiedDiff } from '../src/unifiedDiff.js';
@@ -78,6 +78,24 @@ test('keeps each block in one step and sorts groups by severity', () => {
   assert.equal(guide[0]?.steps[0]?.fileNote, 'Constants.');
   assert.equal(guide[2]?.steps.find((step) => step.path === 'src/a.ts')?.fileNote, undefined);
   assert.deepEqual(guide[2]?.steps.map((step) => [step.path, step.blocks.map((block) => block.id)]), [['src/a.ts', ['b2']], ['logo.png', []]]);
+});
+
+test('marks a whole guide group read: only its unread lines, and Viewed for files it finishes', () => {
+  const files = parseUnifiedDiff(diff);
+  const blocks = changeBlocks(files);
+  const analysis = parseClaudeAnalysis({
+    overview: '', files: [],
+    groups: [{ severity: 'critical', title: 'Values', steps: [{ blocks: ['b1', 'b3'], note: 'Changes b.' }] }],
+  }, blocks, 'head1', '2026-11-03T00:00:00.000Z');
+  const [values, rest] = buildGuide(analysis, files);
+  const lines = (marks: ReturnType<typeof groupReadMarks>) => marks.read.map((range) => [range.path, range.side, range.startLine]);
+  const already = [{ path: 'src/a.ts', side: 'new' as const, startLine: 2, endLine: 2 }];
+  const first = groupReadMarks(values!, files, already, new Set());
+  assert.deepEqual(lines(first), [['src/a.ts', 'new', 8]]);
+  assert.deepEqual(first.viewed, []);
+  const second = groupReadMarks(rest!, files, [...already, ...first.read], new Set(['src/b.ts']));
+  assert.deepEqual(lines(second), [['src/a.ts', 'old', 7], ['src/b.ts', 'new', 2]]);
+  assert.deepEqual(second.viewed, ['src/a.ts', 'logo.png']);
 });
 
 test('moves steps whose code changed to Unclassified and survives a round trip', () => {

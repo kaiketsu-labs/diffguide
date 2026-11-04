@@ -1,5 +1,5 @@
 import type { DefinitionPeek } from '../definitions.js';
-import { buildGuide, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
+import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffSide, ExtensionMessage, FilePreview, GitHubThreadView, OverviewState, PageMessage, PickTarget } from '../pullRequestOverview.js';
 import type { MergeMethod, PickerOptions, PullRequestDetails, ReviewEvent } from '../pullRequests.js';
 import { fileTree, type FileFolder } from '../fileTree.js';
@@ -1703,8 +1703,38 @@ function threadRow(thread: Thread, kind: ThreadKind): HTMLElement {
 function groupHead(group: GuideGroup): HTMLElement {
   const head = el('div', 'guide-group sev-' + group.severity);
   head.dataset.group = group.key;
-  head.append(el('span', 'sev', severityLabels[group.severity]), el('span', 'title', group.title), el('span', 'muted progress'));
+  const label = el('label', 'viewed');
+  label.title = 'Mark every step in this section read.';
+  label.addEventListener('click', (event) => { event.stopPropagation(); });
+  const check = el('input');
+  check.type = 'checkbox';
+  check.checked = group.steps.every(stepViewed);
+  check.addEventListener('change', () => { setGroupViewed(group, check.checked); });
+  label.append(check, 'Viewed');
+  head.append(el('span', 'sev', severityLabels[group.severity]), el('span', 'title', group.title), el('span', 'muted progress'), label);
   return head;
+}
+
+/** Tick or untick every step of a guide section, showing it right away; the extension's next state confirms it. */
+function setGroupViewed(group: GuideGroup, on: boolean): void {
+  if (!files) return;
+  const paths = [...new Set(group.steps.map((step) => step.path))];
+  if (on) {
+    const marks = groupReadMarks(group, files, readRanges, viewed);
+    readRanges = [...readRanges, ...marks.read.map((marked) => ({ id: 'pending', ...marked }))];
+    marks.read.forEach((marked) => post({ action: 'read', ...marked, viewed: false }));
+    for (const path of marks.viewed) { markViewed(path, true); post({ action: 'viewed', path, viewed: true }); }
+  } else {
+    const ids = group.steps.flatMap((step) => {
+      const file = files?.find((item) => item.path === step.path);
+      return file ? step.blocks.flatMap((block) => selectedReadIds(file, block.range) ?? []) : [];
+    });
+    if (ids.length) unmarkRead([...new Set(ids)]);
+    for (const path of paths) if (viewed.has(path)) { markViewed(path, false); post({ action: 'viewed', path, viewed: false }); }
+  }
+  for (const step of group.steps) collapsed.delete(guideState('step', step.key));
+  save();
+  renderFiles();
 }
 
 /** A foldable level of the file list: its head, then its children beside a rail that folds them when clicked, like a threaded discussion. */
@@ -1743,8 +1773,11 @@ function updateGuideProgress(groups: readonly GuideGroup[]): void {
   const steps = groups.flatMap((group) => group.steps);
   $('files-title').textContent = steps.filter(stepViewed).length + '/' + steps.length + ' steps viewed';
   for (const group of groups) {
-    const progress = document.querySelector('[data-group="' + CSS.escape(group.key) + '"] .progress');
+    const head = document.querySelector('[data-group="' + CSS.escape(group.key) + '"]');
+    const progress = head?.querySelector('.progress');
     if (progress) progress.textContent = group.steps.filter(stepViewed).length + '/' + group.steps.length + ' viewed';
+    const check = head?.querySelector<HTMLInputElement>('label.viewed input');
+    if (check) check.checked = group.steps.every(stepViewed);
   }
 }
 
@@ -2086,6 +2119,15 @@ function revealStep(key: string): void {
   document.querySelector('.step-wrap[data-key="' + CSS.escape(key) + '"]')?.scrollIntoView({ block: 'start' });
 }
 
+/** Show the guided layout with a section unfolded, scrolled to its head. */
+function revealGroup(key: string): void {
+  view = 'guide';
+  collapsed.set(guideState('group', key), false);
+  save();
+  renderFiles();
+  document.querySelector('[data-group="' + CSS.escape(key) + '"]')?.closest('.tree-node')?.scrollIntoView({ block: 'start' });
+}
+
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Show a hint that clears itself after a few seconds, on the next click, or on Escape. */
@@ -2111,6 +2153,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
   if (data.definition) { peeks.length = peekAt + 1; peeks.push(data.definition); peekAt = peeks.length - 1; renderPeek(); }
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
   if (data.revealStep) revealStep(data.revealStep);
+  if (data.revealGroup) revealGroup(data.revealGroup);
   if (data.reveal && files) {
     collapsed.set(data.reveal, false);
     openFolders(data.reveal);

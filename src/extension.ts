@@ -14,7 +14,7 @@ import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead 
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
-import { buildGuide, guideOutline } from './prAnalysis.js';
+import { buildGuide, groupReadMarks, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
 import { highlightSource, readPlainPullRequestDiff, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
 import { fenceFilePaths, inlineLocalImages, markdownBlocks, markdownHtml } from './markdown.js';
@@ -413,6 +413,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
     const worktreesOf = (checkout: Checkout): PullRequestWorktrees => {
       const { root: checkoutRoot, storageRoot, sessions, fileReviews } = checkout;
+      /** A checked-out PR's guide with its diff and review marks, or undefined before it is analyzed. */
+      const loadGuide = async (provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary) => {
+        const folder = worktreePath(storageRoot, repository, pullRequest.number);
+        const analysis = await readSavedAnalysis(reviewDataPath(folder));
+        const base = analysis === undefined ? undefined : await readPullRequestBase(folder, pullRequest.baseBranch);
+        if (analysis === undefined || base === undefined) return undefined;
+        const files = await readPlainPullRequestDiff(folder, base);
+        const [read, viewed] = await Promise.all([
+          fileReviews.readRanges(repository, pullRequest.number, base),
+          fileReviews.reviewed(provider, repository, pullRequest.number, files.map((file) => file.path)),
+        ]);
+        return { groups: buildGuide(analysis, files), files, read, viewed, base };
+      };
       return {
         exists: (repository, number) => hasWorktree(storageRoot, repository, number),
         open: (provider, repository, pullRequest, role, revealPath) => showOverview(checkout, provider, repository, pullRequest, role, revealPath === undefined ? undefined : { path: revealPath }),
@@ -431,18 +444,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
         forget: () => { fileReviews.forget(); GitHubApiProvider.forget(); checkouts.rescan(); },
-        showOverview: (provider, repository, pullRequest, role, step) => showOverview(checkout, provider, repository, pullRequest, role, step === undefined ? undefined : { step }),
+        showOverview: (provider, repository, pullRequest, role, at) => showOverview(checkout, provider, repository, pullRequest, role, at),
         guide: async (provider, repository, pullRequest) => {
-          const folder = worktreePath(storageRoot, repository, pullRequest.number);
-          const analysis = await readSavedAnalysis(reviewDataPath(folder));
-          const base = analysis === undefined ? undefined : await readPullRequestBase(folder, pullRequest.baseBranch);
-          if (analysis === undefined || base === undefined) return undefined;
-          const files = await readPlainPullRequestDiff(folder, base);
-          const [read, viewed] = await Promise.all([
-            fileReviews.readRanges(repository, pullRequest.number, base),
-            fileReviews.reviewed(provider, repository, pullRequest.number, files.map((file) => file.path)),
-          ]);
-          return guideOutline(buildGuide(analysis, files), files, read, viewed);
+          const loaded = await loadGuide(provider, repository, pullRequest);
+          return loaded === undefined ? undefined : guideOutline(loaded.groups, loaded.files, loaded.read, loaded.viewed);
+        },
+        markGuideGroupRead: async (provider, repository, pullRequest, key) => {
+          const loaded = await loadGuide(provider, repository, pullRequest);
+          const group = loaded?.groups.find((item) => item.key === key);
+          if (loaded === undefined || group === undefined) return;
+          const marks = groupReadMarks(group, loaded.files, loaded.read, loaded.viewed);
+          for (const range of marks.read) await fileReviews.markRead(repository, pullRequest.number, loaded.base, range);
+          for (const path of marks.viewed) await fileReviews.set(provider, repository, pullRequest.number, path, true);
         },
       };
     };

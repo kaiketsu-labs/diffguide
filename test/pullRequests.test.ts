@@ -86,6 +86,7 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
     setReviewed: async (_provider, _repository, _number, file, done) => { if (done) reviewed.add(file); else reviewed.delete(file); },
     showOverview: async () => undefined,
     guide: async () => undefined,
+    markGuideGroupRead: async () => undefined,
     forget: () => undefined,
   };
 }
@@ -504,7 +505,7 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   assert.deepEqual(redrawn, [pr?.node, undefined]);
 });
 
-test('lists a checked-out PR\'s files or its guide steps, and opens the review page at a step', async (t) => {
+test('lists a checked-out PR\'s files or its guide steps, opens the review page at a step or section, and marks a section read', async (t) => {
   window.trees.length = 0;
   const provider = {
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
@@ -514,8 +515,10 @@ test('lists a checked-out PR\'s files or its guide steps, and opens the review p
   } as unknown as PullRequestProvider;
   const worktrees = recordingWorktrees();
   worktrees.checkedOut.add(7);
-  const shown: (string | undefined)[] = [];
-  worktrees.showOverview = async (_provider, _repository, _pullRequest, _role, step) => { shown.push(step); };
+  const shown: unknown[] = [];
+  worktrees.showOverview = async (_provider, _repository, _pullRequest, _role, at) => { shown.push(at); };
+  const marked: string[] = [];
+  worktrees.markGuideGroupRead = async (_provider, _repository, _pullRequest, group) => { marked.push(group); };
   worktrees.guide = async () => [
     { key: 'g0', severity: 'critical', title: 'Auth', steps: [{ key: 'g0.0', path: 'src/a.ts', title: 'Check tokens', note: 'Rejects expired tokens.', viewed: true }, { key: 'g0.1', path: 'src/b.ts', viewed: false }] },
     { key: 'g1', severity: 'trivial', title: 'Format', steps: [{ key: 'g1.0', path: 'README.md', viewed: false }] },
@@ -538,7 +541,13 @@ test('lists a checked-out PR\'s files or its guide steps, and opens the review p
   assert.deepEqual(steps.map(({ item }) => [item.label, item.description, (item.iconPath as vscode.ThemeIcon).id]), [['1. Check tokens', 'a.ts', 'pass-filled'], ['2. b.ts', 'src', 'circle-large-outline']]);
   const command = steps[0]?.item.command;
   await commands.executeCommand(command?.command ?? '', ...command?.arguments ?? []);
-  assert.deepEqual(shown, ['g0.0']);
+  assert.deepEqual(shown, [{ step: 'g0.0' }]);
+  const open = groups[0]?.item.command;
+  await commands.executeCommand(open?.command ?? '', ...open?.arguments ?? []);
+  assert.deepEqual(shown, [{ step: 'g0.0' }, { group: 'g0' }]);
+  assert.deepEqual(groups.map(({ item }) => item.contextValue), ['pairReview.guideGroup', 'pairReview.guideGroup']);
+  await commands.executeCommand('pairReview.markGuideGroupRead', groups[1]?.node);
+  assert.deepEqual(marked, ['g1']);
 
   worktrees.checkedOut.delete(7);
   view.dispose();

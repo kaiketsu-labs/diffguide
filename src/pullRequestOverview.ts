@@ -221,6 +221,8 @@ export interface ExtensionMessage {
   readonly reveal?: string | undefined;
   /** A guide step's key: show the guided layout at that step. */
   readonly revealStep?: string | undefined;
+  /** A guide group's key: show the guided layout at that section. */
+  readonly revealGroup?: string | undefined;
   readonly filesError?: string;
   readonly preview?: FilePreview & { readonly path: string };
   readonly media?: MediaPreview & { readonly path: string };
@@ -253,9 +255,10 @@ const isLine = (value: unknown): value is number => Number.isSafeInteger(value) 
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '' && value.length <= maximumReviewLength;
 
 /** Where the review page scrolls when it opens: a file, or a step of the guided review. */
-export type OverviewReveal = { readonly path: string } | { readonly step: string };
+export type OverviewReveal = { readonly path: string } | { readonly step: string } | { readonly group: string };
 
-const revealMessage = (reveal: OverviewReveal | undefined): ExtensionMessage => reveal === undefined ? {} : 'path' in reveal ? { reveal: reveal.path } : { revealStep: reveal.step };
+const revealMessage = (reveal: OverviewReveal | undefined): ExtensionMessage => reveal === undefined ? {}
+  : 'path' in reveal ? { reveal: reveal.path } : 'step' in reveal ? { revealStep: reveal.step } : { revealGroup: reveal.group };
 
 /** Show a PR's review page, reusing it when already open, and redraw it whenever `onDidChange` fires. */
 export async function showPullRequestOverview(

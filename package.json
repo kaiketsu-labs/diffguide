@@ -304,6 +304,12 @@
         "icon": "$(diff-multiple)"
       },
       {
+        "command": "pairReview.markGuideGroupRead",
+        "title": "Mark section read",
+        "category": "Pair Review",
+        "icon": "$(check-all)"
+      },
+      {
         "command": "pairReview.removePullRequestWorktree",
         "title": "Remove worktree",
         "category": "Pair Review",
@@ -500,6 +506,11 @@
       ],
       "view/item/context": [
         {
+          "command": "pairReview.markGuideGroupRead",
+          "when": "view == pairReview.pullRequests && viewItem == pairReview.guideGroup",
+          "group": "inline@0"
+        },
+        {
           "command": "pairReview.hideRepository",
           "when": "view == pairReview.pullRequests && viewItem == pairReview.repository",
           "group": "1_repository@1"
@@ -592,6 +603,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "pairReview.markGuideGroupRead",
+          "when": "false"
+        },
         {
           "command": "pairReview.filterByAuthorActive",
           "when": "false"

@@ -85,10 +85,12 @@ export interface PullRequestWorktrees {
   /** Files of a checked-out PR ticked here and unchanged since, or marked Viewed on the code host. */
   reviewedFiles(provider: PullRequestProvider, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>>;
   setReviewed(provider: PullRequestProvider, repository: string, number: number, path: string, reviewed: boolean): Promise<void>;
-  /** Open a tab with the PR's review progress, threads and Claude activity; with `step`, in the guided layout at that step. */
-  showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, step?: string): Promise<void>;
+  /** Open a tab with the PR's review progress, threads and Claude activity; with `at`, in the guided layout at that step or section. */
+  showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, at?: { readonly step: string } | { readonly group: string }): Promise<void>;
   /** The steps of a checked-out PR's guided review, or undefined before it is analyzed. */
   guide(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary): Promise<readonly OutlineGroup[] | undefined>;
+  /** Mark every step of a guide section read, and Viewed the files that leaves fully read. */
+  markGuideGroupRead(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, group: string): Promise<void>;
   /** Drop cached code host state so the next read is fresh. */
   forget(): void;
 }
@@ -449,6 +451,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const item = new vscode.TreeItem(`${look.label} · ${group.title}`, look.folded ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon(look.icon, new vscode.ThemeColor(look.color));
         item.description = `${group.steps.filter((step) => step.viewed).length}/${group.steps.length}`;
+        item.contextValue = group.steps.every((step) => step.viewed) ? 'pairReview.guideGroup.viewed' : 'pairReview.guideGroup';
+        item.command = { command: 'pairReview.showGuideGroup', title: 'Show section', arguments: [node.parent, group.key] };
         return item;
       }
       case 'guideStep': {
@@ -723,7 +727,24 @@ export function registerPullRequestView(
     vscode.commands.registerCommand('pairReview.showGuideStep', async (node: unknown, step: unknown) => {
       if (!isPullRequestNode(node) || typeof step !== 'string') return;
       try {
-        await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, step);
+        await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, { step });
+      } catch (error: unknown) {
+        report(error);
+      }
+    }),
+    vscode.commands.registerCommand('pairReview.showGuideGroup', async (node: unknown, group: unknown) => {
+      if (!isPullRequestNode(node) || typeof group !== 'string') return;
+      try {
+        await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, { group });
+      } catch (error: unknown) {
+        report(error);
+      }
+    }),
+    vscode.commands.registerCommand('pairReview.markGuideGroupRead', async (node: unknown) => {
+      if (!isGuideGroupNode(node)) return;
+      const { parent, group } = node;
+      try {
+        await parent.listing.worktrees.markGuideGroupRead(parent.listing.provider, parent.listing.repository.name, parent.pullRequest, group.key);
       } catch (error: unknown) {
         report(error);
       }
@@ -756,4 +777,9 @@ function isPullRequestNode(value: unknown): value is PullRequestNode {
   return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'pullRequest'
     && typeof (value as { listing?: { provider?: unknown } }).listing?.provider === 'object'
     && typeof (value as { listing?: { worktrees?: unknown } }).listing?.worktrees === 'object';
+}
+
+function isGuideGroupNode(value: unknown): value is Extract<Node, { readonly kind: 'guideGroup' }> {
+  return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'guideGroup'
+    && isPullRequestNode((value as { parent?: unknown }).parent) && typeof (value as { group?: { key?: unknown } }).group?.key === 'string';
 }
