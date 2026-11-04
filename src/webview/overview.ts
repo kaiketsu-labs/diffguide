@@ -801,11 +801,9 @@ function renderConversationForm(): void {
   };
   const field = githubField(key, conversationDraft, 'Add a comment', (value) => { conversationDraft = value; save(); }, submit, () => undefined);
   const row = el('div', 'row composer-actions');
-  const hint = el('span', 'hint');
-  hint.append(el('kbd', '', '⌘/Ctrl'), '+', el('kbd', '', 'Enter'), ' comments');
   const send = button(sending.has(key) ? 'Sending…' : 'Comment', submit, 'primary');
   send.disabled = sending.has(key);
-  row.append(hint, el('span', 'gap'), send);
+  row.append(el('span', 'gap'), send);
   $('conversation-form').replaceChildren(field, row);
 }
 
@@ -1569,11 +1567,6 @@ function composerBox(draft: Composer): HTMLElement {
     save();
     renderFiles([selection.path]);
   });
-  const hint = (label: string): HTMLElement => {
-    const node = el('span', 'hint');
-    node.append(el('kbd', '', '⌘/Ctrl'), '+', el('kbd', '', 'Enter'), ' ' + label);
-    return node;
-  };
   const cancelLink = button('Cancel', cancel, 'quiet');
   const onDraft = (value: string): void => { draft.text = value; save(); };
   const area = github ? githubField('composer', draft.text, 'Comment on GitHub', onDraft, submit, cancel) : textarea('composer', draft.text, 'Ask Claude about these lines', onDraft, submit, cancel);
@@ -1587,7 +1580,7 @@ function composerBox(draft: Composer): HTMLElement {
     const now = button(busySending && !sentPending ? 'Sending…' : 'Post now', () => send(false));
     now.disabled = busySending || reviewing;
     now.title = reviewing ? 'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.' : 'Posts on GitHub right away.';
-    row.append(reviewing ? el('span', 'hint', 'Your review is in progress, so comments go into it.') : hint('adds to review'), el('span', 'gap'), cancelLink, now, review);
+    row.append(...reviewing ? [el('span', 'hint', 'Your review is in progress, so comments go into it.')] : [], el('span', 'gap'), cancelLink, now, review);
   } else {
     const implement = button('Implement', () => send(true, 'implement'));
     implement.disabled = busySending;
@@ -1595,7 +1588,7 @@ function composerBox(draft: Composer): HTMLElement {
     const ask = button(busySending ? 'Sending…' : 'Ask Claude', submit, 'claude');
     ask.disabled = busySending;
     ask.title = 'Claude answers without editing';
-    row.append(hint('asks'), el('span', 'gap'), cancelLink, implement, ask);
+    row.append(el('span', 'gap'), cancelLink, implement, ask);
   }
   const original = draft.side === 'new' ? selectedText(draft.path, draft.start, draft.end) : undefined;
   if (original !== undefined) {

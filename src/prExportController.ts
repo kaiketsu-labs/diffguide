@@ -183,7 +183,7 @@ body{margin:0;padding:28px 30px 20px}main{max-width:1020px;margin:auto}h1{font-s
 <div class="toolbar"><button id="markdown">Markdown-Vorschau</button><span id="counter" class="muted counter"></span></div>
 <div class="actions"><span class="muted">${escapeHtml(target.viewerLogin)} · GitHub-Kommentar</span><button id="publish" class="primary">${action}</button></div>
 <p id="status" class="status muted" role="status" aria-live="polite">${body === draft.markdown ? '' : 'Ungesendeten Entwurf wiederhergestellt.'}</p>
-<p class="muted footnote">Momentaufnahme · Strg/⌘ + Enter veröffentlicht. Bearbeitete Entwürfe bleiben in dieser VS-Code-Sitzung erhalten.</p>
+<p class="muted footnote">Momentaufnahme · Bearbeitete Entwürfe bleiben in dieser VS-Code-Sitzung erhalten.</p>
 </main><script nonce="${nonce}">
 const api=acquireVsCodeApi();
 const body=document.getElementById('body');
