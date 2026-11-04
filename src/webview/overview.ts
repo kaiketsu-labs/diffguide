@@ -913,13 +913,17 @@ function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
 }
 
 /** What the Files tab shows, for the note above the files: hashes as code, the headline in bold. */
-/** The note's first line: the full commit title, or what the range covers; the button above already shows the hash. */
+/** The note's first line: the commit's copyable hash and full title, or what the range covers. */
 function rangeTitle(shown: DiffRange): (Node | string)[] {
   if (shown.kind === 'all') return ['All changes'];
   if (shown.kind === 'since') return ['Changes since your last review'];
-  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits, ', hashChip(shown.from), ' to ', hashChip(shown.to)];
+  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits, ', commitRef(shown.from), ' to ', commitRef(shown.to)];
   const commit = commitsOf().find((each) => each.oid === shown.from);
-  return commit ? [commit.headline, ...checkMark(commit)] : [];
+  return [commitRef(shown.from), ' ', ...commit ? [commit.headline, ...checkMark(commit)] : []];
+}
+
+function commitRef(oid: string): HTMLButtonElement {
+  return copyRef(oid.slice(0, 7), oid, 'commit SHA');
 }
 
 /** The note's second line: who made the shown commits and when, and what they change as shown. */
