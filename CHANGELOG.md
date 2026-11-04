@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Diff hunks on the review page take their syntax colors from the whole file. A hunk that started inside a docstring, comment or multi-line string showed the following code in string colors before.
 - Re-read GitHub state after PR management actions even when a write fails partway through, so saved reviewer requests and completed merges do not leave a stale review page. Report potentially saved requests when withdrawal fails.
 - Reject PR management messages without edit permission, and correctly preselect users whose login matches a team display name.
 
