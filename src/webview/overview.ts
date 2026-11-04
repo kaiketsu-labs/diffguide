@@ -631,17 +631,30 @@ setInterval(() => { for (const node of document.querySelectorAll<HTMLTimeElement
 
 function avatar(entry: Message, author: string): HTMLElement {
   const url = 'avatarUrl' in entry ? entry.avatarUrl : entry.author === 'claude' ? claudeIcon : current?.details?.viewerAvatarUrl ?? '';
-  if (!url) {
-    const fallback = el('span', 'avatar');
-    fallback.append(icon(codicons.account));
-    fallback.title = author;
-    return fallback;
-  }
+  const name = 'avatarUrl' in entry ? entry.authorName ?? entry.author : entry.author === 'human' ? current?.details?.viewerName : undefined;
+  const fallback = (): HTMLElement => {
+    const letters = name === undefined ? '' : initials(name);
+    const node = el('span', 'avatar' + (letters ? ' initials' : ''), letters);
+    if (!letters) node.append(icon(codicons.account));
+    node.title = author;
+    return node;
+  };
+  if (!url) return fallback();
   const image = el('img', 'avatar' + (url === claudeIcon ? ' claude' : ''));
+  image.addEventListener('error', () => { image.replaceWith(fallback()); }, { once: true });
   image.src = url;
   image.alt = author;
   image.title = author;
   return image;
+}
+
+/** Up to two letters for a person without a picture: first and last word of a name, or the start of a single-word login. */
+function initials(name: string): string {
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const first = words[0];
+  if (first === undefined) return '';
+  const last = words.length > 1 ? words.at(-1) : undefined;
+  return ((first[0] ?? '') + (last?.[0] ?? '')).toUpperCase();
 }
 
 /** Avatar on the left, text beside it. GitHub messages name their author; local ones are You or Claude, which the avatar already says. */

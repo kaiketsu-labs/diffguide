@@ -95,7 +95,7 @@ export interface GitHubThreadView {
   /** In the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
   /** Bodies as GitHub rendered and sanitized them. */
-  readonly messages: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean; readonly createdAt: string }[];
+  readonly messages: readonly { readonly id: string; readonly author: string; readonly authorName?: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean; readonly createdAt: string }[];
 }
 export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string };
 type CommentIntent = Extract<ReviewIntent, 'ask' | 'implement'>;
@@ -547,7 +547,7 @@ details.thread:not([open]){padding-bottom:0}
 .strip .muted:last-child{margin-left:auto}
 .thread textarea{margin-top:var(--space-12);min-height:64px}
 .msg{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);margin-top:var(--space-8)}.msg+.msg{padding-top:var(--space-8);border-top:1px solid var(--line)}
-.msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.claude{box-sizing:border-box;padding:2px;border-radius:0}.msg .avatar svg{width:20px;height:20px;fill:currentColor}
+.msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.claude{box-sizing:border-box;padding:2px;border-radius:0}.msg .avatar svg{width:20px;height:20px;fill:currentColor}.msg .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
 .msg-head{display:flex;align-items:center;gap:var(--space-6);min-height:20px}.msg-head b{font-weight:600}.msg-head .msg-meta{margin-left:auto}
 .msg-meta{display:flex;align-items:center;gap:var(--space-6)}.msg-main>.msg-meta{float:right;margin-left:var(--space-12)}.when{font-size:12px;color:var(--ink-muted)}
 .pill{padding:0 var(--space-6);border:1px solid var(--warning);border-radius:var(--radius-pill);font-size:11px;font-weight:500;color:var(--warning)}
@@ -654,7 +654,8 @@ function githubThreadView(thread: RemoteThread): GitHubThreadView {
     outdated: thread.outdated,
     resolved: thread.resolved,
     pending: thread.pending,
-    messages: thread.comments.map(({ id, author, avatarUrl, pending, bodyHtml, canDelete, createdAt }) => ({ id, author, avatarUrl, pending, html: bodyHtml, canDelete, createdAt })),
+    messages: thread.comments.map(({ id, author, authorName, avatarUrl, pending, bodyHtml, canDelete, createdAt }) => ({
+      id, author, ...authorName === undefined ? {} : { authorName }, avatarUrl, pending, html: bodyHtml, canDelete, createdAt })),
   };
 }
 

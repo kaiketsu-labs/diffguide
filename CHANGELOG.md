@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Comment authors without a loadable avatar, as on GitHub Enterprise, show their initials: from their profile name, or the first letter of their login when they set no name.
 - Guide steps can show the unchanged lines around their changes, with the same expand buttons as the Files tab. The buttons were missing before.
 - Resolving a thread on the review page folds it. It stayed open before.
 - The PR you merge from the review page shows as Merged in the Pull Requests sidebar right away, with a purple merge icon. GitHub's search keeps listing a merged PR as open for a while.

@@ -137,6 +137,9 @@ test('reads the viewer\'s avatar and drops links that are not https', () => {
   const pullRequest = { latestOpinionatedReviews: { nodes: [] }, reviewRequests: { nodes: [] }, commits: { nodes: [] }, labels: { nodes: [] }, assignees: { nodes: [] } };
   assert.equal(parseDetails({ pullRequest }, { avatarUrl: 'https://avatars.githubusercontent.com/u/1' }).viewerAvatarUrl, 'https://avatars.githubusercontent.com/u/1');
   assert.equal(parseDetails({ pullRequest }, { avatarUrl: 'javascript:alert(1)' }).viewerAvatarUrl, '');
+  assert.equal(parseDetails({ pullRequest }, { login: 'fstermann', name: ' Fabian Stermann ' }).viewerName, 'Fabian Stermann');
+  assert.equal(parseDetails({ pullRequest }, { login: 'fstermann', name: null }).viewerName, 'fstermann');
+  assert.equal(parseDetails({ pullRequest }, {}).viewerName, undefined);
 });
 
 test('reads picker options, with teams only for organizations', () => {
@@ -147,7 +150,7 @@ test('reads picker options, with teams only for organizations', () => {
 });
 
 test('reads GitHub review threads, using original lines for outdated ones and skipping file-level threads', () => {
-  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, createdAt: login === null ? undefined : '2026-01-02T03:04:05Z', author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}` } });
+  const comment = (login: string | null, body: string, url = 'https://github.com/acme/app/pull/7#discussion_r1', state = 'SUBMITTED') => ({ id: 'C-' + body, viewerCanDelete: login === 'alice', url, bodyHTML: `<p>${body}</p>`, state, createdAt: login === null ? undefined : '2026-01-02T03:04:05Z', author: login === null ? null : { login, avatarUrl: `https://avatars.githubusercontent.com/${login}`, ...login === 'alice' ? { name: 'Alice Liddell' } : {} } });
   const threads = parseReviewThreads([
     { id: 'T1', path: 'src/a.ts', diffSide: 'RIGHT', line: 12, startLine: 10, originalLine: 3, originalStartLine: 1, isOutdated: false, isResolved: true,
       comments: { nodes: [comment('alice', 'Why?'), comment(null, 'Because.')] } },
@@ -158,7 +161,7 @@ test('reads GitHub review threads, using original lines for outdated ones and sk
   ]);
   assert.deepEqual(threads, [
     { id: 'T1', path: 'src/a.ts', side: 'RIGHT', startLine: 10, endLine: 12, outdated: false, resolved: true, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Why?', author: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z' }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '' }] },
+      comments: [{ id: 'C-Why?', author: 'alice', authorName: 'Alice Liddell', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z' }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '' }] },
     { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1',
       comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z' }] },
   ]);

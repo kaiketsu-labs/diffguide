@@ -74,6 +74,8 @@ export interface PullRequestDetails {
   readonly viewerIsAuthor: boolean;
   /** The signed-in user's GitHub avatar; empty when GitHub sent none. */
   readonly viewerAvatarUrl: string;
+  /** The signed-in user's display name, or login when the profile has none; shown as initials when the avatar is missing. */
+  readonly viewerName?: string;
   /** Comments in the viewer's unsubmitted review; undefined when there is no such review. */
   readonly pendingComments?: number;
   readonly mergeMethods: readonly MergeMethod[];
@@ -97,7 +99,7 @@ export interface RemoteThread {
   readonly pending: boolean;
   /** Bodies come rendered and sanitized by GitHub. */
   /** `canDelete` when the viewer may delete the comment, usually because they wrote it. */
-  readonly comments: readonly { readonly id: string; readonly author: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean; readonly createdAt: string }[];
+  readonly comments: readonly { readonly id: string; readonly author: string; readonly authorName?: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean; readonly createdAt: string }[];
 }
 
 export interface Label { readonly name: string; readonly color: string }
@@ -215,7 +217,7 @@ type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSu
 const searchFields = 'number title url isDraft headRefName baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
-const viewerField = 'viewer{avatarUrl(size:40)}';
+const viewerField = 'viewer{login name avatarUrl(size:40)}';
 const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id} headRepository{nameWithOwner}
   labels(first:50){nodes{name color}} assignees(first:20){nodes{login}}
   reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
@@ -224,7 +226,7 @@ const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuth
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
 const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
-  comments(first:100){nodes{id viewerCanDelete url bodyHTML state createdAt author{login avatarUrl(size:40)}}}} pageInfo{hasNextPage endCursor}}`;
+  comments(first:100){nodes{id viewerCanDelete url bodyHTML state createdAt author{login avatarUrl(size:40) ... on User{name}}}}} pageInfo{hasNextPage endCursor}}`;
 
 /** Group search hits by repository, in the shape `parsePullRequestList` reads. */
 export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
@@ -701,6 +703,7 @@ export function parseDetails(repository: Record<string, unknown>, viewer: Record
     mergeable: pullRequest['mergeable'] === 'MERGEABLE' ? 'yes' : pullRequest['mergeable'] === 'CONFLICTING' ? 'no' : 'unknown',
     viewerIsAuthor: pullRequest['viewerDidAuthor'] === true,
     viewerAvatarUrl: optionalHttpsUrl(viewer['avatarUrl']),
+    ...displayName(viewer) === undefined ? {} : { viewerName: displayName(viewer) as string },
     mergeMethods: methods.filter(([key]) => repository[key] === true).map(([, method]) => method),
     reviewers,
     checks,
@@ -755,6 +758,7 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
         return {
           id: text(comment['id']),
           author: typeof author['login'] === 'string' ? author['login'] : 'ghost',
+          ...typeof author['name'] === 'string' && author['name'].trim() ? { authorName: author['name'].trim() } : {},
           avatarUrl: optionalHttpsUrl(author['avatarUrl']),
           pending: comment['state'] === 'PENDING',
           bodyHtml: typeof comment['bodyHTML'] === 'string' ? comment['bodyHTML'] : '',
@@ -796,6 +800,13 @@ function text(value: unknown): string {
 }
 
 /** Accept only credential-free HTTPS links for browser navigation. */
+/** A user's profile name, else their login; undefined when GitHub sent neither. */
+function displayName(user: Record<string, unknown>): string | undefined {
+  const name = user['name'];
+  if (typeof name === 'string' && name.trim()) return name.trim();
+  return typeof user['login'] === 'string' && user['login'] ? user['login'] : undefined;
+}
+
 /** A link GitHub may leave out, such as a deleted user's avatar; empty when missing or not https. */
 function optionalHttpsUrl(value: unknown): string {
   try {
