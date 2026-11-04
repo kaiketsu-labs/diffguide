@@ -105,6 +105,7 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
     throw new Error(`GitHub request failed (${response.status}).${detail ? ` ${detail}` : ''}`);
   }
   if (text === '') return undefined;
+  if (!(response.headers.get('content-type') ?? 'application/json').includes('json')) return text;
   try {
     return JSON.parse(text) as unknown;
   } catch {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type * as vscode from 'vscode';
 
 import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
@@ -146,7 +147,8 @@ test('reads the viewer\'s avatar and drops links that are not https', () => {
 test('reads picker options, with teams only for organizations', () => {
   const repository = { assignableUsers: { nodes: [{ login: 'alice' }] }, labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] } };
   assert.deepEqual(parsePickerOptions({ ...repository, owner: { teams: { nodes: [{ name: 'Core', slug: 'core' }, { name: 'No slug' }] } } }),
-    { users: ['alice'], teams: [{ name: 'Core', slug: 'core' }], labels: [{ name: 'bug', color: 'd73a4a' }] });
+    { users: ['alice'], teams: [{ name: 'Core', slug: 'core' }], labels: [{ name: 'bug', color: 'd73a4a' }], milestones: [] });
+  assert.deepEqual(parsePickerOptions({ ...repository, owner: {}, milestones: { nodes: [{ number: 3, title: 'v1' }, { title: 'No number' }] } }).milestones, [{ number: 3, title: 'v1' }]);
   assert.deepEqual(parsePickerOptions({ ...repository, owner: {} }).teams, []);
   assert.deepEqual(parsePickerOptions({ ...repository, owner: {}, labels: { nodes: [{ name: 'bug', color: 'd73a4a', description: ' Broken ' }, { name: 'docs', color: '0075ca', description: '' }] } }).labels,
     [{ name: 'bug', color: 'd73a4a', description: 'Broken' }, { name: 'docs', color: '0075ca' }]);
@@ -164,9 +166,9 @@ test('reads GitHub review threads, using original lines for outdated ones and sk
   ]);
   assert.deepEqual(threads, [
     { id: 'T1', path: 'src/a.ts', side: 'RIGHT', startLine: 10, endLine: 12, outdated: false, resolved: true, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Why?', author: 'alice', authorName: 'Alice Liddell', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z' }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '' }] },
+      comments: [{ id: 'C-Why?', author: 'alice', authorName: 'Alice Liddell', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }] },
     { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1',
-      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z' }] },
+      comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }] },
   ]);
   assert.throws(() => parseReviewThreads([{ id: 'T4', path: 'a', line: 1, isOutdated: false, comments: { nodes: [comment('x', 'y', 'javascript:alert(1)')] } }]), /invalid link/u);
 });
@@ -181,6 +183,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   window.trees.length = 0;
   env.opened.length = 0;
   const provider: PullRequestProvider = {
+  ...mockPullRequestProvider,
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
     listMine: async () => [],
     listReviewRequested: async () => [summary],
@@ -334,6 +337,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   const listed: string[] = [];
   const connected: string[] = [];
   const provider = (name: string, pullRequests: readonly PullRequestSummary[]): PullRequestProvider => ({
+  ...mockPullRequestProvider,
     readRepository: async () => ({ name, url: `https://github.com/${name}` }),
     listMine: async () => pullRequests,
     listReviewRequested: async () => [],
@@ -441,6 +445,7 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   let release: () => void = () => undefined;
   const slow = new Promise<void>((resolve) => { release = resolve; });
   const provider: PullRequestProvider = {
+  ...mockPullRequestProvider,
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
     listMine: async () => { await slow; return [{ ...summary, number: 8, title: 'feat(ui): Fresh' }]; },
     listReviewRequested: async () => [],

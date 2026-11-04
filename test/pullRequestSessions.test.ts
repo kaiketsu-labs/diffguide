@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { afterEach } from 'node:test';
 import { promisify } from 'node:util';
+import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type * as vscode from 'vscode';
 
 import { pullRequestFileUri } from '../src/pullRequestDiff.js';
@@ -49,6 +50,7 @@ const pullRequest: PullRequestSummary = {
 
 const published: { number: number; comment: PullRequestComment; pending: boolean }[] = [];
 const provider: PullRequestProvider = {
+  ...mockPullRequestProvider,
   readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
   listMine: async () => [],
   listReviewRequested: async () => [],

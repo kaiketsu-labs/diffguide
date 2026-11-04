@@ -82,7 +82,99 @@ export interface PullRequestDetails {
   /** `team` holds the team's slug for a requested team. */
   readonly reviewers: readonly { readonly name: string; readonly state: 'requested' | 'approved' | 'changes' | 'commented' | 'dismissed'; readonly team?: string }[];
   readonly checks: readonly { readonly name: string; readonly state: 'success' | 'failure' | 'pending' | 'neutral'; readonly url?: string }[];
+  readonly milestone?: Milestone;
 }
+
+export interface Milestone { readonly number: number; readonly title: string }
+
+export type ReactionContent = 'THUMBS_UP' | 'THUMBS_DOWN' | 'LAUGH' | 'HOORAY' | 'CONFUSED' | 'HEART' | 'ROCKET' | 'EYES';
+export const reactionContents: readonly ReactionContent[] = ['THUMBS_UP', 'THUMBS_DOWN', 'LAUGH', 'HOORAY', 'CONFUSED', 'HEART', 'ROCKET', 'EYES'];
+
+export interface ReactionCount { readonly content: ReactionContent; readonly count: number; readonly viewerReacted: boolean }
+
+/** A comment anyone wrote on GitHub, with what the viewer may do to it. Bodies come rendered and sanitized by GitHub; `body` is the Markdown for editing and quoting. */
+export interface GitHubComment {
+  readonly id: string;
+  readonly author: string;
+  readonly authorName?: string;
+  readonly avatarUrl: string;
+  readonly createdAt: string;
+  readonly bodyHtml: string;
+  readonly body: string;
+  readonly url?: string;
+  readonly canEdit: boolean;
+  readonly canDelete: boolean;
+  readonly canHide: boolean;
+  readonly canReact: boolean;
+  /** Why it is hidden, such as "outdated"; absent when shown. */
+  readonly hidden?: string;
+  readonly edited: boolean;
+  readonly reactions: readonly ReactionCount[];
+}
+
+/** One entry of a PR's Conversation tab, oldest first. */
+export type TimelineItem =
+  | (GitHubComment & { readonly kind: 'comment' })
+  | (GitHubComment & { readonly kind: 'review'; readonly state: 'approved' | 'changes' | 'commented' | 'dismissed' | 'pending'; readonly commit?: string })
+  | { readonly kind: 'commit'; readonly id: string; readonly oid: string; readonly headline: string; readonly message: string; readonly author: string; readonly avatarUrl: string; readonly createdAt: string; readonly checks?: 'success' | 'failure' | 'pending' }
+  | { readonly kind: 'event'; readonly id: string; readonly actor: string; readonly avatarUrl: string; readonly createdAt: string; readonly text: string };
+
+export type MergeState = 'behind' | 'blocked' | 'clean' | 'dirty' | 'hasHooks' | 'unknown' | 'unstable';
+export type RepositoryPermission = 'admin' | 'maintain' | 'write' | 'triage' | 'read' | 'none';
+
+/** What GitHub's merge box knows beyond conflicts: branch protection, auto-merge and the merge queue. */
+export interface MergeStatus {
+  readonly state: MergeState;
+  readonly reviewDecision?: 'approved' | 'changes' | 'required';
+  readonly canUpdateBranch: boolean;
+  /** The viewer may merge although branch protection blocks it. */
+  readonly canBypass: boolean;
+  readonly autoMerge?: { readonly method: MergeMethod; readonly enabledBy: string };
+  readonly canEnableAutoMerge: boolean;
+  readonly canDisableAutoMerge: boolean;
+  readonly mergeQueue: boolean;
+  /** 1-based place in the merge queue while queued. */
+  readonly queuePosition?: number;
+  readonly headOid: string;
+  /** The head branch is gone from GitHub. */
+  readonly headDeleted: boolean;
+}
+
+/** A check's extras for the merge box and the diff; `runId` is the GitHub Actions run, for re-running it. */
+export interface CheckExtras { readonly name: string; readonly required: boolean; readonly runId?: number; readonly annotations: readonly Annotation[] }
+
+/** A check's note on lines of the PR's version of a file. */
+export interface Annotation { readonly path: string; readonly startLine: number; readonly endLine: number; readonly level: 'failure' | 'warning' | 'notice'; readonly title: string; readonly message: string }
+
+/** How the repository words merge commits by default, as GitHub's merge box fills them in. */
+export interface CommitDefaults {
+  readonly squashTitle: 'PR_TITLE' | 'COMMIT_OR_PR_TITLE';
+  readonly squashBody: 'PR_BODY' | 'COMMIT_MESSAGES' | 'BLANK';
+  readonly mergeTitle: 'PR_TITLE' | 'MERGE_MESSAGE';
+  readonly mergeBody: 'PR_TITLE' | 'PR_BODY' | 'BLANK';
+}
+
+/** The PR's Conversation tab and merge box extras, read apart from its details so older GitHub servers keep the rest of the page. */
+export interface PullRequestConversation {
+  readonly timeline: readonly TimelineItem[];
+  /** The PR's own node, for reacting to its description. */
+  readonly description: { readonly id: string; readonly reactions: readonly ReactionCount[]; readonly canReact: boolean };
+  readonly viewerLogin: string;
+  readonly permission: RepositoryPermission;
+  readonly merge: MergeStatus;
+  readonly checks: readonly CheckExtras[];
+  readonly linkedIssues: readonly { readonly number: number; readonly title: string; readonly url: string; readonly open: boolean }[];
+  /** Each reviewer's latest approving or change-requesting review, by login, for dismissing it. */
+  readonly reviewIds: Readonly<Record<string, string>>;
+  readonly commitDefaults: CommitDefaults;
+  /** The head commit of the viewer's latest submitted review. */
+  readonly lastReviewedCommit?: string;
+  /** GitHub Actions runs from a fork waiting for a maintainer to approve them. */
+  readonly awaitingApproval: readonly number[];
+}
+
+/** Optional merge commit wording; GitHub uses its defaults for what is left out. */
+export interface MergeMessage { readonly headline?: string; readonly body?: string }
 
 /** A diff comment thread on the code host, written by anyone. */
 export interface RemoteThread {
@@ -97,9 +189,7 @@ export interface RemoteThread {
   readonly url: string;
   /** Still in the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
-  /** Bodies come rendered and sanitized by GitHub. */
-  /** `canDelete` when the viewer may delete the comment, usually because they wrote it. */
-  readonly comments: readonly { readonly id: string; readonly author: string; readonly authorName?: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean; readonly createdAt: string }[];
+  readonly comments: readonly (GitHubComment & { readonly pending: boolean })[];
 }
 
 /** `description` is read only for the label picker. */
@@ -110,6 +200,7 @@ export interface PickerOptions {
   readonly users: readonly string[];
   readonly teams: readonly { readonly name: string; readonly slug: string }[];
   readonly labels: readonly Label[];
+  readonly milestones: readonly Milestone[];
 }
 
 /** Users by login and teams by slug. */
@@ -122,10 +213,16 @@ export interface PullRequestEdit {
   readonly state?: 'open' | 'closed';
   readonly labels?: readonly string[];
   readonly assignees?: readonly string[];
+  /** A milestone number, or null to clear it. */
+  readonly milestone?: number | null;
 }
+
+/** Something on GitHub that holds comments and reactions, named by node id. */
+export type CommentKind = 'issue' | 'review' | 'reviewComment';
 
 export type ReviewEvent = 'approve' | 'requestChanges' | 'comment';
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
+const graphqlMethods: Record<MergeMethod, string> = { merge: 'MERGE', squash: 'SQUASH', rebase: 'REBASE' };
 
 /** Pull request queries and the user's own review actions, implemented once per code host CLI. */
 export interface PullRequestProvider {
@@ -151,13 +248,42 @@ export interface PullRequestProvider {
   deleteComment(commentId: string): Promise<void>;
   /** Submit the user's review, including comments already in their pending review. */
   submitReview(number: number, event: ReviewEvent, body: string): Promise<void>;
-  merge(number: number, method: MergeMethod): Promise<void>;
+  merge(number: number, method: MergeMethod, message?: MergeMessage): Promise<void>;
   editPullRequest(number: number, edit: PullRequestEdit): Promise<void>;
   setDraft(number: number, draft: boolean): Promise<void>;
   requestReviewers(number: number, reviewers: ReviewerSet): Promise<void>;
   removeReviewers(number: number, reviewers: ReviewerSet): Promise<void>;
   deleteBranch(branch: string): Promise<void>;
   pickerOptions(): Promise<PickerOptions>;
+  /** Search this repository's PRs with GitHub search syntax, such as `is:closed` or `assignee:@me`. */
+  search(query: string): Promise<readonly PullRequestSummary[]>;
+  conversation(number: number): Promise<PullRequestConversation>;
+  /** Post a comment on the PR itself, outside any review. */
+  addComment(number: number, body: string): Promise<void>;
+  editComment(kind: CommentKind, id: string, body: string): Promise<void>;
+  /** Delete a comment on the PR itself; review comments use `deleteComment`. */
+  deleteIssueComment(id: string): Promise<void>;
+  /** Hide a comment for a reason such as OUTDATED, or show it again with `undefined`. */
+  hideComment(id: string, reason: string | undefined): Promise<void>;
+  react(subjectId: string, content: ReactionContent, on: boolean): Promise<void>;
+  discardPendingReview(number: number): Promise<void>;
+  dismissReview(reviewId: string, message: string): Promise<void>;
+  updateBranch(number: number, method: 'merge' | 'rebase'): Promise<void>;
+  enableAutoMerge(number: number, method: MergeMethod, message: MergeMessage): Promise<void>;
+  disableAutoMerge(number: number): Promise<void>;
+  enqueue(number: number): Promise<void>;
+  dequeue(number: number): Promise<void>;
+  /** Open a PR that reverts this merged one; returns its number and link. */
+  revert(number: number): Promise<{ readonly number: number; readonly url: string }>;
+  /** Create the head branch again at `oid` after it was deleted. */
+  restoreBranch(branch: string, oid: string): Promise<void>;
+  rerunFailedJobs(runId: number): Promise<void>;
+  approveWorkflowRun(runId: number): Promise<void>;
+  changeBase(number: number, base: string): Promise<void>;
+  /** Branch names of this repository, for picking a new base. */
+  branches(): Promise<readonly string[]>;
+  /** GitHub's rendering of Markdown in this repository, for previewing a comment. */
+  renderMarkdown(text: string): Promise<string>;
 }
 
 /** A repository on a GitHub host, as a git remote names it. */
@@ -220,14 +346,58 @@ const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
 const viewerField = 'viewer{login name avatarUrl(size:40)}';
 const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id} headRepository{nameWithOwner}
-  labels(first:50){nodes{name color}} assignees(first:20){nodes{login}}
+  labels(first:50){nodes{name color}} assignees(first:20){nodes{login}} milestone{number title}
   reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
   reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name slug} ... on Bot{login}}}}
   latestOpinionatedReviews(first:30){nodes{state author{login}}}
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
+const reactionFields = 'reactionGroups{content viewerHasReacted reactors{totalCount}}';
+const commentFields = `id url body bodyHTML createdAt lastEditedAt viewerCanUpdate viewerCanDelete viewerCanMinimize viewerCanReact isMinimized minimizedReason
+  author{login avatarUrl(size:40) ... on User{name}} ${reactionFields}`;
 const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
-  comments(first:100){nodes{id viewerCanDelete url bodyHTML state createdAt author{login avatarUrl(size:40) ... on User{name}}}}} pageInfo{hasNextPage endCursor}}`;
+  comments(first:100){nodes{${commentFields} state}}} pageInfo{hasNextPage endCursor}}`;
+const actorField = 'actor{login avatarUrl(size:40)}';
+const userLogin = '... on User{login} ... on Bot{login} ... on Mannequin{login}';
+const timelineTypes = ['ISSUE_COMMENT', 'PULL_REQUEST_REVIEW', 'PULL_REQUEST_COMMIT', 'HEAD_REF_FORCE_PUSHED_EVENT', 'LABELED_EVENT', 'UNLABELED_EVENT',
+  'REVIEW_REQUESTED_EVENT', 'REVIEW_REQUEST_REMOVED_EVENT', 'REVIEW_DISMISSED_EVENT', 'MERGED_EVENT', 'CLOSED_EVENT', 'REOPENED_EVENT', 'READY_FOR_REVIEW_EVENT',
+  'CONVERT_TO_DRAFT_EVENT', 'ASSIGNED_EVENT', 'UNASSIGNED_EVENT', 'RENAMED_TITLE_EVENT', 'BASE_REF_CHANGED_EVENT', 'HEAD_REF_DELETED_EVENT', 'HEAD_REF_RESTORED_EVENT',
+  'CROSS_REFERENCED_EVENT', 'AUTO_MERGE_ENABLED_EVENT', 'AUTO_MERGE_DISABLED_EVENT', 'MILESTONED_EVENT', 'DEMILESTONED_EVENT'].join(',');
+const timelineField = `timelineItems(first:100,after:$after,itemTypes:[${timelineTypes}]){pageInfo{hasNextPage endCursor} nodes{__typename
+  ... on IssueComment{${commentFields}}
+  ... on PullRequestReview{${commentFields} state submittedAt commit{oid}}
+  ... on PullRequestCommit{id pushed:commit{oid messageHeadline messageBody committedDate statusCheckRollup{state} author{name avatarUrl(size:40) user{login}}}}
+  ... on HeadRefForcePushedEvent{id createdAt ${actorField} beforeCommit{abbreviatedOid} afterCommit{abbreviatedOid}}
+  ... on LabeledEvent{id createdAt ${actorField} label{name}}
+  ... on UnlabeledEvent{id createdAt ${actorField} label{name}}
+  ... on ReviewRequestedEvent{id createdAt ${actorField} requestedReviewer{${userLogin} ... on Team{name}}}
+  ... on ReviewRequestRemovedEvent{id createdAt ${actorField} requestedReviewer{${userLogin} ... on Team{name}}}
+  ... on ReviewDismissedEvent{id createdAt ${actorField} review{author{login}}}
+  ... on MergedEvent{id createdAt ${actorField} commit{abbreviatedOid} mergeRefName}
+  ... on ClosedEvent{id createdAt ${actorField}}
+  ... on ReopenedEvent{id createdAt ${actorField}}
+  ... on ReadyForReviewEvent{id createdAt ${actorField}}
+  ... on ConvertToDraftEvent{id createdAt ${actorField}}
+  ... on AssignedEvent{id createdAt ${actorField} assignee{${userLogin}}}
+  ... on UnassignedEvent{id createdAt ${actorField} assignee{${userLogin}}}
+  ... on RenamedTitleEvent{id createdAt ${actorField} previousTitle currentTitle}
+  ... on BaseRefChangedEvent{id createdAt ${actorField} previousRefName currentRefName}
+  ... on HeadRefDeletedEvent{id createdAt ${actorField} headRefName}
+  ... on HeadRefRestoredEvent{id createdAt ${actorField}}
+  ... on CrossReferencedEvent{id createdAt ${actorField} willCloseTarget source{... on Issue{number title repository{nameWithOwner}} ... on PullRequest{number title repository{nameWithOwner}}}}
+  ... on AutoMergeEnabledEvent{id createdAt ${actorField}}
+  ... on AutoMergeDisabledEvent{id createdAt ${actorField}}
+  ... on MilestonedEvent{id createdAt ${actorField} milestoneTitle}
+  ... on DemilestonedEvent{id createdAt ${actorField} milestoneTitle}}}`;
+const conversationFields = `viewerPermission squashMergeCommitTitle squashMergeCommitMessage mergeCommitTitle mergeCommitMessage pullRequest(number:$number){
+  id viewerCanReact ${reactionFields} mergeStateStatus reviewDecision viewerCanUpdateBranch viewerCanMergeAsAdmin viewerCanEnableAutoMerge viewerCanDisableAutoMerge
+  isMergeQueueEnabled mergeQueueEntry{position} headRefOid headRef{id} isCrossRepository autoMergeRequest{mergeMethod enabledBy{login}}
+  closingIssuesReferences(first:10){nodes{number title url state}}
+  latestOpinionatedReviews(first:30){nodes{id author{login}}}
+  commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
+    ... on CheckRun{name isRequired(pullRequestNumber:$number) checkSuite{workflowRun{databaseId}} annotations(first:50){nodes{path annotationLevel title message location{start{line} end{line}}}}}
+    ... on StatusContext{context isRequired(pullRequestNumber:$number)}}}}}}}
+  ${timelineField}}`;
 
 /** Group search hits by repository, in the shape `parsePullRequestList` reads. */
 export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
@@ -473,10 +643,9 @@ export class GitHubApiProvider implements PullRequestProvider {
       { id: await this.#pullRequestId(number), event: events[event], body });
   }
 
-  async merge(number: number, method: MergeMethod): Promise<void> {
-    const methods: Record<MergeMethod, string> = { merge: 'MERGE', squash: 'SQUASH', rebase: 'REBASE' };
-    await this.#graphql('mutation($id:ID!,$method:PullRequestMergeMethod!){mergePullRequest(input:{pullRequestId:$id,mergeMethod:$method}){clientMutationId}}',
-      { id: await this.#pullRequestId(number), method: methods[method] });
+  async merge(number: number, method: MergeMethod, message: MergeMessage = {}): Promise<void> {
+    await this.#graphql('mutation($id:ID!,$method:PullRequestMergeMethod!,$headline:String,$body:String){mergePullRequest(input:{pullRequestId:$id,mergeMethod:$method,commitHeadline:$headline,commitBody:$body}){clientMutationId}}',
+      { id: await this.#pullRequestId(number), method: graphqlMethods[method], headline: message.headline ?? null, body: message.body ?? null });
   }
 
   async editPullRequest(number: number, edit: PullRequestEdit): Promise<void> {
@@ -502,9 +671,156 @@ export class GitHubApiProvider implements PullRequestProvider {
 
   async pickerOptions(): Promise<PickerOptions> {
     const data = await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
-      assignableUsers(first:100){nodes{login}} labels(first:100){nodes{name color description}}
+      assignableUsers(first:100){nodes{login}} labels(first:100){nodes{name color description}} milestones(first:50,states:OPEN){nodes{number title}}
       owner{... on Organization{teams(first:100){nodes{name slug}}}}}}`, {});
     return parsePickerOptions(object(data['repository']));
+  }
+
+  async search(query: string): Promise<readonly PullRequestSummary[]> {
+    const { owner, name, host } = await this.#repo();
+    const data = await this.#graphqlOn(host, `query($query:String!){search(query:$query,type:ISSUE,first:50){nodes{... on PullRequest{${searchFields}}}}}`,
+      { query: `repo:${owner}/${name} is:pr ${query}` });
+    const nodes = list(object(data['search'])['nodes']).filter((node) => typeof node === 'object' && node !== null && 'number' in node);
+    return parsePullRequestList(nodes.map((node) => {
+      const record = object(node);
+      return { ...record, author: record['author'] ?? { login: 'ghost' }, latestReviews: list(object(record['latestReviews'] ?? { nodes: [] })['nodes']) };
+    }));
+  }
+
+  async conversation(number: number): Promise<PullRequestConversation> {
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){viewer{login} repository(owner:$owner,name:$name){${conversationFields}}}`,
+      { number, after: null });
+    const repository = object(data['repository']);
+    const pullRequest = object(repository['pullRequest']);
+    const nodes: unknown[] = [];
+    let page = object(pullRequest['timelineItems']);
+    for (let count = 0; count < 10; count++) {
+      nodes.push(...list(page['nodes']));
+      const info = object(page['pageInfo']);
+      if (info['hasNextPage'] !== true) break;
+      const next = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){${timelineField}}}}`,
+        { number, after: text(info['endCursor']) });
+      page = object(object(object(next['repository'])['pullRequest'])['timelineItems']);
+    }
+    const parsed = parseConversation(repository, object(data['viewer']), nodes);
+    if (pullRequest['isCrossRepository'] !== true || !canWrite(parsed.permission)) return parsed;
+    const runs = await this.#restGet(`actions/runs?status=action_required&head_sha=${encodeURIComponent(parsed.merge.headOid)}&per_page=20`).catch(() => undefined);
+    const ids = typeof runs === 'object' && runs !== null && Array.isArray((runs as Record<string, unknown>)['workflow_runs'])
+      ? ((runs as Record<string, unknown>)['workflow_runs'] as unknown[]).map((run) => (typeof run === 'object' && run !== null ? (run as Record<string, unknown>)['id'] : undefined))
+        .filter((id): id is number => Number.isSafeInteger(id))
+      : [];
+    return { ...parsed, awaitingApproval: ids };
+  }
+
+  async addComment(number: number, body: string): Promise<void> {
+    await this.#graphql('mutation($id:ID!,$body:String!){addComment(input:{subjectId:$id,body:$body}){clientMutationId}}', { id: await this.#pullRequestId(number), body });
+  }
+
+  async editComment(kind: CommentKind, id: string, body: string): Promise<void> {
+    const mutations: Record<CommentKind, string> = {
+      issue: 'updateIssueComment(input:{id:$id,body:$body})',
+      review: 'updatePullRequestReview(input:{pullRequestReviewId:$id,body:$body})',
+      reviewComment: 'updatePullRequestReviewComment(input:{pullRequestReviewCommentId:$id,body:$body})',
+    };
+    await this.#graphql(`mutation($id:ID!,$body:String!){${mutations[kind]}{clientMutationId}}`, { id, body });
+  }
+
+  async deleteIssueComment(id: string): Promise<void> {
+    await this.#graphql('mutation($id:ID!){deleteIssueComment(input:{id:$id}){clientMutationId}}', { id });
+  }
+
+  async hideComment(id: string, reason: string | undefined): Promise<void> {
+    if (reason === undefined) await this.#graphql('mutation($id:ID!){unminimizeComment(input:{subjectId:$id}){clientMutationId}}', { id });
+    else await this.#graphql('mutation($id:ID!,$reason:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$reason}){clientMutationId}}', { id, reason });
+  }
+
+  async react(subjectId: string, content: ReactionContent, on: boolean): Promise<void> {
+    const mutation = on ? 'addReaction' : 'removeReaction';
+    await this.#graphql(`mutation($id:ID!,$content:ReactionContent!){${mutation}(input:{subjectId:$id,content:$content}){clientMutationId}}`, { id: subjectId, content });
+  }
+
+  async discardPendingReview(number: number): Promise<void> {
+    const review = await this.#ownPendingReview(number);
+    if (review === undefined) throw new Error('You have no pending review on this PR.');
+    await this.#graphql('mutation($id:ID!){deletePullRequestReview(input:{pullRequestReviewId:$id}){clientMutationId}}', { id: review });
+  }
+
+  async dismissReview(reviewId: string, message: string): Promise<void> {
+    await this.#graphql('mutation($id:ID!,$message:String!){dismissPullRequestReview(input:{pullRequestReviewId:$id,message:$message}){clientMutationId}}', { id: reviewId, message });
+  }
+
+  async updateBranch(number: number, method: 'merge' | 'rebase'): Promise<void> {
+    await this.#graphql('mutation($id:ID!,$method:PullRequestBranchUpdateMethod){updatePullRequestBranch(input:{pullRequestId:$id,updateMethod:$method}){clientMutationId}}',
+      { id: await this.#pullRequestId(number), method: method === 'rebase' ? 'REBASE' : 'MERGE' });
+  }
+
+  async enableAutoMerge(number: number, method: MergeMethod, message: MergeMessage): Promise<void> {
+    await this.#graphql('mutation($id:ID!,$method:PullRequestMergeMethod!,$headline:String,$body:String){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:$method,commitHeadline:$headline,commitBody:$body}){clientMutationId}}',
+      { id: await this.#pullRequestId(number), method: graphqlMethods[method], headline: message.headline ?? null, body: message.body ?? null });
+  }
+
+  async disableAutoMerge(number: number): Promise<void> {
+    await this.#graphql('mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){clientMutationId}}', { id: await this.#pullRequestId(number) });
+  }
+
+  async enqueue(number: number): Promise<void> {
+    await this.#graphql('mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){clientMutationId}}', { id: await this.#pullRequestId(number) });
+  }
+
+  async dequeue(number: number): Promise<void> {
+    await this.#graphql('mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}', { id: await this.#pullRequestId(number) });
+  }
+
+  async revert(number: number): Promise<{ readonly number: number; readonly url: string }> {
+    const data = await this.#graphql('mutation($id:ID!){revertPullRequest(input:{pullRequestId:$id}){revertPullRequest{number url}}}', { id: await this.#pullRequestId(number) });
+    const created = object(object(data['revertPullRequest'])['revertPullRequest']);
+    const revertNumber = created['number'];
+    if (!Number.isSafeInteger(revertNumber)) throw new Error('GitHub did not open the revert PR.');
+    return { number: revertNumber as number, url: httpsUrl(created['url']) };
+  }
+
+  async restoreBranch(branch: string, oid: string): Promise<void> {
+    if (!/^[a-f\d]{40,64}$/u.test(oid)) throw new Error('Unknown head commit.');
+    await this.#rest('git/refs', 'POST', { ref: `refs/heads/${branch}`, sha: oid });
+  }
+
+  async rerunFailedJobs(runId: number): Promise<void> {
+    await this.#rest(`actions/runs/${runId}/rerun-failed-jobs`, 'POST');
+  }
+
+  async approveWorkflowRun(runId: number): Promise<void> {
+    await this.#rest(`actions/runs/${runId}/approve`, 'POST');
+  }
+
+  async changeBase(number: number, base: string): Promise<void> {
+    await this.#rest(`pulls/${number}`, 'PATCH', { base });
+  }
+
+  async branches(): Promise<readonly string[]> {
+    const names: string[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < 10; page++) {
+      const data = await this.#graphql('query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){refs(refPrefix:"refs/heads/",first:100,after:$after){nodes{name} pageInfo{hasNextPage endCursor}}}}', { after });
+      const refs = object(object(data['repository'])['refs']);
+      names.push(...list(refs['nodes']).map((node) => text(object(node)['name'])));
+      const info = object(refs['pageInfo']);
+      if (info['hasNextPage'] !== true) break;
+      after = text(info['endCursor']);
+    }
+    return names;
+  }
+
+  async renderMarkdown(markdown: string): Promise<string> {
+    const { owner, name, host } = await this.#repo();
+    const endpoints = endpointsFor(host);
+    const html = await githubRequest(endpoints, `${endpoints.rest}/markdown`, 'POST', { text: markdown, mode: 'gfm', context: `${owner}/${name}` });
+    return typeof html === 'string' ? html : '';
+  }
+
+  async #restGet(path: string): Promise<unknown> {
+    const { owner, name, host } = await this.#repo();
+    const endpoints = endpointsFor(host);
+    return await githubRequest(endpoints, `${endpoints.rest}/repos/${owner}/${name}/${path}`, 'GET');
   }
 
   /** Call a REST endpoint under this repository. */
@@ -708,6 +1024,233 @@ export function parseDetails(repository: Record<string, unknown>, viewer: Record
     mergeMethods: methods.filter(([key]) => repository[key] === true).map(([, method]) => method),
     reviewers,
     checks,
+    ...parseMilestone(pullRequest['milestone']),
+  };
+}
+
+function parseMilestone(value: unknown): { milestone?: Milestone } {
+  if (typeof value !== 'object' || value === null) return {};
+  const { number, title } = value as Record<string, unknown>;
+  return Number.isSafeInteger(number) && typeof title === 'string' ? { milestone: { number: number as number, title } } : {};
+}
+
+const reactionSet: ReadonlySet<string> = new Set(reactionContents);
+
+/** Reactions anyone left, in GitHub's order, without empty ones. */
+function parseReactions(groups: unknown): readonly ReactionCount[] {
+  if (!Array.isArray(groups)) return [];
+  return groups.map(object).flatMap((group) => {
+    const content = group['content'];
+    const total = count(object(group['reactors'] ?? {})['totalCount']);
+    return typeof content === 'string' && reactionSet.has(content) && total !== undefined && total > 0
+      ? [{ content: content as ReactionContent, count: total, viewerReacted: group['viewerHasReacted'] === true }] : [];
+  });
+}
+
+/** A comment, review or review comment as GitHub sent it; a deleted user shows as ghost. */
+export function parseComment(comment: Record<string, unknown>): GitHubComment {
+  const author = comment['author'] === null || comment['author'] === undefined ? {} : object(comment['author']);
+  const url = typeof comment['url'] === 'string' ? optionalHttpsUrl(comment['url']) : '';
+  const reason = comment['minimizedReason'];
+  return {
+    id: text(comment['id']),
+    author: typeof author['login'] === 'string' ? author['login'] : 'ghost',
+    ...typeof author['name'] === 'string' && author['name'].trim() ? { authorName: author['name'].trim() } : {},
+    avatarUrl: optionalHttpsUrl(author['avatarUrl']),
+    createdAt: typeof comment['createdAt'] === 'string' ? comment['createdAt'] : '',
+    bodyHtml: typeof comment['bodyHTML'] === 'string' ? comment['bodyHTML'] : '',
+    body: typeof comment['body'] === 'string' ? comment['body'] : '',
+    ...url ? { url } : {},
+    canEdit: comment['viewerCanUpdate'] === true,
+    canDelete: comment['viewerCanDelete'] === true,
+    canHide: comment['viewerCanMinimize'] === true,
+    canReact: comment['viewerCanReact'] === true,
+    ...comment['isMinimized'] === true ? { hidden: typeof reason === 'string' && reason ? reason.toLowerCase().replaceAll('_', ' ') : 'hidden' } : {},
+    edited: typeof comment['lastEditedAt'] === 'string',
+    reactions: parseReactions(comment['reactionGroups']),
+  };
+}
+
+const reviewTimelineStates: Record<string, Extract<TimelineItem, { kind: 'review' }>['state']> = {
+  APPROVED: 'approved', CHANGES_REQUESTED: 'changes', COMMENTED: 'commented', DISMISSED: 'dismissed', PENDING: 'pending',
+};
+
+function login(value: unknown): string {
+  return typeof value === 'object' && value !== null && typeof (value as { login?: unknown }).login === 'string' ? (value as { login: string }).login : 'ghost';
+}
+
+/** What a timeline event says, in GitHub's words without the actor; undefined for events the page leaves out. */
+function eventText(node: Record<string, unknown>): string | undefined {
+  const name = (value: unknown): string => {
+    const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+    return typeof record['login'] === 'string' ? record['login'] : typeof record['name'] === 'string' ? record['name'] : 'someone';
+  };
+  const field = (key: string): string => typeof node[key] === 'string' ? node[key] : '';
+  const label = (): string => typeof node['label'] === 'object' && node['label'] !== null ? String((node['label'] as { name?: unknown }).name ?? '') : '';
+  const short = (key: string): string => typeof node[key] === 'object' && node[key] !== null ? String((node[key] as { abbreviatedOid?: unknown }).abbreviatedOid ?? '') : '';
+  switch (node['__typename']) {
+    case 'HeadRefForcePushedEvent': return `force-pushed the branch from ${short('beforeCommit') || 'an earlier commit'} to ${short('afterCommit') || 'a new commit'}`;
+    case 'LabeledEvent': return `added the ${label()} label`;
+    case 'UnlabeledEvent': return `removed the ${label()} label`;
+    case 'ReviewRequestedEvent': return `requested a review from ${name(node['requestedReviewer'])}`;
+    case 'ReviewRequestRemovedEvent': return `removed the review request for ${name(node['requestedReviewer'])}`;
+    case 'ReviewDismissedEvent': return `dismissed ${login(object(node['review'] ?? {})['author'])}'s review`;
+    case 'MergedEvent': return `merged commit ${short('commit')} into ${field('mergeRefName')}`;
+    case 'ClosedEvent': return 'closed this';
+    case 'ReopenedEvent': return 'reopened this';
+    case 'ReadyForReviewEvent': return 'marked this ready for review';
+    case 'ConvertToDraftEvent': return 'converted this to a draft';
+    case 'AssignedEvent': return `assigned ${name(node['assignee'])}`;
+    case 'UnassignedEvent': return `unassigned ${name(node['assignee'])}`;
+    case 'RenamedTitleEvent': return `changed the title from "${field('previousTitle')}" to "${field('currentTitle')}"`;
+    case 'BaseRefChangedEvent': return `changed the base branch from ${field('previousRefName')} to ${field('currentRefName')}`;
+    case 'HeadRefDeletedEvent': return `deleted the ${field('headRefName')} branch`;
+    case 'HeadRefRestoredEvent': return 'restored the head branch';
+    case 'CrossReferencedEvent': {
+      const source = typeof node['source'] === 'object' && node['source'] !== null ? node['source'] as Record<string, unknown> : {};
+      if (!Number.isSafeInteger(source['number'])) return undefined;
+      const where = String((source['repository'] as { nameWithOwner?: unknown } | undefined)?.nameWithOwner ?? '');
+      return `${node['willCloseTarget'] === true ? 'linked' : 'mentioned this in'} ${where}#${String(source['number'])} ${String(source['title'] ?? '')}`.trim();
+    }
+    case 'AutoMergeEnabledEvent': return 'enabled auto-merge';
+    case 'AutoMergeDisabledEvent': return 'disabled auto-merge';
+    case 'MilestonedEvent': return `added this to the ${field('milestoneTitle')} milestone`;
+    case 'DemilestonedEvent': return `removed this from the ${field('milestoneTitle')} milestone`;
+    default: return undefined;
+  }
+}
+
+/** Timeline entries the page shows, skipping kinds it does not know and entries GitHub sent incomplete. */
+export function parseTimeline(nodes: readonly unknown[]): readonly TimelineItem[] {
+  const items: TimelineItem[] = [];
+  for (const entry of nodes) {
+    if (typeof entry !== 'object' || entry === null || typeof (entry as { id?: unknown }).id !== 'string') continue;
+    const node = entry as Record<string, unknown>;
+    const kind = node['__typename'];
+    if (kind === 'IssueComment') items.push({ kind: 'comment', ...parseComment(node) });
+    else if (kind === 'PullRequestReview') {
+      const state = reviewTimelineStates[String(node['state'])];
+      if (state === undefined) continue;
+      const commit = typeof node['commit'] === 'object' && node['commit'] !== null ? (node['commit'] as { oid?: unknown }).oid : undefined;
+      const comment = parseComment(node);
+      const submitted = typeof node['submittedAt'] === 'string' ? node['submittedAt'] : comment.createdAt;
+      items.push({ kind: 'review', ...comment, createdAt: submitted, state, ...typeof commit === 'string' ? { commit } : {} });
+    } else if (kind === 'PullRequestCommit') {
+      const commit = object(node['pushed']);
+      const oid = commit['oid'];
+      if (typeof oid !== 'string' || !/^[a-f\d]{40,64}$/u.test(oid)) continue;
+      const author = object(commit['author'] ?? {});
+      const user = typeof author['user'] === 'object' && author['user'] !== null ? author['user'] as Record<string, unknown> : undefined;
+      const rollup = typeof commit['statusCheckRollup'] === 'object' && commit['statusCheckRollup'] !== null ? String((commit['statusCheckRollup'] as { state?: unknown }).state) : undefined;
+      const checks = rollup === 'SUCCESS' ? 'success' : rollup === 'FAILURE' || rollup === 'ERROR' ? 'failure' : rollup === 'PENDING' || rollup === 'EXPECTED' ? 'pending' : undefined;
+      items.push({
+        kind: 'commit', id: node['id'] as string, oid,
+        headline: typeof commit['messageHeadline'] === 'string' ? commit['messageHeadline'] : '',
+        message: typeof commit['messageBody'] === 'string' ? commit['messageBody'] : '',
+        author: typeof user?.['login'] === 'string' ? user['login'] : typeof author['name'] === 'string' ? author['name'] : 'unknown',
+        avatarUrl: optionalHttpsUrl(author['avatarUrl']),
+        createdAt: typeof commit['committedDate'] === 'string' ? commit['committedDate'] : '',
+        ...checks === undefined ? {} : { checks },
+      });
+    } else {
+      const said = eventText(node);
+      if (said === undefined) continue;
+      const actor = typeof node['actor'] === 'object' && node['actor'] !== null ? node['actor'] as Record<string, unknown> : {};
+      items.push({
+        kind: 'event', id: node['id'] as string, actor: typeof actor['login'] === 'string' ? actor['login'] : 'ghost',
+        avatarUrl: optionalHttpsUrl(actor['avatarUrl']), createdAt: typeof node['createdAt'] === 'string' ? node['createdAt'] : '', text: said,
+      });
+    }
+  }
+  return items;
+}
+
+const mergeStates: Record<string, MergeState> = {
+  BEHIND: 'behind', BLOCKED: 'blocked', CLEAN: 'clean', DIRTY: 'dirty', HAS_HOOKS: 'hasHooks', UNKNOWN: 'unknown', UNSTABLE: 'unstable',
+};
+const permissions: Record<string, RepositoryPermission> = { ADMIN: 'admin', MAINTAIN: 'maintain', WRITE: 'write', TRIAGE: 'triage', TRIAGE_PLUS: 'triage', READ: 'read' };
+const mergeMethodNames: Record<string, MergeMethod> = { MERGE: 'merge', SQUASH: 'squash', REBASE: 'rebase' };
+const annotationLevels: Record<string, Annotation['level']> = { FAILURE: 'failure', WARNING: 'warning', NOTICE: 'notice' };
+
+/** Whether a repository role may push, dismiss reviews and re-run workflows. */
+export function canWrite(permission: RepositoryPermission): boolean {
+  return permission === 'admin' || permission === 'maintain' || permission === 'write';
+}
+
+/** Validate the Conversation query: `repository` holds the PR's extras, `timeline` every page of timeline nodes. */
+export function parseConversation(repository: Record<string, unknown>, viewer: Record<string, unknown>, timeline: readonly unknown[]): PullRequestConversation {
+  const pullRequest = object(repository['pullRequest']);
+  const viewerLogin = typeof viewer['login'] === 'string' ? viewer['login'] : '';
+  const items = parseTimeline(timeline);
+  const auto = typeof pullRequest['autoMergeRequest'] === 'object' && pullRequest['autoMergeRequest'] !== null ? pullRequest['autoMergeRequest'] as Record<string, unknown> : undefined;
+  const autoMethod = auto === undefined ? undefined : mergeMethodNames[String(auto['mergeMethod'])];
+  const queue = typeof pullRequest['mergeQueueEntry'] === 'object' && pullRequest['mergeQueueEntry'] !== null ? (pullRequest['mergeQueueEntry'] as { position?: unknown }).position : undefined;
+  const decision = pullRequest['reviewDecision'];
+  const headOid = typeof pullRequest['headRefOid'] === 'string' ? pullRequest['headRefOid'] : '';
+  const commit = list(object(pullRequest['commits'] ?? { nodes: [] })['nodes'])[0];
+  const rollup = commit === undefined ? null : object(object(commit)['commit'])['statusCheckRollup'];
+  const checks: CheckExtras[] = [];
+  if (typeof rollup === 'object' && rollup !== null) {
+    for (const node of list(object((rollup as Record<string, unknown>)['contexts'])['nodes'])) {
+      const check = object(node);
+      const run = check['__typename'] === 'CheckRun';
+      const name = run ? check['name'] : check['context'];
+      if (typeof name !== 'string') continue;
+      const workflow = run && typeof check['checkSuite'] === 'object' && check['checkSuite'] !== null ? (check['checkSuite'] as { workflowRun?: unknown }).workflowRun : undefined;
+      const runId = typeof workflow === 'object' && workflow !== null ? (workflow as { databaseId?: unknown }).databaseId : undefined;
+      const annotations = run ? list(object(check['annotations'] ?? { nodes: [] })['nodes']).map(object).flatMap((note): Annotation[] => {
+        const location = object(note['location'] ?? {});
+        const start = object(location['start'] ?? {})['line'];
+        const end = object(location['end'] ?? {})['line'];
+        const path = note['path'];
+        const level = annotationLevels[String(note['annotationLevel'])];
+        if (typeof path !== 'string' || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || level === undefined || (start as number) < 1) return [];
+        return [{ path, startLine: start as number, endLine: Math.max(start as number, end as number), level,
+          title: typeof note['title'] === 'string' ? note['title'] : '', message: typeof note['message'] === 'string' ? note['message'] : '' }];
+      }) : [];
+      checks.push({ name, required: check['isRequired'] === true, ...Number.isSafeInteger(runId) ? { runId: runId as number } : {}, annotations });
+    }
+  }
+  const reviewIds: Record<string, string> = {};
+  for (const node of list(object(pullRequest['latestOpinionatedReviews'] ?? { nodes: [] })['nodes']).map(object)) {
+    const author = login(node['author']);
+    if (typeof node['id'] === 'string' && author !== 'ghost') reviewIds[author] = node['id'];
+  }
+  const lastReviewedCommit = items.filter((item): item is Extract<TimelineItem, { kind: 'review' }> => item.kind === 'review' && item.author === viewerLogin && item.state !== 'pending' && item.commit !== undefined).at(-1)?.commit;
+  const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => allowed.includes(value as T) ? value as T : fallback;
+  return {
+    timeline: items,
+    description: { id: text(pullRequest['id']), reactions: parseReactions(pullRequest['reactionGroups']), canReact: pullRequest['viewerCanReact'] === true },
+    viewerLogin,
+    permission: permissions[String(repository['viewerPermission'])] ?? 'none',
+    merge: {
+      state: mergeStates[String(pullRequest['mergeStateStatus'])] ?? 'unknown',
+      ...decision === 'APPROVED' ? { reviewDecision: 'approved' } : decision === 'CHANGES_REQUESTED' ? { reviewDecision: 'changes' } : decision === 'REVIEW_REQUIRED' ? { reviewDecision: 'required' } : {},
+      canUpdateBranch: pullRequest['viewerCanUpdateBranch'] === true,
+      canBypass: pullRequest['viewerCanMergeAsAdmin'] === true,
+      ...autoMethod === undefined ? {} : { autoMerge: { method: autoMethod, enabledBy: login(auto?.['enabledBy']) } },
+      canEnableAutoMerge: pullRequest['viewerCanEnableAutoMerge'] === true,
+      canDisableAutoMerge: pullRequest['viewerCanDisableAutoMerge'] === true,
+      mergeQueue: pullRequest['isMergeQueueEnabled'] === true,
+      ...Number.isSafeInteger(queue) ? { queuePosition: (queue as number) + 1 } : {},
+      headOid,
+      headDeleted: pullRequest['headRef'] === null && pullRequest['isCrossRepository'] !== true,
+    },
+    checks,
+    linkedIssues: list(object(pullRequest['closingIssuesReferences'] ?? { nodes: [] })['nodes']).map(object).flatMap((issue) => {
+      const url = optionalHttpsUrl(issue['url']);
+      return Number.isSafeInteger(issue['number']) && typeof issue['title'] === 'string' && url
+        ? [{ number: issue['number'] as number, title: issue['title'], url, open: issue['state'] === 'OPEN' }] : [];
+    }),
+    reviewIds,
+    commitDefaults: {
+      squashTitle: pick(repository['squashMergeCommitTitle'], ['PR_TITLE', 'COMMIT_OR_PR_TITLE'], 'COMMIT_OR_PR_TITLE'),
+      squashBody: pick(repository['squashMergeCommitMessage'], ['PR_BODY', 'COMMIT_MESSAGES', 'BLANK'], 'COMMIT_MESSAGES'),
+      mergeTitle: pick(repository['mergeCommitTitle'], ['PR_TITLE', 'MERGE_MESSAGE'], 'MERGE_MESSAGE'),
+      mergeBody: pick(repository['mergeCommitMessage'], ['PR_TITLE', 'PR_BODY', 'BLANK'], 'PR_TITLE'),
+    },
+    ...lastReviewedCommit === undefined ? {} : { lastReviewedCommit },
+    awaitingApproval: [],
   };
 }
 
@@ -732,6 +1275,7 @@ export function parsePickerOptions(repository: Record<string, unknown>): PickerO
     users: logins(repository['assignableUsers']),
     teams: teams.flatMap(({ name, slug }) => typeof name === 'string' && typeof slug === 'string' ? [{ name, slug }] : []),
     labels: parseLabels(repository['labels']),
+    milestones: list(object(repository['milestones'] ?? { nodes: [] })['nodes']).map(parseMilestone).flatMap((entry) => entry.milestone === undefined ? [] : [entry.milestone]),
   };
 }
 
@@ -755,19 +1299,7 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
       resolved: thread['isResolved'] === true,
       pending: comments[0]?.['state'] === 'PENDING',
       url: httpsUrl(comments[0]?.['url']),
-      comments: comments.map((comment) => {
-        const author = comment['author'] === null ? {} : object(comment['author']);
-        return {
-          id: text(comment['id']),
-          author: typeof author['login'] === 'string' ? author['login'] : 'ghost',
-          ...typeof author['name'] === 'string' && author['name'].trim() ? { authorName: author['name'].trim() } : {},
-          avatarUrl: optionalHttpsUrl(author['avatarUrl']),
-          pending: comment['state'] === 'PENDING',
-          bodyHtml: typeof comment['bodyHTML'] === 'string' ? comment['bodyHTML'] : '',
-          canDelete: comment['viewerCanDelete'] === true,
-          createdAt: typeof comment['createdAt'] === 'string' ? comment['createdAt'] : '',
-        };
-      }),
+      comments: comments.map((comment) => ({ ...parseComment(comment), pending: comment['state'] === 'PENDING' })),
     });
   }
   return threads;

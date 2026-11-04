@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { claudeStatus } from './claudeStatus.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
-import type { MergeMethod, PickerOptions, PullRequestDetails, PullRequestSummary, RemoteThread, ReviewEvent } from './pullRequests.js';
+import { type CommentKind, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
 import type { PickedSelection } from './pullRequestEdits.js';
 import { webviewStyles } from './webviewStyles.js';
 import { codicons } from './codicons.js';
@@ -67,6 +67,9 @@ export interface OverviewState {
   /** Code host state; undefined while loading or when the host could not be reached. */
   readonly details?: PullRequestDetails;
   readonly detailsError?: string;
+  /** Timeline, merge box extras and check notes; undefined while loading or when GitHub refused the query. */
+  readonly conversation?: PullRequestConversation;
+  readonly conversationError?: string;
   readonly analysis: AnalysisView;
   /** Claude's question, as HTML, when it stopped fixing conflicts without pushing. */
   readonly conflictQuestion?: string;
@@ -98,9 +101,36 @@ export interface GitHubThreadView {
   readonly resolved: boolean;
   /** In the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
-  /** Bodies as GitHub rendered and sanitized them. */
-  readonly messages: readonly { readonly id: string; readonly author: string; readonly authorName?: string; readonly avatarUrl: string; readonly pending: boolean; readonly html: string; readonly canDelete: boolean; readonly createdAt: string }[];
+  /** Bodies as GitHub rendered and sanitized them; `suggestion` when the body holds exactly one suggestion block to commit. */
+  readonly messages: readonly GitHubMessageView[];
 }
+
+export interface GitHubMessageView {
+  readonly id: string;
+  readonly author: string;
+  readonly authorName?: string;
+  readonly avatarUrl: string;
+  readonly pending: boolean;
+  readonly html: string;
+  readonly body: string;
+  readonly canDelete: boolean;
+  readonly canEdit: boolean;
+  readonly canHide: boolean;
+  readonly canReact: boolean;
+  readonly hidden?: string;
+  readonly edited: boolean;
+  readonly reactions: PullRequestConversation['description']['reactions'];
+  readonly createdAt: string;
+  readonly suggestion?: true;
+}
+
+/** Which commits the Files tab shows: all of the PR, the commits since the viewer's last review, or the commits `from` to `to`. */
+export type DiffRange = { readonly kind: 'all' } | { readonly kind: 'since' } | { readonly kind: 'commits'; readonly from: string; readonly to: string };
+export interface DiffSelection { readonly range: DiffRange; readonly whitespace: boolean }
+/** The files of a selection; `atHead` when the new side is the PR's latest version, so comments and context lines match it. */
+export interface FilesView { readonly files: readonly FileDiff[]; readonly selection: DiffSelection; readonly atHead: boolean }
+/** A GitHub suggestion picked for committing: the thread and its comment. */
+export interface PickedSuggestion { readonly thread: string; readonly comment: string }
 export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string };
 type CommentIntent = Extract<ReviewIntent, 'ask' | 'implement'>;
 
@@ -127,7 +157,8 @@ export interface OverviewActions {
   resolveOnGitHub(threadId: string, resolved: boolean): Promise<void>;
   /** Delete one of the viewer's GitHub comments after they confirm. */
   deleteOnGitHub(commentId: string): Promise<void>;
-  readFiles(): Promise<readonly FileDiff[]>;
+  /** The files of the current selection; `select` changes it first. */
+  readFiles(select?: DiffSelection): Promise<FilesView>;
   /** Every line of a changed file's PR version, highlighted, to expand context. */
   readContext(path: string): Promise<readonly string[]>;
   /** A Markdown file as rendered blocks, or an HTML file's source for a sandboxed frame. */
@@ -150,7 +181,34 @@ export interface OverviewActions {
   retry(): void;
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
-  merge(method: MergeMethod): Promise<void>;
+  merge(method: MergeMethod, message: MergeMessage): Promise<void>;
+  /** Post a comment on the PR's conversation, outside any review. */
+  addComment(text: string): Promise<void>;
+  editComment(kind: CommentKind, id: string, text: string): Promise<void>;
+  /** Delete one of the viewer's conversation comments after they confirm. */
+  deleteIssueComment(id: string): Promise<void>;
+  /** Hide a comment after asking why, or show it again. */
+  hideComment(id: string, hide: boolean): Promise<void>;
+  react(subject: string, content: ReactionContent, on: boolean): Promise<void>;
+  discardReview(): Promise<void>;
+  /** Dismiss a reviewer's latest approval or change request, asking for the reason. */
+  dismissReview(login: string): Promise<void>;
+  rerequestReview(login: string): Promise<void>;
+  /** Bring the base branch into the head branch, asking whether to merge or rebase. */
+  updateBranch(): Promise<void>;
+  enableAutoMerge(method: MergeMethod, message: MergeMessage): Promise<void>;
+  disableAutoMerge(): Promise<void>;
+  enqueue(): Promise<void>;
+  dequeue(): Promise<void>;
+  revert(): Promise<void>;
+  restoreBranch(): Promise<void>;
+  rerun(runId: number): Promise<void>;
+  approveRuns(): Promise<void>;
+  /** Ask for a new base branch in VS Code and save it. */
+  changeBase(): Promise<void>;
+  renderMarkdown(text: string): Promise<string>;
+  /** Commit GitHub suggestions to the PR branch in one commit and push it. */
+  commitSuggestions(picked: readonly PickedSuggestion[]): Promise<void>;
   /** Replace a local thread's lines in the worktree with one option of a message's suggestions. */
   applySuggestion(threadId: string, message: number, option: number): Promise<void>;
   /** Post one option of a message's suggestions on GitHub as a suggestion on the thread's lines, in the pending review. */
@@ -178,8 +236,8 @@ export interface OverviewActions {
   stopAnalysis(): void;
 }
 
-export type PickTarget = 'reviewers' | 'assignees' | 'labels';
-const pickTargets: readonly unknown[] = ['reviewers', 'assignees', 'labels'] satisfies PickTarget[];
+export type PickTarget = 'reviewers' | 'assignees' | 'labels' | 'milestone';
+const pickTargets: readonly unknown[] = ['reviewers', 'assignees', 'labels', 'milestone'] satisfies PickTarget[];
 
 export type DefinitionTarget = { readonly path: string } | { readonly peek: string };
 type PageRange = { readonly path: string; readonly side: DiffSide; readonly startLine: number; readonly endLine: number };
@@ -206,8 +264,19 @@ export type PageMessage =
   | { readonly action: 'view'; readonly view: 'files' | 'guide' }
   | { readonly action: 'find-extension'; readonly extension: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
-  | { readonly action: 'merge'; readonly method: MergeMethod }
+  | { readonly action: 'merge' | 'auto-merge'; readonly method: MergeMethod; readonly headline?: string; readonly body?: string }
   | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
+  | { readonly action: 'discard-review' | 'update-branch' | 'auto-merge-off' | 'enqueue' | 'dequeue' | 'revert' | 'restore-branch' | 'approve-runs' | 'change-base' }
+  | { readonly action: 'dismiss-review' | 'rerequest'; readonly login: string }
+  | { readonly action: 'rerun'; readonly run: number }
+  | { readonly action: 'files'; readonly range: DiffRange; readonly whitespace: boolean }
+  | { readonly action: 'conversation-comment'; readonly form: string; readonly text: string }
+  | { readonly action: 'edit-comment'; readonly form: string; readonly kind: CommentKind; readonly id: string; readonly text: string }
+  | { readonly action: 'delete-issue-comment'; readonly id: string }
+  | { readonly action: 'hide-comment'; readonly id: string; readonly hide: boolean }
+  | { readonly action: 'react'; readonly id: string; readonly content: ReactionContent; readonly on: boolean }
+  | { readonly action: 'markdown'; readonly form: string; readonly text: string }
+  | { readonly action: 'commit-suggestions'; readonly picked: readonly PickedSuggestion[] }
   | { readonly action: 'fix-conflicts'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
   | { readonly action: 'picker-options' }
@@ -218,6 +287,11 @@ export type PageMessage =
 export interface ExtensionMessage {
   readonly state?: OverviewState;
   readonly files?: readonly FileDiff[];
+  /** The selection `files` shows, and whether its new side is the PR's latest version. */
+  readonly selection?: DiffSelection;
+  readonly atHead?: boolean;
+  /** GitHub's rendering of a form's text, for its Preview tab. */
+  readonly markdown?: { readonly form: string; readonly html: string };
   readonly reveal?: string | undefined;
   /** A guide step's key: show the guided layout at that step. */
   readonly revealStep?: string | undefined;
@@ -248,7 +322,22 @@ const maximumReviewLength = 60_000;
 const isNameList = (value: unknown): value is readonly string[] => Array.isArray(value) && value.length <= 500
   && value.every((item) => typeof item === 'string' && item.length > 0 && item.length <= 200);
 /** Actions that change the PR on GitHub, one at a time. */
-const pullRequestActions = new Set(['review', 'merge', 'edit-title', 'edit-body', 'pick', 'draft', 'close', 'reopen', 'delete-branch']);
+const pullRequestActions = new Set(['review', 'merge', 'edit-title', 'edit-body', 'pick', 'draft', 'close', 'reopen', 'delete-branch',
+  'discard-review', 'update-branch', 'auto-merge', 'auto-merge-off', 'enqueue', 'dequeue', 'revert', 'restore-branch', 'approve-runs', 'change-base',
+  'dismiss-review', 'rerequest', 'rerun', 'commit-suggestions']);
+/** Of those, the ones that need permission to edit the PR; the others check GitHub's own per-action flags. */
+const editActions = new Set(['edit-title', 'edit-body', 'pick', 'draft', 'close', 'reopen', 'delete-branch', 'revert', 'restore-branch', 'change-base', 'rerequest', 'commit-suggestions']);
+const commentKinds: readonly unknown[] = ['issue', 'review', 'reviewComment'] satisfies CommentKind[];
+const isOid = (value: unknown): value is string => typeof value === 'string' && /^[a-f\d]{40,64}$/u.test(value);
+const isOptionalText = (value: unknown): value is string | undefined => value === undefined || (typeof value === 'string' && value.length <= maximumReviewLength);
+
+/** A range the page asked for, checked against the PR's own commits. */
+function parseRange(value: unknown, commits: readonly string[]): DiffRange | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { kind, from, to } = value as Record<string, unknown>;
+  if (kind === 'all' || kind === 'since') return { kind };
+  return kind === 'commits' && isOid(from) && isOid(to) && commits.includes(from) && commits.includes(to) ? { kind, from, to } : undefined;
+}
 const panels = new Map<string, vscode.WebviewPanel>();
 
 const isLine = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
@@ -278,14 +367,19 @@ export async function showPullRequestOverview(
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
   panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'), resource('dist', 'pdf.js'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
-  const sendFiles = (): void => {
-    void actions.readFiles().then((files) => {
-      post({ files, ...revealMessage(reveal) });
+  const sendFiles = (select?: DiffSelection): void => {
+    void actions.readFiles(select).then(({ files, selection, atHead }) => {
+      post({ files, selection, atHead, ...revealMessage(reveal) });
       reveal = undefined;
     }, (error: unknown) => {
       post({ filesError: error instanceof Error ? error.message : String(error) });
     });
   };
+  const conversation = (): PullRequestConversation | undefined => state.conversation;
+  /** A comment on this page the viewer may change in the way `may` names, found in the conversation or a GitHub thread. */
+  const findComment = (id: unknown, may: 'canEdit' | 'canDelete' | 'canHide' | 'canReact'): boolean => typeof id === 'string'
+    && ((conversation()?.timeline ?? []).some((item) => item.kind !== 'commit' && item.kind !== 'event' && item.id === id && item[may])
+      || (state.github ?? []).some((thread) => thread.messages.some((entry) => entry.id === id && entry[may])));
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** Bumped by each read and each mark write; a read that is no longer the latest may predate a write, so it is dropped. */
   let generation = 0;
@@ -314,7 +408,8 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option,
+        range, whitespace, kind, hide, content, on, login, run, headline, picked } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -371,6 +466,24 @@ export async function showPullRequestOverview(
         else if (action === 'find-extension' && typeof extension === 'string' && /^[\w+-]{1,20}$/u.test(extension)) {
           await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
         }
+        else if (action === 'files' && typeof whitespace === 'boolean') {
+          const commits = (conversation()?.timeline ?? []).flatMap((item) => item.kind === 'commit' ? [item.oid] : []);
+          const parsed = parseRange(range, commits);
+          if (parsed !== undefined) sendFiles({ range: parsed, whitespace });
+        } else if (action === 'conversation-comment' && isText(text)) {
+          await actions.addComment(text.trim());
+          post({ done: formKey });
+        } else if (action === 'edit-comment' && commentKinds.includes(kind) && findComment(id, 'canEdit') && isText(text)) {
+          await actions.editComment(kind as CommentKind, id as string, text.trim());
+          post({ done: formKey });
+        } else if (action === 'delete-issue-comment' && findComment(id, 'canDelete')) await actions.deleteIssueComment(id as string);
+        else if (action === 'hide-comment' && typeof hide === 'boolean' && findComment(id, 'canHide')) await actions.hideComment(id as string, hide);
+        else if (action === 'react' && reactionContents.includes(content as ReactionContent) && typeof on === 'boolean'
+          && (findComment(id, 'canReact') || (id === conversation()?.description.id && conversation()?.description.canReact === true))) {
+          await actions.react(id as string, content as ReactionContent, on);
+        } else if (action === 'markdown' && typeof text === 'string' && text.length <= maximumReviewLength && formKey !== undefined) {
+          post({ markdown: { form: formKey, html: text.trim() ? await actions.renderMarkdown(text) : '' } });
+        }
         else if (action === 'picker-options') {
           try { post({ pickerOptions: await actions.pickerOptions() }); } catch (error: unknown) { post({ pickerError: error instanceof Error ? error.message : String(error) }); }
         }
@@ -395,19 +508,48 @@ export async function showPullRequestOverview(
         } else if (typeof action === 'string' && pullRequestActions.has(action) && !busy) {
           busy = true;
           try {
-            if (action !== 'review' && action !== 'merge' && state.details?.canEdit !== true) {
+            if (editActions.has(action) && state.details?.canEdit !== true) {
               throw new Error('You do not have permission to edit this pull request.');
             }
+            const merge = conversation()?.merge;
+            const mergeMessage = (): MergeMessage => ({ ...typeof headline === 'string' && headline.trim() ? { headline: headline.trim() } : {}, ...typeof body === 'string' ? { body } : {} });
             if (action === 'review' && reviewEvents.includes(event as ReviewEvent) && typeof body === 'string' && body.length <= maximumReviewLength) {
               await actions.submitReview(event as ReviewEvent, body.trim());
               post({ done: 'review' });
-            } else if (action === 'merge' && mergeMethods.includes(method as MergeMethod)) {
-              await actions.merge(method as MergeMethod);
+            } else if ((action === 'merge' || action === 'auto-merge') && mergeMethods.includes(method as MergeMethod) && isOptionalText(headline) && isOptionalText(body)) {
+              if (action === 'merge') await actions.merge(method as MergeMethod, mergeMessage());
+              else if (merge?.canEnableAutoMerge === true) await actions.enableAutoMerge(method as MergeMethod, mergeMessage());
+              post({ done: 'merge' });
+            } else if (action === 'auto-merge-off' && merge?.canDisableAutoMerge === true) await actions.disableAutoMerge();
+            else if (action === 'enqueue' && merge?.mergeQueue === true) await actions.enqueue();
+            else if (action === 'dequeue' && merge?.queuePosition !== undefined) await actions.dequeue();
+            else if (action === 'update-branch' && merge?.canUpdateBranch === true) await actions.updateBranch();
+            else if (action === 'discard-review' && state.details?.pendingComments !== undefined) await actions.discardReview();
+            else if (action === 'dismiss-review' && typeof login === 'string' && conversation()?.reviewIds[login] !== undefined) await actions.dismissReview(login);
+            else if (action === 'rerequest' && typeof login === 'string' && state.details?.reviewers.some((reviewer) => reviewer.name === login && reviewer.team === undefined)) await actions.rerequestReview(login);
+            else if (action === 'rerun' && Number.isSafeInteger(run) && conversation()?.checks.some((check) => check.runId === run)) await actions.rerun(run as number);
+            else if (action === 'approve-runs' && (conversation()?.awaitingApproval.length ?? 0) > 0) await actions.approveRuns();
+            else if (action === 'revert' && state.details?.merged === true) await actions.revert();
+            else if (action === 'restore-branch' && merge?.headDeleted === true) await actions.restoreBranch();
+            else if (action === 'change-base' && state.details?.open === true) {
+              await actions.changeBase();
+              sendFiles();
+            } else if (action === 'commit-suggestions' && Array.isArray(picked) && picked.length > 0 && picked.length <= 100) {
+              const valid = (picked as unknown[]).every((item) => {
+                const { thread, comment } = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+                return state.github?.some((entry) => entry.id === thread && !entry.outdated && entry.side === 'new' && entry.messages.some((each) => each.id === comment && each.suggestion === true));
+              });
+              if (!valid) throw new Error('A picked suggestion is no longer on this PR. Refresh and pick again.');
+              await actions.commitSuggestions(picked as PickedSuggestion[]);
+              post({ done: 'suggestions' });
+              sendFiles();
             } else if (action === 'edit-title') await actions.editTitle();
             else if (action === 'edit-body' && typeof body === 'string' && body.length <= maximumReviewLength) {
               await actions.editBody(body);
               post({ done: 'body' });
-            } else if (action === 'pick' && pickTargets.includes(what) && isNameList(values) && isNameList(teams)) await actions.pick(what as PickTarget, { values, teams });
+            } else if (action === 'pick' && pickTargets.includes(what) && isNameList(values) && isNameList(teams) && (what !== 'milestone' || (values.length <= 1 && values.every((entry) => /^\d{1,9}$/u.test(entry))))) {
+              await actions.pick(what as PickTarget, { values, teams });
+            }
             else if (action === 'draft' && typeof draft === 'boolean') await actions.setDraft(draft);
             else if (action === 'close' || action === 'reopen') await actions.setOpen(action === 'reopen');
             else if (action === 'delete-branch') await actions.deleteBranch();
@@ -617,6 +759,37 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .card-thread .name,.card-thread .text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card-thread .where{display:flex;min-width:0;font-family:var(--font-code);color:var(--ink-muted)}.card-thread .state{color:var(--ink-muted)}
 .card-thread code{font-family:var(--font-code);font-size:.92em}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
+.toolbar select{height:24px;max-width:220px;font-size:12px}#file-filter{width:150px;height:24px;padding:0 var(--space-8);font-size:12px}
+.toolbar{position:relative;flex-wrap:wrap;justify-content:flex-end}.filter-pop{position:absolute;top:30px;right:0;z-index:6;min-width:200px}
+.range-note{margin-top:var(--space-12);padding:var(--space-6) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);font-size:12px;background:color-mix(in srgb,var(--ink) 4%,transparent)}.range-note .gap{flex:1}
+.timeline-item{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);padding:var(--space-8) 0;font-size:13px;line-height:20px}.timeline-item+.timeline-item{border-top:1px solid var(--line)}
+.timeline-item .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.timeline-item .avatar svg{width:16px;height:16px;fill:currentColor}.timeline-item .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
+.timeline-item.event,.timeline-item.commits{font-size:12px;color:var(--ink-muted)}.timeline-item.event b,.timeline-item.commits b{color:var(--ink);font-weight:600}
+.commit-list{margin-top:var(--space-4)}.commit-row{display:flex;align-items:baseline;gap:var(--space-8);padding:var(--space-2) 0;font-size:12px}.commit-row code{font-family:var(--font-code);color:var(--ink-muted)}.commit-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.commit-row button{min-height:18px;padding:0 var(--space-6);font-size:11px}
+.msg-tools{display:flex;align-items:center;gap:var(--space-2);margin-left:auto}.msg-tools button{min-height:20px;width:22px;padding:0;border:0;background:none;color:var(--ink-muted)}.msg-tools button:hover{color:var(--ink);filter:none}.msg-tools svg{width:14px;height:14px;fill:currentColor}
+.edited{font-size:12px;color:var(--ink-muted)}.verb{color:var(--ink-muted)}
+.reactions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4);margin-top:var(--space-6)}.reactions:empty{display:none}
+.reaction{min-height:22px;height:22px;padding:0 var(--space-6);border:1px solid var(--line-strong);border-radius:var(--radius-pill);background:none;font-size:12px;gap:var(--space-4)}.reaction[aria-pressed=true]{border-color:var(--github);background:var(--github-soft)}
+.reaction.add{width:26px;padding:0;color:var(--ink-muted)}.reaction.add svg{width:14px;height:14px;fill:currentColor}
+.emoji-pop{display:inline-flex;gap:var(--space-2);padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}.emoji-pop button{min-height:24px;width:28px;padding:0;border:0;background:none;font-size:14px}.emoji-pop button:hover{background:color-mix(in srgb,var(--ink) 10%,transparent)}
+.hidden-note{display:flex;align-items:center;gap:var(--space-8);font-size:12px;color:var(--ink-muted)}.hidden-note button{min-height:20px;padding:0 var(--space-6);font-size:12px}
+.field-tabs{display:flex;gap:var(--space-4);margin-top:var(--space-8)}.field-tabs+textarea,.field-tabs+.md-preview{margin-top:var(--space-4)}
+.md-preview{min-height:64px;padding:var(--space-8);border:1px solid var(--line);border-radius:var(--radius-sm);overflow-wrap:anywhere}
+.field{position:relative}.mentions{position:absolute;left:0;z-index:7;display:flex;flex-direction:column;min-width:180px;max-height:200px;overflow:auto;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
+.mentions button{justify-content:flex-start;min-height:22px;padding:0 var(--space-8);border:0;background:none;font-size:12px}.mentions button[aria-selected=true]{background:color-mix(in srgb,var(--ink) 12%,transparent)}
+#conversation-form .row{margin-top:var(--space-8)}#timeline:empty{display:none}
+.merge-status:not(:empty){margin-bottom:var(--space-8)}.merge-status li{display:flex;gap:var(--space-8)}
+#merge-form{margin-top:var(--space-8)}#merge-form input{width:100%;height:26px;box-sizing:border-box;padding:0 var(--space-8);font-size:12px}#merge-form textarea{margin-top:var(--space-6)}
+#update-row,#auto-row,#queue-row{margin-top:var(--space-8)}#update-row .gap,#auto-row .gap,#queue-row .gap,.awaiting .gap,.pending-row .gap{flex:1}.pending-row p{margin:0}.awaiting{margin-bottom:var(--space-6);font-size:12px}
+.check-tools{margin-left:auto;display:inline-flex;gap:var(--space-4);align-items:center}.check-tools button{min-height:18px;padding:0 var(--space-6);font-size:11px}
+.reviewer-tools{margin-left:auto;display:inline-flex;align-items:center;gap:var(--space-4);white-space:nowrap}.reviewer-tools .small{min-height:20px;padding:0 var(--space-6);font-size:11px}.reviewer-tools button{min-height:20px;width:22px;padding:0;border:0;background:none;color:var(--ink-muted)}.reviewer-tools button:hover{color:var(--ink);filter:none}.reviewer-tools svg{width:14px;height:14px;fill:currentColor}
+.file-chip{padding:0 var(--space-6);border:1px solid var(--line-strong);border-radius:var(--radius-pill);font-size:11px;color:var(--ink-muted)}
+tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:var(--space-8);padding:var(--space-6) var(--space-8);border-left:3px solid var(--level);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--level) 10%,transparent);font:12px/18px var(--font-ui);white-space:pre-wrap}.annotation-box svg{flex:none;width:16px;height:16px;fill:var(--level)}
+.annotation-box.failure{--level:var(--danger)}.annotation-box.warning{--level:var(--warning)}.annotation-box.notice{--level:var(--github)}
+.suggest-row{margin-top:var(--space-6);gap:var(--space-6)}.suggest-row button{min-height:22px;padding:0 var(--space-8);font-size:12px}
+.commits-view{margin-top:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md)}.commits-view .commit-row{padding:var(--space-6) var(--space-12);cursor:pointer}.commits-view .commit-row+.commit-row{border-top:1px solid var(--line)}.commits-view .commit-row:hover{background:color-mix(in srgb,var(--ink) 5%,transparent)}.commits-view .commit-row.sel{box-shadow:inset 2px 0 0 var(--brand);background:var(--brand-soft)}
+.byline .icon-button{width:20px;height:20px;min-height:20px}
 </style></head><body>
 <div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
@@ -632,33 +805,46 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 <button id="peek-close" title="Close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div><div id="peek-code"></div></aside>
 <div class="layout">
 <div class="main-col">
-<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div></section>
+<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div><div id="description-reactions"></div></section>
 <section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
+<section class="card" id="conversation"><h3>Conversation</h3><div id="timeline"></div><div id="conversation-form"></div></section>
 </div>
 <aside class="rail">
 <section><div class="section-head"><h3>Reviewers</h3><button id="pick-reviewers" class="icon-button" data-pr-action data-tip="Request reviewers" aria-label="Request reviewers" hidden>${codicons.gear}</button></div><ul id="reviewers"></ul></section>
 <section><div class="section-head"><h3>Assignees</h3><button id="pick-assignees" class="icon-button" data-pr-action data-tip="Edit assignees" aria-label="Edit assignees" hidden>${codicons.gear}</button></div><ul id="assignees"></ul></section>
 <section><div class="section-head"><h3>Labels</h3><button id="pick-labels" class="icon-button" data-pr-action data-tip="Edit labels" aria-label="Edit labels" hidden>${codicons.gear}</button></div><div id="labels" class="labels"></div></section>
-<section><h3>Checks</h3><ul id="checks"></ul></section>
+<section><div class="section-head"><h3>Milestone</h3><button id="pick-milestone" class="icon-button" data-pr-action data-tip="Set milestone" aria-label="Set milestone" hidden>${codicons.gear}</button></div><div id="milestone"></div></section>
+<section id="development" hidden><h3>Development</h3><ul id="linked-issues"></ul></section>
+<section><h3>Checks</h3><div id="awaiting" class="row awaiting" hidden><span class="wait gap" id="awaiting-note"></span><button id="approve-runs" class="small" data-pr-action>Approve and run</button></div><ul id="checks"></ul></section>
 <section id="review-box"><h3>Finish your review</h3>
-<p class="muted" id="pending-note"></p>
+<div class="row pending-row"><p class="muted gap" id="pending-note"></p><button id="discard-review" class="quiet small" data-pr-action hidden>Discard</button></div>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
 <div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><ul id="merge-status" class="merge-status"></ul><div class="row" id="update-row" hidden><span class="muted gap">The branch is behind the base branch.</span><button id="update-branch" class="small" data-pr-action>Update branch</button></div><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button><button id="auto-merge" class="quiet" data-pr-action hidden>Enable auto-merge</button></div>
+<div id="merge-form" hidden><input id="merge-headline" type="text" aria-label="Commit title"><textarea id="merge-body" aria-label="Commit message"></textarea><div class="row actions review-actions"><button id="merge-cancel" class="quiet">Cancel</button><button id="merge-confirm" class="primary" data-pr-action>Confirm merge</button></div></div>
+<div class="row" id="auto-row" hidden><span id="auto-note" class="muted gap"></span><button id="auto-merge-off" class="small" data-pr-action>Disable auto-merge</button></div>
+<div class="row" id="queue-row" hidden><span id="queue-note" class="muted gap"></span><button id="dequeue" class="small" data-pr-action>Remove from queue</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>
 </div>
 <div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
 <button id="view-files" role="tab">Files<span id="files-count" class="count"></span></button>
+<button id="view-commits" role="tab">${codicons.gitCommit}Commits<span id="commits-count" class="count"></span></button>
 <button id="view-guide" role="tab">${codicons.map}Guide<span id="guide-count" class="count" hidden></span></button></span>
 <span id="files-title" class="muted"></span></span><span class="toolbar">
 <span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
 <span id="analyze-divider" class="divider"></span>
+<button id="commit-batch" class="primary small" data-pr-action hidden></button>
+<input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files">
+<button id="filter-menu" class="icon-button" data-tip="Filter by file type" aria-label="Filter by file type">${codicons.filter}</button>
+<select id="range" aria-label="Changes from"></select>
+<button id="whitespace" class="icon-button" data-tip="Hide whitespace changes" aria-label="Hide whitespace changes">${codicons.whitespace}</button>
 <span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button></span>
 <button id="folders" class="icon-button" data-tip="Group files by folder" aria-label="Group files by folder">${codicons.listTree}</button>
 <span class="divider"></span>
 <button id="collapse" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
 <button id="expand" class="icon-button" data-tip="Expand all files" aria-label="Expand all files">${codicons.expandAll}</button>
 <button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button></span></div>
+<div id="range-note" class="row range-note" hidden></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
 <script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon, pdfScript }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
@@ -679,8 +865,9 @@ function githubThreadView(thread: RemoteThread): GitHubThreadView {
     outdated: thread.outdated,
     resolved: thread.resolved,
     pending: thread.pending,
-    messages: thread.comments.map(({ id, author, authorName, avatarUrl, pending, bodyHtml, canDelete, createdAt }) => ({
-      id, author, ...authorName === undefined ? {} : { authorName }, avatarUrl, pending, html: bodyHtml, canDelete, createdAt })),
+    messages: thread.comments.map(({ id, author, authorName, avatarUrl, pending, bodyHtml, body, canDelete, canEdit, canHide, canReact, hidden, edited, reactions, createdAt }) => ({
+      id, author, ...authorName === undefined ? {} : { authorName }, avatarUrl, pending, html: bodyHtml, body, canDelete, canEdit, canHide, canReact,
+      ...hidden === undefined ? {} : { hidden }, edited, reactions, createdAt, ...parseSuggestions(body).length === 1 ? { suggestion: true as const } : {} })),
   };
 }
 
@@ -699,6 +886,7 @@ const threadStatus: Record<ReviewThread['status'], string> = {
 export function buildOverviewState(
   pullRequest: PullRequestSummary, opened: PullRequestSession, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
   details?: PullRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
+  conversation?: PullRequestConversation | Error,
 ): OverviewState {
   const { session, runner } = opened;
   const claude = claudeStatus(runner.activity);
@@ -718,6 +906,7 @@ export function buildOverviewState(
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),
     ...(details === undefined ? {} : details instanceof Error ? { detailsError: details.message } : { details }),
     ...(remote === undefined ? {} : remote instanceof Error ? { githubError: remote.message } : { github: remote.map(githubThreadView) }),
+    ...(conversation === undefined ? {} : conversation instanceof Error ? { conversationError: conversation.message } : { conversation }),
     claude: { text: claude.text, running: runner.activity.running, retry: claude.retry,
       ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}) },
     analysis,

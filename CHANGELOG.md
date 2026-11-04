@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- The review page has a **Conversation** card like GitHub's Conversation tab: comments on the PR, reviews with their summaries, pushed commits, force pushes, label, reviewer, assignee, title, base branch, milestone and merge events, and mentions from other issues. A box at the bottom posts a comment on the PR outside any review.
+- GitHub comments in the Conversation card and in diff threads can be edited by their author, quoted into a reply, hidden for a reason such as Outdated or Spam, shown again, and deleted. Hidden comments fold to one line with **Show**. Comments, reviews and the description take GitHub's eight reactions.
+- Text boxes that post to GitHub have **Write** and **Preview** tabs, rendered by GitHub, and complete `@` mentions from the repository's people and everyone on the PR.
+- **Discard** drops your pending review. Reviewer rows offer **Re-request review** and, with write access, **Dismiss review** with a reason.
+- A **Commits** tab lists the PR's commits. Click one to see only its changes, Shift-click another for the commits between. The Files tab's picker also offers **Since your last review**. Lines can take comments only where they match the PR's latest version, and read marks need all changes.
+- The Files tab can hide whitespace changes, filter files by name, by file type and by Viewed, and folds generated files and large diffs by default, with a chip saying why. Keyboard shortcuts: `j`/`k` next or previous file, `n`/`p` next or previous comment, `v` toggle Viewed, `t` filter files, `?` list them.
+- Checks show which are required, re-run the failed jobs of a GitHub Actions workflow, approve workflows waiting on a fork PR, and place check annotations under the lines they point at.
+- GitHub suggestions in review threads offer **Commit suggestion** and **Add to batch** on PRs you can push to. **Commit N suggestions** in the files bar commits the batch as one commit and pushes it.
+- The Merge box lists review, check and branch protection status, offers **Update branch** by merge or rebase when the branch is behind, lets you edit the merge commit title and message before merging, enables and disables auto-merge, adds the PR to a merge queue and removes it, opens a revert PR after merging and restores a deleted head branch.
+- The sidebar shows the milestone, with a picker, and the issues the PR closes. The pencil after the base branch changes it; the diff follows.
+- **Search pull requests** in the Pull Requests view finds PRs assigned to you, mentioning you, all open ones, recently closed or merged ones, or any GitHub search, and opens the review page for the one you pick.
+- Projects are not shown. Reading them needs the `read:project` sign-in scope, which would make everyone sign in to GitHub again.
+
 - Replies in a local thread on the review page offer **Implement** next to **Ask Claude**, like a new comment. Every reply reused the thread's first choice before, so a thread started with Ask could never ask Claude to change the code.
 - The Reviewers, Assignees and Labels gear buttons on the review page open a popover under the gear, with a filter box and a checkmark on selected items, instead of VS Code's picker at the top of the window. Labels show as on GitHub: a color dot, the name, and the description below it. Label chips in the sidebar lose their dot. Changes save when you click outside the popover or the gear again; Esc closes it without saving. The filter matches names only.
 - The review page shows the PR number as a chip before the title, like the branch chips; clicking it copies the link to the PR.

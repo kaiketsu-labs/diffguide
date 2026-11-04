@@ -284,6 +284,38 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#changed.fire(undefined);
   }
 
+  /** Find a PR of a listed repository with GitHub search, including closed ones, and open its review page. */
+  async search(): Promise<void> {
+    const ready = [...this.#done.values()].filter((listing): listing is Ready => listing.kind === 'ready');
+    if (ready.length === 0) throw new Error('No repository with pull requests has loaded yet.');
+    const listing = ready.length === 1 ? ready[0]
+      : (await vscode.window.showQuickPick(ready.map((each) => ({ label: each.repository.name, listing: each })), { title: 'Search pull requests in' }))?.listing;
+    if (listing === undefined) return;
+    const custom = '$(search) Search with GitHub syntax…';
+    const presets: readonly { readonly label: string; readonly query: string }[] = [
+      { label: 'Assigned to you', query: 'is:open assignee:@me' },
+      { label: 'Mentioning you', query: 'is:open mentions:@me' },
+      { label: 'All open', query: 'is:open sort:updated-desc' },
+      { label: 'Recently closed or merged', query: 'is:closed sort:updated-desc' },
+    ];
+    const preset = await vscode.window.showQuickPick([...presets.map((entry) => ({ label: entry.label, description: entry.query })), { label: custom, description: '' }],
+      { title: `Search pull requests in ${listing.repository.name}` });
+    if (preset === undefined) return;
+    const query = preset.label === custom
+      ? await vscode.window.showInputBox({ title: 'Search pull requests', prompt: 'GitHub search syntax, such as "is:open label:bug" or "author:alice"', value: 'is:open ' })
+      : preset.description;
+    if (query === undefined || !query.trim()) return;
+    const found = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Searching pull requests' }, () => listing.provider.search(query.trim()));
+    if (found.length === 0) { void vscode.window.showInformationMessage(`No pull requests match "${query.trim()}".`); return; }
+    const picked = await vscode.window.showQuickPick(found.map((pullRequest) => ({
+      label: `#${pullRequest.number} ${pullRequest.title}`, description: [pullRequest.author, pullRequest.draft ? 'Draft' : undefined, `${pullRequest.headBranch} → ${pullRequest.baseBranch}`].filter(Boolean).join(' · '), pullRequest,
+    })), { title: `${found.length} pull requests`, matchOnDescription: true });
+    if (picked === undefined) return;
+    const role: PullRequestRole = listing.mine.some((mine) => mine.number === picked.pullRequest.number) ? 'author' : 'reviewer';
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Opening #${picked.pullRequest.number}` },
+      () => listing.worktrees.showOverview(listing.provider, listing.repository.name, picked.pullRequest, role));
+  }
+
   /** Whether a PR row lists its guide steps instead of its files, when it has a guide. */
   get showsGuide(): boolean {
     return this.settings.get<string>(childViewKey, 'files') === 'guide';
@@ -675,6 +707,13 @@ export function registerPullRequestView(
     }),
     onDidChangeStatus((pullRequest) => { tree.redraw(pullRequest); }),
     vscode.commands.registerCommand('pairReview.refreshPullRequests', () => { tree.refresh(); }),
+    vscode.commands.registerCommand('pairReview.searchPullRequests', async () => {
+      try {
+        await tree.search();
+      } catch (error: unknown) {
+        report(error);
+      }
+    }),
     vscode.commands.registerCommand('pairReview.markPullRequestMerged', (key: unknown) => {
       if (typeof key === 'string') tree.markMerged(key);
     }),

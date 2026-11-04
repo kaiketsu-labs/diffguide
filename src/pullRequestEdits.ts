@@ -24,6 +24,13 @@ export async function saveSelection(provider: PullRequestProvider, number: numbe
     }
     return;
   }
+  if (what === 'milestone') {
+    const [chosen] = picked.values;
+    const next = chosen === undefined ? null : Number(chosen);
+    if (next === (details.milestone?.number ?? null)) return;
+    await provider.editPullRequest(number, { milestone: next });
+    return;
+  }
   const current = what === 'labels' ? details.labels.map((label) => label.name) : details.assignees;
   if (sameSet(picked.values, current)) return;
   await provider.editPullRequest(number, what === 'labels' ? { labels: picked.values } : { assignees: picked.values });

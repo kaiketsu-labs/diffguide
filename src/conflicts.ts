@@ -25,21 +25,22 @@ export async function syncToPullRequestHead(worktree: string, number: number): P
 }
 
 /**
- * Commit one file of a PR worktree and push it to the PR's branch. A failed push takes the commit back and restores the file.
+ * Commit files of a PR worktree and push them to the PR's branch. A failed push takes the commit back and restores the files.
  * `hooksOff` skips Git hooks, for someone else's PR, whose author controls the checkout.
  */
 export async function commitAndPush(worktree: string, { path, message, pushTo, headBranch, hooksOff }: {
-  readonly path: string; readonly message: string; readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean;
+  readonly path: string | readonly string[]; readonly message: string; readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean;
 }): Promise<void> {
   if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
+  const paths = typeof path === 'string' ? [path] : path;
   const hooks = hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [];
-  await git(worktree, ['add', '--', path]);
-  await git(worktree, [...hooks, 'commit', '--quiet', '--only', '-m', message, '--', path]);
+  await git(worktree, ['add', '--', ...paths]);
+  await git(worktree, [...hooks, 'commit', '--quiet', '--only', '-m', message, '--', ...paths]);
   try {
     await git(worktree, [...hooks, 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
   } catch (error: unknown) {
     await git(worktree, ['reset', '--quiet', '--soft', 'HEAD~1']);
-    await git(worktree, ['restore', '--quiet', '--staged', '--worktree', '--', path]);
+    await git(worktree, ['restore', '--quiet', '--staged', '--worktree', '--', ...paths]);
     throw error;
   }
 }

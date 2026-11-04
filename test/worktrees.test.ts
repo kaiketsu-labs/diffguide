@@ -7,6 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import { listChangedFiles } from '../src/git.js';
+import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
 import { ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/worktrees.js';
 import { cleanUpWorktrees } from '../src/worktreeCleanup.js';
@@ -54,6 +55,7 @@ const detached = async (_number: number, worktree: string): Promise<void> => { a
 
 /** Check out the PR branch the way a code host CLI would. */
 const provider = (checkouts: string[]): PullRequestProvider => ({
+  ...mockPullRequestProvider,
   readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
   listMine: async () => [],
   listReviewRequested: async () => [],
