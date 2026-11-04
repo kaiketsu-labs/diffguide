@@ -110,6 +110,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
   discardPendingReview: unchanged, dismissReview: unchanged, updateBranch: unchanged, enableAutoMerge: unchanged, disableAutoMerge: unchanged,
   enqueue: unchanged, dequeue: unchanged, revert: unchanged, restoreBranch: unchanged, rerunFailedJobs: unchanged, approveWorkflowRun: unchanged,
   changeBase: unchanged, branches: async () => ['main'], renderMarkdown: async (text) => `<p>${text.replace(/[&<>]/gu, (char) => `&#${char.charCodeAt(0)};`)}</p>`,
+  version: unchanged, listVersion: unchanged,
 };
 
 function unchanged(): Promise<never> {

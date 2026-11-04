@@ -113,6 +113,26 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
   }
 }
 
+/** A GET answered with its ETag, for asking later whether it changed. */
+export interface Polled { readonly etag: string; readonly data: unknown }
+
+/** GET `url` again; returns `known` itself when GitHub answers 304, which does not count against the rate limit. */
+export async function githubPoll(endpoints: GitHubEndpoints, url: string, known?: Polled): Promise<Polled> {
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${await token(endpoints.authProvider, false)}`,
+      'User-Agent': 'pair-review',
+      ...(known === undefined ? {} : { 'If-None-Match': known.etag }),
+    },
+    redirect: 'error',
+    signal: AbortSignal.timeout(requestTimeoutMs),
+  });
+  if (response.status === 304 && known !== undefined) return known;
+  if (!response.ok) throw new Error(`GitHub request failed (${response.status}).`);
+  return { etag: response.headers.get('etag') ?? '', data: await response.json() as unknown };
+}
+
 /** GitHub's reasons from a failed API call: its message and each listed error. */
 export function errorDetail(body: string): string {
   try {

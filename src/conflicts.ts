@@ -12,16 +12,22 @@ export async function prepareConflictFix(worktree: string, number: number, baseB
   return (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
 }
 
-/** Move a PR worktree to the PR's latest commit on GitHub; refuses when it has commits GitHub does not have. */
-export async function syncToPullRequestHead(worktree: string, number: number): Promise<void> {
+/**
+ * Move a PR worktree to the PR's latest commit on GitHub, keeping uncommitted edits; refuses when it has commits GitHub does not have.
+ * `pushedHead` is a commit GitHub had as the PR's head, so a worktree still there may follow a force push.
+ */
+export async function syncToPullRequestHead(worktree: string, number: number, pushedHead?: string): Promise<void> {
   await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]);
   const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
   const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
-  if (local !== head) {
-    const behind = await git(worktree, ['merge-base', '--is-ancestor', local, head]).then(() => true, () => false);
-    if (!behind) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
-    await git(worktree, ['checkout', '--quiet', '--detach', head]);
-  }
+  if (local === head) return;
+  const behind = local === pushedHead || await git(worktree, ['merge-base', '--is-ancestor', local, head]).then(() => true, () => false);
+  if (!behind) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+  await git(worktree, ['checkout', '--quiet', '--detach', head]).catch((error: unknown) => {
+    const blocking = /would be overwritten/u.test(String(error)) ? String(error).split('\n').filter((line) => line.startsWith('\t')).map((line) => line.trim()) : [];
+    if (blocking.length === 0) throw error;
+    throw new Error(`GitHub has newer commits that change files with local edits: ${blocking.join(', ')}. Commit, push or discard them to update.`);
+  });
 }
 
 /**

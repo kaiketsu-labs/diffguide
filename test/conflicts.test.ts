@@ -92,3 +92,27 @@ test('commits one file and pushes it to the PR branch, and takes the commit back
   assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'suggested\n');
   await assert.rejects(commitAndPush(worktree, { ...push, headBranch: '--force' }), /Unsupported/u);
 });
+
+test('moves a worktree to the PR head and keeps uncommitted edits the new commits do not touch', async (t) => {
+  const { worktree, latest } = await fixture(t);
+  await writeFile(path.join(worktree, 'a.txt'), 'local edit\n');
+  await syncToPullRequestHead(worktree, 7);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+  assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'local edit\n');
+});
+
+test('stays put and names the files when local edits clash with the new commits', async (t) => {
+  const { worktree, older } = await fixture(t);
+  await writeFile(path.join(worktree, 'b.txt'), 'local\n');
+  await assert.rejects(syncToPullRequestHead(worktree, 7), /change files with local edits: b\.txt\./u);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), older);
+});
+
+test('follows a force push only from a head GitHub had', async (t) => {
+  const { worktree, latest } = await fixture(t);
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'replaced on GitHub');
+  const replaced = await git(worktree, 'rev-parse', 'HEAD');
+  await assert.rejects(syncToPullRequestHead(worktree, 7), /commits that are not on GitHub/u);
+  await syncToPullRequestHead(worktree, 7, replaced);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+});

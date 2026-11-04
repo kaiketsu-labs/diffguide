@@ -23,7 +23,7 @@ import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
 import { saveSelection } from './pullRequestEdits.js';
 import { buildOverviewState, showPullRequestOverview, type AnalysisView, type DiffSelection, type FilesView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
-import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
+import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread } from './pullRequests.js';
 import { githubPageActions } from './pullRequestPageActions.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
@@ -116,6 +116,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return { anchor, base };
       };
       const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
+      /** The PR on GitHub at the last check, so the next one can ask whether it changed. */
+      let version: PullRequestVersion | undefined;
       /** A commit the diff needs, fetched when a force push left it out of the worktree. */
       const haveCommit = async (oid: string): Promise<void> => {
         if (await git(folder, ['cat-file', '-e', `${oid}^{commit}`]).then(() => true, () => false)) return;
@@ -444,6 +446,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return true;
         },
         refresh: () => { void loadDetails(); void loadThreads(); void loadConversation(); },
+        pollGitHub: async () => {
+          const previous = version;
+          version = await provider.version(pullRequest.number, previous);
+          const reload = previous !== undefined && version !== previous;
+          if (opened.runner.activity.running || version.head === await readHead()) return { reload, files: false };
+          try {
+            await syncToPullRequestHead(folder, pullRequest.number, previous?.head);
+            return { reload: true, files: true };
+          } catch (error: unknown) {
+            return { reload, files: false, problem: error instanceof Error ? error.message : String(error) };
+          }
+        },
         ...githubPageActions({
           provider, number: pullRequest.number, headBranch: pullRequest.headBranch, baseBranch: () => baseBranch, folder, hooksOff: role === 'reviewer',
           details: currentDetails, conversation: currentConversation,

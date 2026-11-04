@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import type { PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, ReviewVerdict } from './pullRequests.js';
+import type { ListVersion, PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, ReviewVerdict } from './pullRequests.js';
 import type { PullRequestRole } from './worktrees.js';
+import { pollWhileFocused } from './autoSync.js';
 import { GitHubSignInRequired } from './githubApi.js';
 import { fileTree, type FileFolder } from './fileTree.js';
 import type { OutlineGroup, OutlineStep } from './prAnalysis.js';
@@ -227,6 +228,10 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #guides = new Map<string, Promise<readonly OutlineGroup[] | undefined>>();
   /** PRs merged from this window; GitHub's search keeps listing them as open for a while. */
   readonly #merged = new Set<string>();
+  /** Each listed repository's latest PR update at the last check. */
+  readonly #versions = new Map<string, ListVersion>();
+  /** GitHub search can lag behind a change, so the check after one reloads again. */
+  #settling = false;
 
   constructor(
     private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
@@ -344,6 +349,20 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#forgetState();
     for (const checkout of this.#listed) checkout.worktrees.forget();
     this.#changed.fire(undefined);
+  }
+
+  /** Reload the list when a PR in a listed repository changed on GitHub since the last check. */
+  async pollGitHub(): Promise<void> {
+    const ready = [...this.#done.values()].filter((listing): listing is Ready => listing.kind === 'ready');
+    const changes = await Promise.all(ready.map(async ({ provider, repository }) => {
+      const known = this.#versions.get(repository.name);
+      const next = await provider.listVersion(known).catch(() => known);
+      if (next !== undefined) this.#versions.set(repository.name, next);
+      return known !== undefined && next !== undefined && next.latest !== known.latest;
+    }));
+    const changed = changes.includes(true);
+    if (changed || this.#settling) this.refresh();
+    this.#settling = changed;
   }
 
   /** Show a PR as merged from now on, keyed `repository#number`. */
@@ -693,6 +712,7 @@ export function registerPullRequestView(
   };
   const legend = vscode.window.createTreeView('pairReview.legend', { treeDataProvider: legendProvider });
   const view = vscode.window.createTreeView('pairReview.pullRequests', { treeDataProvider: tree, manageCheckboxStateManually: true });
+  const sync = pollWhileFocused(60_000, () => view.visible, () => tree.pollGitHub());
   return vscode.Disposable.from(
     view,
     legend,
@@ -707,6 +727,8 @@ export function registerPullRequestView(
     }),
     onDidChangeStatus((pullRequest) => { tree.redraw(pullRequest); }),
     vscode.commands.registerCommand('pairReview.refreshPullRequests', () => { tree.refresh(); }),
+    sync,
+    view.onDidChangeVisibility(({ visible }) => { if (visible) sync.now(); }),
     vscode.commands.registerCommand('pairReview.searchPullRequests', async () => {
       try {
         await tree.search();

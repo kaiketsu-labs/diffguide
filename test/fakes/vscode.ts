@@ -146,6 +146,9 @@ export class FakePanel {
   private readonly received = new EventEmitter<unknown>();
   private readonly closed = new EventEmitter<void>();
   readonly onDidDispose = this.closed.event;
+  visible = true;
+  readonly viewStates = new EventEmitter<{ readonly webviewPanel: FakePanel }>();
+  readonly onDidChangeViewState = this.viewStates.event;
   readonly webview = {
     html: '',
     asWebviewUri: (uri: vscode.Uri): vscode.Uri => uri,
@@ -565,6 +568,7 @@ interface FakeTreeView {
 }
 export const window = {
   activeColorTheme: { kind: ColorThemeKind.Dark as number },
+  state: { focused: true },
   panels: [] as FakePanel[],
   errors: [] as string[],
   information: [] as string[],
@@ -585,7 +589,8 @@ export const window = {
   onDidChangeWindowState: editorEvents.focus.event,
   createTreeView(_id: string, options: { readonly treeDataProvider: vscode.TreeDataProvider<vscode.TreeItem> }): FakeTreeView {
     const checkboxes = new EventEmitter<{ readonly items: readonly [unknown, number][] }>();
-    const tree = { title: '', description: '', message: '', provider: options.treeDataProvider, checkboxes, onDidChangeCheckboxState: checkboxes.event, dispose(): void {} };
+    const tree = { title: '', description: '', message: '', visible: true, onDidChangeVisibility: new EventEmitter<{ readonly visible: boolean }>().event,
+      provider: options.treeDataProvider, checkboxes, onDidChangeCheckboxState: checkboxes.event, dispose(): void {} };
     this.trees.push(tree);
     return tree;
   },

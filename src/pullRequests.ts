@@ -1,4 +1,4 @@
-import { endpointsFor, githubRequest } from './githubApi.js';
+import { endpointsFor, githubPoll, githubRequest, type Polled } from './githubApi.js';
 import { git } from './worktrees.js';
 
 /** Open pull request shown in the sidebar, validated from provider output. */
@@ -286,7 +286,14 @@ export interface PullRequestProvider {
   branches(): Promise<readonly string[]>;
   /** GitHub's rendering of Markdown in this repository, for previewing a comment. */
   renderMarkdown(text: string): Promise<string>;
+  /** The PR's head and last update; returns `known` itself when nothing changed. */
+  version(number: number, known?: PullRequestVersion): Promise<PullRequestVersion>;
+  /** The repository's most recent PR update, which moves when any PR is opened, changed or closed; returns `known` itself when nothing changed. */
+  listVersion(known?: ListVersion): Promise<ListVersion>;
 }
+
+export interface PullRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string }
+export interface ListVersion { readonly polled?: Polled; readonly latest: string }
 
 /** A repository on a GitHub host, as a git remote names it. */
 export interface GitHubRemote {
@@ -817,6 +824,26 @@ export class GitHubApiProvider implements PullRequestProvider {
     const endpoints = endpointsFor(host);
     const html = await githubRequest(endpoints, `${endpoints.rest}/markdown`, 'POST', { text: markdown, mode: 'gfm', context: `${owner}/${name}` });
     return typeof html === 'string' ? html : '';
+  }
+
+  async version(number: number, known?: PullRequestVersion): Promise<PullRequestVersion> {
+    const polled = await this.#poll(`pulls/${number}`, known?.polled);
+    if (polled === known?.polled) return known;
+    const pullRequest = object(polled.data);
+    return { polled, head: text(object(pullRequest['head'])['sha']), updatedAt: text(pullRequest['updated_at']) };
+  }
+
+  async listVersion(known?: ListVersion): Promise<ListVersion> {
+    const polled = await this.#poll('pulls?state=all&sort=updated&direction=desc&per_page=1', known?.polled);
+    if (polled === known?.polled) return known;
+    const latest = object(list(polled.data)[0]);
+    return { polled, latest: `${String(latest['number'] ?? '')} ${String(latest['updated_at'] ?? '')}` };
+  }
+
+  async #poll(path: string, known: Polled | undefined): Promise<Polled> {
+    const { owner, name, host } = await this.#repo();
+    const endpoints = endpointsFor(host);
+    return await githubPoll(endpoints, `${endpoints.rest}/repos/${owner}/${name}/${path}`, known);
   }
 
   async #restGet(path: string): Promise<unknown> {

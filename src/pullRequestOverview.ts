@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
+import { pollWhileFocused } from './autoSync.js';
 import { claudeStatus } from './claudeStatus.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
@@ -234,6 +235,8 @@ export interface OverviewActions {
   /** Remove the PR's local worktree after the user confirms; true when removed, so the page closes. */
   removeWorktree(): Promise<boolean>;
   refresh(): void;
+  /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
+  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string }>;
   analyze(): Promise<void>;
   stopAnalysis(): void;
 }
@@ -575,6 +578,16 @@ export async function showPullRequestOverview(
       }
     }),
   ];
+  let shownProblem: string | undefined;
+  const sync = pollWhileFocused(30_000, () => panel.visible, async () => {
+    const { reload, files, problem } = await actions.pollGitHub();
+    if (reload) actions.refresh();
+    if (files) sendFiles();
+    if (problem !== undefined && problem !== shownProblem) post({ error: problem });
+    shownProblem = problem;
+  });
+  subscriptions.push(sync, panel.onDidChangeViewState(({ webviewPanel }) => { if (webviewPanel.visible) sync.now(); }));
+  sync.now();
   panel.onDidDispose(() => {
     if (timer !== undefined) clearTimeout(timer);
     for (const subscription of subscriptions) subscription.dispose();
