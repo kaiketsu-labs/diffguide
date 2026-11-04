@@ -14,7 +14,7 @@ declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; 
 
 type Layout = 'unified' | 'split';
 /** What the file list shows: every file, the PR's commits, or Claude's guide in reading order. */
-type View = 'files' | 'commits' | 'guide';
+type View = 'files' | 'guide';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
 interface Saved {
@@ -55,7 +55,7 @@ const { claudeIcon } = initial;
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
 let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
-let view: View = saved.view ?? (saved.layout === 'guided' ? 'guide' : 'files');
+let view: View = saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : 'files';
 let peekWidth = saved.peekWidth;
 let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
@@ -828,7 +828,7 @@ function commitGroup(commits: readonly Extract<TimelineItem, { kind: 'commit' }>
   const last = commits.at(-1);
   main.append(el('b', '', authors.join(', ')), ' added ' + commits.length + (commits.length === 1 ? ' commit · ' : ' commits · '), ...last ? timeLabel(last.createdAt) : []);
   const list = el('div', 'commit-list');
-  for (const commit of commits) list.append(commitRow(commit, false));
+  for (const commit of commits) list.append(commitRow(commit));
   main.append(list);
   node.append(mark, main);
   return node;
@@ -836,19 +836,23 @@ function commitGroup(commits: readonly Extract<TimelineItem, { kind: 'commit' }>
 
 const checkMarks: Record<NonNullable<Extract<TimelineItem, { kind: 'commit' }>['checks']>, readonly [string, string]> = { success: ['✓', 'ok'], failure: ['✗', 'bad'], pending: ['●', 'wait'] };
 
-function commitRow(commit: Extract<TimelineItem, { kind: 'commit' }>, selectable: boolean): HTMLElement {
+function commitRow(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement {
   const row = el('div', 'commit-row');
-  row.dataset.oid = commit.oid;
-  row.title = commit.message ? commit.headline + '\n\n' + commit.message : commit.headline;
-  const hash = selectable ? el('code', '', commit.oid.slice(0, 7)) : button(commit.oid.slice(0, 7), () => { showCommits(commit.oid, commit.oid); }, 'ref');
-  if (!selectable) hash.title = 'Show this commit\'s changes';
-  row.append(hash, el('span', 'text', commit.headline));
-  if (commit.checks) {
-    const [mark, tone] = checkMarks[commit.checks];
-    row.append(el('span', tone, mark));
-  }
-  if (selectable) row.append(...commitStats(commit), el('span', 'muted', commit.author), ...timeLabel(commit.createdAt));
+  row.title = commitTitle(commit);
+  const hash = button(commit.oid.slice(0, 7), () => { showCommits(commit.oid, commit.oid); }, 'ref');
+  hash.title = 'Show this commit\'s changes';
+  row.append(hash, el('span', 'text', commit.headline), ...checkMark(commit));
   return row;
+}
+
+function commitTitle(commit: Extract<TimelineItem, { kind: 'commit' }>): string {
+  return commit.message ? commit.headline + '\n\n' + commit.message : commit.headline;
+}
+
+function checkMark(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement[] {
+  if (!commit.checks) return [];
+  const [mark, tone] = checkMarks[commit.checks];
+  return [el('span', tone, mark)];
 }
 
 function commitStats(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement[] {
@@ -868,6 +872,7 @@ function commitsOf(state = current): Extract<TimelineItem, { kind: 'commit' }>[]
 
 /** Show the changes of commits `from` to `to` in the Files tab. */
 function showCommits(from: string, to: string): void {
+  if (from === to) rangeAnchor = from;
   requestFiles({ kind: 'commits', from, to }, whitespace);
   setView('files');
   $('files-bar').scrollIntoView({ block: 'start' });
@@ -901,8 +906,12 @@ function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
 function rangeTitle(shown: DiffRange): (Node | string)[] {
   if (shown.kind === 'all') return ['All changes'];
   if (shown.kind === 'since') return ['Changes since your last review'];
-  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits ', el('code', '', shown.from.slice(0, 7)), ' to ', el('code', '', shown.to.slice(0, 7))];
-  return ['Commit ', el('code', '', shown.from.slice(0, 7)), ' ', el('b', '', commitsOf().find((commit) => commit.oid === shown.from)?.headline ?? '')];
+  if (shown.from !== shown.to) return [rangeCount(shown) + ' commits ', hashChip(shown.from), ' to ', hashChip(shown.to)];
+  return ['Commit ', hashChip(shown.from), ' ', el('b', '', commitsOf().find((commit) => commit.oid === shown.from)?.headline ?? '')];
+}
+
+function hashChip(oid: string): HTMLElement {
+  return el('span', 'ref', oid.slice(0, 7));
 }
 
 /** The range button, whitespace toggle and the note above the files while they show part of the PR. */
@@ -914,7 +923,7 @@ function renderRangeControls(): void {
   range.classList.toggle('on', diffRange.kind !== 'all');
   $('whitespace').setAttribute('aria-pressed', String(whitespace));
   const note = $('range-note');
-  note.hidden = diffRange.kind === 'all' || view === 'commits';
+  note.hidden = diffRange.kind === 'all';
   if (!note.hidden) {
     const why = atHead ? 'Read marks and comments on the base need all changes.' : 'Comments and read marks need all changes.';
     const title = el('div', 'range-title');
@@ -953,7 +962,7 @@ function openToolbarMenu(anchor: string, rows: HTMLElement[], className = ''): v
   $(anchor).after(node);
   $(anchor).setAttribute('aria-expanded', 'true');
   toolbarMenu = { anchor, node };
-  (node.querySelector<HTMLInputElement>('input:checked') ?? node.querySelector<HTMLInputElement>('input'))?.focus();
+  (node.querySelector<HTMLElement>('input:checked, [aria-checked=true]') ?? node.querySelector<HTMLElement>('input, button'))?.focus();
 }
 
 function closeToolbarMenu(): void {
@@ -963,16 +972,39 @@ function closeToolbarMenu(): void {
   toolbarMenu = undefined;
 }
 
+/** The range menu: all changes, since your last review, or commits; click a commit for its changes, Shift-click another for the commits between. */
 function openRangeMenu(): void {
-  const pick = (next: DiffRange) => (on: boolean): void => { if (on) { closeToolbarMenu(); requestFiles(next, whitespace); } };
-  const rows = [menuRow(['All changes'], diffRange.kind === 'all', pick({ kind: 'all' }), true)];
-  if (current?.conversation?.lastReviewedCommit) rows.push(menuRow(['Since your last review'], diffRange.kind === 'since', pick({ kind: 'since' }), true));
-  if (diffRange.kind === 'commits' && diffRange.from !== diffRange.to) rows.push(menuRow([rangeLabel(diffRange)], true, () => undefined, true));
-  for (const commit of commitsOf()) {
-    const picked = diffRange.kind === 'commits' && diffRange.from === commit.oid && diffRange.to === commit.oid;
-    rows.push(menuRow([el('code', '', commit.oid.slice(0, 7)), ' ' + commit.headline], picked, pick({ kind: 'commits', from: commit.oid, to: commit.oid }), true));
-  }
-  openToolbarMenu('range', rows, 'range-menu');
+  const commits = commitsOf();
+  const index = (oid: string): number => commits.findIndex((commit) => commit.oid === oid);
+  const [low, high] = diffRange.kind === 'commits' ? [index(diffRange.from), index(diffRange.to)] : [-1, -1];
+  const pick = (next: DiffRange): void => { closeToolbarMenu(); requestFiles(next, whitespace); };
+  const rows = [rangeRow([el('span', 'text', 'All changes'), el('span', 'muted', commits.length === 1 ? '1 commit' : commits.length + ' commits')], diffRange.kind === 'all', () => pick({ kind: 'all' }))];
+  if (current?.conversation?.lastReviewedCommit) rows.push(rangeRow([el('span', 'text', 'Since your last review')], diffRange.kind === 'since', () => pick({ kind: 'since' })));
+  commits.forEach((commit, at) => {
+    const row = rangeRow([hashChip(commit.oid), el('span', 'text', commit.headline), ...checkMark(commit), ...commitStats(commit), el('span', 'muted', commit.author), ...timeLabel(commit.createdAt)],
+      low >= 0 && at >= low && at <= high, (shift) => {
+        const anchor = shift && rangeAnchor !== undefined ? index(rangeAnchor) : -1;
+        if (anchor < 0) { rangeAnchor = commit.oid; pick({ kind: 'commits', from: commit.oid, to: commit.oid }); return; }
+        const [from, to] = anchor <= at ? [commits[anchor], commit] : [commit, commits[anchor]];
+        if (from && to) pick({ kind: 'commits', from: from.oid, to: to.oid });
+      });
+    row.title = commitTitle(commit);
+    row.classList.add('commit');
+    rows.push(row);
+  });
+  const hint = el('div', 'muted menu-hint', commits.length > 1 ? 'Shift-click a second commit to see the commits between.' : current?.conversation ? '' : 'Loading commits…');
+  openToolbarMenu('range', hint.textContent ? [...rows, hint] : rows, 'range-menu');
+}
+
+function rangeRow(content: Node[], checked: boolean, choose: (shift: boolean) => void): HTMLElement {
+  const row = el('button', 'picker-row range-row');
+  row.setAttribute('role', 'menuitemcheckbox');
+  row.setAttribute('aria-checked', String(checked));
+  const mark = icon(codicons.check);
+  mark.classList.add('check');
+  row.append(mark, ...content);
+  row.addEventListener('click', (event) => { choose(event.shiftKey); });
+  return row;
 }
 
 /** Whether lines on `side` can take comments, read marks and threads in the shown range. */
@@ -1022,29 +1054,6 @@ function clearFilters(): void {
   hiddenTypes.clear();
   hideViewed = false;
   applyFilters();
-}
-
-/** The Commits tab: each commit of the PR; click one to see its changes, Shift-click another to see the commits between. */
-function renderCommits(): void {
-  const container = $('files');
-  const commits = commitsOf();
-  const box = el('div', 'commits-view');
-  const index = (oid: string): number => commits.findIndex((commit) => commit.oid === oid);
-  const [low, high] = diffRange.kind === 'commits' ? [index(diffRange.from), index(diffRange.to)] : [-1, -1];
-  commits.forEach((commit, at) => {
-    const row = commitRow(commit, true);
-    if (at >= low && at <= high && low >= 0) row.classList.add('sel');
-    row.addEventListener('click', (event) => {
-      const anchor = event.shiftKey && rangeAnchor !== undefined ? index(rangeAnchor) : -1;
-      if (anchor < 0) { rangeAnchor = commit.oid; showCommits(commit.oid, commit.oid); return; }
-      const [from, to] = anchor <= at ? [commits[anchor], commit] : [commit, commits[anchor]];
-      if (from && to) showCommits(from.oid, to.oid);
-    });
-    box.append(row);
-  });
-  const hint = el('p', 'muted', commits.length ? 'Click a commit to see its changes. Shift-click another to see the commits between.' : current?.conversation ? 'No commits.' : 'Loading commits…');
-  container.replaceChildren(hint, ...commits.length ? [box] : []);
-  $('files-title').textContent = '';
 }
 
 /** Default merge commit wording, as the repository's settings tell GitHub to fill it in. */
@@ -2295,7 +2304,7 @@ function setTip(button: HTMLElement, tip: string): void {
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
-  for (const name of ['files', 'commits', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
+  for (const name of ['files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
   showGuideTab();
   renderRangeControls();
   const folderButton = $('folders');
@@ -2303,7 +2312,6 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   setTip(folderButton, view === 'guide' ? 'Folders are off in the guide' : 'Group files by folder');
   folderButton.setAttribute('aria-pressed', String(folders));
   folderButton.setAttribute('aria-pressed', String(folders));
-  if (view === 'commits') { renderCommits(); return; }
   if (!files) return;
   if (view === 'guide') { keepView(() => renderGuide(only)); return; }
   const allFiles = files;
@@ -2965,7 +2973,7 @@ function setView(next: View): void {
   if (next === 'guide' && (diffRange.kind !== 'all' || whitespace)) requestFiles({ kind: 'all' }, false);
   save();
   renderFiles();
-  if (next !== 'commits') post({ action: 'view', view: next });
+  post({ action: 'view', view: next });
 }
 
 /** The Guide tab's count: steps once a guide exists, a pulse while Claude builds it. Build guide shows only in the guide. */
@@ -2977,7 +2985,6 @@ function showGuideTab(): void {
   count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
   count.hidden = !analysis?.running && steps === undefined;
   $('files-count').textContent = files ? String(files.length) : '';
-  $('commits-count').textContent = current?.conversation ? String(commitsOf().length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
   for (const id of ['range', 'whitespace', 'filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
 }
@@ -3164,7 +3171,7 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
-for (const name of ['files', 'commits', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
+for (const name of ['files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
 $('range').addEventListener('click', openRangeMenu);
 $('whitespace').addEventListener('click', () => requestFiles(diffRange, !whitespace));
 $<HTMLInputElement>('file-filter').value = fileFilter;
