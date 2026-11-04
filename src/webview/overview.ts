@@ -34,6 +34,7 @@ interface Saved {
   readonly hideViewed?: boolean;
   readonly hiddenTypes?: readonly string[];
   readonly conversationDraft?: string;
+  readonly conversationFolded?: boolean;
 }
 type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
@@ -88,6 +89,10 @@ const hiddenTypes = new Set(saved.hiddenTypes ?? []);
 /** The open menu under a Files toolbar button: the range or the file filter. */
 let toolbarMenu: { readonly anchor: string; readonly node: HTMLElement } | undefined;
 let conversationDraft = saved.conversationDraft ?? '';
+let conversationFolded = saved.conversationFolded === true;
+/** Whether the Conversation card shows its older entries; it shows only the latest ones on long PRs. */
+let conversationAll = false;
+const recentEntries = 6;
 /** Comment edits in progress, by comment id. */
 const edits = new Map<string, string>();
 /** Hidden comments the viewer chose to read anyway. */
@@ -216,7 +221,7 @@ function frameMain(): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -741,7 +746,7 @@ let conversationStamp = '';
 
 /** The Conversation card: comments, reviews, pushes and events, oldest first, and a box for a new comment. */
 function renderConversation(state: OverviewState, force = false): void {
-  const stamp = JSON.stringify([state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:'))]);
+  const stamp = JSON.stringify([conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:'))]);
   if (!force && stamp === conversationStamp) return;
   conversationStamp = stamp;
   const timeline = $('timeline');
@@ -774,7 +779,13 @@ function renderConversation(state: OverviewState, force = false): void {
       else nodes.push(commentItem(item, place(item)));
     }
     flush();
-    timeline.replaceChildren(...nodes.length ? nodes : [el('div', 'muted', 'No comments yet.')]);
+    $('conversation').classList.toggle('folded', conversationFolded);
+    $('fold-conversation').setAttribute('aria-expanded', String(!conversationFolded));
+    $('conversation-count').textContent = nodes.length ? String(nodes.length) : '';
+    const hidden = conversationAll ? 0 : Math.max(0, nodes.length - recentEntries - 1);
+    const more = button('Show ' + hidden + ' earlier entries', () => { conversationAll = true; if (current) renderConversation(current, true); }, 'quiet');
+    more.classList.add('timeline-more');
+    timeline.replaceChildren(...nodes.length ? hidden ? [more, ...nodes.slice(hidden)] : nodes : [el('div', 'muted', 'No comments yet.')]);
     renderConversationForm();
   }, $('conversation'));
 }
@@ -855,15 +866,14 @@ function checkMark(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLEleme
   return [el('span', tone, mark)];
 }
 
+/** Files, added and removed lines: always three cells, empty when GitHub could not count them. */
 function commitStats(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement[] {
-  const stats: HTMLElement[] = [];
-  if (commit.files !== undefined) stats.push(el('span', 'muted', commit.files + (commit.files === 1 ? ' file' : ' files')));
-  if (commit.additions !== undefined && commit.deletions !== undefined) {
-    const lines = el('span', 'commit-lines');
-    lines.append(el('span', 'ok', '+' + commit.additions), el('span', 'bad', '−' + commit.deletions));
-    stats.push(lines);
-  }
-  return stats;
+  const lines = commit.additions !== undefined && commit.deletions !== undefined;
+  return [
+    el('span', 'muted num', commit.files === undefined ? '' : commit.files + (commit.files === 1 ? ' file' : ' files')),
+    el('span', 'ok num', lines ? '+' + commit.additions : ''),
+    el('span', 'bad num', lines ? '−' + commit.deletions : ''),
+  ];
 }
 
 function commitsOf(state = current): Extract<TimelineItem, { kind: 'commit' }>[] {
@@ -919,7 +929,7 @@ function renderRangeControls(): void {
   const label = rangeLabel(diffRange);
   const range = $('range');
   range.title = label;
-  range.querySelector('.range-text')?.replaceChildren(label);
+  range.querySelector('.range-text')?.replaceChildren(...diffRange.kind === 'commits' && diffRange.from === diffRange.to ? [hashChip(diffRange.from), ' ' + label.slice(8)] : [label]);
   range.classList.toggle('on', diffRange.kind !== 'all');
   $('whitespace').setAttribute('aria-pressed', String(whitespace));
   const note = $('range-note');
@@ -981,7 +991,7 @@ function openRangeMenu(): void {
   const rows = [rangeRow([el('span', 'text', 'All changes'), el('span', 'muted', commits.length === 1 ? '1 commit' : commits.length + ' commits')], diffRange.kind === 'all', () => pick({ kind: 'all' }))];
   if (current?.conversation?.lastReviewedCommit) rows.push(rangeRow([el('span', 'text', 'Since your last review')], diffRange.kind === 'since', () => pick({ kind: 'since' })));
   commits.forEach((commit, at) => {
-    const row = rangeRow([hashChip(commit.oid), el('span', 'text', commit.headline), ...checkMark(commit), ...commitStats(commit), el('span', 'muted', commit.author), ...timeLabel(commit.createdAt)],
+    const row = rangeRow([hashChip(commit.oid), el('span', 'text', commit.headline), ...cell(checkMark(commit)), ...commitStats(commit), el('span', 'muted', commit.author), ...cell(timeLabel(commit.createdAt))],
       low >= 0 && at >= low && at <= high, (shift) => {
         const anchor = shift && rangeAnchor !== undefined ? index(rangeAnchor) : -1;
         if (anchor < 0) { rangeAnchor = commit.oid; pick({ kind: 'commits', from: commit.oid, to: commit.oid }); return; }
@@ -994,6 +1004,11 @@ function openRangeMenu(): void {
   });
   const hint = el('div', 'muted menu-hint', commits.length > 1 ? 'Shift-click a second commit to see the commits between.' : current?.conversation ? '' : 'Loading commits…');
   openToolbarMenu('range', hint.textContent ? [...rows, hint] : rows, 'range-menu');
+}
+
+/** One grid cell: the node, or an empty one so the columns stay in place. */
+function cell(nodes: HTMLElement[]): HTMLElement[] {
+  return nodes.length ? nodes : [el('span')];
 }
 
 function rangeRow(content: Node[], checked: boolean, choose: (shift: boolean) => void): HTMLElement {
@@ -3180,6 +3195,7 @@ $('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Esc
 $('filter-clear').addEventListener('click', () => { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; applyFilters(); $('file-filter').focus(); });
 $('filter-clear').hidden = fileFilter === '';
 $('filter-menu').addEventListener('click', openFilterMenu);
+$('fold-conversation').addEventListener('click', () => { conversationFolded = !conversationFolded; save(); if (current) renderConversation(current, true); });
 $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
 document.addEventListener('pointerdown', (event) => {
   if (toolbarMenu && event.target instanceof Node && !toolbarMenu.node.contains(event.target) && !$(toolbarMenu.anchor).contains(event.target)) closeToolbarMenu();
