@@ -147,6 +147,8 @@ test('reads picker options, with teams only for organizations', () => {
   assert.deepEqual(parsePickerOptions({ ...repository, owner: { teams: { nodes: [{ name: 'Core', slug: 'core' }, { name: 'No slug' }] } } }),
     { users: ['alice'], teams: [{ name: 'Core', slug: 'core' }], labels: [{ name: 'bug', color: 'd73a4a' }] });
   assert.deepEqual(parsePickerOptions({ ...repository, owner: {} }).teams, []);
+  assert.deepEqual(parsePickerOptions({ ...repository, owner: {}, labels: { nodes: [{ name: 'bug', color: 'd73a4a', description: ' Broken ' }, { name: 'docs', color: '0075ca', description: '' }] } }).labels,
+    [{ name: 'bug', color: 'd73a4a', description: 'Broken' }, { name: 'docs', color: '0075ca' }]);
 });
 
 test('reads GitHub review threads, using original lines for outdated ones and skipping file-level threads', () => {

@@ -102,7 +102,8 @@ export interface RemoteThread {
   readonly comments: readonly { readonly id: string; readonly author: string; readonly authorName?: string; readonly avatarUrl: string; readonly pending: boolean; readonly bodyHtml: string; readonly canDelete: boolean; readonly createdAt: string }[];
 }
 
-export interface Label { readonly name: string; readonly color: string }
+/** `description` is read only for the label picker. */
+export interface Label { readonly name: string; readonly color: string; readonly description?: string }
 
 /** Who can be asked to review, assigned or labeled on this repository. */
 export interface PickerOptions {
@@ -501,7 +502,7 @@ export class GitHubApiProvider implements PullRequestProvider {
 
   async pickerOptions(): Promise<PickerOptions> {
     const data = await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
-      assignableUsers(first:100){nodes{login}} labels(first:100){nodes{name color}}
+      assignableUsers(first:100){nodes{login}} labels(first:100){nodes{name color description}}
       owner{... on Organization{teams(first:100){nodes{name slug}}}}}}`, {});
     return parsePickerOptions(object(data['repository']));
   }
@@ -717,8 +718,9 @@ function logins(connection: unknown): readonly string[] {
 /** Labels with a six-digit hex color; others are left out. */
 function parseLabels(connection: unknown): readonly Label[] {
   return list(object(connection)['nodes']).map(object).flatMap((label) => {
-    const { name, color } = label;
-    return typeof name === 'string' && typeof color === 'string' && /^[0-9a-f]{6}$/iu.test(color) ? [{ name, color }] : [];
+    const { name, color, description } = label;
+    if (typeof name !== 'string' || typeof color !== 'string' || !/^[0-9a-f]{6}$/iu.test(color)) return [];
+    return [typeof description === 'string' && description.trim() ? { name, color, description: description.trim() } : { name, color }];
   });
 }
 

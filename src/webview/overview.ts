@@ -1,7 +1,7 @@
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
-import type { DefinitionTarget, DiffSide, ExtensionMessage, FilePreview, GitHubThreadView, OverviewState, PageMessage } from '../pullRequestOverview.js';
-import type { MergeMethod, PullRequestDetails, ReviewEvent } from '../pullRequests.js';
+import type { DefinitionTarget, DiffSide, ExtensionMessage, FilePreview, GitHubThreadView, OverviewState, PageMessage, PickTarget } from '../pullRequestOverview.js';
+import type { MergeMethod, PickerOptions, PullRequestDetails, ReviewEvent } from '../pullRequests.js';
 import { fileTree, type FileFolder } from '../fileTree.js';
 import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLines.js';
 import type { LineRange } from '../reviewedFiles.js';
@@ -208,18 +208,23 @@ function icon(svg: string): Element {
 
 /** A branch name that copies itself, like GitHub's. */
 function branchRef(name: string): HTMLButtonElement {
+  return copyRef(name, name, 'branch name');
+}
+
+/** A chip showing `text` that copies `value`; `what` names the value in its tooltip and error. */
+function copyRef(text: string, value: string, what: string): HTMLButtonElement {
   const ref = el('button', 'ref');
-  ref.title = 'Copy branch name';
+  ref.title = 'Copy ' + what;
   const copy = icon(codicons.copy);
   copy.classList.add('copy');
   const done = icon(codicons.check);
   done.classList.add('done');
-  ref.append(name, copy, done);
+  ref.append(text, copy, done);
   ref.addEventListener('click', () => {
-    void navigator.clipboard.writeText(name).then(() => {
+    void navigator.clipboard.writeText(value).then(() => {
       ref.classList.add('copied');
       setTimeout(() => ref.classList.remove('copied'), 1500);
-    }, () => { $('error').textContent = 'Could not copy the branch name.'; });
+    }, () => { $('error').textContent = 'Could not copy the ' + what + '.'; });
   });
   return ref;
 }
@@ -255,6 +260,109 @@ function changePullRequest(message: PageMessage): void {
   $('error').textContent = '';
   setBusy(true);
   post(message);
+}
+
+/** One row of a picker; `key` keeps a user and a team with the same name apart. */
+interface PickerItem { readonly key: string; readonly text: string; readonly note?: string; readonly color?: string; readonly description?: string }
+/** The open reviewer, assignee or label picker; it saves on close when `selected` differs from `initial`. */
+interface Picker { readonly what: PickTarget; readonly initial: ReadonlySet<string>; readonly selected: Set<string>; readonly node: HTMLElement; readonly list: HTMLElement }
+let picker: Picker | undefined;
+let pickerOptions: PickerOptions | undefined;
+let pickerError: string | undefined;
+const pickerPlaceholders: Record<PickTarget, string> = { reviewers: 'Filter people and teams', assignees: 'Filter people', labels: 'Filter labels' };
+
+function pickedKeys(what: PickTarget, details: PullRequestDetails): Set<string> {
+  if (what === 'labels') return new Set(details.labels.map((label) => label.name));
+  if (what === 'assignees') return new Set(details.assignees);
+  return new Set(details.reviewers.filter((reviewer) => reviewer.state === 'requested').map((reviewer) => reviewer.team === undefined ? 'user:' + reviewer.name : 'team:' + reviewer.team));
+}
+
+/** The repository's choices plus whatever the PR already has, so current values stay removable. */
+function pickerItems(what: PickTarget, details: PullRequestDetails, options: PickerOptions): PickerItem[] {
+  if (what === 'labels') {
+    const byName = new Map([...details.labels, ...options.labels].map((label) => [label.name, label]));
+    return [...byName.values()].map((label) => ({ key: label.name, text: label.name, color: label.color, ...(label.description === undefined ? {} : { description: label.description }) }));
+  }
+  if (what === 'assignees') return [...new Set([...details.assignees, ...options.users])].map((login) => ({ key: login, text: login }));
+  const users = details.reviewers.filter((reviewer) => reviewer.team === undefined);
+  const teams = details.reviewers.flatMap((reviewer) => reviewer.team === undefined ? [] : [{ name: reviewer.name, slug: reviewer.team }]);
+  const userItems = [...new Set([...users.map((reviewer) => reviewer.name), ...options.users])].map((login): PickerItem => {
+    const state = users.find((reviewer) => reviewer.name === login)?.state;
+    return { key: 'user:' + login, text: login, ...(state === undefined || state === 'requested' ? {} : { note: labels[state][2] }) };
+  });
+  const teamItems = [...teams, ...options.teams.filter((team) => !teams.some((entry) => entry.slug === team.slug))]
+    .map((team): PickerItem => ({ key: 'team:' + team.slug, text: team.name, note: 'Team' }));
+  return [...userItems, ...teamItems];
+}
+
+function openPicker(what: PickTarget): void {
+  const reopen = picker?.what !== what;
+  closePicker(true);
+  const details = current?.details;
+  if (!reopen || !details?.canEdit || busy) return;
+  const search = el('input');
+  search.type = 'text';
+  search.placeholder = pickerPlaceholders[what];
+  search.setAttribute('aria-label', pickerPlaceholders[what]);
+  const list = el('div', 'picker-list');
+  const node = el('div', 'picker');
+  node.append(search, list);
+  $('pick-' + what).closest('section')?.append(node);
+  $('pick-' + what).setAttribute('aria-pressed', 'true');
+  const initial = pickedKeys(what, details);
+  picker = { what, initial, selected: new Set(initial), node, list };
+  search.addEventListener('input', () => renderPicker(search.value));
+  renderPicker('');
+  search.focus();
+  post({ action: 'picker-options' });
+}
+
+function renderPicker(filter = picker?.node.querySelector('input')?.value ?? ''): void {
+  const details = current?.details;
+  if (!picker || !details) return;
+  const { what, initial, selected, list } = picker;
+  const query = filter.trim().toLowerCase();
+  const items = pickerItems(what, details, pickerOptions ?? { users: [], teams: [], labels: [] })
+    .filter((item) => !query || [item.text, item.key.replace(/^(?:user|team):/u, '')].some((text) => text.toLowerCase().includes(query)))
+    .sort((a, b) => Number(initial.has(b.key)) - Number(initial.has(a.key)));
+  const rows = items.map((item) => {
+    const row = el('label', 'picker-row');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = selected.has(item.key);
+    box.addEventListener('change', () => { if (box.checked) selected.add(item.key); else selected.delete(item.key); });
+    const mark = icon(codicons.check);
+    mark.classList.add('check');
+    row.append(box);
+    if (item.color === undefined) row.append(mark, el('span', 'text', item.text));
+    else {
+      const label = el('span', 'picker-label');
+      label.style.setProperty('--label', '#' + item.color);
+      label.append(mark, el('span', 'dot'), el('span', 'text', item.text));
+      if (item.description) {
+        label.append(el('span', 'muted picker-description', item.description));
+        row.title = item.description;
+      }
+      row.append(label);
+    }
+    if (item.note) row.append(el('span', 'muted', item.note));
+    return row;
+  });
+  const note = pickerError ? 'Could not load choices: ' + pickerError : pickerOptions === undefined ? 'Loading…' : items.length ? '' : query ? 'No matches.' : 'Nothing to pick.';
+  list.replaceChildren(...rows, ...note ? [el('div', 'muted picker-note', note)] : []);
+}
+
+/** Close the open picker and save its selection unless `save` is false or nothing changed. */
+function closePicker(save: boolean): void {
+  if (!picker) return;
+  const { what, initial, selected, node } = picker;
+  picker = undefined;
+  node.remove();
+  $('pick-' + what).removeAttribute('aria-pressed');
+  if (!save || (selected.size === initial.size && [...selected].every((key) => initial.has(key)))) return;
+  const keys = [...selected];
+  const prefixed = (prefix: string): string[] => keys.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+  changePullRequest(what === 'reviewers' ? { action: 'pick', what, values: prefixed('user:'), teams: prefixed('team:') } : { action: 'pick', what, values: keys, teams: [] });
 }
 
 function editBody(): void {
@@ -328,7 +436,8 @@ function allThreads(): Thread[] {
 
 function render(state: OverviewState): void {
   current = state;
-  $('title').textContent = state.title;
+  $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
+  $('title').textContent = state.heading ?? state.title;
   $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch));
   $('facts').replaceChildren(...pullRequestFacts(state));
   const { details } = state;
@@ -2023,6 +2132,8 @@ function onExtensionMessage(data: ExtensionMessage): void {
     save();
     renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
   }
+  if (data.pickerOptions) { pickerOptions = data.pickerOptions; pickerError = undefined; renderPicker(); }
+  if (data.pickerError !== undefined) { pickerError = data.pickerError; renderPicker(); }
   if (data.idle) setBusy(false);
 }
 
@@ -2143,7 +2254,11 @@ $('fix-conflicts').addEventListener('click', () => {
 });
 $('edit-title').addEventListener('click', () => changePullRequest({ action: 'edit-title' }));
 $('edit-body').addEventListener('click', editBody);
-for (const what of ['reviewers', 'assignees', 'labels'] as const) $('pick-' + what).addEventListener('click', () => changePullRequest({ action: 'pick', what }));
+for (const what of ['reviewers', 'assignees', 'labels'] as const) $('pick-' + what).addEventListener('click', () => openPicker(what));
+document.addEventListener('pointerdown', (event) => {
+  if (picker && event.target instanceof Node && !picker.node.contains(event.target) && !$('pick-' + picker.what).contains(event.target)) closePicker(true);
+});
+window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && picker) closePicker(false); });
 $('merge').addEventListener('click', () => {
   $('error').textContent = '';
   setBusy(true);

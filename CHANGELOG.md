@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The Reviewers, Assignees and Labels gear buttons on the review page open a popover under the gear, with a filter box and a checkmark on selected items, instead of VS Code's picker at the top of the window. Labels show as on GitHub: a color dot, the name, and the description below it. Label chips in the sidebar lose their dot. Changes save when you click outside the popover or the gear again; Esc closes it without saving. The filter matches names only.
+- The review page shows the PR number as a chip before the title, like the branch chips; clicking it copies the link to the PR.
 - Comment authors without a loadable avatar, as on GitHub Enterprise, show their initials: from their profile name, or the first letter of their login when they set no name.
 - Guide steps can show the unchanged lines around their changes, with the same expand buttons as the Files tab. The buttons were missing before.
 - Resolving a thread on the review page folds it. It stayed open before.

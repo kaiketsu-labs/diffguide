@@ -21,7 +21,7 @@ import { fenceFilePaths, inlineLocalImages, markdownBlocks, markdownHtml } from 
 import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
-import { pickAndSave } from './pullRequestEdits.js';
+import { saveSelection } from './pullRequestEdits.js';
 import { buildOverviewState, showPullRequestOverview, type AnalysisView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestDetails, PullRequestProvider, PullRequestSummary, RemoteThread } from './pullRequests.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
@@ -364,8 +364,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await provider.editPullRequest(pullRequest.number, { body });
           void loadDetails();
         },
-        pick: async (what) => {
-          await pickAndSave(provider, pullRequest.number, await currentDetails(), what);
+        pickerOptions: () => provider.pickerOptions(),
+        pick: async (what, picked) => {
+          await saveSelection(provider, pullRequest.number, await currentDetails(), what, picked);
           void loadDetails();
         },
         setDraft: async (draft) => {

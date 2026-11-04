@@ -37,7 +37,7 @@ async function fixture(canEdit?: boolean, fail = false) {
 for (const canEdit of [false, undefined]) {
   test(`rejects management messages when edit permission is ${String(canEdit)}`, async () => {
     const f = await fixture(canEdit);
-    for (const message of [{ action: 'pick', what: 'reviewers' }, { action: 'edit-title' }, { action: 'edit-body', body: 'x' }, { action: 'draft', draft: true }, { action: 'close' }, { action: 'reopen' }, { action: 'delete-branch' }]) {
+    for (const message of [{ action: 'pick', what: 'reviewers', values: ['bob'], teams: [] }, { action: 'edit-title' }, { action: 'edit-body', body: 'x' }, { action: 'draft', draft: true }, { action: 'close' }, { action: 'reopen' }, { action: 'delete-branch' }]) {
       f.panel.receive(message); await tick();
     }
     assert.equal(f.writes(), 0);
@@ -45,7 +45,7 @@ for (const canEdit of [false, undefined]) {
     f.panel.dispose();
   });
 }
-for (const message of [{ action: 'pick', what: 'reviewers' }, { action: 'pick', what: 'assignees' }, { action: 'pick', what: 'labels' }, { action: 'merge', method: 'squash' }]) {
+for (const message of [{ action: 'pick', what: 'reviewers', values: ['bob'], teams: [] }, { action: 'pick', what: 'assignees', values: ['bob'], teams: [] }, { action: 'pick', what: 'labels', values: ['bug'], teams: [] }, { action: 'merge', method: 'squash' }]) {
   test(`${JSON.stringify(message)} refreshes and redraws after partial failure`, async () => {
     const f = await fixture(true, true); f.panel.receive(message); await tick();
     assert.equal(f.writes(), 1); assert.equal(f.refreshes(), 1);
@@ -56,35 +56,55 @@ for (const message of [{ action: 'pick', what: 'reviewers' }, { action: 'pick', 
   });
 }
 test('successful management action also reloads authoritative state', async () => {
-  const f = await fixture(true); f.panel.receive({ action: 'pick', what: 'labels' }); await tick();
+  const f = await fixture(true); f.panel.receive({ action: 'pick', what: 'labels', values: ['bug'], teams: [] }); await tick();
   assert.equal(f.writes(), 1); assert.equal(f.refreshes(), 1); f.panel.dispose();
 });
 
 test('partial reviewer writes reach the page as actual remote state, and retry requests only the missing removal', async () => {
   resetFakeWindow();
-  const { pickAndSave } = await import('../src/pullRequestEdits.js');
+  const { saveSelection } = await import('../src/pullRequestEdits.js');
   const remote = new Set(['alice']);
   let additions = 0; let withdrawals = 0; let fail = true;
   const snapshot = (): PullRequestDetails => ({ ...details, reviewers: [...remote].map((name) => ({ name, state: 'requested' })) });
   let current = snapshot();
   const provider = {
-    pickerOptions: async () => ({ users: ['bob'], teams: [], labels: [] }),
     requestReviewers: async (_n: number, value: { users: readonly string[] }) => { additions++; value.users.forEach((u) => remote.add(u)); },
     removeReviewers: async (_n: number, value: { users: readonly string[] }) => { withdrawals++; if (fail) throw new Error('Forbidden'); value.users.forEach((u) => remote.delete(u)); },
   } as unknown as import('../src/pullRequests.js').PullRequestProvider;
   const changed = new EventEmitter<void>();
   const actions = {
-    pick: async () => pickAndSave(provider, 7, current, 'reviewers'),
+    pick: async (what: 'reviewers', picked: { values: string[]; teams: string[] }) => saveSelection(provider, 7, current, what, picked),
     refresh: () => { current = snapshot(); },
   } as unknown as OverviewActions;
   await showPullRequestOverview('partial-reviewers', async () => ({ ...base, details: current }), changed.event, actions, vscode.Uri.file('/extension'));
   const panel = window.panels.at(-1)!;
-  window.quickPickManyIndexes = [1];
-  panel.receive({ action: 'pick', what: 'reviewers' }); await tick();
+  panel.receive({ action: 'pick', what: 'reviewers', values: ['bob'], teams: [] }); await tick();
   const posted = panel.sent.filter((m): m is { state: OverviewState } => typeof m === 'object' && m !== null && 'state' in m).at(-1);
   assert.deepEqual(posted?.state.details?.reviewers.map((r) => r.name), ['alice', 'bob']);
   fail = false;
-  panel.receive({ action: 'pick', what: 'reviewers' }); await tick();
+  panel.receive({ action: 'pick', what: 'reviewers', values: ['bob'], teams: [] }); await tick();
   assert.equal(additions, 1); assert.equal(withdrawals, 2); assert.deepEqual([...remote], ['bob']);
+  panel.dispose();
+});
+
+test('malformed picker selections never write', async () => {
+  const f = await fixture(true);
+  for (const message of [{ action: 'pick', what: 'labels' }, { action: 'pick', what: 'labels', values: [1], teams: [] }, { action: 'pick', what: 'labels', values: [''], teams: [] }, { action: 'pick', what: 'milestone', values: [], teams: [] }]) {
+    f.panel.receive(message); await tick();
+  }
+  assert.equal(f.writes(), 0); f.panel.dispose();
+});
+
+test('sends picker options to the page, or the reason they failed to load', async () => {
+  resetFakeWindow();
+  let fail = false;
+  const options = { users: ['bob'], teams: [], labels: [{ name: 'bug', color: 'd73a4a', description: 'Broken' }] };
+  const actions = { pickerOptions: async () => { if (fail) throw new Error('offline'); return options; } } as unknown as OverviewActions;
+  await showPullRequestOverview('picker-options', async () => base, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'picker-options' }); await tick();
+  assert.ok(panel.sent.some((m) => JSON.stringify((m as { pickerOptions?: unknown }).pickerOptions) === JSON.stringify(options)));
+  fail = true; panel.receive({ action: 'picker-options' }); await tick();
+  assert.ok(panel.sent.some((m) => (m as { pickerError?: string }).pickerError === 'offline'));
   panel.dispose();
 });

@@ -3,7 +3,8 @@ import * as vscode from 'vscode';
 import { claudeStatus } from './claudeStatus.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
-import type { MergeMethod, PullRequestDetails, PullRequestSummary, RemoteThread, ReviewEvent } from './pullRequests.js';
+import type { MergeMethod, PickerOptions, PullRequestDetails, PullRequestSummary, RemoteThread, ReviewEvent } from './pullRequests.js';
+import type { PickedSelection } from './pullRequestEdits.js';
 import { webviewStyles } from './webviewStyles.js';
 import { codicons } from './codicons.js';
 import { codePreviewStyles } from './codePreview.js';
@@ -18,7 +19,10 @@ import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
+  /** `#number title`, for the editor tab; the page shows `heading` beside a copyable number. */
   readonly title: string;
+  readonly number?: number;
+  readonly heading?: string;
   readonly author: string;
   readonly headBranch: string;
   readonly baseBranch: string;
@@ -159,8 +163,10 @@ export interface OverviewActions {
   /** Ask for a new title in VS Code and save it. */
   editTitle(): Promise<void>;
   editBody(body: string): Promise<void>;
-  /** Pick from the repository's users, teams or labels in VS Code and save the choice. */
-  pick(what: PickTarget): Promise<void>;
+  /** The repository's users, teams and labels for the page's pickers. */
+  pickerOptions(): Promise<PickerOptions>;
+  /** Save a picker's final selection. */
+  pick(what: PickTarget, picked: PickedSelection): Promise<void>;
   setDraft(draft: boolean): Promise<void>;
   setOpen(open: boolean): Promise<void>;
   deleteBranch(): Promise<void>;
@@ -202,7 +208,8 @@ export type PageMessage =
   | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
   | { readonly action: 'fix-conflicts'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
-  | { readonly action: 'pick'; readonly what: PickTarget }
+  | { readonly action: 'picker-options' }
+  | ({ readonly action: 'pick'; readonly what: PickTarget } & PickedSelection)
   | { readonly action: 'draft'; readonly draft: boolean };
 
 /** What the extension sends the page; each field is handled on its own. */
@@ -226,12 +233,16 @@ export interface ExtensionMessage {
   /** The form whose send succeeded, or 'review'. */
   readonly done?: string | undefined;
   readonly idle?: true;
+  readonly pickerOptions?: PickerOptions;
+  readonly pickerError?: string;
 }
 
 const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comment'];
 const mergeMethods: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
 const commentIntents: readonly unknown[] = ['ask', 'implement'] satisfies CommentIntent[];
 const maximumReviewLength = 60_000;
+const isNameList = (value: unknown): value is readonly string[] => Array.isArray(value) && value.length <= 500
+  && value.every((item) => typeof item === 'string' && item.length > 0 && item.length <= 200);
 /** Actions that change the PR on GitHub, one at a time. */
 const pullRequestActions = new Set(['review', 'merge', 'edit-title', 'edit-body', 'pick', 'draft', 'close', 'reopen', 'delete-branch']);
 const panels = new Map<string, vscode.WebviewPanel>();
@@ -294,7 +305,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option } = value as Record<string, unknown>;
+      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -351,6 +362,9 @@ export async function showPullRequestOverview(
         else if (action === 'find-extension' && typeof extension === 'string' && /^[\w+-]{1,20}$/u.test(extension)) {
           await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
         }
+        else if (action === 'picker-options') {
+          try { post({ pickerOptions: await actions.pickerOptions() }); } catch (error: unknown) { post({ pickerError: error instanceof Error ? error.message : String(error) }); }
+        }
         else if (action === 'log') actions.showLog();
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
@@ -384,7 +398,7 @@ export async function showPullRequestOverview(
             else if (action === 'edit-body' && typeof body === 'string' && body.length <= maximumReviewLength) {
               await actions.editBody(body);
               post({ done: 'body' });
-            } else if (action === 'pick' && pickTargets.includes(what)) await actions.pick(what as PickTarget);
+            } else if (action === 'pick' && pickTargets.includes(what) && isNameList(values) && isNameList(teams)) await actions.pick(what as PickTarget, { values, teams });
             else if (action === 'draft' && typeof draft === 'boolean') await actions.setDraft(draft);
             else if (action === 'close' || action === 'reopen') await actions.setOpen(action === 'reopen');
             else if (action === 'delete-branch') await actions.deleteBranch();
@@ -453,9 +467,11 @@ ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
 .review-actions{justify-content:flex-end}#review-note{flex:1 1 160px}#review-note:empty{display:none}.state-actions{justify-content:flex-end}
-.title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}
+.title-row{display:flex;align-items:center;gap:var(--space-4);min-width:0}#number{display:contents}#number .ref{flex:none;margin-right:var(--space-4)}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-8)}.section-head h3{margin:0}.section-head .icon-button{width:22px;height:22px;min-height:22px;margin:-2px 0}
-.labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}.label::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--label)}
+section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:0;right:0;z-index:6;display:flex;flex-direction:column;gap:var(--space-4);padding:var(--space-6);border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}.picker input[type=text]{width:100%;height:26px;padding:0 var(--space-8);font-size:12px}.picker input[type=text]:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}
+.picker-list{display:flex;flex-direction:column;max-height:280px;overflow:auto}.picker-row{position:relative;display:flex;flex:none;align-items:center;gap:var(--space-8);min-height:24px;padding:0 var(--space-4);border-radius:var(--radius-sm);font-size:12px;cursor:pointer}.picker-row:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}.picker-row input{position:absolute;opacity:0;pointer-events:none}.picker-row .check{flex:none;width:16px;height:16px;fill:currentColor;visibility:hidden}.picker-row:has(input:checked) .check{visibility:visible}.picker-row:has(input:focus-visible){outline:1px solid var(--focus);outline-offset:-1px}.picker-row .muted{margin-left:auto}.picker-note{padding:var(--space-6);font-size:12px}.picker-label{display:grid;grid-template-columns:16px 10px minmax(0,1fr);column-gap:var(--space-8);align-items:center;flex:1;min-width:0;padding:var(--space-4) 0}.picker-label .dot{width:10px;height:10px;border-radius:50%;background:var(--label)}.picker-row .picker-description{grid-column:3;margin-left:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.picker-row:has(.picker-label)+.picker-row{border-top:1px solid color-mix(in srgb,var(--ink) 10%,transparent)}
+.labels{display:flex;flex-wrap:wrap;gap:var(--space-4)}.label{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-8);border:1px solid color-mix(in srgb,var(--label) 55%,transparent);border-radius:var(--radius-pill);font-size:12px;background:color-mix(in srgb,var(--label) 16%,transparent)}
 .state-actions:not(:empty){margin-top:var(--space-8)}.state-actions .gap{flex:1}#body textarea{width:100%;min-height:120px}
 .verdict{display:inline-flex;align-items:center;height:24px;box-sizing:border-box;padding:0 var(--space-12);border:1px solid currentColor;border-radius:var(--radius-pill);font-size:12px;font-weight:600}
 .verdict.muted{color:var(--ink-muted)}
@@ -593,7 +609,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .card-thread code{font-family:var(--font-code);font-size:.92em}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
 </style></head><body>
-<div class="row head"><span class="title-row"><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
+<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="row"><a id="pr">Open on GitHub</a><a id="refresh">Refresh</a><a id="remove-worktree">Remove worktree</a></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div id="facts" class="muted facts"></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
@@ -679,6 +695,8 @@ export function buildOverviewState(
   const claude = claudeStatus(runner.activity);
   return {
     title: `#${pullRequest.number} ${pullRequest.title}`,
+    number: pullRequest.number,
+    heading: pullRequest.title,
     author: pullRequest.author,
     headBranch: pullRequest.headBranch,
     baseBranch: pullRequest.baseBranch,
