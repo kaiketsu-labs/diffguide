@@ -1,9 +1,11 @@
+import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 
 type AuthProvider = 'github' | 'github-enterprise';
 
 /** Where a GitHub host serves its API, and which VS Code sign-in it takes. */
 export interface GitHubEndpoints {
+  readonly host: string;
   readonly rest: string;
   readonly graphql: string;
   readonly authProvider: AuthProvider;
@@ -15,10 +17,10 @@ const requestTimeoutMs = 30_000;
 
 /** API addresses for github.com, or for the one enterprise host VS Code's `github-enterprise.uri` names. */
 export function githubEndpoints(host: string, enterpriseUri: string | undefined): GitHubEndpoints {
-  if (host === 'github.com') return { rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql', authProvider: 'github' };
+  if (host === 'github.com') return { host, rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql', authProvider: 'github' };
   if (enterpriseHost(enterpriseUri) !== host) throw new Error(`Set "github-enterprise.uri" to https://${host} to sign in to this GitHub host.`);
-  if (host.endsWith('.ghe.com')) return { rest: `https://api.${host}`, graphql: `https://api.${host}/graphql`, authProvider: 'github-enterprise' };
-  return { rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql`, authProvider: 'github-enterprise' };
+  if (host.endsWith('.ghe.com')) return { host, rest: `https://api.${host}`, graphql: `https://api.${host}/graphql`, authProvider: 'github-enterprise' };
+  return { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql`, authProvider: 'github-enterprise' };
 }
 
 function enterpriseHost(uri: string | undefined): string | undefined {
@@ -47,18 +49,35 @@ export class GitHubSignInRequired extends Error {
   }
 }
 
-/** The user's VS Code GitHub sign-in; `interactive` asks for it when missing instead of failing. */
-function token(provider: AuthProvider, interactive: boolean): Promise<string> {
+/** The user's VS Code GitHub sign-in, else GitHub CLI's; `interactive` asks for a VS Code sign-in when missing instead of failing. */
+function token({ host, authProvider: provider }: GitHubEndpoints, interactive: boolean): Promise<string> {
   let found = tokens.get(provider);
   if (found === undefined) {
-    found = interactive ? signInToGitHub(provider) : Promise.resolve(vscode.authentication.getSession(provider, scopes, { silent: true })).then((session) => {
-      if (session === undefined) throw new GitHubSignInRequired(provider);
-      return session.accessToken;
+    found = interactive ? signInToGitHub(provider) : Promise.resolve(vscode.authentication.getSession(provider, scopes, { silent: true })).then(async (session) => {
+      const accessToken = session?.accessToken ?? await ghToken(host);
+      if (accessToken === undefined) throw new GitHubSignInRequired(provider);
+      return accessToken;
     });
     found.catch(() => { tokens.delete(provider); });
     tokens.set(provider, found);
   }
   return found;
+}
+
+/** VS Code started from the Dock lacks the shell's PATH, so also try Homebrew's install locations. */
+const ghExecutables = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh'];
+
+/** The token GitHub CLI holds for `host`, or undefined when gh is missing or signed out there. */
+async function ghToken(host: string): Promise<string | undefined> {
+  for (const executable of ghExecutables) {
+    const found = await new Promise<string | undefined>((resolve) => {
+      execFile(executable, ['auth', 'token', '--hostname', host], { timeout: 10_000 }, (error, stdout) => {
+        resolve(error === null && stdout.trim() !== '' ? stdout.trim() : undefined);
+      });
+    });
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /** Show VS Code's GitHub sign-in, for the provider that last needed one when none is given. */
@@ -86,7 +105,7 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
     method,
     headers: {
       Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${await token(endpoints.authProvider, interactive)}`,
+      Authorization: `Bearer ${await token(endpoints, interactive)}`,
       'User-Agent': 'pair-review',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
@@ -121,7 +140,7 @@ export async function githubPoll(endpoints: GitHubEndpoints, url: string, known?
   const response = await fetch(url, {
     headers: {
       Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${await token(endpoints.authProvider, false)}`,
+      Authorization: `Bearer ${await token(endpoints, false)}`,
       'User-Agent': 'pair-review',
       ...(known === undefined ? {} : { 'If-None-Match': known.etag }),
     },
