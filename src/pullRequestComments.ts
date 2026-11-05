@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { WorktreeCommit } from './conflicts.js';
-import type { CodeAnchor } from './contracts.js';
+import type { CodeAnchor, ReviewThread } from './contracts.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 import type { PullRequestComment } from './pullRequests.js';
 import { git } from './worktrees.js';
@@ -9,6 +9,11 @@ import { git } from './worktrees.js';
 export interface Publication {
   readonly url: string;
   readonly pending: boolean;
+}
+
+/** What a thread posts on GitHub unless the user edits it: Claude's latest answer, else the opening comment. */
+export function publishableText(thread: ReviewThread): string {
+  return ([...thread.messages].reverse().find((message) => message.author === 'claude') ?? thread.messages[0])?.text ?? '';
 }
 
 /** Where a thread lands on the code host, minus the text. */

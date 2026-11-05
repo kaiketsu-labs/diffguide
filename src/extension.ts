@@ -292,6 +292,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         resolve: (id, resolved) => opened.session.store.resolve(findThread(id).id, resolved),
         publish: async (id) => { await opened.session.publish?.(findThread(id).id); },
+        postToGitHub: async (id, text, pending) => { await opened.session.postToGitHub?.(findThread(id).id, text, pending); },
         commentOnGitHub: async ({ text, ...lines }, pending) => {
           const { anchor, base } = await pageAnchor(lines);
           const placement = await placeComment(folder, base, anchor);

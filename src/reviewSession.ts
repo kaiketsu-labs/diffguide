@@ -25,6 +25,8 @@ export interface ReviewSession {
   publication?(threadId: string): Publication | undefined;
   /** Let the user edit the thread's comment and post it to the code host. */
   publish?(threadId: string): Promise<void>;
+  /** Post the thread's comment, as the user edited it on the review page, on the PR diff. */
+  postToGitHub?(threadId: string, body: string, pending: boolean): Promise<void>;
   /** Remember the GitHub thread a local thread answers, so publishing replies inside it. */
   linkToGitHub?(threadId: string, link: GitHubLink): Promise<void>;
   /** The GitHub thread the local thread answers, if any; publishing replies inside it. */

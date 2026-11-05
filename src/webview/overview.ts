@@ -28,6 +28,7 @@ interface Saved {
   readonly previewing?: readonly string[];
   readonly composer?: Composer | undefined;
   readonly replies?: Record<string, string>;
+  readonly publishing?: Record<string, string>;
   readonly range?: DiffRange;
   readonly whitespace?: boolean;
   readonly filter?: string;
@@ -77,6 +78,8 @@ const openReads = new Set<string>();
 const fileKeys = new Map<string, string>();
 let composer = saved.composer;
 const replies = new Map(Object.entries(saved.replies ?? {}));
+/** Local threads being posted on GitHub, with the text the user is editing. */
+const publishing = new Map(Object.entries(saved.publishing ?? {}));
 /** The commits the Files tab shows, as the extension last confirmed them; `wanted` waits for the PR's commits to arrive. */
 let diffRange: DiffRange = { kind: 'all' };
 let wantedRange: DiffRange | undefined = saved.range?.kind === 'all' ? undefined : saved.range;
@@ -225,7 +228,7 @@ function frameMain(): void {
 }
 
 function save(): void {
-  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies),
+  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
     range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded });
 }
 
@@ -1848,7 +1851,7 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(github ? githubField(key, reply, 'Reply on GitHub, or tell Claude what to do', onReply, () => submit(), cancel)
       : textarea(key, reply, 'Reply to Claude', onReply, () => submit(), cancel));
     const busySending = sending.has(key);
-    const primary = button(busySending ? 'Sending…' : github ? 'Post on GitHub' : 'Ask Claude', () => submit(), github ? 'primary' : 'claude');
+    const primary = button(busySending ? 'Sending…' : !github ? 'Ask Claude' : thread.pending ? 'Add to pending review' : 'Post on GitHub', () => submit(), github ? 'primary' : 'claude');
     primary.disabled = busySending;
     actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'));
     if (github) {
@@ -1868,13 +1871,62 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(actions);
     return box;
   }
+  const draft = thread.source === 'local' ? publishing.get(thread.id) : undefined;
+  if (thread.source === 'local' && draft !== undefined && !thread.url) {
+    box.append(publishBox(thread, draft));
+    return box;
+  }
   actions.append(el('span', 'gap'), thread.url
     ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
-    : button(thread.source === 'local' && thread.linkedTo !== undefined ? 'Reply on GitHub…' : 'Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
+    : thread.source === 'local' ? toGitHubButton(thread) : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
   actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
   return box;
+}
+
+/** Reply in the GitHub thread this local thread sits in, else open the box that posts it on the diff. */
+function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButtonElement {
+  const parent = current?.github?.find((github) => github.id === thread.linkedTo);
+  if (thread.linkedTo !== undefined) {
+    return button('Reply on GitHub…', () => {
+      if (parent === undefined || parent.resolved) { post({ action: 'publish', id: thread.id }); return; }
+      if (!replies.get(parent.id)?.trim()) replies.set(parent.id, thread.draft ?? '');
+      focusNext = 'reply:' + parent.id;
+      save();
+      renderFiles([parent.path]);
+    }, 'quiet');
+  }
+  return button('Publish to GitHub…', () => { publishing.set(thread.id, thread.draft ?? ''); focusNext = 'publish:' + thread.id; save(); renderFiles([thread.path]); }, 'quiet');
+}
+
+/** Edit a local thread's comment and post it on the PR diff, now or into the pending review. */
+function publishBox(thread: Thread & { readonly source: 'local' }, draft: string): DocumentFragment {
+  const key = 'publish:' + thread.id;
+  const cancel = (): void => { publishing.delete(thread.id); previewTabs.delete(key); save(); renderFiles([thread.path]); };
+  const send = (pending: boolean): void => {
+    const text = publishing.get(thread.id) ?? '';
+    if (!text.trim() || sending.has(key)) return;
+    sending.add(key);
+    sentPending = pending;
+    $('error').textContent = '';
+    renderFiles([thread.path]);
+    post({ action: 'github-publish', form: key, id: thread.id, text, pending });
+  };
+  const field = githubField(key, draft, 'Comment on GitHub', (value) => { publishing.set(thread.id, value); save(); }, () => send(true), cancel);
+  const busySending = sending.has(key);
+  const review = button(busySending && sentPending ? 'Sending…' : 'Add to pending review', () => send(true), 'primary');
+  review.disabled = busySending;
+  review.title = 'Goes into your pending review. Nobody sees it until you submit the review.';
+  const reviewing = current?.details?.pendingComments !== undefined;
+  const now = button(busySending && !sentPending ? 'Sending…' : 'Post now', () => send(false));
+  now.disabled = busySending || reviewing;
+  now.title = reviewing ? 'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.' : 'Posts on GitHub right away.';
+  const row = el('div', 'row actions composer-actions');
+  row.append(...reviewing ? [el('span', 'hint', 'Your review is in progress, so comments go into it.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), now, review);
+  const fragment = document.createDocumentFragment();
+  fragment.append(field, row);
+  return fragment;
 }
 
 /** Commits whose changes are unfolded in their Local thread. */
@@ -3324,6 +3376,14 @@ function onExtensionMessage(data: ExtensionMessage): void {
     composer = undefined;
     save();
     renderFiles([path]);
+  }
+  if (data.done?.startsWith('publish:')) {
+    const id = data.done.slice(8);
+    sending.delete(data.done);
+    publishing.delete(id);
+    previewTabs.delete(data.done);
+    save();
+    renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
   }
   if (data.done?.startsWith('reply:')) {
     const id = data.done.slice(6);
