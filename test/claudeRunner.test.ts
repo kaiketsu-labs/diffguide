@@ -113,6 +113,21 @@ test('answers a sent comment in the background, shows each step, and resumes the
   assert.equal(second.args[second.args.indexOf('--resume') + 1], sessionId);
 });
 
+test('starts no Claude when the PR closes while the run is still getting ready', async (t) => {
+  let ready: (() => void) | undefined;
+  const resolve: ClaudeRunnerOptions['resolve'] = async () => {
+    await new Promise<void>((done) => { ready = done; });
+    return { executable: '/bin/claude', mcpPath: '/data/mcp.json' };
+  };
+  const { instance, store, children, log } = await runner('author', t, undefined, undefined, { resolve });
+  store.setPending([event('one')]);
+  await until(() => ready !== undefined);
+  instance.dispose();
+  ready?.();
+  await until(() => log.some((line) => line.includes('Stopped.')));
+  assert.equal(children.length, 0);
+});
+
 test('on the author\'s own PR, uses the checkout\'s config and asks Claude to commit without pushing', async (t) => {
   const { store, children } = await runner('author', t);
   store.setPending([event('one')]);

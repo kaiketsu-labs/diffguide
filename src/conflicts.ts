@@ -42,6 +42,27 @@ export async function catchUpWithPullRequest(worktree: string, number: number): 
 }
 
 /**
+ * Before committing on the PR: move to its latest commit on GitHub unless local commits build on it.
+ * Returns that commit, and whether the worktree is ahead of it, so a new commit waits to be pushed with the others.
+ */
+export async function syncKeepingLocalCommits(worktree: string, number: number): Promise<{ readonly head: string; readonly ahead: boolean }> {
+  await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]);
+  const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
+  const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
+  if (local !== head && await git(worktree, ['merge-base', '--is-ancestor', head, local]).then(() => true, () => false)) return { head, ahead: true };
+  await syncToPullRequestHead(worktree, number);
+  return { head, ahead: false };
+}
+
+/** Commit files of a PR worktree without pushing. `hooksOff` skips Git hooks, for someone else's PR. */
+export async function commitFiles(worktree: string, { path, message, hooksOff }: { readonly path: string | readonly string[]; readonly message: string; readonly hooksOff: boolean }): Promise<void> {
+  const paths = typeof path === 'string' ? [path] : path;
+  const hooks = hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [];
+  await git(worktree, ['add', '--', ...paths]);
+  await git(worktree, [...hooks, 'commit', '--quiet', '--only', '-m', message, '--', ...paths]);
+}
+
+/**
  * Commit files of a PR worktree and push them to the PR's branch. A failed push takes the commit back and restores the files.
  * `hooksOff` skips Git hooks, for someone else's PR, whose author controls the checkout.
  */
@@ -51,8 +72,7 @@ export async function commitAndPush(worktree: string, { path, message, pushTo, h
   if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
   const paths = typeof path === 'string' ? [path] : path;
   const hooks = hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [];
-  await git(worktree, ['add', '--', ...paths]);
-  await git(worktree, [...hooks, 'commit', '--quiet', '--only', '-m', message, '--', ...paths]);
+  await commitFiles(worktree, { path: paths, message, hooksOff });
   try {
     await git(worktree, [...hooks, 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
   } catch (error: unknown) {

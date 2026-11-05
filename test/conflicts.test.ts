@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { catchUpWithPullRequest, commitAndPush, commitsSince, conflictTask, discardSince, prepareConflictFix, pushCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/conflicts.js';
+import { catchUpWithPullRequest, commitAndPush, commitFiles, commitsSince, conflictTask, discardSince, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/conflicts.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
@@ -91,6 +91,19 @@ test('commits one file and pushes it to the PR branch, and takes the commit back
   assert.equal(await git(worktree, 'rev-parse', 'HEAD'), pushed);
   assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'suggested\n');
   await assert.rejects(commitAndPush(worktree, { ...push, headBranch: '--force' }), /Unsupported/u);
+});
+
+test('commits a suggestion after unpushed commits without pushing, and catches up a worktree without any', async (t) => {
+  const { origin, worktree, latest } = await fixture(t);
+  for (const [key, value] of [['user.name', 't'], ['user.email', 't@example.invalid'], ['commit.gpgSign', 'false']] as const) await git(worktree, 'config', key, value);
+  assert.deepEqual(await syncKeepingLocalCommits(worktree, 7), { head: latest, ahead: false });
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'by claude');
+  assert.deepEqual(await syncKeepingLocalCommits(worktree, 7), { head: latest, ahead: true });
+  await writeFile(path.join(worktree, 'a.txt'), 'suggested\n');
+  await commitFiles(worktree, { path: 'a.txt', message: 'Apply suggestion from code review', hooksOff: true });
+  assert.equal(await git(worktree, 'log', '--format=%s', `${latest}..HEAD`), 'Apply suggestion from code review\nby claude');
+  assert.equal(await git(origin, 'rev-parse', 'feature'), latest);
 });
 
 test('moves a worktree to the PR head and keeps uncommitted edits the new commits do not touch', async (t) => {

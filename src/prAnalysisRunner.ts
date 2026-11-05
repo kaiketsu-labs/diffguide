@@ -7,6 +7,7 @@ import { contentBlocks, describeTool, parseLine, untrustedCheckoutFlags, type Cl
 import type { CodeAnchor, ReviewStore } from './contracts.js';
 import { analysisPrompt, analysisSchema, changeBlocks, parseClaudeAnalysis, readStoredAnalysis, type Analysis, type ChangeBlock } from './prAnalysis.js';
 import { writePrivateJson } from './privateFiles.js';
+import { stopProcess } from './shell.js';
 import type { FileDiff } from './unifiedDiff.js';
 
 /** What the analysis run is doing right now. */
@@ -87,7 +88,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
 
   stop(): void {
     this.#stopped = true;
-    this.#child?.kill('SIGTERM');
+    if (this.#child !== undefined) stopProcess(this.#child);
   }
 
   dispose(): void {
@@ -139,6 +140,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
   /** Run Claude and resolve with its structured output. */
   async #spawn(prompt: string): Promise<unknown> {
     const { executable, shell } = await this.options.resolve();
+    if (this.#stopped) throw new Error('Stopped.');
     const args = [
       '-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--json-schema', JSON.stringify(analysisSchema),
       '--allowedTools', 'Read', 'Grep', 'Glob', '--disallowedTools', ...blockedTools,

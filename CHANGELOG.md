@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Commit suggestion** works while Claude has unpushed commits. The suggestion becomes one more local commit after them, and **Push N commits** pushes them together. It failed with "The PR worktree has commits that are not on GitHub" before. A GitHub suggestion whose file the unpushed commits change still asks you to push first, since its lines may have moved.
+- Claude writes `suggestion` blocks only for changes within the commented lines. Changes to other lines or files come as a `diff` block per file, so they no longer show up as a one-line **Commit suggestion**.
+- **Ask Claude** and **Implement** stay disabled until the comment or reply has text.
+- Avatars no longer reload and blink each time Claude updates a thread.
+- Closing or cleaning up a PR stops its Claude even when the run was still starting, and kills a Claude that ignores the stop signal after 5 seconds. A Claude could keep running for hours after its worktree was removed before.
 - The Pull Requests view has a **Pinned** section above Review requested and Mine. Pin a PR with the pin icon on its row, or drag it onto **Pinned**; drag pinned rows to reorder them. A pinned PR leaves its role section, stays pinned after it drops out of your review requests, and is unpinned once GitHub reports it merged or closed.
 - A thread's header on the review page stays at the top while you scroll through a long thread, so you can collapse it from there. Collapsing keeps the header where it was on screen.
 - Threads with more than four messages show only the latest three, with **Show N earlier messages** above them, which turns into **Hide N earlier messages** once shown.

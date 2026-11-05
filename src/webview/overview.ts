@@ -747,6 +747,10 @@ function attachMentions(area: HTMLTextAreaElement, wrap: HTMLElement): void {
   area.addEventListener('blur', () => { setTimeout(close, 150); });
 }
 
+/** Avatars that loaded, held so redraws reuse the decoded picture instead of fetching and blinking. */
+const loadedAvatars = new Map<string, HTMLImageElement>();
+const failedAvatars = new Set<string>();
+
 /** An avatar image, or initials when the picture is missing or does not load. */
 function personAvatar(url: string, name: string | undefined, title: string): HTMLElement {
   const fallback = (): HTMLElement => {
@@ -756,10 +760,14 @@ function personAvatar(url: string, name: string | undefined, title: string): HTM
     node.title = title;
     return node;
   };
-  if (!url) return fallback();
-  const image = el('img', 'avatar' + (url === claudeIcon ? ' claude' : ''));
-  image.addEventListener('error', () => { image.replaceWith(fallback()); }, { once: true });
-  image.src = url;
+  if (!url || failedAvatars.has(url)) return fallback();
+  const loaded = loadedAvatars.get(url);
+  const image = loaded ? loaded.cloneNode() as HTMLImageElement : el('img', 'avatar' + (url === claudeIcon ? ' claude' : ''));
+  if (!loaded) {
+    image.addEventListener('load', () => { loadedAvatars.set(url, image); }, { once: true });
+    image.addEventListener('error', () => { failedAvatars.add(url); image.replaceWith(fallback()); }, { once: true });
+    image.src = url;
+  }
   image.alt = title;
   image.title = title;
   return image;
@@ -1630,7 +1638,8 @@ function composerBox(draft: Composer): HTMLElement {
     renderFiles([selection.path]);
   });
   const cancelLink = button('Cancel', cancel, 'quiet');
-  const onDraft = (value: string): void => { draft.text = value; save(); };
+  const needText: HTMLButtonElement[] = [];
+  const onDraft = (value: string): void => { draft.text = value; save(); for (const each of needText) each.disabled = sending.has('composer') || !value.trim(); };
   const area = github ? githubField('composer', draft.text, 'Comment on GitHub', onDraft, submit, cancel) : textarea('composer', draft.text, 'Ask Claude about these lines', onDraft, submit, cancel);
   const busySending = sending.has('composer');
   const row = el('div', 'row actions composer-actions');
@@ -1645,11 +1654,11 @@ function composerBox(draft: Composer): HTMLElement {
     row.append(...reviewing ? [el('span', 'hint', 'Your review is in progress, so comments go into it.')] : [], el('span', 'gap'), cancelLink, now, review);
   } else {
     const implement = button('Implement', () => send(true, 'implement'));
-    implement.disabled = busySending;
     implement.title = 'Claude changes the code';
     const ask = button(busySending ? 'Sending…' : 'Ask Claude', submit, 'claude');
-    ask.disabled = busySending;
     ask.title = 'Claude answers without editing';
+    needText.push(implement, ask);
+    onDraft(draft.text);
     row.append(el('span', 'gap'), cancelLink, implement, ask);
   }
   const original = draft.side === 'new' ? selectedText(draft.path, draft.start, draft.end) : undefined;
@@ -1847,7 +1856,8 @@ function threadBox(thread: Thread): HTMLElement {
       if (sending.has(key)) return;
       send({ action: 'github-ask', form: key, id: thread.id, text: replies.get(thread.id) ?? '', intent });
     };
-    const onReply = (value: string): void => { replies.set(thread.id, value); save(); };
+    const needText: HTMLButtonElement[] = [];
+    const onReply = (value: string): void => { replies.set(thread.id, value); save(); for (const each of needText) each.disabled = sending.has(key) || !value.trim(); };
     box.append(github ? githubField(key, reply, 'Reply on GitHub, or tell Claude what to do', onReply, () => submit(), cancel)
       : textarea(key, reply, 'Reply to Claude', onReply, () => submit(), cancel));
     const busySending = sending.has(key);
@@ -1863,8 +1873,9 @@ function threadBox(thread: Thread): HTMLElement {
     } else {
       primary.title = 'Claude answers without editing';
       const implement = button('Implement', () => submit('implement'));
-      implement.disabled = busySending;
       implement.title = 'Claude changes the code';
+      needText.push(implement, primary);
+      onReply(reply);
       actions.append(implement);
     }
     actions.append(primary);
@@ -2033,10 +2044,12 @@ function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: num
   publish.title = 'Adds it to your pending review as a GitHub suggestion the author can commit.';
   const canPush = current?.details?.canEdit === true;
   const apply = button(canPush ? 'Commit suggestion' : 'Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
-  apply.title = canPush ? 'Commits the change to the PR branch and pushes it.' : 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.';
+  apply.title = !canPush ? 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.'
+    : current?.unpushed?.length ? 'Commits the change after the unpushed commits. Push them together.' : 'Commits the change to the PR branch and pushes it.';
   const done = thread.applied?.message === index ? thread.applied : undefined;
   if (done === undefined) actions.append(el('span', 'gap'), publish, apply);
-  else if (done.pushed) actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed and pushed.'));
+  else if (done.done === 'pushed') actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed and pushed.'));
+  else if (done.done === 'committed') actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed, not pushed yet.'));
   else actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' applied to the worktree, not committed.'), button('Discard', () => post({ action: 'discard-suggestion', id: thread.id })), publish);
   card.append(head, lines, actions);
   return card;

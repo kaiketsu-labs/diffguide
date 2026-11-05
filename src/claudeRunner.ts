@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import type { ReviewEvent, ReviewStore } from './contracts.js';
 import { buildReviewBatchPrompt } from './eventPrompt.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
+import { stopProcess } from './shell.js';
 import type { PullRequestRole } from './worktrees.js';
 
 /** What a PR's background Claude is doing right now. */
@@ -65,10 +66,10 @@ export interface ClaudeLaunch {
   readonly env: Readonly<Record<string, string>>;
 }
 
-const reviewerNote = 'This is someone else\'s pull request. You may read other repositories, run commands and make throwaway edits or commits to test an idea, but Pair Review discards them after this run. For implement requests, reply with the proposed change as suggestion blocks instead.';
+const reviewerNote = 'This is someone else\'s pull request. You may read other repositories, run commands and make throwaway edits or commits to test an idea, but Pair Review discards them after this run. For implement requests, reply with the proposed change instead of committing it.';
 const authorNote = 'When you change files, commit the change with a short message saying what it does. Do not push; the human reviews your commits and pushes them.';
 /** How to propose code in a reply, so the review page can show, apply and publish it as on GitHub. */
-const suggestionNote = 'To propose new code for the commented lines without editing files, put the complete replacement lines in a fenced block whose language is `suggestion`, as on GitHub. It replaces exactly the commented lines, so include every line that stays. To offer alternatives, write up to three suggestion blocks, each after a short line naming the option, such as "Option 1: read the limit from config." The human picks one to apply or publish.';
+const suggestionNote = 'To propose new code for the commented lines without editing files, put the complete replacement lines in a fenced block whose language is `suggestion`, as on GitHub. It replaces exactly the commented lines, so include every line that stays. Use suggestion blocks only for a change that stays within the commented lines; show a change that touches other lines or files as a ```diff block per file instead. To offer alternatives, write up to three suggestion blocks, each after a short line naming the option, such as "Option 1: read the limit from config." The human picks one to apply or publish.';
 /** On someone else's PR the checkout is the author's: skip its CLAUDE.md, skills, hooks, settings and MCP servers. */
 export const untrustedCheckoutFlags = ['--setting-sources', 'user', '--strict-mcp-config'];
 
@@ -132,7 +133,7 @@ export class ClaudeRunner implements vscode.Disposable {
   dispose(): void {
     this.#disposed = true;
     this.#subscription.dispose();
-    this.#child?.kill('SIGTERM');
+    if (this.#child !== undefined) stopProcess(this.#child);
     this.#changed.dispose();
   }
 
@@ -211,6 +212,7 @@ export class ClaudeRunner implements vscode.Disposable {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const sessionPath = this.#sessionPath;
     const { sessionId, resume: resumed } = await this.#session();
+    if (this.#disposed) return 'Stopped.';
     const resume = resumed ? sessionId : undefined;
     const args = [
       '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...this.#flags(mcpPath, run.allowedTools, run.mode),

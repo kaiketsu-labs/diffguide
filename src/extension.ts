@@ -10,7 +10,7 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
-import { commitAndPush, conflictTask, prepareConflictFix, pushCommits, syncToPullRequestHead, unpushedCommits } from './conflicts.js';
+import { commitAndPush, commitFiles, conflictTask, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { sharedPerTurn } from './autoSync.js';
@@ -23,7 +23,7 @@ import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
 import { saveSelection } from './pullRequestEdits.js';
-import { buildOverviewState, showPullRequestOverview, type AnalysisView, type DiffSelection, type FilesView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
+import { buildOverviewState, showPullRequestOverview, type AnalysisView, type AppliedSuggestion, type DiffSelection, type FilesView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread } from './pullRequests.js';
 import { githubPageActions } from './pullRequestPageActions.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
@@ -190,7 +190,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       /** What Claude asked when it last stopped fixing conflicts without pushing. */
       let conflictQuestion: string | undefined;
       /** Suggestion options written to the worktree while this page is open, by thread. */
-      const applied = new Map<string, { readonly message: number; readonly option: number; readonly pushed: boolean }>();
+      const applied = new Map<string, AppliedSuggestion>();
       /** File contents around each suggestion applied without committing, so Discard can put the file back. */
       const undo = new Map<string, { readonly path: string; readonly before: string; readonly after: string }>();
       /** Where to push the PR's branch: `origin`, or the fork's URL when the branch lives in a fork. */
@@ -363,18 +363,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Apply the suggestion when it is done.');
           const loaded = await currentDetails();
           const file = join(folder, anchor.path);
+          let ahead = false;
           if (loaded.canEdit) {
             if ((await git(folder, ['status', '--porcelain', '--', anchor.path])).trim() !== '') throw new Error(`${anchor.path} has uncommitted changes. Commit or discard them first.`);
-            await syncToPullRequestHead(folder, pullRequest.number);
+            ({ ahead } = await syncKeepingLocalCommits(folder, pullRequest.number));
           }
           const before = await readFile(file, 'utf8');
           const after = applySuggestion(before, anchor, suggestion);
           await writeFile(file, after);
-          if (loaded.canEdit) {
-            await commitAndPush(folder, { path: anchor.path, message: 'Apply suggestion from code review', pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer' });
+          const commit = { path: anchor.path, message: 'Apply suggestion from code review', hooksOff: role === 'reviewer' };
+          if (!loaded.canEdit) undo.set(id, { path: anchor.path, before, after });
+          else if (ahead) await commitFiles(folder, commit);
+          else {
+            await commitAndPush(folder, { ...commit, pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch });
             changedOnGitHub();
-          } else undo.set(id, { path: anchor.path, before, after });
-          applied.set(id, { message, option, pushed: loaded.canEdit });
+          }
+          applied.set(id, { message, option, done: !loaded.canEdit ? 'applied' : ahead ? 'committed' : 'pushed' });
           detailsChanged.fire();
         },
         discardSuggestion: async (id) => {

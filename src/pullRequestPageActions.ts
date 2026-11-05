@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { commitAndPush, syncToPullRequestHead } from './conflicts.js';
+import { commitAndPush, commitFiles, syncKeepingLocalCommits } from './conflicts.js';
 import type { OverviewActions, PickedSuggestion } from './pullRequestOverview.js';
 import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, RemoteThread } from './pullRequests.js';
 import { applyLineSuggestions, parseSuggestions, type LineSuggestion } from './suggestions.js';
@@ -153,7 +153,9 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       const edits = suggestionEdits(await context.threads(), picked);
       const paths = [...edits.keys()];
       if ((await git(context.folder, ['status', '--porcelain', '--', ...paths])).trim() !== '') throw new Error('Files these suggestions change have uncommitted changes. Commit or discard them first.');
-      await syncToPullRequestHead(context.folder, number);
+      const { head, ahead } = await syncKeepingLocalCommits(context.folder, number);
+      const moved = ahead ? (await git(context.folder, ['diff', '--name-only', head, 'HEAD', '--', ...paths])).trim() : '';
+      if (moved) throw new Error(`Unpushed commits change ${moved.split('\n').join(', ')}, so the suggestion's lines may have moved. Push them first.`);
       const before = new Map<string, string>();
       try {
         for (const [path, suggestions] of edits) {
@@ -166,10 +168,9 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
         for (const [path, text] of before) await writeFile(join(context.folder, path), text);
         throw error;
       }
-      await commitAndPush(context.folder, {
-        path: paths, message: picked.length === 1 ? 'Apply suggestion from code review' : 'Apply suggestions from code review',
-        pushTo: context.pushTarget(details), headBranch: context.headBranch, hooksOff: context.hooksOff,
-      });
+      const commit = { path: paths, message: picked.length === 1 ? 'Apply suggestion from code review' : 'Apply suggestions from code review', hooksOff: context.hooksOff };
+      if (ahead) await commitFiles(context.folder, commit);
+      else await commitAndPush(context.folder, { ...commit, pushTo: context.pushTarget(details), headBranch: context.headBranch });
       context.reload(true);
     },
   };

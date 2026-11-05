@@ -47,7 +47,7 @@ export interface OverviewState {
     /** What Claude is doing with this thread right now, while it waits for or works on it. */
     readonly working?: string;
     /** The suggestion option written to the worktree from this thread, while the page is open. */
-    readonly applied?: { readonly message: number; readonly option: number; readonly pushed: boolean };
+    readonly applied?: AppliedSuggestion;
     /** Commits Claude made while answering this thread, oldest first. */
     readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
     readonly url?: string;
@@ -142,6 +142,8 @@ export interface DiffSelection { readonly range: DiffRange; readonly whitespace:
 /** The files of a selection; `atHead` when the new side is the PR's latest version, so comments and context lines match it. */
 export interface FilesView { readonly files: readonly FileDiff[]; readonly selection: DiffSelection; readonly atHead: boolean }
 /** A GitHub suggestion picked for committing: the thread and its comment. */
+/** A suggestion option written from a local thread: pushed, committed after unpushed commits, or only applied to the worktree. */
+export interface AppliedSuggestion { readonly message: number; readonly option: number; readonly done: 'pushed' | 'committed' | 'applied' }
 export interface PickedSuggestion { readonly thread: string; readonly comment: string }
 export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string };
 type CommentIntent = Extract<ReviewIntent, 'ask' | 'implement'>;
