@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { diffRanges, githubFeedbackRequest, readGitHubLinks, writeGitHubLinks } from '../src/pullRequestComments.js';
+import { diffRanges, githubFeedbackRequest, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/pullRequestComments.js';
 import { buildOverviewState, overviewHtml } from '../src/pullRequestOverview.js';
 import type { PullRequestSession } from '../src/pullRequestSessions.js';
 
@@ -26,6 +26,7 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
       publication: () => ({ url: 'https://github.com/acme/app/pull/3#r1', pending: true }),
     },
     runner: { activity: { running: true, step: 'Reading src/a.ts', threads: new Set(), skipped: 0 } },
+    commits: () => [],
   } as unknown as PullRequestSession;
   const state = buildOverviewState({
     number: 3, title: 'Mock data', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'feature', baseBranch: 'main',
@@ -59,4 +60,12 @@ test('keeps links from local threads to GitHub threads across restarts and drops
   assert.equal((await readGitHubLinks(dataPath)).size, 0);
   await writeGitHubLinks(dataPath, new Map([['local-1', { id: 'PRRT_1', url: 'https://github.com/acme/app/pull/7#discussion_r1' }], ['bad', { id: 'x', url: 'http://evil' }]]));
   assert.deepEqual([...await readGitHubLinks(dataPath)], [['local-1', { id: 'PRRT_1', url: 'https://github.com/acme/app/pull/7#discussion_r1' }]]);
+});
+
+test('keeps the commits Claude made per local thread across restarts and drops malformed ones', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'commits-'));
+  assert.equal((await readClaudeCommits(dataPath)).size, 0);
+  const oid = 'a'.repeat(40);
+  await writeClaudeCommits(dataPath, new Map([['local-1', [{ oid, subject: 'Use the limit' }, { oid: '--force', subject: 'x' }]], ['bad', [{ oid: 'zz', subject: 'y' }]]]));
+  assert.deepEqual([...await readClaudeCommits(dataPath)], [['local-1', [{ oid, subject: 'Use the limit' }]]]);
 });

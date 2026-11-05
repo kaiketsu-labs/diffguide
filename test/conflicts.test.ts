@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { catchUpWithPullRequest, commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from '../src/conflicts.js';
+import { catchUpWithPullRequest, commitAndPush, commitsSince, conflictTask, discardSince, prepareConflictFix, pushCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/conflicts.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
@@ -135,4 +135,32 @@ test('follows a force push only from a head GitHub had', async (t) => {
   await assert.rejects(syncToPullRequestHead(worktree, 7), /commits that are not on GitHub/u);
   await syncToPullRequestHead(worktree, 7, replaced);
   assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+});
+
+test('lists the commits Claude made, counts and pushes them, and can undo a run\'s commits and files', async (t) => {
+  const { origin, worktree, latest } = await fixture(t);
+  for (const [key, value] of [['user.name', 't'], ['user.email', 't@example.invalid'], ['commit.gpgSign', 'false']] as const) await git(worktree, 'config', key, value);
+  await syncToPullRequestHead(worktree, 7);
+  const before = await worktreeSnapshot(worktree);
+  assert.deepEqual(before, { head: latest, clean: true });
+  await writeFile(path.join(worktree, 'a.txt'), 'claude\n');
+  await git(worktree, 'commit', '--quiet', '-am', 'Use the configured limit');
+  const made = await commitsSince(worktree, before.head);
+  assert.deepEqual(made.map((commit) => commit.subject), ['Use the configured limit']);
+  assert.equal(made[0]?.oid, await git(worktree, 'rev-parse', 'HEAD'));
+  const [local, ...more] = await unpushedCommits(worktree, latest);
+  assert.deepEqual({ ...local, createdAt: undefined }, { oid: made[0]?.oid, subject: 'Use the configured limit', author: 't', createdAt: undefined, files: 1, additions: 1, deletions: 1 });
+  assert.equal(more.length, 0);
+  assert.deepEqual(await unpushedCommits(worktree, 'not-a-commit'), []);
+
+  await pushCommits(worktree, { pushTo: 'origin', headBranch: 'feature', hooksOff: false });
+  assert.equal(await git(origin, 'rev-parse', 'feature'), made[0]?.oid);
+  await assert.rejects(pushCommits(worktree, { pushTo: 'origin', headBranch: '--force', hooksOff: false }), /Unsupported/u);
+
+  await writeFile(path.join(worktree, 'b.txt'), 'throwaway\n');
+  await writeFile(path.join(worktree, 'scratch.txt'), 'test\n');
+  await git(worktree, 'commit', '--quiet', '-am', 'Try something');
+  await writeFile(path.join(worktree, 'a.txt'), 'uncommitted\n');
+  await discardSince(worktree, before.head);
+  assert.deepEqual(await worktreeSnapshot(worktree), before);
 });

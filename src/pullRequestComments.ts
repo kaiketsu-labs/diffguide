@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { WorktreeCommit } from './conflicts.js';
 import type { CodeAnchor } from './contracts.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 import type { PullRequestComment } from './pullRequests.js';
@@ -89,6 +90,30 @@ export async function readGitHubLinks(dataPath: string): Promise<Map<string, Git
 
 export async function writeGitHubLinks(dataPath: string, links: ReadonlyMap<string, GitHubLink>): Promise<void> {
   await writePrivateJson(linksPath(dataPath), { threads: Object.fromEntries(links) });
+}
+
+function commitsPath(dataPath: string): string {
+  return join(dataPath, 'claude-commits.json');
+}
+
+/** Commits Claude made while answering each local thread, by local thread id, oldest first. */
+export async function readClaudeCommits(dataPath: string): Promise<Map<string, readonly WorktreeCommit[]>> {
+  const value = await readPrivateJson(commitsPath(dataPath)).catch(() => undefined);
+  const threads = typeof value === 'object' && value !== null ? (value as { threads?: unknown }).threads : undefined;
+  const found = new Map<string, readonly WorktreeCommit[]>();
+  if (typeof threads !== 'object' || threads === null) return found;
+  for (const [id, entry] of Object.entries(threads)) {
+    const commits = (Array.isArray(entry) ? entry as unknown[] : []).flatMap((commit) => {
+      const record = typeof commit === 'object' && commit !== null ? commit as Partial<WorktreeCommit> : {};
+      return typeof record.oid === 'string' && /^[a-f\d]{40,64}$/u.test(record.oid) && typeof record.subject === 'string' ? [{ oid: record.oid, subject: record.subject }] : [];
+    });
+    if (commits.length > 0) found.set(id, commits);
+  }
+  return found;
+}
+
+export async function writeClaudeCommits(dataPath: string, commits: ReadonlyMap<string, readonly WorktreeCommit[]>): Promise<void> {
+  await writePrivateJson(commitsPath(dataPath), { threads: Object.fromEntries(commits) });
 }
 
 /** The request Claude gets for a GitHub thread: the user's note, or a default for the intent, then the thread's comments quoted. */

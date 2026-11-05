@@ -62,6 +62,63 @@ export async function commitAndPush(worktree: string, { path, message, pushTo, h
   }
 }
 
+/** Push the worktree's commits to the PR's branch. `hooksOff` skips Git hooks, for someone else's PR. */
+export async function pushCommits(worktree: string, { pushTo, headBranch, hooksOff }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean }): Promise<void> {
+  if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
+  await git(worktree, [...hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [], 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+}
+
+/** A worktree commit GitHub does not have yet, with what the range menu shows for it. */
+export interface LocalCommit {
+  readonly oid: string;
+  readonly subject: string;
+  readonly author: string;
+  readonly createdAt: string;
+  readonly files: number;
+  readonly additions: number;
+  readonly deletions: number;
+}
+
+/** The worktree's commits after the PR's head on GitHub, oldest first; none when that commit is not in the worktree. */
+export async function unpushedCommits(worktree: string, pushedHead: string): Promise<readonly LocalCommit[]> {
+  if (!/^[a-f\d]{40,64}$/u.test(pushedHead)) return [];
+  const log = await git(worktree, ['log', '--reverse', '--format=%x1e%H%x1f%s%x1f%an%x1f%cI', '--shortstat', `${pushedHead}..HEAD`]).catch(() => '');
+  return log.split('\x1e').filter((record) => record.trim() !== '').map((record) => {
+    const [line = '', ...rest] = record.split('\n');
+    const [oid = '', subject = '', author = '', createdAt = ''] = line.split('\x1f');
+    const stat = rest.join(' ');
+    const count = (pattern: RegExp): number => Number(pattern.exec(stat)?.[1] ?? 0);
+    return { oid, subject, author, createdAt, files: count(/(\d+) files? changed/u), additions: count(/(\d+) insertions?/u), deletions: count(/(\d+) deletions?/u) };
+  });
+}
+
+/** A commit Claude made in a PR worktree. */
+export interface WorktreeCommit {
+  readonly oid: string;
+  readonly subject: string;
+}
+
+/** The worktree's commit, and whether it has no uncommitted or untracked files. */
+export async function worktreeSnapshot(worktree: string): Promise<{ readonly head: string; readonly clean: boolean }> {
+  const [head, status] = await Promise.all([git(worktree, ['rev-parse', 'HEAD']), git(worktree, ['status', '--porcelain'])]);
+  return { head: head.trim(), clean: status.trim() === '' };
+}
+
+/** Commits on the worktree's HEAD after `head`, oldest first. */
+export async function commitsSince(worktree: string, head: string): Promise<readonly WorktreeCommit[]> {
+  const log = await git(worktree, ['log', '--reverse', '--format=%H%x1f%s', `${head}..HEAD`]);
+  return log.split('\n').filter((line) => line !== '').map((line) => {
+    const [oid = '', subject = ''] = line.split('\x1f');
+    return { oid, subject };
+  });
+}
+
+/** Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file; ignored files stay. */
+export async function discardSince(worktree: string, head: string): Promise<void> {
+  await git(worktree, ['reset', '--quiet', '--hard', head]);
+  await git(worktree, ['clean', '--quiet', '-d', '--force']);
+}
+
 /** What to merge and where to push the result. */
 export interface ConflictFix {
   readonly base: string;

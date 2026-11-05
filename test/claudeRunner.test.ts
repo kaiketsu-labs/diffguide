@@ -51,7 +51,7 @@ function fakeStore(): ReviewStore & { setPending(events: ReviewEvent[]): void } 
   } as unknown as ReviewStore & { setPending(events: ReviewEvent[]): void };
 }
 
-async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string, prepare?: () => Promise<void>) {
+async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string, prepare?: () => Promise<void>, extra: Partial<ClaudeRunnerOptions> = {}) {
   const dataPath = await mkdtemp(path.join(tmpdir(), 'pair-review-runner-'));
   t.after(async () => { await rm(dataPath, { recursive: true, force: true }); });
   const store = fakeStore();
@@ -67,6 +67,7 @@ async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, sh
       return child;
     }) as unknown as NonNullable<ClaudeRunnerOptions['spawn']>,
     ...(prepare === undefined ? {} : { prepare }),
+    ...extra,
   });
   t.after(() => { instance.dispose(); });
   return { instance, store, children, log };
@@ -79,7 +80,9 @@ test('answers a sent comment in the background, shows each step, and resumes the
   const first = children[0];
   assert.ok(first !== undefined);
   assert.equal(first.cwd, '/worktree');
-  assert.ok(first.args.includes('--disallowedTools') && first.args.includes('Edit') && first.args.includes('Bash'));
+  assert.ok(!first.args.includes('--disallowedTools'));
+  assert.equal(first.args[first.args.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(first.env?.['GIT_CONFIG_VALUE_0'], '/dev/null');
   assert.equal(first.args[first.args.indexOf('--setting-sources') + 1], 'user');
   assert.ok(first.args.includes('--strict-mcp-config'));
   assert.equal(first.args[0], '-p');
@@ -110,15 +113,49 @@ test('answers a sent comment in the background, shows each step, and resumes the
   assert.equal(second.args[second.args.indexOf('--resume') + 1], sessionId);
 });
 
-test('lets Claude edit and run commands only on the author\'s own PR', async (t) => {
+test('on the author\'s own PR, uses the checkout\'s config and asks Claude to commit without pushing', async (t) => {
   const { store, children } = await runner('author', t);
   store.setPending([event('one')]);
   await until(() => children.length === 1);
   const args = children[0]?.args ?? [];
-  assert.ok(!args.includes('--disallowedTools'));
   assert.ok(!args.includes('--setting-sources') && !args.includes('--strict-mcp-config'));
   assert.equal(args[args.indexOf('--permission-mode') + 1], 'auto');
   assert.ok(!children[0]?.args[1]?.includes('someone else'));
+  assert.match(children[0]?.args[1] ?? '', /commit the change[^]*Do not push/u);
+  assert.equal(children[0]?.env?.['GIT_CONFIG_VALUE_0'], undefined);
+});
+
+test('lets Claude read the workspace\'s other folders, and runs the finish step with the handled threads', async (t) => {
+  const finished: string[][] = [];
+  const { store, children } = await runner('reviewer', t, undefined, undefined, {
+    folders: () => ['/worktree', '/repos/other', '/repos/main'],
+    finish: async (threads) => { finished.push([...threads]); },
+  });
+  store.setPending([event('one')]);
+  await until(() => children.length === 1);
+  const args = children[0]?.args ?? [];
+  assert.deepEqual(args.slice(args.indexOf('--add-dir') + 1, args.indexOf('--add-dir') + 3), ['/repos/other', '/repos/main']);
+  children[0]?.send({ type: 'result', subtype: 'success', is_error: false });
+  await children[0]?.exit(0);
+  await until(() => finished.length === 1);
+  assert.deepEqual(finished, [['thread-one']]);
+});
+
+test('opens the same conversation interactively with the same flags, and starts one when there is none', async (t) => {
+  const { instance, store, children } = await runner('reviewer', t, '/bin/zsh');
+  const first = await instance.launch();
+  assert.equal(first.command, '/bin/zsh');
+  assert.equal(first.cwd, '/worktree');
+  assert.ok(!first.args.includes('-p'));
+  assert.ok(first.args.includes('--strict-mcp-config'));
+  assert.equal(first.env['GIT_CONFIG_VALUE_0'], '/dev/null');
+  const sessionId = first.args[first.args.indexOf('--session-id') + 1];
+  assert.ok(sessionId !== undefined);
+  const again = await instance.launch();
+  assert.equal(again.args[again.args.indexOf('--resume') + 1], sessionId);
+  store.setPending([event('one')]);
+  await until(() => children.length === 1);
+  assert.equal(children[0]?.args[children[0].args.indexOf('--resume') + 1], sessionId);
 });
 
 test('runs a task in the PR conversation with its own tools, and keeps Git hooks off on someone else\'s PR', async (t) => {

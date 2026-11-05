@@ -51,12 +51,24 @@ export interface ClaudeRunnerOptions {
   readonly instructions?: () => Promise<string>;
   /** Runs before Claude answers comments, such as bringing the worktree to the PR's latest commit; a failure stops the run with its message. */
   readonly prepare?: () => Promise<void>;
+  /** Runs after Claude answers comments, with the threads it handled, such as recording its commits; a failure is the run's error. */
+  readonly finish?: (threads: ReadonlySet<string>) => Promise<void>;
+  /** Folders outside the worktree Claude may read and search, such as the workspace's other repositories. */
+  readonly folders?: () => readonly string[];
 }
 
-const reviewerNote = 'This is someone else\'s pull request. You cannot edit files or run commands. For implement requests, reply with the proposed change as suggestion blocks instead.';
+/** How to start this PR's Claude conversation interactively, such as in a terminal. */
+export interface ClaudeLaunch {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+const reviewerNote = 'This is someone else\'s pull request. You may read other repositories, run commands and make throwaway edits or commits to test an idea, but Pair Review discards them after this run. For implement requests, reply with the proposed change as suggestion blocks instead.';
+const authorNote = 'When you change files, commit the change with a short message saying what it does. Do not push; the human reviews your commits and pushes them.';
 /** How to propose code in a reply, so the review page can show, apply and publish it as on GitHub. */
 const suggestionNote = 'To propose new code for the commented lines without editing files, put the complete replacement lines in a fenced block whose language is `suggestion`, as on GitHub. It replaces exactly the commented lines, so include every line that stays. To offer alternatives, write up to three suggestion blocks, each after a short line naming the option, such as "Option 1: read the limit from config." The human picks one to apply or publish.';
-const reviewerBlockedTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash'];
 /** On someone else's PR the checkout is the author's: skip its CLAUDE.md, skills, hooks, settings and MCP servers. */
 export const untrustedCheckoutFlags = ['--setting-sources', 'user', '--strict-mcp-config'];
 
@@ -91,10 +103,7 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: true, step: 'Starting', task: task.label, threads: new Set(), skipped: 0, error: undefined });
     let error: string | undefined;
     try {
-      error = await this.#spawn({
-        prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, edits: true,
-        env: this.options.role === 'reviewer' ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } : {},
-      });
+      error = await this.#spawn({ prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, mode: this.options.role === 'author' ? 'auto' : 'acceptEdits' });
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
@@ -103,6 +112,14 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: false, step: undefined, task: undefined, threads: new Set(), skipped: 0, error });
     this.#next();
     return error !== undefined ? { error } : this.#reply === undefined ? {} : { reply: this.#reply };
+  }
+
+  /** How to open this PR's conversation interactively; starts and remembers a new conversation when there is none yet. */
+  async launch(): Promise<ClaudeLaunch> {
+    const { executable, mcpPath, shell } = await this.options.resolve();
+    const { sessionId, resume } = await this.#session();
+    if (!resume) await writePrivateJson(this.#sessionPath, { sessionId });
+    return this.#command(executable, shell, [...this.#flags(mcpPath, [], 'auto'), ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId])]);
   }
 
   /** Send comments Claude did not pick up again, and clear the last error. */
@@ -146,9 +163,10 @@ export class ClaudeRunner implements vscode.Disposable {
       await this.options.prepare?.();
       const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
       error = await this.#spawn({
-        prompt: `${this.options.role === 'reviewer' ? `${reviewerNote}\n\n` : ''}${prompt}\n\n${suggestionNote}`,
-        label: `${events.length} comment${events.length === 1 ? '' : 's'}`, allowedTools: [], edits: this.options.role === 'author', env: {},
+        prompt: `${this.options.role === 'reviewer' ? reviewerNote : authorNote}\n\n${prompt}\n\n${suggestionNote}`,
+        label: `${events.length} comment${events.length === 1 ? '' : 's'}`, allowedTools: [], mode: 'auto',
       });
+      await this.options.finish?.(threads);
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
@@ -158,26 +176,50 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#next();
   }
 
-  /**
-   * Run Claude once in the PR's conversation; resolves with an error message, or undefined on success.
-   * `edits` lets Claude change files; without it, edits and commands are blocked. On the author's own PR, auto mode also lets it run commands.
-   */
-  async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly edits: boolean; readonly env: Readonly<Record<string, string>> }): Promise<string | undefined> {
-    const { executable, mcpPath, shell } = await this.options.resolve();
-    const sessionPath = join(this.options.dataPath, 'claude-session.json');
-    const saved = await readPrivateJson(sessionPath).catch(() => undefined) as { sessionId?: unknown } | undefined;
+  get #sessionPath(): string {
+    return join(this.options.dataPath, 'claude-session.json');
+  }
+
+  /** The saved conversation to resume, or a new conversation's ID. */
+  async #session(): Promise<{ readonly sessionId: string; readonly resume: boolean }> {
+    const saved = await readPrivateJson(this.#sessionPath).catch(() => undefined) as { sessionId?: unknown } | undefined;
     const resume = typeof saved?.sessionId === 'string' && /^[\da-f-]{36}$/u.test(saved.sessionId) ? saved.sessionId : undefined;
-    const sessionId = resume ?? randomUUID();
-    const args = [
-      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...run.allowedTools,
+    return { sessionId: resume ?? randomUUID(), resume: resume !== undefined };
+  }
+
+  /** Flags every run of this PR's conversation shares: Pair Review's tools, the extra folders, and on someone else's PR no checkout config. */
+  #flags(mcpPath: string, allowedTools: readonly string[], mode: 'auto' | 'acceptEdits'): string[] {
+    const folders = (this.options.folders?.() ?? []).filter((folder) => folder !== this.options.cwd);
+    return [
+      '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...allowedTools,
       ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
-      ...(!run.edits ? ['--disallowedTools', ...reviewerBlockedTools] : ['--permission-mode', this.options.role === 'author' ? 'auto' : 'acceptEdits']),
+      '--permission-mode', mode,
+      ...(folders.length === 0 ? [] : ['--add-dir', ...folders]),
+    ];
+  }
+
+  /** Start Claude directly, or through the login shell so the user's own `claude` setup applies. On someone else's PR, Git hooks stay off, since the PR's author controls the checkout. */
+  #command(executable: string, shell: string | undefined, args: readonly string[]): ClaudeLaunch {
+    const env = this.options.role === 'reviewer' ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } : {};
+    return shell === undefined
+      ? { command: executable, args, cwd: this.options.cwd, env }
+      : { command: shell, args: ['-l', '-i', '-c', '"$0" "$@"', executable, ...args], cwd: this.options.cwd, env };
+  }
+
+  /** Run Claude once in the PR's conversation; resolves with an error message, or undefined on success. */
+  async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly mode: 'auto' | 'acceptEdits' }): Promise<string | undefined> {
+    const { executable, mcpPath, shell } = await this.options.resolve();
+    const sessionPath = this.#sessionPath;
+    const { sessionId, resume: resumed } = await this.#session();
+    const resume = resumed ? sessionId : undefined;
+    const args = [
+      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...this.#flags(mcpPath, run.allowedTools, run.mode),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
     this.#reply = undefined;
     this.options.log(`Starting Claude for ${run.label} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);
-    const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
-    const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...run.env } });
+    const launch = this.#command(executable, shell, args);
+    const child = (this.options.spawn ?? spawnProcess)(launch.command, launch.args, { cwd: launch.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...launch.env } });
     this.#child = child;
     let stderr = '';
     child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });

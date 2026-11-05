@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- On your own PR, Claude answers Local threads in auto mode, so **Implement** can run tests, builds and git commands. Before, it could only edit files and refused every command. Someone else's PR stays locked to reading.
+- On your own PR, Claude answers Local threads in auto mode, so **Implement** can run tests, builds and git commands. Before, it could only edit files and refused every command.
+- On someone else's PR, Claude also answers Local threads in auto mode, so it can run commands and try a change to test an idea. After each answer, Pair Review discards its edits and commits, unless the worktree already had uncommitted changes. Git hooks, and the checkout's `CLAUDE.md`, skills, hooks, settings and MCP servers, stay off. Commands that run tests or builds still run the PR author's code.
+- Claude can read and search the workspace's other folders while answering a Local thread.
+- On your own PR, Claude commits what it changes for a Local thread and does not push. The thread lists each commit with **Not pushed** until GitHub has it. The chevron before a commit unfolds its changes inside the thread; the hash shows the commit in the Files tab. **Push N commits** in the files bar pushes them, and **Show changes** next to it opens every commit GitHub does not have yet in the Files tab. The range menu lists those commits after the PR's, marked **Not pushed**, with a **Not pushed** entry that picks them all.
+- **Open in terminal** on the review page replaces **Show log**. It continues the PR's Claude conversation in a VS Code terminal with the same tools and limits. It is off while Claude answers in the background; a comment sent while the terminal conversation is open still starts a background answer in the same conversation. The log stays available from Claude's error message.
 - Before Claude answers a Local thread, the worktree moves to the PR's latest commit on GitHub, so commits pushed from another checkout are never edited over. Local commits built on that commit stay. If the worktree went another way, the run stops and says why; if GitHub can't be reached, Claude works on the worktree as it is. The review page shows the new files when the worktree moves.
 - The review page sends half as many GitHub requests after an action, loads the Conversation card together with the rest of the page, and redraws faster with many read marks.
 - Refreshing the review page redraws only the files whose changes differ, instead of every file.

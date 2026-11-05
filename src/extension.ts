@@ -10,7 +10,7 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
-import { commitAndPush, conflictTask, prepareConflictFix, syncToPullRequestHead } from './conflicts.js';
+import { commitAndPush, conflictTask, prepareConflictFix, pushCommits, syncToPullRequestHead, unpushedCommits } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { sharedPerTurn } from './autoSync.js';
@@ -221,7 +221,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
         const state = buildOverviewState(current(), opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
         const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
-        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }) };
+        const unpushed = loadedConversation instanceof Error ? [] : await unpushedCommits(folder, loadedConversation.merge.headOid);
+        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }) };
       };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
@@ -331,7 +332,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         unmarkRead: (ids) => fileReviews.unmarkRead(repository, pullRequest.number, ids),
         openInEditor: (path) => openPullRequestFile(storageRoot, repository, current(), path),
-        showLog: () => { opened.output.show(true); },
+        openTerminal: async () => {
+          if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Open the terminal when it is done.');
+          const { command, args, cwd, env } = await opened.runner.launch();
+          vscode.window.createTerminal({ name: `Claude · #${pullRequest.number}`, shellPath: command, shellArgs: [...args], cwd, env }).show();
+        },
+        readCommit: async (oid) => {
+          await haveCommit(oid);
+          return readPullRequestDiff(folder, (await git(folder, ['rev-parse', `${oid}^`])).trim(), { to: oid });
+        },
+        push: async () => {
+          if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Push when it is done.');
+          const loaded = await currentDetails();
+          if (!loaded.canEdit) throw new Error('You cannot push to this PR.');
+          await pushCommits(folder, { pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer' });
+          changedOnGitHub();
+        },
         retry: () => { opened.runner.retry(); },
         revealThread: async (id) => { await vscode.commands.executeCommand('pairReview.revealThread', id); },
         submitReview: async (event, body) => {
@@ -468,7 +484,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const before = await readHead();
           shownHead ??= before;
           let problem: string | undefined;
-          if (version.head !== before) {
+          const ahead = await git(folder, ['merge-base', '--is-ancestor', version.head, 'HEAD']).then(() => true, () => false);
+          if (version.head !== before && !ahead) {
             await syncToPullRequestHead(folder, pullRequest.number, previous?.head).catch((error: unknown) => { problem = error instanceof Error ? error.message : String(error); });
           }
           const head = await readHead();

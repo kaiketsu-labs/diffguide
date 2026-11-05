@@ -878,6 +878,24 @@ function commitsOf(state = current): Extract<TimelineItem, { kind: 'commit' }>[]
   return (state?.conversation?.timeline ?? []).filter((item): item is Extract<TimelineItem, { kind: 'commit' }> => item.kind === 'commit');
 }
 
+/** The PR's commits on GitHub, then the worktree's commits GitHub does not have yet, for the range menu and the Files tab. */
+function rangeCommits(): Extract<TimelineItem, { kind: 'commit' }>[] {
+  const local = (current?.unpushed ?? []).map(({ oid, subject, author, createdAt, files, additions, deletions }) =>
+    ({ kind: 'commit' as const, id: oid, oid, headline: subject, message: '', author, avatarUrl: '', createdAt, files, additions, deletions }));
+  return [...commitsOf(), ...local];
+}
+
+function isUnpushed(oid: string): boolean {
+  return current?.unpushed?.some((commit) => commit.oid === oid) === true;
+}
+
+/** Show every commit GitHub does not have yet in the Files tab. */
+function showUnpushed(): void {
+  const first = current?.unpushed?.[0];
+  const last = current?.unpushed?.at(-1);
+  if (first && last) showCommits(first.oid, last.oid);
+}
+
 /** Show the changes of commits `from` to `to` in the Files tab. */
 function showCommits(from: string, to: string): void {
   if (from === to) rangeAnchor = from;
@@ -902,11 +920,17 @@ function rangeLabel(shown: DiffRange): string {
   if (shown.kind === 'all') return 'All changes';
   if (shown.kind === 'since') return 'Since your last review';
   if (shown.from !== shown.to) return rangeCount(shown) + ' commits';
-  return shown.from.slice(0, 7) + ' ' + (commitsOf().find((commit) => commit.oid === shown.from)?.headline ?? '');
+  return shown.from.slice(0, 7) + ' ' + (commitHeadline(shown.from) ?? '');
+}
+
+/** A commit's title from the PR's commits, or from Claude's local commits before they are pushed. */
+function commitHeadline(oid: string): string | undefined {
+  return rangeCommits().find((commit) => commit.oid === oid)?.headline
+    ?? current?.threads.flatMap((thread) => thread.commits ?? []).find((commit) => commit.oid === oid)?.subject;
 }
 
 function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
-  const commits = commitsOf();
+  const commits = rangeCommits();
   return commits.findIndex((commit) => commit.oid === shown.to) - commits.findIndex((commit) => commit.oid === shown.from) + 1;
 }
 
@@ -916,8 +940,9 @@ function rangeTitle(shown: DiffRange): (Node | string)[] {
   if (shown.kind === 'all') return ['All changes'];
   if (shown.kind === 'since') return ['Changes since your last review'];
   if (shown.from !== shown.to) return [rangeCount(shown) + ' commits,', commitRef(shown.from), 'to', commitRef(shown.to)];
-  const commit = commitsOf().find((each) => each.oid === shown.from);
-  return [commitRef(shown.from), ...commit ? [el('span', 'headline', commit.headline), ...checkMark(commit)] : []];
+  const commit = rangeCommits().find((each) => each.oid === shown.from);
+  const headline = commitHeadline(shown.from);
+  return [commitRef(shown.from), ...headline === undefined ? [] : [el('span', 'headline', headline)], ...commit ? checkMark(commit) : []];
 }
 
 function commitRef(oid: string): HTMLButtonElement {
@@ -926,7 +951,7 @@ function commitRef(oid: string): HTMLButtonElement {
 
 /** The note's second line: who made the shown commits and when, and what they change as shown. */
 function rangeFacts(shown: DiffRange): (Node | string)[] {
-  const commits = commitsOf();
+  const commits = rangeCommits();
   const index = (oid: string): number => commits.findIndex((commit) => commit.oid === oid);
   const picked = shown.kind === 'commits' ? commits.slice(index(shown.from), index(shown.to) + 1) : [];
   const facts: (Node | string)[] = [];
@@ -1011,14 +1036,21 @@ function closeToolbarMenu(): void {
 
 /** The range menu: all changes, since your last review, or commits; click a commit for its changes, Shift-click another for the commits between. */
 function openRangeMenu(): void {
-  const commits = commitsOf();
+  const commits = rangeCommits();
   const index = (oid: string): number => commits.findIndex((commit) => commit.oid === oid);
   const [low, high] = diffRange.kind === 'commits' ? [index(diffRange.from), index(diffRange.to)] : [-1, -1];
   const pick = (next: DiffRange): void => { closeToolbarMenu(); requestFiles(next, whitespace); };
   const rows = [rangeRow([el('span', 'text', 'All changes'), el('span', 'muted', commits.length === 1 ? '1 commit' : commits.length + ' commits')], diffRange.kind === 'all', () => pick({ kind: 'all' }))];
   if (current?.conversation?.lastReviewedCommit) rows.push(rangeRow([el('span', 'text', 'Since your last review')], diffRange.kind === 'since', () => pick({ kind: 'since' })));
+  const unpushed = current?.unpushed ?? [];
+  const [firstLocal, lastLocal] = [unpushed[0], unpushed.at(-1)];
+  if (firstLocal && lastLocal) {
+    const range: DiffRange = { kind: 'commits', from: firstLocal.oid, to: lastLocal.oid };
+    rows.push(rangeRow([el('span', 'text', 'Not pushed'), el('span', 'muted', unpushed.length === 1 ? '1 commit' : unpushed.length + ' commits')], sameRange(diffRange, range), () => pick(range)));
+  }
   commits.forEach((commit, at) => {
-    const row = rangeRow([hashChip(commit.oid), el('span', 'text', commit.headline), ...cell(checkMark(commit)), ...commitStats(commit), el('span', 'muted', commit.author), ...cell(timeLabel(commit.createdAt))],
+    const local = isUnpushed(commit.oid);
+    const row = rangeRow([hashChip(commit.oid), el('span', 'text', commit.headline), ...cell(local ? [el('span', 'chip', 'Not pushed')] : checkMark(commit)), ...commitStats(commit), el('span', 'muted', commit.author), ...cell(timeLabel(commit.createdAt))],
       low >= 0 && at >= low && at <= high, (shift) => {
         const anchor = shift && rangeAnchor !== undefined ? index(rangeAnchor) : -1;
         if (anchor < 0) { rangeAnchor = commit.oid; pick({ kind: 'commits', from: commit.oid, to: commit.oid }); return; }
@@ -1027,6 +1059,7 @@ function openRangeMenu(): void {
       });
     row.title = commitTitle(commit);
     row.classList.add('commit');
+    if (local) row.classList.add('unpushed');
     rows.push(row);
   });
   const hint = el('div', 'muted menu-hint', commits.length > 1 ? 'Shift-click a second commit to see the commits between.' : current?.conversation ? '' : 'Loading commits…');
@@ -1381,6 +1414,12 @@ function render(state: OverviewState): void {
   claude.textContent = state.claude.text;
   claude.className = state.claude.running ? 'chip claude working' : 'chip';
   $('retry').hidden = !state.claude.retry;
+  ($('terminal') as HTMLButtonElement).disabled = state.claude.running;
+  const unpushed = state.unpushed?.length ?? 0;
+  const push = $('push');
+  push.hidden = !unpushed || !details?.canEdit;
+  push.textContent = 'Push ' + unpushed + (unpushed === 1 ? ' commit' : ' commits');
+  $('show-unpushed').hidden = !unpushed;
   renderThreadList();
   author = !details || details.viewerIsAuthor;
   setBusy(busy);
@@ -1730,6 +1769,7 @@ function threadBox(thread: Thread): HTMLElement {
     if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
     box.append(item);
   });
+  if (thread.source === 'local' && thread.commits) box.append(claudeCommits(thread.commits));
   const working = thread.source === 'local' ? thread.working : undefined;
   if (working) {
     const live = el('div', 'claude-live');
@@ -1786,6 +1826,76 @@ function threadBox(thread: Thread): HTMLElement {
   actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
+  return box;
+}
+
+/** Commits whose changes are unfolded in their Local thread. */
+const openCommits = new Set<string>();
+/** Each unfolded commit's changes, `loading` while the extension reads them, or why it could not. */
+const commitDiffs = new Map<string, readonly FileDiff[] | 'loading' | { readonly error: string }>();
+
+/** Redraw the files whose Local threads list a commit. */
+function renderCommitThreads(oid: string): void {
+  renderFiles((current?.threads ?? []).filter((thread) => thread.commits?.some((commit) => commit.oid === oid)).map((thread) => thread.path));
+}
+
+/** The commits Claude made in a local thread; each folds open to its changes, and its hash shows them in the Files tab. Commits GitHub does not list yet are marked as not pushed. */
+function claudeCommits(commits: readonly { readonly oid: string; readonly subject: string }[]): HTMLElement {
+  const list = el('div', 'commit-list thread-commits');
+  for (const commit of commits) {
+    const open = openCommits.has(commit.oid);
+    const row = el('div', 'commit-row');
+    const chevron = chevronMark(!open);
+    chevron.title = open ? 'Hide the changes' : 'Show the changes here';
+    chevron.addEventListener('click', () => {
+      if (open) openCommits.delete(commit.oid);
+      else {
+        openCommits.add(commit.oid);
+        if (!Array.isArray(commitDiffs.get(commit.oid))) { commitDiffs.set(commit.oid, 'loading'); post({ action: 'commit-diff', oid: commit.oid }); }
+      }
+      renderCommitThreads(commit.oid);
+    });
+    const hash = button(commit.oid.slice(0, 7), () => { showCommits(commit.oid, commit.oid); }, 'ref');
+    hash.title = 'Show this commit in the Files tab';
+    row.append(chevron, hash, el('span', 'text', commit.subject), ...isUnpushed(commit.oid) ? [el('span', 'chip', 'Not pushed')] : []);
+    list.append(row);
+    if (open) list.append(commitPreview(commitDiffs.get(commit.oid)));
+  }
+  return list;
+}
+
+/** A commit's changes as a read-only unified diff, file by file. */
+function commitPreview(diff: readonly FileDiff[] | 'loading' | { readonly error: string } | undefined): HTMLElement {
+  const box = el('div', 'commit-preview');
+  if (diff === undefined || diff === 'loading') { box.append(el('div', 'note muted', 'Loading changes…')); return box; }
+  if (!Array.isArray(diff)) { box.append(el('div', 'note bad', 'Could not read the changes: ' + (diff as { readonly error: string }).error)); return box; }
+  for (const file of diff as readonly FileDiff[]) {
+    const card = el('div');
+    const head = el('div', 'preview-file');
+    head.append(el('span', 'name', file.oldPath ? file.oldPath + ' → ' + file.path : file.path), el('span', 'stat-add', '+' + file.additions), el('span', 'stat-del', '−' + file.deletions));
+    card.append(head);
+    box.append(card);
+    if (file.binary || !file.hunks.length) { card.append(el('div', 'note muted', file.binary ? 'Binary file not shown.' : 'No content changes.')); continue; }
+    const table = el('table');
+    const columns = el('colgroup');
+    for (const name of ['num', 'num', '']) columns.append(el('col', name));
+    table.append(columns);
+    for (const hunk of file.hunks) {
+      const header = el('tr', 'hunk');
+      const cell = el('td', 'muted', hunk.header);
+      cell.colSpan = 3;
+      header.append(cell);
+      table.append(header);
+      for (const line of hunk.lines) {
+        const row = el('tr', line.kind === 'context' ? '' : line.kind);
+        const code = el('td', 'code');
+        code.innerHTML = line.html;
+        row.append(el('td', 'num', line.oldLine === undefined ? '' : String(line.oldLine)), el('td', 'num', line.newLine === undefined ? '' : String(line.newLine)), code);
+        table.append(row);
+      }
+    }
+    card.append(table);
+  }
   return box;
 }
 
@@ -3110,6 +3220,11 @@ function onExtensionMessage(data: ExtensionMessage): void {
     const box = document.querySelector<HTMLElement>('[data-preview="' + CSS.escape(data.markdown.form) + '"]');
     if (box && entry) box.innerHTML = data.markdown.html || '<span class="muted">Nothing to preview.</span>';
   }
+  if (data.commitDiff) {
+    const { oid } = data.commitDiff;
+    commitDiffs.set(oid, 'files' in data.commitDiff ? data.commitDiff.files : { error: data.commitDiff.error });
+    renderCommitThreads(oid);
+  }
   if (data.preview) { previews.set(data.preview.path, data.preview); loading.delete('preview:' + data.preview.path); renderFiles([data.preview.path]); }
   if (data.media) { medias.set(data.media.path, data.media); loading.delete('media:' + data.media.path); renderFiles([data.media.path]); }
   if (data.context) { contextLines.set(data.context.path, data.context.lines); loading.delete(data.context.path); renderFiles([data.context.path]); }
@@ -3171,7 +3286,8 @@ function onExtensionMessage(data: ExtensionMessage): void {
   if (data.idle) setBusy(false);
 }
 
-for (const [id, action] of [['pr', 'pr'], ['log', 'log'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
+$('show-unpushed').addEventListener('click', showUnpushed);
+for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
 $('error').addEventListener('click', () => { $('error').textContent = ''; });
 document.addEventListener('pointerdown', (event) => { if (!(event.target instanceof Node && $('notice').contains(event.target))) clearNotice(); });
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });

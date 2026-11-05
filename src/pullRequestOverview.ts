@@ -15,7 +15,7 @@ import { type FileDiff, highlightSource } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
-import { conflictFixLabel } from './conflicts.js';
+import { conflictFixLabel, type LocalCommit } from './conflicts.js';
 import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
@@ -47,6 +47,8 @@ export interface OverviewState {
     readonly working?: string;
     /** The suggestion option written to the worktree from this thread, while the page is open. */
     readonly applied?: { readonly message: number; readonly option: number; readonly pushed: boolean };
+    /** Commits Claude made while answering this thread, oldest first. */
+    readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
     readonly url?: string;
     /** Set when the thread answers a GitHub thread, so publishing replies inside it. */
     readonly linked?: true;
@@ -76,6 +78,8 @@ export interface OverviewState {
   readonly analysis: AnalysisView;
   /** Claude's question, as HTML, when it stopped fixing conflicts without pushing. */
   readonly conflictQuestion?: string;
+  /** Commits in the worktree that the PR's branch on GitHub does not have yet, oldest first. */
+  readonly unpushed?: readonly LocalCommit[];
 }
 
 /** Claude's guided-review analysis: whether it runs, and the last result. */
@@ -182,7 +186,12 @@ export interface OverviewActions {
   markRead(range: LineRange, fileDone: boolean): Promise<void>;
   unmarkRead(ids: readonly string[]): Promise<void>;
   openInEditor(path: string): Promise<void>;
-  showLog(): void;
+  /** Open the PR's Claude conversation in a VS Code terminal. */
+  openTerminal(): Promise<void>;
+  /** Push the worktree's commits to the PR's branch. */
+  push(): Promise<void>;
+  /** The changes of one commit in the worktree, for a preview in the thread that made it. */
+  readCommit(oid: string): Promise<readonly FileDiff[]>;
   retry(): void;
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
@@ -253,7 +262,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'log' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor'; readonly path: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
@@ -267,6 +276,7 @@ export type PageMessage =
   | { readonly action: 'github-delete'; readonly id: string }
   | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
   | { readonly action: 'discard-suggestion'; readonly id: string }
+  | { readonly action: 'commit-diff'; readonly oid: string }
   | { readonly action: 'viewed'; readonly path: string; readonly viewed: boolean }
   | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
@@ -301,6 +311,8 @@ export interface ExtensionMessage {
   /** The selection `files` shows, and whether its new side is the PR's latest version. */
   readonly selection?: DiffSelection;
   readonly atHead?: boolean;
+  /** A commit's changes for the preview under it in a Local thread, or why they could not be read. */
+  readonly commitDiff?: { readonly oid: string; readonly files: readonly FileDiff[] } | { readonly oid: string; readonly error: string };
   /** GitHub's rendering of a form's text, for its Preview tab. */
   readonly markdown?: { readonly form: string; readonly html: string };
   readonly reveal?: string | undefined;
@@ -422,7 +434,7 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option,
-        range, whitespace, kind, hide, content, on, login, run, headline, picked, branch } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, content, on, login, run, headline, picked, branch, oid } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -482,8 +494,15 @@ export async function showPullRequestOverview(
         else if (action === 'find-extension' && typeof extension === 'string' && /^[\w+-]{1,20}$/u.test(extension)) {
           await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
         }
+        else if (action === 'commit-diff' && isOid(oid) && state.threads.some((thread) => thread.commits?.some((commit) => commit.oid === oid))) {
+          try { post({ commitDiff: { oid, files: await actions.readCommit(oid) } }); } catch (error: unknown) { post({ commitDiff: { oid, error: error instanceof Error ? error.message : String(error) } }); }
+        }
         else if (action === 'files' && typeof whitespace === 'boolean') {
-          const commits = (conversation()?.timeline ?? []).flatMap((item) => item.kind === 'commit' ? [item.oid] : []);
+          const commits = [
+            ...(conversation()?.timeline ?? []).flatMap((item) => item.kind === 'commit' ? [item.oid] : []),
+            ...state.threads.flatMap((thread) => thread.commits ?? []).map((commit) => commit.oid),
+            ...(state.unpushed ?? []).map((commit) => commit.oid),
+          ];
           const parsed = parseRange(range, commits);
           if (parsed !== undefined) sendFiles({ range: parsed, whitespace });
         } else if (action === 'conversation-comment' && isText(text)) {
@@ -506,7 +525,8 @@ export async function showPullRequestOverview(
         else if (action === 'picker-options') {
           try { post({ pickerOptions: await actions.pickerOptions() }); } catch (error: unknown) { post({ pickerError: error instanceof Error ? error.message : String(error) }); }
         }
-        else if (action === 'log') actions.showLog();
+        else if (action === 'terminal') await actions.openTerminal();
+        else if (action === 'push') await actions.push();
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
@@ -698,7 +718,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 #peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:var(--peek-width,min(560px,92vw));max-width:calc(100vw - 2 * var(--space-8));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-.claude-live{margin-top:var(--space-8)}
+.claude-live{margin-top:var(--space-8)}.thread-commits{margin-top:var(--space-8)}.thread-commits .chevron{cursor:pointer}.commit-preview{display:flex;flex-direction:column;gap:var(--space-8);margin:var(--space-4) 0 var(--space-8) 22px}.commit-preview>*{border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden}.commit-preview .preview-file{display:flex;gap:var(--space-8);padding:var(--space-4) var(--space-8);font-size:12px;background:var(--tint);border-bottom:1px solid var(--line)}.commit-preview .preview-file .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-code)}.commit-preview table{width:100%}.commit-preview .note{padding:var(--space-4) var(--space-8);font-size:12px}.thread-commits svg{flex:none;width:14px;height:14px;align-self:center;fill:var(--ink-muted)}.thread-commits .chip{flex:none}
 .suggestion{margin-top:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
 .suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line-strong)}
 .suggestion-diff .add{background:var(--diff-add)}.suggestion-diff .del{background:var(--diff-del)}
@@ -826,7 +846,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button" data-tip="Open on GitHub" aria-label="Open on GitHub">${codicons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${codicons.refresh}</button><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree">${codicons.trash}</button></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div id="facts" class="muted facts"></div>
-<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="log" class="quiet">Show log</button><button id="retry" class="small">Retry</button></div>
+<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">Open in terminal</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
 <p id="notice" role="status"></p>
 <aside id="peek" hidden aria-label="Definition"><div id="peek-resize" title="Drag to resize. Double-click to reset."></div><div class="peek-head">
@@ -866,6 +886,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
 <span id="analyze-divider" class="divider"></span>
 <button id="commit-batch" class="primary small" data-pr-action hidden></button>
+<button id="show-unpushed" class="small" data-tip="Show the commits you would push" hidden>Show changes</button><button id="push" class="primary small" data-tip="Commits in this worktree that GitHub does not have yet" hidden></button>
 <span id="filter-box" class="filter-box"><input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files"><button id="filter-clear" class="icon-button" aria-label="Clear filter" hidden>${codicons.close}</button></span>
 <span class="menu-anchor"><button id="filter-menu" class="icon-button" data-tip="Filter files" aria-label="Filter files" aria-haspopup="true" aria-expanded="false">${codicons.filter}</button></span>
 <button id="whitespace" class="icon-button" data-tip="Hide whitespace changes" aria-label="Hide whitespace changes">${codicons.whitespace}</button>
@@ -969,6 +990,7 @@ export function buildOverviewState(
         }),
         ...(publication === undefined ? {} : { url: publication.url }),
         ...(session.linkedToGitHub?.(thread.id) === true ? { linked: true as const } : {}),
+        ...(opened.commits(thread.id).length === 0 ? {} : { commits: opened.commits(thread.id) }),
       };
     }),
   };

@@ -5,12 +5,12 @@ import { createReviewBridge } from './bridge.js';
 import { readCustomInstructions, type InstructionKind } from './customInstructions.js';
 import type { ReviewBridge } from './contracts.js';
 import { parsePullRequestFileUri, pullRequestFileUri } from './pullRequestDiff.js';
-import { placeComment, readGitHubLinks, readPublications, writeGitHubLinks, writePublications } from './pullRequestComments.js';
+import { placeComment, readClaudeCommits, readGitHubLinks, readPublications, writeClaudeCommits, writeGitHubLinks, writePublications } from './pullRequestComments.js';
 import type { PullRequestProvider } from './pullRequests.js';
 import { showPublishPanel } from './publishPanel.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from './claudeRunner.js';
-import { catchUpWithPullRequest } from './conflicts.js';
+import { catchUpWithPullRequest, commitsSince, discardSince, worktreeSnapshot, type WorktreeCommit } from './conflicts.js';
 import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
@@ -26,6 +26,8 @@ export interface PullRequestSession {
   readonly analysis: PullRequestAnalysis;
   /** Full log of what Claude did for this PR. */
   readonly output: vscode.OutputChannel;
+  /** Commits Claude made while answering a local thread, oldest first. */
+  readonly commits: (threadId: string) => readonly WorktreeCommit[];
 }
 
 /** Review sessions for the PR worktrees of one checkout, opened on demand and restored on startup. */
@@ -146,6 +148,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     }
     const publications = await readPublications(dataPath);
     const links = await readGitHubLinks(dataPath);
+    const commits = await readClaudeCommits(dataPath);
     const publishing = new Map<string, vscode.WebviewPanel>();
     const output = vscode.window.createOutputChannel(`Claude · #${number}`);
     const configuration = vscode.workspace.getConfiguration('pairReview');
@@ -166,10 +169,28 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       if (metadata.role === 'reviewer' && revision === undefined) log('Skipping the repository\'s review instructions: could not find the base branch.');
       return readCustomInstructions(kind, { projectRoot: this.sourceRoot, repository: { cwd: worktree, ...(revision === undefined ? {} : { revision }) } });
     };
+    /** The worktree before Claude's current run, to find its commits or undo its throwaway changes. */
+    let before: Awaited<ReturnType<typeof worktreeSnapshot>> | undefined;
     const runner = new ClaudeRunner({
       store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('comments'),
+      folders: () => [...new Set([this.sourceRoot, ...(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)])],
       prepare: async () => {
         if (!await catchUpWithPullRequest(worktree, number)) log('Could not reach GitHub for the PR\'s latest commit; Claude works on the worktree as it is.');
+        before = await worktreeSnapshot(worktree);
+      },
+      finish: async (threads) => {
+        const start = before;
+        before = undefined;
+        if (start === undefined) return;
+        if (metadata.role === 'reviewer') {
+          if (start.clean) await discardSince(worktree, start.head);
+          else log('Kept the worktree as it is: it had uncommitted changes before Claude started.');
+          return;
+        }
+        const made = await commitsSince(worktree, start.head).catch(() => []);
+        if (made.length === 0) return;
+        for (const threadId of threads) commits.set(threadId, [...commits.get(threadId) ?? [], ...made]);
+        await writeClaudeCommits(dataPath, commits);
       },
       ...this.claude,
     });
@@ -252,7 +273,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       linkedToGitHub: (threadId) => links.has(threadId),
     };
-    const result: PullRequestSession = { session, bridge, runner, analysis, output };
+    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [] };
     return result;
   }
 }
