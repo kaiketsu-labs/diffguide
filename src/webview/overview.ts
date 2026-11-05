@@ -1,3 +1,4 @@
+import type { ClaudeStep } from '../claudeRunner.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
@@ -52,8 +53,7 @@ type CheckState = PullRequestDetails['checks'][number]['state'];
 const api = acquireVsCodeApi();
 const post = (message: PageMessage): void => api.postMessage(message);
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly claudeIcon: string; readonly pdfScript?: string };
-const { claudeIcon } = initial;
+const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly pdfScript?: string };
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
 let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
@@ -237,6 +237,32 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+const elapsed = (since: number): string => {
+  const seconds = Math.max(0, Math.floor((Date.now() - since) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+};
+
+/** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, Clawd and the run's time on the current one. */
+function stepLog(steps: readonly ClaudeStep[], startedAt?: number): HTMLElement {
+  const log = el('div', 'step-log');
+  const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
+  shown.forEach((step, index) => {
+    const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
+    row.append(step.done ? el('span', 'mark', step.failed ? '✕' : '✓') : el('span', 'clawd'));
+    const title = el('span', 'step-call');
+    title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
+    row.append(title);
+    if (startedAt !== undefined && index === shown.length - 1) {
+      const time = el('span', 'time', elapsed(startedAt));
+      time.dataset.since = String(startedAt);
+      row.append(time);
+    }
+    if (step.detail) row.append(el('span', 'detail', step.detail));
+    log.append(row);
+  });
+  return log;
 }
 
 function button(label: string, onClick: () => void, className?: string): HTMLButtonElement {
@@ -762,7 +788,7 @@ function personAvatar(url: string, name: string | undefined, title: string): HTM
   };
   if (!url || failedAvatars.has(url)) return fallback();
   const loaded = loadedAvatars.get(url);
-  const image = loaded ? loaded.cloneNode() as HTMLImageElement : el('img', 'avatar' + (url === claudeIcon ? ' claude' : ''));
+  const image = loaded ? loaded.cloneNode() as HTMLImageElement : el('img', 'avatar');
   if (!loaded) {
     image.addEventListener('load', () => { loadedAvatars.set(url, image); }, { once: true });
     image.addEventListener('error', () => { failedAvatars.add(url); image.replaceWith(fallback()); }, { once: true });
@@ -1442,10 +1468,16 @@ function render(state: OverviewState): void {
     reviewed.append(wrap, el('span', '', state.reviewed.done + '/' + state.reviewed.total + ' viewed'));
   }
   const claude = $('claude');
-  claude.textContent = state.claude.text;
-  claude.className = state.claude.running ? 'chip claude working' : 'chip';
+  const terminal = $('terminal');
+  const progress = state.claude.running ? state.claude.progress : undefined;
+  claude.after(terminal);
+  if (progress === undefined) claude.textContent = state.claude.text;
+  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), terminal);
+  claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip claude working' : 'chip';
   $('retry').hidden = !state.claude.retry;
-  ($('terminal') as HTMLButtonElement).disabled = state.claude.running;
+  terminal.className = state.claude.running ? 'small' : 'quiet';
+  terminal.textContent = state.claude.running ? 'Stop and open in terminal' : 'Open in terminal';
+  terminal.dataset.tip = state.claude.running ? 'Stops Claude\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s Claude conversation in a terminal';
   const unpushed = state.unpushed?.length ?? 0;
   const push = $('push');
   push.hidden = !unpushed || !details?.canEdit;
@@ -1710,7 +1742,13 @@ function timeLabel(iso: string): HTMLElement[] {
 setInterval(() => { for (const node of document.querySelectorAll<HTMLTimeElement>('time.when')) node.textContent = relativeTime(node.dateTime); }, 60_000);
 
 function avatar(entry: Message, author: string): HTMLElement {
-  const url = 'avatarUrl' in entry ? entry.avatarUrl : entry.author === 'claude' ? claudeIcon : current?.details?.viewerAvatarUrl ?? '';
+  if (!('avatarUrl' in entry) && entry.author === 'claude') {
+    const node = el('span', 'avatar clawd-avatar');
+    node.title = author;
+    node.append(el('span', 'clawd-pose'));
+    return node;
+  }
+  const url = 'avatarUrl' in entry ? entry.avatarUrl : current?.details?.viewerAvatarUrl ?? '';
   const name = 'avatarUrl' in entry ? entry.authorName ?? entry.author : entry.author === 'human' ? current?.details?.viewerName : undefined;
   return personAvatar(url, name, author);
 }
@@ -1833,7 +1871,9 @@ function threadBox(thread: Thread): HTMLElement {
   const working = thread.source === 'local' ? thread.working : undefined;
   if (working) {
     const live = el('div', 'claude-live');
-    live.append(el('span', 'chip claude working', working));
+    live.dataset.thread = thread.id;
+    const progress = thread.source === 'local' ? thread.progress : undefined;
+    live.append(progress === undefined ? stepLog([{ verb: working, done: false }]) : stepLog(progress.steps, progress.startedAt));
     box.append(live);
   }
   const key = 'reply:' + thread.id;
@@ -2773,10 +2813,12 @@ function guideIntro(): HTMLElement {
   const row = el('div', 'row');
   const start = button(analysis?.running ? 'Stop' : 'Build guide', () => post({ action: analysis?.running ? 'analysis-stop' : 'analyze' }), analysis?.running ? '' : 'primary');
   row.append(start);
-  if (analysis?.running) row.append(el('span', 'chip claude working', 'Guide · ' + (analysis.step ?? 'Working')));
+  if (analysis?.running && analysis.progress === undefined) row.append(el('span', 'chip claude working', 'Guide · ' + (analysis.step ?? 'Working')));
+  else if (analysis?.running) row.append(el('span', 'muted', 'Building the guide'));
   else if (analysis?.error) row.append(el('span', 'bad', 'Guide failed: ' + analysis.error));
   else row.append(el('span', 'muted', 'Runs Claude read-only on this PR. Large PRs take a few minutes.'));
   card.append(row);
+  if (analysis?.running && analysis.progress !== undefined) card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt));
   return card;
 }
 
@@ -3317,8 +3359,62 @@ function changedFiles(next: readonly FileDiff[], shownAs: string): string[] | un
   return next.filter((file, index) => JSON.stringify(file) !== JSON.stringify(shown[index])).map((file) => file.path);
 }
 
+/** A thread's live log on screen before a redraw, so Clawd can hop from it into Claude's new reply. */
+interface LiveLog { readonly threadId: string; readonly messages: number; readonly log: HTMLElement; readonly at: DOMRect; readonly clawd: DOMRect }
+
+function liveLogs(): LiveLog[] {
+  return [...document.querySelectorAll<HTMLElement>('.claude-live[data-thread]')].flatMap((log) => {
+    const clawd = log.querySelector('.clawd');
+    const thread = current?.threads.find((candidate) => candidate.id === log.dataset.thread);
+    return clawd && thread ? [{ threadId: thread.id, messages: thread.messages.length, log, at: log.getBoundingClientRect(), clawd: clawd.getBoundingClientRect() }] : [];
+  });
+}
+
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Once Claude's reply replaces its live log, the old log fades where it was and Clawd hops from it up into the reply's avatar. */
+async function hopIntoAvatar(live: LiveLog): Promise<void> {
+  const thread = current?.threads.find((candidate) => candidate.id === live.threadId);
+  const box = document.getElementById('thread-' + live.threadId);
+  if (reducedMotion.matches || !thread || !box || box.querySelector('.claude-live') || thread.messages.length <= live.messages || thread.messages.at(-1)?.author !== 'claude') return;
+  const avatar = [...box.querySelectorAll<HTMLElement>('.clawd-avatar')].at(-1);
+  const pose = avatar?.querySelector<HTMLElement>('.clawd-pose');
+  const text = avatar?.nextElementSibling;
+  if (!avatar || !pose || !(text instanceof HTMLElement)) return;
+  Object.assign(live.log.style, { position: 'fixed', left: live.at.left + 'px', top: live.at.top + 'px', width: live.at.width + 'px', margin: '0', pointerEvents: 'none' });
+  live.log.querySelector<HTMLElement>('.clawd')?.style.setProperty('visibility', 'hidden');
+  document.body.append(live.log);
+  live.log.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: 'forwards' }).finished.then(() => { live.log.remove(); }, () => { live.log.remove(); });
+  // The avatar's own Clawd makes the hop: it starts offset onto the log row, feet to feet, and ends at offset zero, its resting place.
+  const to = pose.getBoundingClientRect();
+  const dx = Math.round(live.clawd.left + live.clawd.width / 2 - (to.left + to.width / 2)), dy = Math.round(live.clawd.bottom - to.bottom);
+  const height = text.offsetHeight, from = Math.max(0, Math.round(live.at.bottom - text.getBoundingClientRect().top));
+  Object.assign(text.style, { overflow: 'clip', boxSizing: 'border-box' });
+  text.animate([{ height: from + 'px' }, { height: height + 'px' }], { duration: 260, easing: 'cubic-bezier(.2, .8, .2, 1)' }).finished
+    .finally(() => { Object.assign(text.style, { overflow: '', boxSizing: '' }); }).catch(() => undefined);
+  text.animate([{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 180, easing: 'ease-out', fill: 'backwards' });
+  avatar.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 180, delay: 300, easing: 'ease-out', fill: 'backwards', pseudoElement: '::before' });
+  pose.style.transform = `translate(${dx}px, ${dy}px)`;
+  pose.dataset.pose = 'crouch';
+  await wait(60);
+  pose.dataset.pose = 'air';
+  const steps = 6, jump = 6;
+  const flight = pose.animate(Array.from({ length: steps + 1 }, (_, step) => {
+    const done = step / steps, left = 1 - done;
+    return { transform: step === steps ? 'translate(0px, 0px)' : `translate(${Math.round(dx * left)}px, ${Math.round(dy * left - jump * 4 * done * left)}px)` };
+  }), { duration: 240 });
+  pose.style.transform = '';
+  await flight.finished.catch(() => undefined);
+  pose.dataset.pose = 'crouch';
+  await wait(60);
+  delete pose.dataset.pose;
+}
+
 function onExtensionMessage(data: ExtensionMessage): void {
+  const live = data.state ? liveLogs() : [];
   if (data.state) render(data.state);
+  for (const log of live) void hopIntoAvatar(log);
   const shownAs = JSON.stringify([diffRange, whitespace, atHead]);
   if (data.selection) { diffRange = data.selection.range; whitespace = data.selection.whitespace; atHead = data.atHead !== false; save(); }
   if (data.files) {
@@ -3414,6 +3510,14 @@ function onExtensionMessage(data: ExtensionMessage): void {
 
 $('show-unpushed').addEventListener('click', showUnpushed);
 for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
+// Re-rendered Clawds join the page clock instead of restarting their animation.
+document.addEventListener('animationstart', (event) => {
+  if (event.animationName !== 'clawd' || !(event.target instanceof Element)) return;
+  for (const animation of event.target.getAnimations({ subtree: true })) if (animation instanceof CSSAnimation && animation.animationName === 'clawd') animation.startTime = 0;
+});
+setInterval(() => {
+  for (const time of document.querySelectorAll<HTMLElement>('[data-since]')) time.textContent = elapsed(Number(time.dataset.since));
+}, 1000);
 $('error').addEventListener('click', () => { $('error').textContent = ''; });
 document.addEventListener('pointerdown', (event) => { if (!(event.target instanceof Node && $('notice').contains(event.target))) clearNotice(); });
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });

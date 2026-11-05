@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import * as vscode from 'vscode';
-import { contentBlocks, describeTool, parseLine, untrustedCheckoutFlags, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { contentBlocks, describeTool, parseLine, StepLog, untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions } from './claudeRunner.js';
 import type { CodeAnchor, ReviewStore } from './contracts.js';
 import { analysisPrompt, analysisSchema, changeBlocks, parseClaudeAnalysis, readStoredAnalysis, type Analysis, type ChangeBlock } from './prAnalysis.js';
 import { writePrivateJson } from './privateFiles.js';
@@ -14,6 +14,7 @@ import type { FileDiff } from './unifiedDiff.js';
 export interface AnalysisActivity {
   readonly running: boolean;
   readonly step?: string;
+  readonly progress?: ClaudeProgress;
   readonly error?: string;
 }
 
@@ -75,7 +76,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
   start(input: AnalysisInput): void {
     if (this.#activity.running || this.#disposed) return;
     this.#stopped = false;
-    this.#set({ running: true, step: 'Starting' });
+    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() } });
     void this.#run(input).then(
       () => { this.#set({ running: false }); },
       (failure: unknown) => {
@@ -155,15 +156,22 @@ export class PullRequestAnalysis implements vscode.Disposable {
     child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
     let output: unknown;
     let error: string | undefined;
+    const steps = new StepLog(this.options.cwd);
+    let progress = this.#activity.progress;
+    const startedAt = progress?.startedAt ?? Date.now();
     createInterface({ input: child.stdout! }).on('line', (line) => {
       const message = parseLine(line);
+      if (message !== undefined && steps.read(message)) {
+        progress = { steps: steps.steps, startedAt };
+        this.#set({ ...this.#activity, progress });
+      }
       if (message?.type === 'assistant') {
         for (const block of contentBlocks(message)) {
           if (block.type === 'tool_use' && typeof block.name === 'string') {
             const step = describeTool(block.name, block.input, this.options.cwd);
             this.options.log(`→ ${step}`);
-            this.#set({ running: true, step });
-          } else if (block.type === 'thinking') this.#set({ running: true, step: 'Thinking' });
+            this.#set({ ...this.#activity, step });
+          } else if (block.type === 'thinking') this.#set({ ...this.#activity, step: 'Thinking' });
         }
       }
       if (message?.type === 'result') {

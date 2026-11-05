@@ -14,6 +14,8 @@ export interface ClaudeActivity {
   readonly running: boolean;
   /** Current step in a few words, such as "Reading src/app.ts". */
   readonly step?: string;
+  /** The current run's latest steps, while it runs. */
+  readonly progress?: ClaudeProgress;
   /** Label of the task running instead of comments, such as "fixing merge conflicts". */
   readonly task?: string;
   /** Threads whose comments the current or last run handles. */
@@ -21,6 +23,22 @@ export interface ClaudeActivity {
   readonly error?: string;
   /** Comments sent to Claude that it did not pick up; they wait for a retry. */
   readonly skipped: number;
+}
+
+/** One step of a Claude run, shown like a Claude Code transcript line: `verb(target)`, then `detail`. */
+export interface ClaudeStep {
+  readonly verb: string;
+  readonly target?: string;
+  /** Claude's sentence before the step while it runs; once done, its exact result, such as "Read 120 lines". */
+  readonly detail?: string;
+  readonly done: boolean;
+  readonly failed?: boolean;
+}
+
+/** A run's latest steps, oldest first, and when the run started in epoch milliseconds. */
+export interface ClaudeProgress {
+  readonly steps: readonly ClaudeStep[];
+  readonly startedAt: number;
 }
 
 /** How a task ended: an error message, or Claude's last message on success. */
@@ -81,6 +99,7 @@ export class ClaudeRunner implements vscode.Disposable {
   readonly #sent = new Set<string>();
   #activity: ClaudeActivity = { running: false, threads: new Set(), skipped: 0 };
   #child: ReturnType<typeof spawnProcess> | undefined;
+  #stopping = false;
   #disposed = false;
 
   constructor(private readonly options: ClaudeRunnerOptions) {
@@ -101,16 +120,18 @@ export class ClaudeRunner implements vscode.Disposable {
    */
   async runTask(task: ClaudeTask): Promise<ClaudeTaskResult> {
     if (this.#disposed || this.#child !== undefined || this.#activity.running) throw new Error('Claude is still working on this PR. Try again when it is done.');
-    this.#set({ running: true, step: 'Starting', task: task.label, threads: new Set(), skipped: 0, error: undefined });
+    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, task: task.label, threads: new Set(), skipped: 0, error: undefined });
     let error: string | undefined;
     try {
       error = await this.#spawn({ prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, mode: this.options.role === 'author' ? 'auto' : 'acceptEdits' });
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
+    if (this.#stopping) error = 'Stopped.';
     if (error !== undefined) this.options.log(`Failed: ${error}`);
     this.#child = undefined;
-    this.#set({ running: false, step: undefined, task: undefined, threads: new Set(), skipped: 0, error });
+    this.#stopping = false;
+    this.#set({ running: false, step: undefined, progress: undefined, task: undefined, threads: new Set(), skipped: 0, error });
     this.#next();
     return error !== undefined ? { error } : this.#reply === undefined ? {} : { reply: this.#reply };
   }
@@ -130,6 +151,16 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#next();
   }
 
+  /** Stop the current run, if any, and resolve once it ended; its comments wait for a retry. */
+  async stop(): Promise<void> {
+    if (!this.#activity.running) return;
+    this.#stopping = true;
+    if (this.#child !== undefined) stopProcess(this.#child);
+    await new Promise<void>((resolve) => {
+      const watch = this.onDidChange(() => { if (!this.#activity.running) { watch.dispose(); resolve(); } });
+    });
+  }
+
   dispose(): void {
     this.#disposed = true;
     this.#subscription.dispose();
@@ -138,8 +169,11 @@ export class ClaudeRunner implements vscode.Disposable {
   }
 
   #set(activity: { [K in keyof ClaudeActivity]: ClaudeActivity[K] | undefined }): void {
-    const { step, task, error, ...rest } = activity;
-    this.#activity = { ...rest, ...(step === undefined ? {} : { step }), ...(task === undefined ? {} : { task }), ...(error === undefined ? {} : { error }) } as ClaudeActivity;
+    const { step, progress, task, error, ...rest } = activity;
+    this.#activity = {
+      ...rest, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
+      ...(task === undefined ? {} : { task }), ...(error === undefined ? {} : { error }),
+    } as ClaudeActivity;
     if (!this.#disposed) this.#changed.fire();
   }
 
@@ -158,7 +192,7 @@ export class ClaudeRunner implements vscode.Disposable {
   async #run(events: readonly ReviewEvent[]): Promise<void> {
     for (const event of events) this.#sent.add(event.id);
     const threads = new Set(events.map((event) => event.threadId));
-    this.#set({ running: true, step: 'Starting', threads, skipped: 0, error: undefined });
+    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, threads, skipped: 0, error: undefined });
     let error: string | undefined;
     try {
       await this.options.prepare?.();
@@ -171,9 +205,14 @@ export class ClaudeRunner implements vscode.Disposable {
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
+    if (this.#stopping) {
+      this.options.log('Stopped.');
+      error = undefined;
+    }
     if (error !== undefined) this.options.log(`Failed: ${error}`);
     this.#child = undefined;
-    this.#set({ running: false, step: undefined, threads, skipped: 0, error });
+    this.#stopping = false;
+    this.#set({ running: false, step: undefined, progress: undefined, threads, skipped: 0, error });
     this.#next();
   }
 
@@ -212,7 +251,7 @@ export class ClaudeRunner implements vscode.Disposable {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const sessionPath = this.#sessionPath;
     const { sessionId, resume: resumed } = await this.#session();
-    if (this.#disposed) return 'Stopped.';
+    if (this.#disposed || this.#stopping) return 'Stopped.';
     const resume = resumed ? sessionId : undefined;
     const args = [
       '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...this.#flags(mcpPath, run.allowedTools, run.mode),
@@ -227,10 +266,13 @@ export class ClaudeRunner implements vscode.Disposable {
     child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
     let result: string | undefined | null = null;
     let saving: Promise<void> = Promise.resolve();
+    const steps = new StepLog(this.options.cwd);
+    const startedAt = this.#activity.progress?.startedAt ?? Date.now();
     const lines = createInterface({ input: child.stdout! });
     lines.on('line', (line) => {
       const message = parseLine(line);
       if (message === undefined) return;
+      if (steps.read(message)) this.#set({ ...this.#activity, progress: { steps: steps.steps, startedAt } });
       if (message.type === 'assistant') {
         for (const block of contentBlocks(message)) {
           if (block.type === 'tool_use' && typeof block.name === 'string') {
@@ -298,8 +340,14 @@ const reviewTools: Record<string, string> = {
   list_pending_reviews: 'Checking open comments',
 };
 
-/** Describe a tool call as a short step, such as "Reading src/app.ts". */
-export function describeTool(name: string, input: unknown, cwd: string): string {
+/** A tool call as a transcript verb and target, plus a short phrase for status lines, such as "Reading src/app.ts". */
+export interface ToolStep {
+  readonly verb: string;
+  readonly target?: string;
+  readonly label: string;
+}
+
+export function toolStep(name: string, input: unknown, cwd: string): ToolStep {
   const fields = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
   const text = (key: string): string | undefined => typeof fields[key] === 'string' ? fields[key] : undefined;
   const file = (key: string): string => {
@@ -309,16 +357,107 @@ export function describeTool(name: string, input: unknown, cwd: string): string 
     return clean(inside === '' || inside.startsWith('..') ? value : inside);
   };
   const review = name.startsWith('mcp__pair-review__') ? reviewTools[name.slice('mcp__pair-review__'.length)] : undefined;
-  if (review !== undefined) return review;
+  if (review !== undefined) return { verb: review, label: review };
   switch (name) {
-    case 'Read': return `Reading ${file('file_path')}`;
-    case 'Edit': case 'MultiEdit': case 'Write': return `Editing ${file('file_path')}`;
-    case 'Grep': return `Searching for ${clean(JSON.stringify(text('pattern') ?? ''), 60)}`;
-    case 'Glob': return `Looking for ${clean(text('pattern') ?? 'files', 60)}`;
-    case 'Bash': return `Running ${clean(text('description') ?? text('command') ?? 'a command', 60)}`;
-    case 'WebFetch': case 'WebSearch': return 'Searching the web';
-    case 'Task': case 'Agent': return 'Delegating to a subagent';
-    case 'TodoWrite': return 'Planning';
-    default: return `Using ${clean(name, 40)}`;
+    case 'Read': return { verb: 'Read', target: file('file_path'), label: `Reading ${file('file_path')}` };
+    case 'Edit': case 'MultiEdit': return { verb: 'Edit', target: file('file_path'), label: `Editing ${file('file_path')}` };
+    case 'Write': return { verb: 'Write', target: file('file_path'), label: `Editing ${file('file_path')}` };
+    case 'Grep': {
+      const pattern = clean(JSON.stringify(text('pattern') ?? ''), 60);
+      return { verb: 'Search', target: pattern, label: `Searching for ${pattern}` };
+    }
+    case 'Glob': return { verb: 'Find', target: clean(text('pattern') ?? 'files', 60), label: `Looking for ${clean(text('pattern') ?? 'files', 60)}` };
+    case 'Bash': {
+      const command = clean(text('description') ?? text('command') ?? 'a command', 60);
+      return { verb: 'Bash', target: command, label: `Running ${command}` };
+    }
+    case 'WebFetch': case 'WebSearch': return { verb: 'Web', target: clean(text('url') ?? text('query') ?? 'search', 60), label: 'Searching the web' };
+    case 'Task': case 'Agent': return { verb: 'Agent', ...(text('description') === undefined ? {} : { target: clean(text('description')!, 60) }), label: 'Delegating to a subagent' };
+    case 'TodoWrite': return { verb: 'Plan', label: 'Planning' };
+    default: return { verb: clean(name, 40), label: `Using ${clean(name, 40)}` };
+  }
+}
+
+/** Describe a tool call as a short step, such as "Reading src/app.ts". */
+export function describeTool(name: string, input: unknown, cwd: string): string {
+  return toolStep(name, input, cwd).label;
+}
+
+const lineCount = (text: string): number => text === '' ? 0 : text.replace(/\n$/u, '').split('\n').length;
+const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** A finished tool call's exact result in a few words, or undefined when nothing exact is known. */
+function toolResult(name: string, input: Record<string, unknown>, output: string): string | undefined {
+  const text = (key: string): string => typeof input[key] === 'string' ? input[key] : '';
+  switch (name) {
+    case 'Read': return `Read ${plural(output.split('\n').filter((line) => /^\s*\d+[\t→]/u.test(line)).length, 'line')}`;
+    case 'Write': return `Wrote ${plural(lineCount(text('content')), 'line')}`;
+    case 'Edit': {
+      const before = lineCount(text('old_string')), after = lineCount(text('new_string'));
+      return before === after ? `Changed ${plural(after, 'line')}` : `Replaced ${plural(before, 'line')} with ${after}`;
+    }
+    case 'MultiEdit': return Array.isArray(input.edits) ? `Made ${plural(input.edits.length, 'edit')}` : undefined;
+    case 'Bash': {
+      const last = output.split('\n').map((line) => line.trim()).filter(Boolean).at(-1);
+      return last === undefined ? undefined : clean(last, 100);
+    }
+    default: return undefined;
+  }
+}
+
+const resultText = (content: unknown): string => typeof content === 'string' ? content
+  : Array.isArray(content) ? content.map((part: unknown) => typeof part === 'object' && part !== null && typeof (part as Record<string, unknown>).text === 'string' ? (part as Record<string, string>).text : '').join('\n') : '';
+
+const shownSteps = 3;
+
+/** Follows a run's stream: tool calls become steps, Claude's sentences and tool results their details. */
+export class StepLog {
+  #tools: { id: unknown; name: string; input: Record<string, unknown>; step: ClaudeStep }[] = [];
+  /** "Thinking" or "Writing" after the last tool call. */
+  #phase: ClaudeStep | undefined;
+  #sentence: string | undefined;
+
+  constructor(private readonly cwd: string) {}
+
+  /** Oldest first, like a transcript: the latest tool calls, then what Claude does now; between calls it is thinking. */
+  get steps(): readonly ClaudeStep[] {
+    const steps = this.#tools.map((tool) => tool.step);
+    const now = this.#phase ?? (steps.length > 0 && steps.every((step) => step.done) ? { verb: 'Thinking', done: false } : undefined);
+    return (now === undefined ? steps : [...steps, now]).slice(-shownSteps);
+  }
+
+  /** Take one stream message; true when the steps changed. */
+  read(message: StreamMessage): boolean {
+    let changed = false;
+    for (const block of contentBlocks(message)) {
+      if (message.type === 'assistant' && block.type === 'tool_use' && typeof block.name === 'string') {
+        const input = typeof block.input === 'object' && block.input !== null ? block.input as Record<string, unknown> : {};
+        const { verb, target } = toolStep(block.name, input, this.cwd);
+        this.#tools.push({ id: block.id, name: block.name, input, step: { verb, ...(target === undefined ? {} : { target }), ...(this.#sentence === undefined ? {} : { detail: this.#sentence }), done: false } });
+        this.#tools = this.#tools.slice(-shownSteps * 4);
+        this.#phase = undefined;
+        this.#sentence = undefined;
+        changed = true;
+      } else if (message.type === 'assistant' && block.type === 'thinking') {
+        this.#phase = { verb: 'Thinking', done: false };
+        changed = true;
+      } else if (message.type === 'assistant' && block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
+        this.#sentence = clean(block.text.trim().split(/(?<=[.!?])\s+/u).at(-1) ?? '', 120);
+        this.#phase = { verb: 'Writing', detail: this.#sentence, done: false };
+        changed = true;
+      } else if (message.type === 'user' && block.type === 'tool_result') {
+        const tool = this.#tools.find((candidate) => candidate.id === block.tool_use_id && !candidate.step.done);
+        if (tool === undefined) continue;
+        const output = resultText(block.content);
+        const failed = block.is_error === true;
+        const lines = output.split('\n').filter((line) => line.trim() !== '');
+        const reason = tool.name === 'Bash' ? lines.at(-1) : lines[0];
+        const detail = failed ? `Failed: ${clean(reason ?? 'error', 100)}` : toolResult(tool.name, tool.input, output);
+        const { verb, target } = tool.step;
+        tool.step = { verb, ...(target === undefined ? {} : { target }), ...(detail === undefined ? {} : { detail }), done: true, ...(failed ? { failed } : {}) };
+        changed = true;
+      }
+    }
+    return changed;
   }
 }

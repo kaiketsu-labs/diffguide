@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
-import { ClaudeRunner, describeTool, type ClaudeRunnerOptions } from '../src/claudeRunner.js';
+import { ClaudeRunner, describeTool, StepLog, type ClaudeRunnerOptions } from '../src/claudeRunner.js';
 import type { ReviewEvent, ReviewStore } from '../src/contracts.js';
 import { settle } from './fakes/vscode.js';
 
@@ -263,4 +263,43 @@ test('describes tool calls in plain words and keeps paths short', () => {
   assert.equal(describeTool('mcp__pair-review__reply_to_review', {}, '/w'), 'Writing the reply');
   assert.equal(describeTool('Read', { file_path: '/elsewhere/x.ts' }, '/w'), 'Reading /elsewhere/x.ts');
   assert.equal(describeTool('Weird\ntool', {}, '/w'), 'Using Weird tool');
+});
+
+test('turns Claude\'s stream into transcript steps, oldest first: its sentence while a tool runs, the exact result once done', () => {
+  const steps = new StepLog('/w');
+  const assistant = (...content: unknown[]) => ({ type: 'assistant', message: { content } });
+  const result = (id: string, content: unknown, isError = false) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } });
+
+  assert.equal(steps.read(assistant({ type: 'text', text: 'Looks off. Let me read the retry code.' })), true);
+  assert.deepEqual(steps.steps, [{ verb: 'Writing', detail: 'Let me read the retry code.', done: false }]);
+  steps.read(assistant({ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: '/w/src/retry.ts' } }));
+  assert.deepEqual(steps.steps, [{ verb: 'Read', target: 'src/retry.ts', detail: 'Let me read the retry code.', done: false }]);
+  steps.read(result('r', '     1\tconst a = 1;\n     2\tconst b = 2;\n<system-reminder>x</system-reminder>'));
+  assert.deepEqual(steps.steps, [{ verb: 'Read', target: 'src/retry.ts', detail: 'Read 2 lines', done: true }, { verb: 'Thinking', done: false }]);
+  steps.read(assistant({ type: 'tool_use', id: 'e', name: 'Edit', input: { file_path: '/w/src/retry.ts', old_string: 'a', new_string: 'a\nb' } }));
+  steps.read(result('e', 'ok'));
+  steps.read(assistant({ type: 'tool_use', id: 'b', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } }));
+  assert.deepEqual(steps.steps.map((step) => step.verb), ['Read', 'Edit', 'Bash']);
+  steps.read(result('b', [{ type: 'text', text: 'running\n12 passed, 1 failed\n' }], true));
+  assert.deepEqual(steps.steps, [
+    { verb: 'Edit', target: 'src/retry.ts', detail: 'Replaced 1 line with 2', done: true },
+    { verb: 'Bash', target: 'Run tests', detail: 'Failed: 12 passed, 1 failed', done: true, failed: true },
+    { verb: 'Thinking', done: false },
+  ]);
+  assert.equal(steps.read({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'unknown', content: '' }] } }), false);
+});
+
+test('stop ends the running answer without an error and leaves its comments waiting for a retry', async (t) => {
+  const { instance, store, children } = await runner('author', t);
+  store.setPending([event('one')]);
+  await until(() => children.length === 1);
+  assert.deepEqual(instance.activity.progress?.steps, []);
+  children[0]?.send({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: '/worktree/a.ts' } }] } });
+  await until(() => instance.activity.progress?.steps.at(-1)?.verb === 'Read');
+  await instance.stop();
+  assert.equal(instance.activity.running, false);
+  assert.equal(instance.activity.error, undefined);
+  assert.equal(instance.activity.progress, undefined);
+  assert.equal(instance.activity.skipped, 1);
+  assert.equal(children.length, 1);
 });

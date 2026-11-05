@@ -69,3 +69,27 @@ test('keeps the commits Claude made per local thread across restarts and drops m
   await writeClaudeCommits(dataPath, new Map([['local-1', [{ oid, subject: 'Use the limit' }, { oid: '--force', subject: 'x' }]], ['bad', [{ oid: 'zz', subject: 'y' }]]]));
   assert.deepEqual([...await readClaudeCommits(dataPath)], [['local-1', [{ oid, subject: 'Use the limit' }]]]);
 });
+
+test('ends a thread\'s live log once Claude\'s reply from the current run arrives, while the run still wraps up', () => {
+  const startedAt = Date.parse('2026-11-05T10:00:00Z');
+  const stateWith = (replyAt: string) => {
+    const thread = {
+      id: 't1', intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: 'e1',
+      anchor: { path: 'src/a.ts', startLine: 1, endLine: 1, side: 'working', selectedText: 'x' },
+      messages: [{ id: 'm1', author: 'human', text: 'hello?', createdAt: '2026-11-05T09:59:00Z' }, { id: 'm2', author: 'claude', text: 'Hi.', createdAt: replyAt }],
+    };
+    const opened = {
+      session: { store: { threads: [thread] }, activity: () => 'Claude · Thinking', publication: () => undefined },
+      runner: { activity: { running: true, step: 'Thinking', threads: new Set(['t1']), skipped: 0, progress: { steps: [], startedAt } } },
+      commits: () => [],
+    } as unknown as PullRequestSession;
+    return buildOverviewState({ number: 3, title: 'T', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'f', baseBranch: 'main' }, opened, [], [], 1).threads[0];
+  };
+  const replied = stateWith('2026-11-05T10:00:05Z');
+  assert.equal(replied?.working, undefined);
+  assert.equal(replied?.progress, undefined);
+  assert.equal(replied?.status, 'Answered');
+  const earlier = stateWith('2026-11-05T09:59:30Z');
+  assert.equal(earlier?.working, 'Thinking');
+  assert.ok(earlier?.progress !== undefined);
+});

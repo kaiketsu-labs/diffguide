@@ -152,9 +152,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
       const readAnalysis = async (): Promise<AnalysisView> => {
         const result = await opened.analysis.result();
-        const { running, step, error } = opened.analysis.activity;
+        const { running, step, progress, error } = opened.analysis.activity;
         const stale = result !== undefined && result.head !== await readHead().catch(() => result.head);
-        return { running, stale, ...(step === undefined ? {} : { step }), ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }) };
+        return {
+          running, stale, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
+          ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }),
+        };
       };
       const detailsChanged = new vscode.EventEmitter<void>();
       let details: Promise<PullRequestDetails | Error> | undefined;
@@ -334,7 +337,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         unmarkRead: (ids) => fileReviews.unmarkRead(repository, pullRequest.number, ids),
         openInEditor: (path) => openPullRequestFile(storageRoot, repository, current(), path),
         openTerminal: async () => {
-          if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Open the terminal when it is done.');
+          await opened.runner.stop();
           const { command, args, cwd, env } = await opened.runner.launch();
           vscode.window.createTerminal({ name: `Claude · #${pullRequest.number}`, shellPath: command, shellArgs: [...args], cwd, env }).show();
         },

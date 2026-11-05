@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import { pollWhileFocused } from './autoSync.js';
 import { claudeStatus } from './claudeStatus.js';
+import { clawdLoaderStyles, clawdPoseStyles } from './clawdLoader.js';
+import type { ClaudeProgress } from './claudeRunner.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import { type CommentKind, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
@@ -38,7 +40,7 @@ export interface OverviewState {
   /** Line ranges marked read, collapsed in the diff. */
   readonly read: readonly ReadRange[];
   /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
-  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string };
+  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string; readonly progress?: ClaudeProgress };
   readonly threads: readonly {
     readonly id: string;
     readonly location: string;
@@ -46,6 +48,8 @@ export interface OverviewState {
     readonly status: string;
     /** What Claude is doing with this thread right now, while it waits for or works on it. */
     readonly working?: string;
+    /** Claude's latest steps while it works on this thread. */
+    readonly progress?: ClaudeProgress;
     /** The suggestion option written to the worktree from this thread, while the page is open. */
     readonly applied?: AppliedSuggestion;
     /** Commits Claude made while answering this thread, oldest first. */
@@ -91,6 +95,7 @@ export interface OverviewState {
 export interface AnalysisView {
   readonly running: boolean;
   readonly step?: string;
+  readonly progress?: ClaudeProgress;
   readonly error?: string;
   readonly result?: Analysis;
   /** The result was made for an older head commit. */
@@ -400,7 +405,7 @@ export async function showPullRequestOverview(
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('resources', 'claude-spark.svg'), resource('dist', 'pdf.js'));
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (select?: DiffSelection): void => {
     void actions.readFiles(select).then(({ files, selection, atHead }) => {
@@ -638,7 +643,7 @@ export async function showPullRequestOverview(
 
 /** The review page: PR overview on top, every changed file below. `script` (src/webview/overview.ts) draws it from state and file messages. */
 /** `pdfScript` is the URL of pdf.js, which the page loads on its first PDF. */
-export function overviewHtml(state: OverviewState, script: string, claudeIcon = '', pdfScript?: string): string {
+export function overviewHtml(state: OverviewState, script: string, pdfScript?: string): string {
   const nonce = randomUUID().replaceAll('-', '');
   // Inline styles are allowed because an HTML preview frame inherits this policy; its sandbox still blocks scripts.
   return `<!doctype html>
@@ -697,7 +702,9 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .tabs button:hover{color:var(--ink);filter:none}.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
 .tabs svg{width:16px;height:16px;fill:currentColor}
 .tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty:not(.working){display:none}
-.tabs .count.working{min-width:0;width:8px;height:8px;padding:0;background:var(--claude);animation:pulse 1.2s ease-in-out infinite}
+.tabs .count.working{min-width:0;padding:0;background:var(--claude)}
+${clawdLoaderStyles()}
+${clawdPoseStyles()}
 .off-view{display:none}
 .file{margin-top:var(--space-12);border:1px solid var(--line-strong);border-top:0;border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + 10px)}
 .file-head{position:sticky;top:var(--bar-height,46px);z-index:1;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);margin:0 -1px;padding:var(--space-6) var(--space-12);background:var(--surface-raised);border:1px solid var(--line-strong);border-bottom-color:var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
@@ -731,7 +738,14 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 #peek{position:fixed;top:var(--space-8);right:var(--space-8);bottom:var(--space-8);z-index:6;width:var(--peek-width,min(560px,92vw));max-width:calc(100vw - 2 * var(--space-8));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .peek-head{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}.peek-head .where{flex:1;overflow-wrap:anywhere}
 .peek-head button{min-height:24px;padding:0 var(--space-6)}.peek-head button[disabled]{opacity:.4;cursor:default}.peek-head svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-.claude-live{margin-top:var(--space-8)}.thread-commits{margin-top:var(--space-8)}.thread-commits .chevron{cursor:pointer}.commit-preview{display:flex;flex-direction:column;gap:var(--space-8);margin:var(--space-4) 0 var(--space-8) 22px}.commit-preview>*{border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden}.commit-preview .preview-file{display:flex;gap:var(--space-8);padding:var(--space-4) var(--space-8);font-size:12px;background:var(--tint);border-bottom:1px solid var(--line)}.commit-preview .preview-file .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-code)}.commit-preview table{width:100%}.commit-preview .note{padding:var(--space-4) var(--space-8);font-size:12px}.thread-commits svg{flex:none;width:14px;height:14px;align-self:center;fill:var(--ink-muted)}.thread-commits .chip{flex:none}
+.claude-live{margin:var(--space-8) 0 0 calc(20px + var(--space-8))}.clawd{display:inline-block;background:var(--claude)}
+.claude-box{display:flex;flex:1 1 100%;align-items:flex-start;gap:var(--space-12);padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md)}.claude-box .step-log{flex:1}
+.step-log{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;font:12px/18px var(--font-code);color:var(--ink)}
+.step-log .step{display:grid;grid-template-columns:18px minmax(0,1fr) auto;column-gap:var(--space-6);align-items:center}
+.step-log .clawd,.step-log .mark{justify-self:center}.step-log .done{color:var(--ink-muted)}.step-log .failed .mark{color:var(--danger)}
+.step-log .step-call,.step-log .detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-log .time{color:var(--ink-muted)}
+.step-log .detail{grid-column:2/-1;color:var(--ink-muted)}.step-log .detail::before{content:'⎿ '}
+.thread-commits{margin-top:var(--space-8)}.thread-commits .chevron{cursor:pointer}.commit-preview{display:flex;flex-direction:column;gap:var(--space-8);margin:var(--space-4) 0 var(--space-8) 22px}.commit-preview>*{border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden}.commit-preview .preview-file{display:flex;gap:var(--space-8);padding:var(--space-4) var(--space-8);font-size:12px;background:var(--tint);border-bottom:1px solid var(--line)}.commit-preview .preview-file .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-code)}.commit-preview table{width:100%}.commit-preview .note{padding:var(--space-4) var(--space-8);font-size:12px}.thread-commits svg{flex:none;width:14px;height:14px;align-self:center;fill:var(--ink-muted)}.thread-commits .chip{flex:none}
 .suggestion{margin-top:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
 .suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line-strong)}
 .suggestion-diff .add{background:var(--diff-add)}.suggestion-diff .del{background:var(--diff-del)}
@@ -778,7 +792,7 @@ details.thread:not([open]){padding-bottom:0}
 .strip .muted:last-child{margin-left:auto}
 .thread textarea{margin-top:var(--space-12);min-height:64px}
 .msg{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);margin-top:var(--space-8)}.msg+.msg{padding-top:var(--space-8);border-top:1px solid var(--line)}
-.msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.claude{box-sizing:border-box;padding:2px;border-radius:0}.msg .avatar svg{width:20px;height:20px;fill:currentColor}.msg .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
+.msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.clawd-avatar{position:relative}.clawd-avatar::before{content:'';position:absolute;inset:0;border-radius:50%;background:color-mix(in srgb,var(--claude) 18%,transparent)}.clawd-avatar .clawd-pose{position:absolute;left:4px;top:4px;z-index:1}.msg .avatar svg{width:20px;height:20px;fill:currentColor}.msg .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
 .msg-head{display:flex;align-items:center;gap:var(--space-6);min-height:20px}.msg-head b{font-weight:600}.msg-head .msg-meta{margin-left:auto}
 .msg-meta{display:flex;align-items:center;gap:var(--space-6)}.msg-main>.msg-meta{float:right;margin-left:var(--space-12)}.when{font-size:12px;color:var(--ink-muted)}
 .pill{padding:0 var(--space-6);border:1px solid var(--warning);border-radius:var(--radius-pill);font-size:11px;font-weight:500;color:var(--warning)}
@@ -793,7 +807,7 @@ details.thread:not([open]){padding-bottom:0}
 .thread.local,.card-thread.local,.thread-group.local{--accent:var(--ink-muted);--tint:color-mix(in srgb,var(--ink) 5%,transparent)}
 .thread.analysis,.card-thread.analysis,.thread-group.analysis{--accent:var(--claude);--tint:var(--claude-soft)}
 .thread.github,.card-thread.github,.thread-group.github{--accent:var(--github);--tint:var(--github-soft)}
-.strip .gap{flex:1}.pill.state{border-color:var(--line-strong);color:var(--ink-muted)}
+.strip .gap{flex:1}.pill.state{border-color:var(--line-strong);color:var(--ink-muted)}.strip .pill{line-height:16px}
 .msg .delete{min-height:20px;padding:0 var(--space-2)}.msg .delete svg{width:14px;height:14px}.msg .delete:hover{color:var(--danger);text-decoration:none}
 details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size:12px}
 .chip.bad{color:var(--danger);background:var(--danger-soft)}
@@ -913,7 +927,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button></span></div>
 <div id="range-note" class="row range-note" hidden></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
-<script id="initial" type="application/json">${JSON.stringify({ state, claudeIcon, pdfScript }).replaceAll('<', '\\u003c')}</script>
+<script id="initial" type="application/json">${JSON.stringify({ state, pdfScript }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
 </body></html>`;
 }
@@ -975,16 +989,20 @@ export function buildOverviewState(
     ...(remote === undefined ? {} : remote instanceof Error ? { githubError: remote.message } : { github: remote.map(githubThreadView) }),
     ...(conversation === undefined ? {} : conversation instanceof Error ? { conversationError: conversation.message } : { conversation }),
     claude: { text: claude.text, running: runner.activity.running, retry: claude.retry,
-      ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}) },
+      ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}),
+      ...(runner.activity.progress === undefined ? {} : { progress: runner.activity.progress }) },
     analysis,
     threads: session.store.threads.map((thread) => {
       const publication = session.publication?.(thread.id);
       const linkedTo = session.linkedGitHubThread?.(thread.id);
       const activity = session.activity?.(thread.id);
-      const working = thread.resolved ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
+      const last = thread.messages.at(-1);
+      // Claude's reply ends the thread's live log, even while the run is still wrapping up.
+      const replied = last?.author === 'claude' && Date.parse(last.createdAt) >= (runner.activity.progress?.startedAt ?? Infinity);
+      const working = thread.resolved || replied ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
         : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
       const status = [
-        thread.resolved ? 'Resolved' : working !== undefined ? undefined : activity ?? threadStatus[thread.status],
+        thread.resolved ? 'Resolved' : working !== undefined ? undefined : replied ? threadStatus[thread.status] : activity ?? threadStatus[thread.status],
         publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
       ].filter(Boolean).join(' · ');
       return {
@@ -993,6 +1011,7 @@ export function buildOverviewState(
         text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
         status,
         ...(working === undefined ? {} : { working }),
+        ...(working !== undefined && runner.activity.threads.has(thread.id) && runner.activity.progress !== undefined ? { progress: runner.activity.progress } : {}),
         path: thread.anchor.path,
         side: thread.anchor.side === 'original' ? 'old' : 'new',
         startLine: thread.anchor.startLine,

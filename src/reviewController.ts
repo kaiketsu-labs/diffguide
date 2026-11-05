@@ -243,7 +243,7 @@ export async function createReviewController(
   controller.options = { prompt: 'Antworten …', placeHolder: '/a fragen · /i umsetzen · /r zusammenfassen' };
   const authors: Record<ReviewMessage['author'], vscode.CommentAuthorInformation> = {
     human: { name: 'Du', iconPath: vscode.Uri.joinPath(context.extensionUri, 'resources', 'reviewer.svg') },
-    claude: { name: 'Claude', iconPath: vscode.Uri.joinPath(context.extensionUri, 'resources', 'claude-mark.svg') },
+    claude: { name: 'Claude', iconPath: vscode.Uri.joinPath(context.extensionUri, 'resources', 'clawd-avatar.svg') },
   };
   const bindings = new Map<string, ThreadBinding>();
   const renderedComments = new WeakMap<vscode.CommentThread, RenderedComments>();

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- While Claude works, the review page shows Clawd, Claude's pixel mascot, instead of a pulsing dot. Each time the page opens it picks one of four animations: a hop, a squash hop, a sideways scuttle or typing. With reduced motion on, Clawd stands still.
+- While Claude runs, the review page header, a thread's live box and the Guide card show its last three steps like a Claude Code transcript: `Edit(src/retry.ts)` with Claude's latest sentence under the current step, and the exact result under finished ones, such as "Read 120 lines" or a failed command's last output line. The current step shows how long the run has taken. Clawd's animation no longer restarts when the status changes.
+- Claude's avatar is Clawd on a clay-tinted circle, on the review page and in the editor's comment threads. When Claude's reply replaces its live log, Clawd hops from the log up into the reply's avatar; with reduced motion on, the reply just appears.
+- **Open in terminal** works while Claude runs. It reads **Stop and open in terminal**, stops the background run, and continues the conversation in the terminal; the comments Claude was answering wait for **Retry**.
 - **Commit suggestion** works while Claude has unpushed commits. The suggestion becomes one more local commit after them, and **Push N commits** pushes them together. It failed with "The PR worktree has commits that are not on GitHub" before. A GitHub suggestion whose file the unpushed commits change still asks you to push first, since its lines may have moved.
 - Claude writes `suggestion` blocks only for changes within the commented lines. Changes to other lines or files come as a `diff` block per file, so they no longer show up as a one-line **Commit suggestion**.
 - **Ask Claude** and **Implement** stay disabled until the comment or reply has text.
