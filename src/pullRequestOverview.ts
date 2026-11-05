@@ -6,7 +6,7 @@ import { clawdLoaderStyles, clawdPoseStyles } from './clawdLoader.js';
 import type { ClaudeProgress } from './claudeRunner.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
-import { type CommentKind, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
+import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
 import type { PickedSelection } from './pullRequestEdits.js';
 import { webviewStyles } from './webviewStyles.js';
 import { codicons } from './codicons.js';
@@ -178,7 +178,7 @@ export interface OverviewActions {
   /** Hand a GitHub thread to Claude in a linked local thread; an empty `note` asks Claude to answer or implement the feedback as is. */
   askAboutGitHub(threadId: string, note: string, intent: CommentIntent): Promise<void>;
   resolveOnGitHub(threadId: string, resolved: boolean): Promise<void>;
-  /** Delete one of the viewer's GitHub comments after they confirm. */
+  /** Delete one of the viewer's GitHub comments; the page asked first. */
   deleteOnGitHub(commentId: string): Promise<void>;
   /** The files of the current selection; `select` changes it first. */
   readFiles(select?: DiffSelection): Promise<FilesView>;
@@ -209,32 +209,35 @@ export interface OverviewActions {
   retry(): void;
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
-  merge(method: MergeMethod, message: MergeMessage): Promise<void>;
+  /** Merge the PR, then delete its branch when `deleteBranch` is set and GitHub allows it. */
+  merge(method: MergeMethod, message: MergeMessage, deleteBranch: boolean): Promise<void>;
   /** Post a comment on the PR's conversation, outside any review. */
   addComment(text: string): Promise<void>;
   editComment(kind: CommentKind, id: string, text: string): Promise<void>;
-  /** Delete one of the viewer's conversation comments after they confirm. */
+  /** Delete one of the viewer's conversation comments; the page asked first. */
   deleteIssueComment(id: string): Promise<void>;
-  /** Hide a comment after asking why, or show it again. */
-  hideComment(id: string, hide: boolean): Promise<void>;
+  /** Hide a comment for `reason`, or show it again with `undefined`. */
+  hideComment(id: string, reason: HideReason | undefined): Promise<void>;
   react(subject: string, content: ReactionContent, on: boolean): Promise<void>;
   discardReview(): Promise<void>;
-  /** Dismiss a reviewer's latest approval or change request, asking for the reason. */
-  dismissReview(login: string): Promise<void>;
+  /** Dismiss a reviewer's latest approval or change request, telling everyone `reason`. */
+  dismissReview(login: string, reason: string): Promise<void>;
   rerequestReview(login: string): Promise<void>;
-  /** Bring the base branch into the head branch, asking whether to merge or rebase. */
-  updateBranch(): Promise<void>;
+  /** Bring the base branch into the head branch with a merge commit or a rebase. */
+  updateBranch(method: 'merge' | 'rebase'): Promise<void>;
   enableAutoMerge(method: MergeMethod, message: MergeMessage): Promise<void>;
   disableAutoMerge(): Promise<void>;
   enqueue(): Promise<void>;
   dequeue(): Promise<void>;
-  revert(): Promise<void>;
+  /** Open a PR that reverts this merged one; returns its number and link. */
+  revert(): Promise<{ readonly number: number; readonly url: string }>;
   restoreBranch(): Promise<void>;
   rerun(runId: number): Promise<void>;
+  /** Approve the fork's waiting workflow runs; the page asked first. */
   approveRuns(): Promise<void>;
   /** Branches the PR could merge into instead, for the base menu. */
   branches(): Promise<readonly string[]>;
-  /** Confirm and save a new base branch. */
+  /** Save a new base branch the page confirmed. */
   changeBase(branch: string): Promise<void>;
   renderMarkdown(text: string): Promise<string>;
   /** Commit GitHub suggestions to the PR branch in one commit and push it. */
@@ -249,8 +252,7 @@ export interface OverviewActions {
   fixConflicts(answer?: string): Promise<void>;
   /** Hide Claude's question about the conflicts. */
   dismissConflictQuestion(): void;
-  /** Ask for a new title in VS Code and save it. */
-  editTitle(): Promise<void>;
+  editTitle(title: string): Promise<void>;
   editBody(body: string): Promise<void>;
   /** The repository's users, teams and labels for the page's pickers. */
   pickerOptions(): Promise<PickerOptions>;
@@ -259,8 +261,8 @@ export interface OverviewActions {
   setDraft(draft: boolean): Promise<void>;
   setOpen(open: boolean): Promise<void>;
   deleteBranch(): Promise<void>;
-  /** Remove the PR's local worktree after the user confirms; true when removed, so the page closes. */
-  removeWorktree(): Promise<boolean>;
+  /** Remove the PR's local worktree, which the page confirmed, and its local comments. */
+  removeWorktree(): Promise<void>;
   refresh(): void;
   /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
   pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string }>;
@@ -299,17 +301,20 @@ export type PageMessage =
   | { readonly action: 'view'; readonly view: 'files' | 'guide' }
   | { readonly action: 'find-extension'; readonly extension: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
-  | { readonly action: 'merge' | 'auto-merge'; readonly method: MergeMethod; readonly headline?: string; readonly body?: string }
-  | { readonly action: 'edit-title' | 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
-  | { readonly action: 'discard-review' | 'update-branch' | 'auto-merge-off' | 'enqueue' | 'dequeue' | 'revert' | 'restore-branch' | 'approve-runs' | 'branches' }
+  | { readonly action: 'merge' | 'auto-merge'; readonly method: MergeMethod; readonly headline?: string; readonly body?: string; readonly deleteBranch?: boolean }
+  | { readonly action: 'edit-title'; readonly title: string }
+  | { readonly action: 'update-branch'; readonly method: 'merge' | 'rebase' }
+  | { readonly action: 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
+  | { readonly action: 'discard-review' | 'auto-merge-off' | 'enqueue' | 'dequeue' | 'revert' | 'restore-branch' | 'approve-runs' | 'branches' }
   | { readonly action: 'change-base'; readonly branch: string }
-  | { readonly action: 'dismiss-review' | 'rerequest'; readonly login: string }
+  | { readonly action: 'dismiss-review'; readonly login: string; readonly text: string }
+  | { readonly action: 'rerequest'; readonly login: string }
   | { readonly action: 'rerun'; readonly run: number }
   | { readonly action: 'files'; readonly range: DiffRange; readonly whitespace: boolean }
   | { readonly action: 'conversation-comment'; readonly form: string; readonly text: string }
   | { readonly action: 'edit-comment'; readonly form: string; readonly kind: CommentKind; readonly id: string; readonly text: string }
   | { readonly action: 'delete-issue-comment'; readonly id: string }
-  | { readonly action: 'hide-comment'; readonly id: string; readonly hide: boolean }
+  | { readonly action: 'hide-comment'; readonly id: string; readonly hide: boolean; readonly reason?: HideReason }
   | { readonly action: 'react'; readonly id: string; readonly content: ReactionContent; readonly on: boolean }
   | { readonly action: 'markdown'; readonly form: string; readonly text: string }
   | { readonly action: 'commit-suggestions'; readonly picked: readonly PickedSuggestion[] }
@@ -343,7 +348,7 @@ export interface ExtensionMessage {
   readonly probe?: { readonly id: string; readonly found: boolean };
   readonly error?: string;
   /** A passing hint that clears itself; `extension` offers to search language extensions for that file extension. */
-  readonly notice?: { readonly text: string; readonly extension?: string };
+  readonly notice?: { readonly text: string; readonly extension?: string; readonly url?: string };
   /** The form whose send failed, so the page can enable it again. */
   readonly form?: string | undefined;
   /** The form whose send succeeded, or 'review'. */
@@ -357,6 +362,7 @@ export interface ExtensionMessage {
 
 const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comment'];
 const mergeMethods: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
+const hideReasons: readonly unknown[] = ['OUTDATED', 'RESOLVED', 'DUPLICATE', 'OFF_TOPIC', 'LOW_QUALITY', 'SPAM', 'ABUSE'] satisfies HideReason[];
 const commentIntents: readonly unknown[] = ['ask', 'implement'] satisfies CommentIntent[];
 const maximumReviewLength = 60_000;
 const isNameList = (value: unknown): value is readonly string[] => Array.isArray(value) && value.length <= 500
@@ -449,7 +455,7 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option,
-        range, whitespace, kind, hide, content, on, login, run, headline, picked, branch, oid } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -530,7 +536,9 @@ export async function showPullRequestOverview(
           await actions.editComment(kind as CommentKind, id as string, text.trim());
           post({ done: formKey });
         } else if (action === 'delete-issue-comment' && findComment(id, 'canDelete')) await actions.deleteIssueComment(id as string);
-        else if (action === 'hide-comment' && typeof hide === 'boolean' && findComment(id, 'canHide')) await actions.hideComment(id as string, hide);
+        else if (action === 'hide-comment' && typeof hide === 'boolean' && (!hide || hideReasons.includes(reason)) && findComment(id, 'canHide')) {
+          await actions.hideComment(id as string, hide ? reason as HideReason : undefined);
+        }
         else if (action === 'react' && reactionContents.includes(content as ReactionContent) && typeof on === 'boolean'
           && (findComment(id, 'canReact') || (id === conversation()?.description.id && conversation()?.description.canReact === true))) {
           await actions.react(id as string, content as ReactionContent, on);
@@ -548,7 +556,7 @@ export async function showPullRequestOverview(
         else if (action === 'retry') actions.retry();
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
-        else if (action === 'remove-worktree') { if (await actions.removeWorktree()) panel.dispose(); }
+        else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
         else if (action === 'refresh') {
           actions.refresh();
           sendFiles();
@@ -573,20 +581,27 @@ export async function showPullRequestOverview(
             if (action === 'review' && reviewEvents.includes(event as ReviewEvent) && typeof body === 'string' && body.length <= maximumReviewLength) {
               await actions.submitReview(event as ReviewEvent, body.trim());
               post({ done: 'review' });
-            } else if ((action === 'merge' || action === 'auto-merge') && mergeMethods.includes(method as MergeMethod) && isOptionalText(headline) && isOptionalText(body)) {
-              if (action === 'merge') await actions.merge(method as MergeMethod, mergeMessage());
+            } else if ((action === 'merge' || action === 'auto-merge') && mergeMethods.includes(method as MergeMethod) && isOptionalText(headline) && isOptionalText(body)
+              && (deleteBranch === undefined || typeof deleteBranch === 'boolean')) {
+              if (action === 'merge') await actions.merge(method as MergeMethod, mergeMessage(), deleteBranch === true);
               else if (merge?.canEnableAutoMerge === true) await actions.enableAutoMerge(method as MergeMethod, mergeMessage());
               post({ done: 'merge' });
             } else if (action === 'auto-merge-off' && merge?.canDisableAutoMerge === true) await actions.disableAutoMerge();
             else if (action === 'enqueue' && merge?.mergeQueue === true) await actions.enqueue();
             else if (action === 'dequeue' && merge?.queuePosition !== undefined) await actions.dequeue();
-            else if (action === 'update-branch' && merge?.canUpdateBranch === true) await actions.updateBranch();
+            else if (action === 'update-branch' && (method === 'merge' || method === 'rebase') && merge?.canUpdateBranch === true) await actions.updateBranch(method);
             else if (action === 'discard-review' && state.details?.pendingComments !== undefined) await actions.discardReview();
-            else if (action === 'dismiss-review' && typeof login === 'string' && conversation()?.reviewIds[login] !== undefined) await actions.dismissReview(login);
+            else if (action === 'dismiss-review' && typeof login === 'string' && isText(text) && conversation()?.reviewIds[login] !== undefined) {
+              await actions.dismissReview(login, text.trim());
+              post({ done: 'dismiss' });
+            }
             else if (action === 'rerequest' && typeof login === 'string' && state.details?.reviewers.some((reviewer) => reviewer.name === login && reviewer.team === undefined)) await actions.rerequestReview(login);
             else if (action === 'rerun' && Number.isSafeInteger(run) && conversation()?.checks.some((check) => check.runId === run)) await actions.rerun(run as number);
             else if (action === 'approve-runs' && (conversation()?.awaitingApproval.length ?? 0) > 0) await actions.approveRuns();
-            else if (action === 'revert' && state.details?.merged === true) await actions.revert();
+            else if (action === 'revert' && state.details?.merged === true) {
+              const created = await actions.revert();
+              post({ notice: { text: `Opened #${created.number} to revert this PR.`, url: created.url } });
+            }
             else if (action === 'restore-branch' && merge?.headDeleted === true) await actions.restoreBranch();
             else if (action === 'change-base' && state.details?.open === true && typeof branch === 'string' && branch.length <= 255) {
               await actions.changeBase(branch);
@@ -600,7 +615,10 @@ export async function showPullRequestOverview(
               await actions.commitSuggestions(picked as PickedSuggestion[]);
               post({ done: 'suggestions' });
               sendFiles();
-            } else if (action === 'edit-title') await actions.editTitle();
+            } else if (action === 'edit-title' && isText(title) && title.length <= 256) {
+              await actions.editTitle(title.trim());
+              post({ done: 'title' });
+            }
             else if (action === 'edit-body' && typeof body === 'string' && body.length <= maximumReviewLength) {
               await actions.editBody(body);
               post({ done: 'body' });
@@ -861,7 +879,9 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .mentions button{justify-content:flex-start;min-height:22px;padding:0 var(--space-8);border:0;background:none;font-size:12px}.mentions button[aria-selected=true]{background:color-mix(in srgb,var(--ink) 12%,transparent)}
 #conversation-form .row{margin-top:var(--space-8)}#timeline:empty{display:none}
 .merge-status:not(:empty){margin-bottom:var(--space-8)}.merge-status li{display:flex;gap:var(--space-8)}
-#merge-form{margin-top:var(--space-8)}#merge-form input{width:100%;height:26px;box-sizing:border-box;padding:0 var(--space-8);font-size:12px}#merge-form textarea{margin-top:var(--space-6)}
+#merge-form{margin-bottom:var(--space-8)}#merge-row .gap{flex:1}.merge-delete{display:inline-flex;align-items:center;gap:var(--space-4);font-size:12px;cursor:pointer}.merge-delete input{margin:0;accent-color:var(--brand)}.method-menu{left:0;right:auto}
+.ask-row{justify-content:flex-end;margin-top:var(--space-6)}.ask-row .gap{flex:1 1 180px}.ask-buttons{display:flex;gap:var(--space-8);margin-left:auto}.ask-row .muted{font-size:12px}.ask-menu{width:280px}.ask-text{margin:var(--space-4) var(--space-4) var(--space-8);font-size:12px}.ask-actions{justify-content:flex-end}
+.title-row:has(.title-form){flex:1;min-width:0}.title-form{display:flex;flex:1;align-items:center;gap:var(--space-8);min-width:0}.title-form input{flex:1;min-width:0;height:28px;padding:0 var(--space-8);font-size:14px}.dismiss-form{display:block}.dismiss-form textarea{width:100%;min-height:60px}#merge-form input{width:100%;height:26px;box-sizing:border-box;padding:0 var(--space-8);font-size:12px}#merge-form textarea{margin-top:var(--space-6)}
 #update-row,#auto-row,#queue-row{margin-top:var(--space-8)}#update-row .gap,#auto-row .gap,#queue-row .gap,.awaiting .gap,.pending-row .gap{flex:1}.pending-row p{margin:0}.awaiting{margin-bottom:var(--space-6);font-size:12px}
 .check-tools{margin-left:auto;display:inline-flex;gap:var(--space-4);align-items:center}.check-tools button{min-height:18px;padding:0 var(--space-6);font-size:11px}
 .reviewer-tools{margin-left:auto;display:inline-flex;align-items:center;gap:var(--space-4);white-space:nowrap}.reviewer-tools .small{min-height:20px;padding:0 var(--space-6);font-size:11px}.reviewer-tools button{min-height:20px;width:22px;padding:0;border:0;background:none;color:var(--ink-muted)}.reviewer-tools button:hover{color:var(--ink);filter:none}.reviewer-tools svg{width:14px;height:14px;fill:currentColor}
@@ -872,7 +892,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 
 .byline .icon-button{width:20px;height:20px;min-height:20px}
 </style></head><body>
-<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button" data-tip="Open on GitHub" aria-label="Open on GitHub">${codicons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${codicons.refresh}</button><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree">${codicons.trash}</button></span></div>
+<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button" data-tip="Open on GitHub" aria-label="Open on GitHub">${codicons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${codicons.refresh}</button><span class="menu-anchor"><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree" aria-haspopup="true" aria-expanded="false">${codicons.trash}</button></span></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div id="facts" class="muted facts"></div>
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">Open in terminal</button><button id="retry" class="small">Retry</button></div>
@@ -896,13 +916,13 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <section><div class="section-head"><h3>Labels</h3><button id="pick-labels" class="icon-button" data-pr-action data-tip="Edit labels" aria-label="Edit labels" hidden>${codicons.gear}</button></div><div id="labels" class="labels"></div></section>
 <section><div class="section-head"><h3>Milestone</h3><button id="pick-milestone" class="icon-button" data-pr-action data-tip="Set milestone" aria-label="Set milestone" hidden>${codicons.gear}</button></div><div id="milestone"></div></section>
 <section id="development" hidden><h3>Development</h3><ul id="linked-issues"></ul></section>
-<section><h3>Checks</h3><div id="awaiting" class="row awaiting" hidden><span class="wait gap" id="awaiting-note"></span><button id="approve-runs" class="small" data-pr-action>Approve and run</button></div><ul id="checks"></ul></section>
+<section><h3>Checks</h3><div id="awaiting" class="row awaiting" hidden><span class="wait gap" id="awaiting-note"></span><span class="menu-anchor"><button id="approve-runs" class="small" data-pr-action aria-haspopup="true" aria-expanded="false">Approve and run</button></span></div><ul id="checks"></ul></section>
 <section id="review-box"><h3>Finish your review</h3>
-<div class="row pending-row"><p class="muted gap" id="pending-note"></p><button id="discard-review" class="quiet small" data-pr-action hidden>Discard</button></div>
+<div class="row pending-row"><p class="muted gap" id="pending-note"></p><span class="menu-anchor"><button id="discard-review" class="quiet small" data-pr-action aria-haspopup="true" aria-expanded="false" hidden>Discard</button></span></div>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
 <div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><ul id="merge-status" class="merge-status"></ul><div class="row" id="update-row" hidden><span class="muted gap">The branch is behind the base branch.</span><button id="update-branch" class="small" data-pr-action>Update branch</button></div><div class="row" id="merge-row"><select id="method" aria-label="Merge method"></select><button id="merge">Merge</button><button id="auto-merge" class="quiet" data-pr-action hidden>Enable auto-merge</button></div>
-<div id="merge-form" hidden><input id="merge-headline" type="text" aria-label="Commit title"><textarea id="merge-body" aria-label="Commit message"></textarea><div class="row actions review-actions"><button id="merge-cancel" class="quiet">Cancel</button><button id="merge-confirm" class="primary" data-pr-action>Confirm merge</button></div></div>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><ul id="merge-status" class="merge-status"></ul><div class="row" id="update-row" hidden><span class="muted gap">The branch is behind the base branch.</span><span class="menu-anchor"><button id="update-branch" class="small" data-pr-action aria-haspopup="true" aria-expanded="false">Update branch</button></span></div><div id="merge-form" hidden><input id="merge-headline" type="text" aria-label="Commit title"><textarea id="merge-body" aria-label="Commit message"></textarea></div>
+<div class="row" id="merge-row"><span class="menu-anchor"><button id="method" class="range-button" aria-label="Merge method" aria-haspopup="true" aria-expanded="false"><span class="range-text" id="method-text"></span>${codicons.chevronDown}</button></span><label class="merge-delete" id="merge-delete-label" hidden><input type="checkbox" id="merge-delete">Delete branch</label><span class="gap"></span><button id="merge-cancel" class="quiet" hidden>Cancel</button><button id="merge">Merge</button><button id="auto-merge" class="quiet" data-pr-action hidden>Enable auto-merge</button></div>
 <div class="row" id="auto-row" hidden><span id="auto-note" class="muted gap"></span><button id="auto-merge-off" class="small" data-pr-action>Disable auto-merge</button></div>
 <div class="row" id="queue-row" hidden><span id="queue-note" class="muted gap"></span><button id="dequeue" class="small" data-pr-action>Remove from queue</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
 </aside>

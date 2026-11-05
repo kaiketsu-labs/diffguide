@@ -224,6 +224,8 @@ export type CommentKind = 'issue' | 'review' | 'reviewComment';
 
 export type ReviewEvent = 'approve' | 'requestChanges' | 'comment';
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
+/** GitHub's reasons for hiding a comment. */
+export type HideReason = 'OUTDATED' | 'RESOLVED' | 'DUPLICATE' | 'OFF_TOPIC' | 'LOW_QUALITY' | 'SPAM' | 'ABUSE';
 const graphqlMethods: Record<MergeMethod, string> = { merge: 'MERGE', squash: 'SQUASH', rebase: 'REBASE' };
 
 /** Pull request queries and the user's own review actions, implemented once per code host CLI. */
