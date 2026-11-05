@@ -189,3 +189,28 @@ test('a page action reads each part of the PR from GitHub once', async () => {
   assert.deepEqual(reads, { details: 1, threads: 1, conversation: 1 });
   panel.dispose();
 });
+
+test('page-confirmed actions carry the choice the page made, and malformed choices never write', async () => {
+  resetFakeWindow();
+  const calls: unknown[] = [];
+  const record = (name: string) => async (...args: unknown[]) => { calls.push([name, ...args]); };
+  const actions = {
+    merge: record('merge'), editTitle: record('title'), updateBranch: record('update'), dismissReview: record('dismiss'), hideComment: record('hide'),
+    refresh: () => undefined,
+  } as unknown as OverviewActions;
+  const comment = { kind: 'comment', id: 'c1', canHide: true, canEdit: false, canDelete: false, canReact: false };
+  const state = { ...base, details, conversation: { merge: { canUpdateBranch: true }, reviewIds: { bob: 'r1' }, timeline: [comment] } } as unknown as OverviewState;
+  await showPullRequestOverview('page-confirmed', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  for (const message of [
+    { action: 'merge', method: 'squash', deleteBranch: true }, { action: 'merge', method: 'squash', deleteBranch: 'yes' },
+    { action: 'edit-title', title: ' New title ' }, { action: 'edit-title', title: ' ' },
+    { action: 'update-branch', method: 'rebase' }, { action: 'update-branch', method: 'squash' },
+    { action: 'dismiss-review', login: 'bob', text: ' Stale ' }, { action: 'dismiss-review', login: 'bob', text: '' },
+    { action: 'hide-comment', id: 'c1', hide: true, reason: 'OUTDATED' }, { action: 'hide-comment', id: 'c1', hide: true, reason: 'BORING' }, { action: 'hide-comment', id: 'c1', hide: false },
+  ]) { panel.receive(message); await tick(); }
+  assert.deepEqual(calls, [
+    ['merge', 'squash', {}, true], ['title', 'New title'], ['update', 'rebase'], ['dismiss', 'bob', 'Stale'], ['hide', 'c1', 'OUTDATED'], ['hide', 'c1', undefined],
+  ]);
+  panel.dispose();
+});

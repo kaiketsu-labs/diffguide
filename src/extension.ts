@@ -322,8 +322,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await loadThreads();
         },
         deleteOnGitHub: async (id) => {
-          const choice = await vscode.window.showWarningMessage('Delete this comment on GitHub?', { modal: true, detail: 'Everyone on the PR loses it. This cannot be undone.' }, 'Delete');
-          if (choice !== 'Delete') return;
           await provider.deleteComment(id);
           await Promise.all([loadThreads(), loadDetails()]);
         },
@@ -422,26 +420,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           conflictQuestion = undefined;
           detailsChanged.fire();
         },
-        merge: async (method, message) => {
-          const merge = 'Merge';
-          const mergeAndDelete = 'Merge and delete branch';
+        merge: async (method, message, deleteBranch) => {
           const { branchDeletable } = await currentDetails();
-          const answer = await vscode.window.showWarningMessage(`Merge #${pullRequest.number} into ${baseBranch}?`, { modal: true },
-            ...branchDeletable ? [merge, mergeAndDelete] : [merge]);
-          if (answer === undefined) return;
           try {
             await provider.merge(pullRequest.number, method, message);
             await vscode.commands.executeCommand('pairReview.markPullRequestMerged', `${repository}#${pullRequest.number}`);
-            if (answer === mergeAndDelete) await provider.deleteBranch(pullRequest.headBranch);
+            if (deleteBranch && branchDeletable) await provider.deleteBranch(pullRequest.headBranch);
           } finally {
             changedOnGitHub();
           }
         },
-        editTitle: async () => {
+        editTitle: async (next) => {
           const { title } = await currentDetails();
-          const next = await vscode.window.showInputBox({ title: 'Edit title', value: title, validateInput: (value) => value.trim() ? undefined : 'Enter a title.' });
-          if (next === undefined || next.trim() === title) return;
-          await provider.editPullRequest(pullRequest.number, { title: next.trim() });
+          if (next === title) return;
+          await provider.editPullRequest(pullRequest.number, { title: next });
           changedOnGitHub();
         },
         editBody: async (body) => {
@@ -458,30 +450,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           changedOnGitHub();
         },
         setOpen: async (open) => {
-          if (!open) {
-            const close = 'Close';
-            const answer = await vscode.window.showWarningMessage(`Close #${pullRequest.number} without merging?`, { modal: true, detail: 'You can reopen it later.' }, close);
-            if (answer !== close) return;
-          }
           await provider.editPullRequest(pullRequest.number, { state: open ? 'open' : 'closed' });
           changedOnGitHub();
         },
         deleteBranch: async () => {
-          const remove = 'Delete branch';
-          const answer = await vscode.window.showWarningMessage(`Delete the branch ${pullRequest.headBranch} on GitHub?`, { modal: true }, remove);
-          if (answer !== remove) return;
           await provider.deleteBranch(pullRequest.headBranch);
           void loadDetails();
         },
         removeWorktree: async () => {
-          const confirm = 'Remove worktree';
-          const answer = await vscode.window.showWarningMessage(
-            `Remove the worktree for #${pullRequest.number}? Its local comments are deleted too. Git refuses if it has uncommitted changes.`, { modal: true }, confirm);
-          if (answer !== confirm) return false;
           await pullRequestSessions.close(repository, pullRequest.number);
           await removeWorktree(checkout.root, storageRoot, repository, pullRequest.number);
           void vscode.commands.executeCommand('pairReview.refreshPullRequests');
-          return true;
         },
         refresh: () => { void loadDetails(); void loadThreads(); void loadConversation(); },
         pollGitHub: async () => {

@@ -2,7 +2,7 @@ import type { ClaudeStep } from '../claudeRunner.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
-import type { Annotation, CommentKind, GitHubComment, MergeMethod, PickerOptions, PullRequestConversation, PullRequestDetails, ReactionContent, ReactionCount, ReviewEvent, TimelineItem } from '../pullRequests.js';
+import type { Annotation, CommentKind, GitHubComment, HideReason, MergeMethod, PickerOptions, PullRequestConversation, PullRequestDetails, ReactionContent, ReactionCount, ReviewEvent, TimelineItem } from '../pullRequests.js';
 import { fileTree, type FileFolder } from '../fileTree.js';
 import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLines.js';
 import type { LineRange } from '../reviewedFiles.js';
@@ -108,7 +108,15 @@ const batch = new Map<string, PickedSuggestion>();
 /** The commit a Shift-click range starts from in the Commits tab. */
 let rangeAnchor: string | undefined;
 let emojiFor: string | undefined;
-let mergeForm: { readonly auto: boolean } | undefined;
+/** The open merge form; its button confirms on the next click, after `openedAt` plus a double-click's time. */
+let mergeForm: { readonly auto: boolean; readonly openedAt: number } | undefined;
+let mergeMethod: MergeMethod = 'squash';
+/** A question that waits for its confirm button in place of what asked it; `redraw` draws that place. */
+interface Ask { readonly key: string; readonly question: string; readonly label: string; send(): void; redraw(): void }
+let asking: Ask | undefined;
+/** The reviewer whose review the dismiss form is open for, and the reason typed so far. */
+let dismissing: { readonly login: string; text: string } | undefined;
+let reviewersStamp = '';
 const sending = new Set<string>();
 const threadOpen = new Map<string, boolean>();
 /** Threads whose earlier messages the user showed. */
@@ -136,6 +144,8 @@ const labels: Record<ReviewerState | CheckState, readonly [string, string, strin
   success: ['✓', 'ok', 'Passed'], failure: ['✗', 'bad', 'Failed'], pending: ['●', 'wait', 'Running'], neutral: ['○', 'muted', 'Skipped'],
 };
 const methodLabels: Record<MergeMethod, string> = { squash: 'Squash and merge', merge: 'Create a merge commit', rebase: 'Rebase and merge' };
+const hideReasons: readonly (readonly [HideReason, string])[] = [['OUTDATED', 'Outdated'], ['RESOLVED', 'Resolved'], ['DUPLICATE', 'Duplicate'], ['OFF_TOPIC', 'Off-topic'],
+  ['LOW_QUALITY', 'Low quality'], ['SPAM', 'Spam'], ['ABUSE', 'Abuse']];
 const changeLetters: Record<FileDiff['change'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
 const severityLabels: Record<Severity | 'unclassified', string> = { critical: 'Critical', significant: 'Significant', routine: 'Routine', trivial: 'Trivial', unclassified: 'Unclassified' };
 let guide: GuideGroup[] | undefined;
@@ -481,9 +491,7 @@ function renderState(details: PullRequestDetails): void {
   $('merge-row').hidden = !details.open || draft || !details.mergeMethods.length || queued;
   $('merge-status').replaceChildren(...details.open && !draft && conversation ? mergeChecklist(details, conversation) : []);
   $('update-row').hidden = !details.open || draft || merge?.state !== 'behind' || !merge.canUpdateBranch;
-  $('merge').textContent = merge?.mergeQueue ? 'Merge when ready' : 'Merge';
   $('merge').title = merge?.mergeQueue ? 'Adds the PR to the merge queue.' : '';
-  $('auto-merge').hidden = !merge?.canEnableAutoMerge || merge.autoMerge !== undefined || merge.state === 'clean' || merge.mergeQueue;
   $('auto-row').hidden = merge?.autoMerge === undefined || !details.open;
   if (merge?.autoMerge) {
     $('auto-note').textContent = 'Auto-merge is on: ' + methodLabels[merge.autoMerge.method].toLowerCase() + ' when all requirements are met. Enabled by ' + merge.autoMerge.enabledBy + '.';
@@ -491,7 +499,9 @@ function renderState(details: PullRequestDetails): void {
   }
   $('queue-row').hidden = !queued || !details.open;
   $('queue-note').textContent = queued ? 'Queued to merge, position ' + merge.queuePosition + '.' : '';
+  if (!details.mergeMethods.includes(mergeMethod)) mergeMethod = details.mergeMethods[0] ?? 'squash';
   if (!details.open || draft || queued) closeMergeForm();
+  else drawMergeButtons();
   $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
     : !details.open ? (details.merged ? '' : 'Closed without merging.')
     : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
@@ -512,19 +522,21 @@ function renderState(details: PullRequestDetails): void {
   note.replaceChildren(fixing === undefined ? text : el('span', '', text));
   note.title = fixing ?? '';
   const actions: HTMLButtonElement[] = [];
-  const add = (label: string, message: PageMessage, className = 'quiet'): void => {
-    const node = button(label, () => changePullRequest(message), className);
+  const add = (label: string, message: PageMessage, className = 'quiet', question?: string): void => {
+    const send = (): void => changePullRequest(message);
+    const node = button(label, question === undefined ? send : () => askInline({ key: 'state', question, label, send, redraw: () => { if (current?.details) renderState(current.details); } }), className);
     node.dataset.prAction = '';
     actions.push(node);
   };
+  const number = current?.number === undefined ? 'this PR' : '#' + current.number;
   if (details.canEdit && details.open && !draft) add('Convert to draft', { action: 'draft', draft: true });
-  if (details.canEdit && details.open) add('Close pull request', { action: 'close' });
+  if (details.canEdit && details.open) add('Close pull request', { action: 'close' }, 'quiet', 'Close ' + number + ' without merging? You can reopen it later.');
   if (details.canEdit && draft) add('Ready for review', { action: 'draft', draft: false }, 'primary');
   if (details.canEdit && !details.open && !details.merged) add('Reopen', { action: 'reopen' });
-  if (details.merged && details.branchDeletable && merge?.headDeleted !== true) add('Delete branch', { action: 'delete-branch' }, '');
+  if (details.merged && details.branchDeletable && merge?.headDeleted !== true) add('Delete branch', { action: 'delete-branch' }, '', 'Delete the branch ' + (current?.headBranch ?? '') + ' on GitHub?');
   if (!details.open && details.canEdit && merge?.headDeleted === true) add('Restore branch', { action: 'restore-branch' }, '');
-  if (details.merged && details.canEdit) add('Revert', { action: 'revert' }, '');
-  $('state-actions').replaceChildren(...actions);
+  if (details.merged && details.canEdit) add('Revert', { action: 'revert' }, '', 'Open a PR that reverts ' + number + '? GitHub creates a branch with a revert commit.');
+  $('state-actions').replaceChildren(...asking?.key === 'state' ? [askRow(asking)] : actions);
 }
 
 function verdict(reviewers: PullRequestDetails['reviewers']): readonly [string, string] {
@@ -621,9 +633,19 @@ function commentTools(comment: GitHubComment, place: CommentPlace): HTMLElement 
   const tools = el('span', 'msg-tools');
   if (comment.body.trim() && !hiddenComment(comment)) tools.append(toolButton(codicons.quote, 'Quote reply', () => place.quote(quoted(comment.body))));
   if (comment.canEdit && !edits.has(comment.id)) tools.append(toolButton(codicons.edit, 'Edit', () => { edits.set(comment.id, comment.body); focusNext = 'edit:' + comment.id; place.redraw(); }));
-  if (comment.canHide) tools.append(toolButton(codicons.eyeClosed, comment.hidden ? 'Unhide' : 'Hide', () => post({ action: 'hide-comment', id: comment.id, hide: comment.hidden === undefined })));
+  if (comment.canHide && comment.hidden !== undefined) tools.append(toolButton(codicons.eyeClosed, 'Unhide', () => post({ action: 'hide-comment', id: comment.id, hide: false })));
+  else if (comment.canHide) {
+    const anchor = 'hide-' + place.kind + '-' + comment.id;
+    const hide = toolButton(codicons.eyeClosed, 'Hide', () => openHideMenu(anchor, comment.id));
+    hide.id = anchor;
+    hide.setAttribute('aria-haspopup', 'true');
+    const wrap = el('span', 'menu-anchor');
+    wrap.append(hide);
+    tools.append(wrap);
+  }
   if (comment.canDelete) {
-    const remove = toolButton(codicons.trash, 'Delete on GitHub', () => post(place.kind === 'reviewComment' ? { action: 'github-delete', id: comment.id } : { action: 'delete-issue-comment', id: comment.id }));
+    const send = (): void => post(place.kind === 'reviewComment' ? { action: 'github-delete', id: comment.id } : { action: 'delete-issue-comment', id: comment.id });
+    const remove = toolButton(codicons.trash, 'Delete on GitHub', () => askInline({ key: 'delete:' + comment.id, question: 'Delete this comment on GitHub? Everyone on the PR loses it.', label: 'Delete', send, redraw: place.redraw }));
     remove.classList.add('delete');
     tools.append(remove);
   }
@@ -662,7 +684,55 @@ function commentBody(comment: GitHubComment, place: CommentPlace): HTMLElement[]
     nodes.push(body);
   }
   nodes.push(reactionsRow(comment.id, comment.reactions, comment.canReact, place.redraw));
+  if (asking?.key === 'delete:' + comment.id) nodes.push(askRow(asking));
   return nodes;
+}
+
+/** GitHub's reasons to hide a comment, under its Hide button; picking one hides it. */
+function openHideMenu(anchor: string, id: string): void {
+  const rows = hideReasons.map(([reason, label]) => menuRow([label], false, (on) => {
+    if (!on) return;
+    closeToolbarMenu();
+    post({ action: 'hide-comment', id, hide: true, reason });
+  }, true));
+  openToolbarMenu(anchor, [el('div', 'muted picker-note', 'Why hide it?'), ...rows], 'hide-menu');
+}
+
+/** Show `next` in place of what asked it, until its confirm button or Cancel. */
+function askInline(next: Ask): void {
+  const before = asking;
+  asking = next;
+  before?.redraw();
+  next.redraw();
+  document.querySelector<HTMLElement>('.ask-row button')?.focus();
+}
+
+function stopAsking(): void {
+  const before = asking;
+  asking = undefined;
+  before?.redraw();
+}
+
+/** The question on the left, Cancel and the confirm button on the right. */
+function askRow(ask: Ask): HTMLElement {
+  const row = el('div', 'row ask-row');
+  const confirm = button(ask.label, () => { stopAsking(); ask.send(); }, 'primary');
+  confirm.dataset.prAction = '';
+  confirm.disabled = busy;
+  const buttons = el('span', 'ask-buttons');
+  buttons.append(button('Cancel', stopAsking, 'quiet'), confirm);
+  row.append(el('span', 'muted gap', ask.question), buttons);
+  return row;
+}
+
+/** A question in a menu under the button `anchor`, for buttons with no row to show it in. */
+function askInMenu(anchor: string, question: string, label: string, send: () => void): void {
+  closeToolbarMenu();
+  const confirm = button(label, () => { closeToolbarMenu(); send(); }, 'primary');
+  confirm.disabled = busy;
+  const row = el('div', 'row ask-actions');
+  row.append(button('Cancel', closeToolbarMenu, 'quiet'), confirm);
+  openToolbarMenu(anchor, [el('p', 'ask-text', question), row], 'ask-menu');
 }
 
 /** A text box for GitHub with Write and Preview tabs, and @mention completion. */
@@ -803,7 +873,7 @@ let conversationStamp = '';
 
 /** The Conversation card: comments, reviews, pushes and events, oldest first, and a box for a new comment. */
 function renderConversation(state: OverviewState, force = false): void {
-  const stamp = JSON.stringify([conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:'))]);
+  const stamp = JSON.stringify([asking?.key, conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:'))]);
   if (!force && stamp === conversationStamp) return;
   conversationStamp = stamp;
   const timeline = $('timeline');
@@ -1209,25 +1279,100 @@ function mergeDefaults(method: MergeMethod): { readonly headline: string; readon
   return { headline, body };
 }
 
+/** Open the commit fields above the merge row; the clicked button turns into its own confirm button. */
 function openMergeForm(auto: boolean): void {
-  const method = $<HTMLSelectElement>('method').value as MergeMethod;
-  if (method === 'rebase' && !auto) { changePullRequest({ action: 'merge', method }); return; }
-  mergeForm = { auto };
-  const { headline, body } = mergeDefaults(method);
+  mergeForm = { auto, openedAt: Date.now() };
+  const { headline, body } = mergeDefaults(mergeMethod);
   const title = $<HTMLInputElement>('merge-headline');
-  const message = $<HTMLTextAreaElement>('merge-body');
+  $<HTMLTextAreaElement>('merge-body').value = body;
   title.value = headline;
-  message.value = body;
-  title.hidden = method === 'rebase';
-  message.hidden = method === 'rebase';
-  $('merge-confirm').textContent = auto ? 'Confirm auto-merge' : 'Confirm ' + methodLabels[method].toLowerCase();
-  $('merge-form').hidden = false;
-  (method === 'rebase' ? $('merge-confirm') : title).focus();
+  $('merge-form').hidden = mergeMethod === 'rebase';
+  $<HTMLInputElement>('merge-delete').checked = false;
+  drawMergeButtons();
+  (mergeMethod === 'rebase' ? $(auto ? 'auto-merge' : 'merge') : title).focus();
 }
 
 function closeMergeForm(): void {
   mergeForm = undefined;
   $('merge-form').hidden = true;
+  drawMergeButtons();
+}
+
+/** The merge row's buttons, as the open form and GitHub's merge state allow. */
+function drawMergeButtons(): void {
+  const merge = current?.conversation?.merge;
+  const form = mergeForm;
+  const mergeButton = $('merge');
+  mergeButton.textContent = form?.auto === false ? 'Confirm ' + methodLabels[mergeMethod].toLowerCase() : merge?.mergeQueue ? 'Merge when ready' : 'Merge';
+  mergeButton.classList.toggle('primary', form?.auto === false);
+  mergeButton.hidden = form?.auto === true;
+  const auto = $('auto-merge');
+  auto.textContent = form?.auto ? 'Confirm auto-merge' : 'Enable auto-merge';
+  auto.className = form?.auto ? 'primary' : 'quiet';
+  auto.hidden = form ? !form.auto : !merge?.canEnableAutoMerge || merge.autoMerge !== undefined || merge.state === 'clean' || merge.mergeQueue;
+  $('merge-cancel').hidden = !form;
+  $('merge-delete-label').hidden = form?.auto !== false || current?.details?.branchDeletable !== true;
+  $('method-text').textContent = methodLabels[mergeMethod];
+}
+
+/** Open the merge form on the first click and merge on the second; a double-click's second click does nothing. */
+function clickMerge(auto: boolean): void {
+  if (mergeForm?.auto !== auto) { openMergeForm(auto); return; }
+  if (Date.now() - mergeForm.openedAt < 400) return;
+  const message = mergeMethod === 'rebase' ? {} : { headline: $<HTMLInputElement>('merge-headline').value, body: $<HTMLTextAreaElement>('merge-body').value };
+  if (auto) changePullRequest({ action: 'auto-merge', method: mergeMethod, ...message });
+  else changePullRequest({ action: 'merge', method: mergeMethod, ...message, deleteBranch: $<HTMLInputElement>('merge-delete').checked && current?.details?.branchDeletable === true });
+}
+
+function openMethodMenu(): void {
+  const methods = current?.details?.mergeMethods ?? [];
+  openToolbarMenu('method', methods.map((method) => menuRow([methodLabels[method]], method === mergeMethod, (on) => {
+    if (!on) return;
+    mergeMethod = method;
+    closeToolbarMenu();
+    if (mergeForm) openMergeForm(mergeForm.auto);
+    else drawMergeButtons();
+  }, true)), 'method-menu');
+}
+
+function openUpdateMenu(): void {
+  const update = (method: 'merge' | 'rebase'): void => { closeToolbarMenu(); changePullRequest({ action: 'update-branch', method }); };
+  openToolbarMenu('update-branch', [
+    menuRow(['Update with merge commit'], false, (on) => { if (on) update('merge'); }, true),
+    menuRow([el('span', '', 'Update with rebase'), el('span', 'muted', 'Rewrites commits')], false, (on) => { if (on) update('rebase'); }, true),
+  ], 'update-menu');
+}
+
+/** Swap the title for a text field with Cancel and Save. */
+function editTitle(): void {
+  const input = el('input');
+  input.type = 'text';
+  input.maxLength = 256;
+  input.value = current?.details?.title ?? current?.title ?? '';
+  input.setAttribute('aria-label', 'Title');
+  const submit = (): void => {
+    if (!input.value.trim()) { input.focus(); return; }
+    changePullRequest({ action: 'edit-title', title: input.value });
+  };
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); submit(); } else if (event.key === 'Escape') closeTitleForm();
+  });
+  const saveButton = button('Save', submit, 'primary');
+  saveButton.dataset.prAction = '';
+  const form = el('span', 'title-form');
+  form.id = 'title-form';
+  form.append(input, button('Cancel', closeTitleForm, 'quiet'), saveButton);
+  $('title').hidden = true;
+  $('edit-title').hidden = true;
+  $('title').after(form);
+  input.focus();
+  input.select();
+}
+
+function closeTitleForm(): void {
+  document.getElementById('title-form')?.remove();
+  $('title').hidden = false;
+  $('edit-title').hidden = current?.details?.canEdit !== true;
 }
 
 /** GitHub's merge box checklist: reviews, checks and branch protection. */
@@ -1338,6 +1483,53 @@ function baseButton(): HTMLElement {
   return anchor;
 }
 
+/** The reviewers and their tools, with the dismiss form under the reviewer it is open for; redrawn only when they change, so the form keeps its focus. */
+function renderReviewers(state: OverviewState, force = false): void {
+  const { details, conversation } = state;
+  const stamp = JSON.stringify([details?.reviewers, details?.canEdit, details?.open, conversation?.reviewIds, conversation?.viewerLogin, conversation?.permission, dismissing?.login]);
+  if (!force && stamp === reviewersStamp) return;
+  reviewersStamp = stamp;
+  const reviewers = $('reviewers');
+  reviewers.replaceChildren();
+  if (!details) return;
+  for (const reviewer of details.reviewers) {
+    const tools: HTMLElement[] = [];
+    if (details.canEdit && details.open && reviewer.team === undefined && reviewer.state !== 'requested' && reviewer.name !== conversation?.viewerLogin) {
+      const again = toolButton(codicons.sync, 'Re-request review', () => changePullRequest({ action: 'rerequest', login: reviewer.name }));
+      again.dataset.prAction = '';
+      tools.push(again);
+    }
+    if (isWriter(conversation) && details.open && (reviewer.state === 'approved' || reviewer.state === 'changes') && conversation?.reviewIds[reviewer.name] !== undefined) {
+      const dismiss = toolButton(codicons.close, 'Dismiss review', () => {
+        dismissing = { login: reviewer.name, text: '' };
+        renderReviewers(state, true);
+        $('reviewers').querySelector('textarea')?.focus();
+      });
+      dismiss.dataset.prAction = '';
+      tools.push(dismiss);
+    }
+    reviewers.append(status(reviewer.state, reviewer.name, undefined, tools));
+    if (dismissing?.login === reviewer.name) reviewers.append(dismissForm(dismissing));
+  }
+  if (!details.reviewers.length) reviewers.append(el('li', 'muted', 'No reviewers yet.'));
+}
+
+function dismissForm(form: { readonly login: string; text: string }): HTMLElement {
+  const close = (): void => { dismissing = undefined; if (current) renderReviewers(current, true); };
+  const submit = (): void => {
+    if (!form.text.trim()) { area.focus(); return; }
+    changePullRequest({ action: 'dismiss-review', login: form.login, text: form.text });
+  };
+  const area = textarea('dismiss', form.text, 'Why dismiss it? Everyone on the PR sees this.', (value) => { form.text = value; }, submit, close);
+  const send = button('Dismiss review', submit, 'primary');
+  send.dataset.prAction = '';
+  const row = el('div', 'row ask-row');
+  row.append(el('span', 'gap'), button('Cancel', close, 'quiet'), send);
+  const item = el('li', 'dismiss-form');
+  item.append(area, row);
+  return item;
+}
+
 /** The base branch menu: a filter over the branches the PR could merge into; GitHub's list arrives after it opens. */
 function openBaseMenu(): void {
   if (busy) return;
@@ -1361,7 +1553,9 @@ function renderBaseMenu(): void {
   if (!list || !search) return;
   const query = search.value.trim().toLowerCase();
   const names = typeof baseBranches === 'string' || baseBranches === undefined ? [] : baseBranches.filter((name) => name.toLowerCase().includes(query));
-  const rows = names.slice(0, 200).map((name) => menuRow([name], false, (on) => { if (on) { closeToolbarMenu(); changePullRequest({ action: 'change-base', branch: name }); } }, true));
+  const rows = names.slice(0, 200).map((name) => menuRow([name], false, (on) => {
+    if (on) askInMenu('change-base', 'Change the base branch to ' + name + '? The diff and checks follow.', 'Change base', () => changePullRequest({ action: 'change-base', branch: name }));
+  }, true));
   const note = typeof baseBranches === 'string' ? 'Could not load branches: ' + baseBranches : baseBranches === undefined ? 'Loading…' : names.length ? '' : query ? 'No matches.' : 'No other branches.';
   list.replaceChildren(search, ...rows, ...note ? [el('div', 'muted picker-note', note)] : []);
 }
@@ -1383,26 +1577,7 @@ function render(state: OverviewState): void {
   if (!details) body.replaceChildren(el('span', 'muted', state.detailsError ? 'Could not load from GitHub: ' + state.detailsError : 'Loading from GitHub…'));
   else if (!editingBody && details.bodyHtml.trim()) body.innerHTML = details.bodyHtml;
   else if (!editingBody) body.replaceChildren(el('span', 'muted', 'No description.'));
-  const reviewers = $('reviewers');
-  reviewers.replaceChildren();
-  if (details) {
-    const conversation = state.conversation;
-    for (const reviewer of details.reviewers) {
-      const tools: HTMLElement[] = [];
-      if (details.canEdit && details.open && reviewer.team === undefined && reviewer.state !== 'requested' && reviewer.name !== conversation?.viewerLogin) {
-        const again = toolButton(codicons.sync, 'Re-request review', () => changePullRequest({ action: 'rerequest', login: reviewer.name }));
-        again.dataset.prAction = '';
-        tools.push(again);
-      }
-      if (isWriter(conversation) && details.open && (reviewer.state === 'approved' || reviewer.state === 'changes') && conversation?.reviewIds[reviewer.name] !== undefined) {
-        const dismiss = toolButton(codicons.close, 'Dismiss review', () => changePullRequest({ action: 'dismiss-review', login: reviewer.name }));
-        dismiss.dataset.prAction = '';
-        tools.push(dismiss);
-      }
-      reviewers.append(status(reviewer.state, reviewer.name, undefined, tools));
-    }
-    if (!details.reviewers.length) reviewers.append(el('li', 'muted', 'No reviewers yet.'));
-  }
+  renderReviewers(state);
   const checks = $('checks');
   checks.replaceChildren();
   if (details) {
@@ -1421,7 +1596,8 @@ function render(state: OverviewState): void {
     }
     if (!details.checks.length) checks.append(el('li', 'muted', 'No checks.'));
   }
-  for (const id of ['edit-title', 'pick-reviewers', 'pick-assignees', 'pick-labels', 'pick-milestone']) $(id).hidden = !details?.canEdit;
+  for (const id of ['pick-reviewers', 'pick-assignees', 'pick-labels', 'pick-milestone']) $(id).hidden = !details?.canEdit;
+  $('edit-title').hidden = !details?.canEdit || document.getElementById('title-form') !== null;
   $('milestone').replaceChildren(...details ? [details.milestone ? el('span', '', details.milestone.title) : el('span', 'muted', 'No milestone.')] : []);
   const linked = state.conversation?.linkedIssues ?? [];
   $('development').hidden = linked.length === 0;
@@ -1505,14 +1681,6 @@ function render(state: OverviewState): void {
   $('merge-box').hidden = !details;
   if (details) {
     renderState(details);
-    const select = $<HTMLSelectElement>('method');
-    const chosen = select.value;
-    select.replaceChildren(...details.mergeMethods.map((method) => {
-      const option = el('option', '', methodLabels[method]);
-      option.value = method;
-      return option;
-    }));
-    if (details.mergeMethods.some((method) => method === chosen)) select.value = chosen;
   }
   const next = new Set(state.viewed);
   for (const path of next) if (!viewed.has(path)) collapsed.set(path, true);
@@ -3341,9 +3509,12 @@ let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 function showNotice(notice: NonNullable<ExtensionMessage['notice']>): void {
   const box = $('notice');
   const { extension } = notice;
-  box.replaceChildren(el('span', '', notice.text), ...extension === undefined ? [] : [button('Find extension', () => { post({ action: 'find-extension', extension }); clearNotice(); }, 'small')]);
+  const link = el('a', '', 'Open on GitHub');
+  if (notice.url !== undefined) link.href = notice.url;
+  box.replaceChildren(el('span', '', notice.text), ...extension === undefined ? [] : [button('Find extension', () => { post({ action: 'find-extension', extension }); clearNotice(); }, 'small')],
+    ...notice.url === undefined ? [] : [link]);
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(clearNotice, extension === undefined ? 4000 : 8000);
+  noticeTimer = setTimeout(clearNotice, extension === undefined && notice.url === undefined ? 4000 : 8000);
 }
 
 function clearNotice(): void {
@@ -3462,6 +3633,8 @@ function onExtensionMessage(data: ExtensionMessage): void {
   }
   if (data.done === 'review') $<HTMLTextAreaElement>('review').value = '';
   if (data.done === 'merge') closeMergeForm();
+  if (data.done === 'title') closeTitleForm();
+  if (data.done === 'dismiss') { dismissing = undefined; if (current) renderReviewers(current, true); }
   if (data.done === 'suggestions') { batch.clear(); renderBatch(); }
   if (data.done === 'conversation') {
     sending.delete('conversation');
@@ -3509,7 +3682,10 @@ function onExtensionMessage(data: ExtensionMessage): void {
 }
 
 $('show-unpushed').addEventListener('click', showUnpushed);
-for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh'], ['remove-worktree', 'remove-worktree']] as const) $(id).addEventListener('click', () => post({ action }));
+for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
+$('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
+  'Remove the worktree for ' + (current?.number === undefined ? 'this PR' : '#' + current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
+  'Remove worktree', () => post({ action: 'remove-worktree' })));
 // Re-rendered Clawds join the page clock instead of restarting their animation.
 document.addEventListener('animationstart', (event) => {
   if (event.animationName !== 'clawd' || !(event.target instanceof Element)) return;
@@ -3603,19 +3779,19 @@ document.addEventListener('pointerdown', (event) => {
 });
 window.addEventListener('keydown', onShortcut);
 $('commit-batch').addEventListener('click', () => { if (batch.size) changePullRequest({ action: 'commit-suggestions', picked: [...batch.values()] }); });
-$('discard-review').addEventListener('click', () => changePullRequest({ action: 'discard-review' }));
-$('approve-runs').addEventListener('click', () => changePullRequest({ action: 'approve-runs' }));
-$('update-branch').addEventListener('click', () => changePullRequest({ action: 'update-branch' }));
-$('auto-merge').addEventListener('click', () => openMergeForm(true));
+$('discard-review').addEventListener('click', () => askInMenu('discard-review', 'Discard your pending review? Its comments are deleted. Nobody saw them yet.', 'Discard review',
+  () => changePullRequest({ action: 'discard-review' })));
+$('approve-runs').addEventListener('click', () => {
+  const count = current?.conversation?.awaitingApproval.length ?? 0;
+  askInMenu('approve-runs', 'Run ' + (count === 1 ? 'the workflow' : count + ' workflows') + ' from this fork? It runs code the fork\'s author wrote. Review changes to workflow files first.',
+    'Approve and run', () => changePullRequest({ action: 'approve-runs' }));
+});
+$('update-branch').addEventListener('click', openUpdateMenu);
+$('method').addEventListener('click', openMethodMenu);
+$('auto-merge').addEventListener('click', () => clickMerge(true));
 $('auto-merge-off').addEventListener('click', () => changePullRequest({ action: 'auto-merge-off' }));
 $('dequeue').addEventListener('click', () => changePullRequest({ action: 'dequeue' }));
 $('merge-cancel').addEventListener('click', closeMergeForm);
-$('merge-confirm').addEventListener('click', () => {
-  const method = $<HTMLSelectElement>('method').value as MergeMethod;
-  const message = method === 'rebase' ? {} : { headline: $<HTMLInputElement>('merge-headline').value, body: $<HTMLTextAreaElement>('merge-body').value };
-  changePullRequest({ action: mergeForm?.auto ? 'auto-merge' : 'merge', method, ...message });
-});
-$('method').addEventListener('change', () => { if (mergeForm) openMergeForm(mergeForm.auto); });
 attachMentions($<HTMLTextAreaElement>('review'), $('review-box'));
 $('folders').addEventListener('click', () => { folders = !folders; save(); renderFiles(); });
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
@@ -3666,7 +3842,7 @@ $('fix-conflicts').addEventListener('click', () => {
   $<HTMLButtonElement>('fix-conflicts').disabled = true;
   post({ action: 'fix-conflicts' });
 });
-$('edit-title').addEventListener('click', () => changePullRequest({ action: 'edit-title' }));
+$('edit-title').addEventListener('click', editTitle);
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels', 'milestone'] as const) $('pick-' + what).addEventListener('click', () => openPicker(what));
 document.addEventListener('pointerdown', (event) => {
@@ -3675,10 +3851,11 @@ document.addEventListener('pointerdown', (event) => {
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && picker) closePicker(false);
   if (event.key === 'Escape' && toolbarMenu) closeToolbarMenu();
+  if (event.key === 'Escape' && asking) stopAsking();
 });
 $('merge').addEventListener('click', () => {
   if (current?.conversation?.merge.mergeQueue) changePullRequest({ action: 'enqueue' });
-  else openMergeForm(false);
+  else clickMerge(false);
 });
 window.addEventListener('message', (event: MessageEvent) => {
   const frame = event.source ? [...document.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')].find((node) => node.contentWindow === event.source) : undefined;

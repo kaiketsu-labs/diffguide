@@ -1,6 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import * as vscode from 'vscode';
 import { commitAndPush, commitFiles, syncKeepingLocalCommits } from './conflicts.js';
 import type { OverviewActions, PickedSuggestion } from './pullRequestOverview.js';
 import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, RemoteThread } from './pullRequests.js';
@@ -33,17 +32,9 @@ export type GitHubPageActions = Pick<OverviewActions, 'addComment' | 'editCommen
   | 'rerequestReview' | 'updateBranch' | 'enableAutoMerge' | 'disableAutoMerge' | 'enqueue' | 'dequeue' | 'revert' | 'restoreBranch' | 'rerun' | 'approveRuns'
   | 'branches' | 'changeBase' | 'renderMarkdown' | 'commitSuggestions'>;
 
-/** GitHub's reasons for hiding a comment, as its menu names them. */
-const hideReasons: readonly { readonly label: string; readonly classifier: string }[] = [
-  { label: 'Outdated', classifier: 'OUTDATED' }, { label: 'Resolved', classifier: 'RESOLVED' }, { label: 'Duplicate', classifier: 'DUPLICATE' },
-  { label: 'Off-topic', classifier: 'OFF_TOPIC' }, { label: 'Low quality', classifier: 'LOW_QUALITY' }, { label: 'Spam', classifier: 'SPAM' }, { label: 'Abuse', classifier: 'ABUSE' },
-];
-
 /** The review page's actions on GitHub conversations, reviews, the merge box and checks. */
 export function githubPageActions(context: PageContext): GitHubPageActions {
   const { provider, number } = context;
-  const confirm = async (message: string, action: string, detail?: string): Promise<boolean> =>
-    await vscode.window.showWarningMessage(message, { modal: true, ...detail === undefined ? {} : { detail } }, action) === action;
   return {
     addComment: async (text) => {
       await provider.addComment(number, text);
@@ -54,17 +45,11 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       context.reload();
     },
     deleteIssueComment: async (id) => {
-      if (!await confirm('Delete this comment on GitHub?', 'Delete', 'Everyone on the PR loses it. This cannot be undone.')) return;
       await provider.deleteIssueComment(id);
       context.reload();
     },
-    hideComment: async (id, hide) => {
-      if (hide) {
-        const reason = await vscode.window.showQuickPick(hideReasons.map((entry) => entry.label), { title: 'Hide comment', placeHolder: 'Why hide it?' });
-        const classifier = hideReasons.find((entry) => entry.label === reason)?.classifier;
-        if (classifier === undefined) return;
-        await provider.hideComment(id, classifier);
-      } else await provider.hideComment(id, undefined);
+    hideComment: async (id, reason) => {
+      await provider.hideComment(id, reason);
       context.reload();
     },
     react: async (subject, content, on) => {
@@ -72,28 +57,21 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       context.reload();
     },
     discardReview: async () => {
-      if (!await confirm('Discard your pending review?', 'Discard review', 'Its comments are deleted. Nobody saw them yet.')) return;
       await provider.discardPendingReview(number);
       context.reload();
     },
-    dismissReview: async (login) => {
+    dismissReview: async (login, reason) => {
       const review = (await context.conversation()).reviewIds[login];
       if (review === undefined) throw new Error(`${login} has no review to dismiss.`);
-      const message = await vscode.window.showInputBox({ title: `Dismiss ${login}'s review`, prompt: 'Why dismiss it? Everyone on the PR sees this.', validateInput: (value) => value.trim() ? undefined : 'Enter a reason.' });
-      if (message === undefined) return;
-      await provider.dismissReview(review, message.trim());
+      await provider.dismissReview(review, reason);
       context.reload(true);
     },
     rerequestReview: async (login) => {
       await provider.requestReviewers(number, { users: [login], teams: [] });
       context.reload();
     },
-    updateBranch: async () => {
-      const merge = 'Update with merge commit';
-      const rebase = 'Update with rebase';
-      const answer = await vscode.window.showWarningMessage(`Bring the latest ${context.baseBranch()} into ${context.headBranch}?`, { modal: true, detail: 'A rebase rewrites the PR\'s commits.' }, merge, rebase);
-      if (answer === undefined) return;
-      await provider.updateBranch(number, answer === rebase ? 'rebase' : 'merge');
+    updateBranch: async (method) => {
+      await provider.updateBranch(number, method);
       context.reload(true);
     },
     enableAutoMerge: async (method, message) => {
@@ -113,11 +91,9 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       context.reload();
     },
     revert: async () => {
-      if (!await confirm(`Open a PR that reverts #${number}?`, 'Revert', 'GitHub creates a branch with a revert commit and opens a PR for it.')) return;
       const created = await provider.revert(number);
       context.reload(true);
-      const open = 'Open on GitHub';
-      if (await vscode.window.showInformationMessage(`Opened #${created.number} to revert #${number}.`, open) === open) await vscode.env.openExternal(vscode.Uri.parse(created.url));
+      return created;
     },
     restoreBranch: async () => {
       const { merge } = await context.conversation();
@@ -131,8 +107,6 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
     },
     approveRuns: async () => {
       const { awaitingApproval } = await context.conversation();
-      if (!await confirm(`Run ${awaitingApproval.length === 1 ? 'the workflow' : `${awaitingApproval.length} workflows`} from this fork?`, 'Approve and run',
-        'Workflows from a fork run code its author wrote. Review the changes to workflow files first.')) return;
       for (const run of awaitingApproval) await provider.approveWorkflowRun(run);
       context.reload();
     },
@@ -140,7 +114,6 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
     changeBase: async (picked) => {
       const branches = (await provider.branches()).filter((name) => name !== context.baseBranch() && name !== context.headBranch);
       if (!branches.includes(picked)) throw new Error(`${picked} is not a branch this PR can merge into.`);
-      if (!await confirm(`Change the base branch to ${picked}?`, 'Change base', `The PR then merges into ${picked} instead of ${context.baseBranch()}. Its diff and checks follow.`)) return;
       await provider.changeBase(number, picked);
       await context.useBase(picked);
       context.reload(true);
