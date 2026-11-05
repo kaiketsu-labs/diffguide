@@ -38,6 +38,8 @@ export interface ReviewThread {
   readonly latestEventId: string;
   /** Set when Claude's PR analysis opened the thread; its first message is then Claude's. */
   readonly origin?: 'analysis';
+  /** A few words naming what the thread is about, written by Claude with its first reply. */
+  readonly title?: string;
 }
 
 /** A single immutable work item sent to Claude at least once. */
@@ -73,6 +75,8 @@ export interface AgentUpdate {
   readonly eventId: string;
   readonly status: Exclude<ReviewStatus, 'queued'>;
   readonly text?: string;
+  /** Kept only when the thread has no title yet. */
+  readonly title?: string;
 }
 
 /** Handles used by the native editor and extension lifecycle. */

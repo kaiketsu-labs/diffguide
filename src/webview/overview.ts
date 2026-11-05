@@ -512,6 +512,21 @@ function allThreads(): Thread[] {
   return [...current.threads.map((thread) => ({ ...thread, source: 'local' as const })), ...(current.github ?? []).map((thread) => ({ ...thread, source: 'github' as const }))];
 }
 
+/** Local threads Claude opened from this GitHub thread; the page shows them inside it. */
+function nestedIn(githubId: string): Thread[] {
+  return (current?.threads ?? []).filter((thread) => thread.linkedTo === githubId).map((thread) => ({ ...thread, source: 'local' as const }))
+    .sort((left, right) => started(left) - started(right));
+}
+
+function started(thread: Thread): number {
+  return Date.parse(thread.messages[0]?.createdAt ?? '');
+}
+
+/** False for a local thread shown inside its GitHub thread. */
+function standalone(thread: Thread): boolean {
+  return thread.source !== 'local' || thread.linkedTo === undefined || !current?.github?.some((github) => github.id === thread.linkedTo);
+}
+
 const reactionEmoji: Record<ReactionContent, string> = { THUMBS_UP: '👍', THUMBS_DOWN: '👎', LAUGH: '😄', HOORAY: '🎉', CONFUSED: '😕', HEART: '❤️', ROCKET: '🚀', EYES: '👀' };
 const reactionNames: Record<ReactionContent, string> = { THUMBS_UP: '+1', THUMBS_DOWN: '-1', LAUGH: 'Laugh', HOORAY: 'Hooray', CONFUSED: 'Confused', HEART: 'Heart', ROCKET: 'Rocket', EYES: 'Eyes' };
 const reviewVerbs: Record<Extract<TimelineItem, { kind: 'review' }>['state'], string> = {
@@ -1755,11 +1770,11 @@ function keepInView(box: HTMLElement, summary: HTMLElement): void {
   box.addEventListener('toggle', () => { window.scrollBy(0, box.getBoundingClientRect().top - before); }, { once: true });
 }
 
-function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | 'local' | 'analysis', note: string, status: readonly string[], right: string): HTMLElementTagNameMap[K] {
+function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | 'local' | 'analysis', note: string, status: readonly string[], right: string, title?: string): HTMLElementTagNameMap[K] {
   const node = el(tag, 'strip');
   const name = kindLabel(kind);
   name.title = note;
-  node.append(name, el('span', 'gap'), ...(status.length ? [el('span', 'pill state', status.join(' · '))] : []), el('span', 'muted', right));
+  node.append(name, ...(title === undefined ? [] : [el('span', 'title', title)]), el('span', 'gap'), ...(status.length ? [el('span', 'pill state', status.join(' · '))] : []), el('span', 'muted', right));
   return node;
 }
 
@@ -1774,12 +1789,15 @@ function threadBox(thread: Thread): HTMLElement {
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
-    status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine));
+    status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
   box.append(summary);
   const folded = thread.messages.length > foldThreadsAbove ? thread.messages.length - unfoldedMessages : 0;
   const foldedItems: HTMLElement[] = [];
+  const nested = github ? nestedIn(thread.id) : [];
+  const startedBy = (time: string): Thread[] => nested.splice(0, nested.filter((local) => started(local) <= Date.parse(time)).length);
   thread.messages.forEach((entry, index) => {
+    box.append(...startedBy(entry.createdAt).map(threadBox));
     const item = message(entry, thread);
     if (index < folded) {
       item.hidden = !threadUnfolded.has(thread.id);
@@ -1799,6 +1817,7 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(item);
   });
   if (thread.source === 'local' && thread.commits) box.append(claudeCommits(thread.commits));
+  box.append(...nested.map(threadBox));
   const working = thread.source === 'local' ? thread.working : undefined;
   if (working) {
     const live = el('div', 'claude-live');
@@ -1851,7 +1870,7 @@ function threadBox(thread: Thread): HTMLElement {
   }
   actions.append(el('span', 'gap'), thread.url
     ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
-    : button(thread.source === 'local' && thread.linked ? 'Reply on GitHub…' : 'Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
+    : button(thread.source === 'local' && thread.linkedTo !== undefined ? 'Reply on GitHub…' : 'Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
   actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
@@ -2010,6 +2029,8 @@ function jump(thread: Thread): void {
   }
   const target = document.getElementById('thread-' + thread.id) as HTMLDetailsElement | null;
   if (!target) return;
+  const outer = target.parentElement?.closest<HTMLDetailsElement>('details.thread');
+  if (outer) { outer.open = true; threadOpen.set(outer.id.slice('thread-'.length), true); }
   target.open = true;
   threadOpen.set(thread.id, true);
   target.scrollIntoView({ block: 'center' });
@@ -2659,7 +2680,7 @@ function groupCollapsed(group: GuideGroup): boolean {
 function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, FileDiff>): { threads: Map<string, Thread[]>; notes: Map<string, Thread>; draft?: string } {
   const threads = new Map<string, Thread[]>();
   const notes = new Map<string, Thread>();
-  const all = allThreads();
+  const all = allThreads().filter(standalone);
   const steps = groups.flatMap((group) => group.steps);
   for (const step of steps) {
     const note = step.threadId === undefined ? undefined : all.find((thread) => thread.source === 'local' && thread.id === step.threadId);
@@ -2719,7 +2740,7 @@ function renderThreadList(): void {
   if (threads.length === 0) list.append(el('li', 'muted', current?.github || current?.githubError ? 'No comments yet.' : 'No local comments yet. Loading GitHub comments…'));
   if (current?.githubError) list.append(el('li', 'bad', 'Could not load GitHub comments: ' + current.githubError));
   for (const kind of threadKinds) {
-    const members = threads.filter((thread) => threadKind(thread) === kind);
+    const members = threads.filter((thread) => threadKind(thread) === kind && standalone(thread));
     if (!members.length) continue;
     const key = 'threads:' + kind;
     const isCollapsed = collapsed.get(key) ?? kind === 'analysis';
@@ -2730,7 +2751,10 @@ function renderThreadList(): void {
     group.append(head);
     if (!isCollapsed) {
       const rows = el('ul');
-      for (const thread of members) rows.append(threadRow(thread, kind));
+      for (const thread of members) {
+        rows.append(threadRow(thread, kind));
+        if (thread.source === 'github') for (const local of nestedIn(thread.id)) rows.append(threadRow(local, threadKind(local), true));
+      }
       group.append(rows);
     }
     list.append(group);
@@ -2743,12 +2767,12 @@ function inlineCode(text: string): Node[] {
 }
 
 /** One thread as a row: where on the left, the text in a column that lines up, status on the right only when it adds something. */
-function threadRow(thread: Thread, kind: ThreadKind): HTMLElement {
-  const item = el('li', 'card-thread ' + kind);
+function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElement {
+  const item = el('li', 'card-thread ' + kind + (nested ? ' nested' : ''));
   item.title = thread.location + '\n' + thread.text;
   item.addEventListener('click', () => jump(thread));
   const text = el('span', 'text');
-  text.append(...inlineCode(thread.text));
+  text.append(...inlineCode((thread.source === 'local' ? thread.title : undefined) ?? thread.text));
   const status = kind === 'analysis' ? '' : thread.status;
   const working = thread.source === 'local' ? thread.working : undefined;
   const [name = '', line = ''] = (thread.location.split('/').pop() ?? '').split(/(?=:\d+$)/u);
@@ -3024,7 +3048,7 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   head.append(chevron, name, badge, stats, ...chips, comments, mode, label, full, open);
   box.append(head);
   const diff = el('div', 'diff');
-  const placed = new Set<string>();
+  const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
   if (showPreview && kind === 'media') diff.append(mediaNode(file));
   else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, placed));

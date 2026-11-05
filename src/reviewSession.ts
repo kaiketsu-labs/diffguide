@@ -27,8 +27,8 @@ export interface ReviewSession {
   publish?(threadId: string): Promise<void>;
   /** Remember the GitHub thread a local thread answers, so publishing replies inside it. */
   linkToGitHub?(threadId: string, link: GitHubLink): Promise<void>;
-  /** Whether publishing the thread replies inside a GitHub thread. */
-  linkedToGitHub?(threadId: string): boolean;
+  /** The GitHub thread the local thread answers, if any; publishing replies inside it. */
+  linkedGitHubThread?(threadId: string): string | undefined;
 }
 
 /** PR sessions that join the review UI next to local changes. */

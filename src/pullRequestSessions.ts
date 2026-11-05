@@ -271,7 +271,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         links.set(threadId, link);
         await writeGitHubLinks(dataPath, links);
       },
-      linkedToGitHub: (threadId) => links.has(threadId),
+      linkedGitHubThread: (threadId) => links.get(threadId)?.id,
     };
     const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [] };
     return result;
