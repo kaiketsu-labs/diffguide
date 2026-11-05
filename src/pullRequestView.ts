@@ -13,11 +13,12 @@ type Listing =
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
 
-type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary };
+type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary; readonly pinned?: true };
 
 type RepositoryNode = { readonly kind: 'repository'; readonly listing: Ready; /** Set when grouped by role: the row then holds only that role's PRs. */ readonly role?: PullRequestRole };
 
 type Node =
+  | { readonly kind: 'pinned'; readonly rows: readonly PullRequestNode[] }
   | { readonly kind: 'role'; readonly role: PullRequestRole; readonly listings: readonly Ready[] }
   | RepositoryNode
   | { readonly kind: 'section'; readonly listing: Ready; readonly role: PullRequestRole }
@@ -37,6 +38,15 @@ const hiddenKey = 'pairReview.hiddenRepositories';
 const authorKey = 'pairReview.authorFilter';
 const childViewKey = 'pairReview.pullRequestChildren';
 const snapshotKey = 'pairReview.pullRequestSnapshot';
+const pinnedKey = 'pairReview.pinnedPullRequests';
+const pinMime = 'application/vnd.code.tree.pairreview.pullrequests';
+
+/** A PR the user pinned, with its last known summary so it stays listed after it leaves the role searches, such as once reviewed. */
+interface Pin { readonly repository: string; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary }
+
+function pinKey(pin: Pin): string {
+  return `${pin.repository}#${pin.pullRequest.number}`;
+}
 
 /** A repository's PR lists from the last load, shown at once while fresh ones load. */
 type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>>;
@@ -274,6 +284,61 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#changed.fire(undefined);
   }
 
+  get #pins(): readonly Pin[] {
+    return this.workspace.get<readonly Pin[]>(pinnedKey, []);
+  }
+
+  /** Pin PRs, or move pinned ones, before `before` or at the end. */
+  async pin(nodes: readonly PullRequestNode[], before?: PullRequestNode): Promise<void> {
+    const moving = nodes.map((node): Pin => ({ repository: node.listing.repository.name, role: node.role, pullRequest: node.pullRequest }));
+    const keys = new Set(moving.map(pinKey));
+    const pins = this.#pins.filter((pin) => !keys.has(pinKey(pin)));
+    const at = before === undefined ? -1 : pins.findIndex((pin) => pinKey(pin) === pullRequestKey(before));
+    pins.splice(at < 0 ? pins.length : at, 0, ...moving);
+    await this.workspace.update(pinnedKey, pins);
+    this.#changed.fire(undefined);
+  }
+
+  async unpin(key: string): Promise<void> {
+    const pins = this.#pins;
+    if (!pins.some((pin) => pinKey(pin) === key)) return;
+    await this.workspace.update(pinnedKey, pins.filter((pin) => pinKey(pin) !== key));
+    this.#changed.fire(undefined);
+  }
+
+  /** A listing's PRs in a role section: those by the chosen author, without the pinned ones. */
+  #sectionOf(listing: Ready, role: PullRequestRole): readonly PullRequestSummary[] {
+    const pinned = new Set(this.#pins.map(pinKey));
+    return pullRequestsOf(listing, role, this.author).filter((pullRequest) => !pinned.has(`${listing.repository.name}#${pullRequest.number}`));
+  }
+
+  /** Pinned PRs of the loaded repositories, in the user's order, with their freshest summary. */
+  #pinnedRows(ready: readonly Ready[]): PullRequestNode[] {
+    return this.#pins.flatMap((pin) => {
+      const listing = ready.find((each) => each.repository.name === pin.repository);
+      if (listing === undefined) return [];
+      const fresh = [...listing.mine, ...listing.reviewRequested].find((pullRequest) => pullRequest.number === pin.pullRequest.number);
+      const row: PullRequestNode = { kind: 'pullRequest', listing, role: pin.role, pullRequest: fresh ?? pin.pullRequest, pinned: true };
+      this.#rows.set(pullRequestKey(row), row);
+      return [row];
+    });
+  }
+
+  /** Drop pins of a freshly listed repository whose PRs were merged or closed, and refresh the summaries of those its searches no longer list. */
+  async #refreshPins(listing: Ready): Promise<void> {
+    const listed = new Set([...listing.mine, ...listing.reviewRequested].map((pullRequest) => pullRequest.number));
+    const unlisted = this.#pins.filter((pin) => pin.repository === listing.repository.name && !listed.has(pin.pullRequest.number));
+    if (unlisted.length === 0) return;
+    const open = await listing.provider.openPullRequests(unlisted.map((pin) => pin.pullRequest.number)).catch(() => undefined);
+    if (open === undefined) return;
+    const fresh = new Map(open.map((pullRequest) => [pullRequest.number, pullRequest]));
+    await this.workspace.update(pinnedKey, this.#pins.flatMap((pin) => {
+      if (pin.repository !== listing.repository.name || listed.has(pin.pullRequest.number)) return [pin];
+      const pullRequest = fresh.get(pin.pullRequest.number);
+      return pullRequest === undefined ? [] : [{ ...pin, pullRequest }];
+    }));
+  }
+
   /** Only PRs by this author are listed, when set. */
   get author(): string | undefined {
     return this.workspace.get<string>(authorKey);
@@ -369,6 +434,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   markMerged(pullRequest: string): void {
     this.#merged.add(pullRequest);
     this.redraw(pullRequest);
+    void this.unpin(pullRequest);
   }
 
   /** Redraw checkout state without querying the code host again: one PR's row when it is shown, else the whole tree. */
@@ -397,12 +463,13 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         ? [{ kind: 'message', text: 'No open PRs', icon: 'check' }]
         : node.listings.map((listing) => ({ kind: 'repository', listing, role: node.role }));
     }
+    if (node.kind === 'pinned') return [...node.rows];
     if (node.kind === 'repository' && node.role === undefined) {
-      return roles.filter((role) => pullRequestsOf(node.listing, role, this.author).length > 0).map((role) => ({ kind: 'section', listing: node.listing, role }));
+      return roles.filter((role) => this.#sectionOf(node.listing, role).length > 0).map((role) => ({ kind: 'section', listing: node.listing, role }));
     }
     if (node.kind === 'repository' || node.kind === 'section') {
       const role = node.role as PullRequestRole;
-      return pullRequestsOf(node.listing, role, this.author).map((pullRequest) => {
+      return this.#sectionOf(node.listing, role).map((pullRequest) => {
         const row: PullRequestNode = { kind: 'pullRequest', listing: node.listing, role, pullRequest };
         this.#rows.set(pullRequestKey(row), row);
         return row;
@@ -427,10 +494,17 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
   async getTreeItem(node: Node): Promise<vscode.TreeItem> {
     switch (node.kind) {
+      case 'pinned': {
+        const item = new vscode.TreeItem('PINNED', vscode.TreeItemCollapsibleState.Expanded);
+        item.iconPath = new vscode.ThemeIcon('pinned');
+        item.description = String(node.rows.length);
+        item.tooltip = 'Drag PRs here to pin them, and within this section to reorder them.';
+        return item;
+      }
       case 'role': {
         const item = new vscode.TreeItem(sectionLabels[node.role].toUpperCase(), vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
-        item.description = String(node.listings.reduce((sum, listing) => sum + pullRequestsOf(listing, node.role, this.author).length, 0));
+        item.description = String(node.listings.reduce((sum, listing) => sum + this.#sectionOf(listing, node.role).length, 0));
         return item;
       }
       case 'repository': {
@@ -439,8 +513,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = repositoryIcon;
         const counts = role === undefined
-          ? roles.filter((each) => pullRequestsOf(listing, each, this.author).length > 0).map((each) => `${pullRequestsOf(listing, each, this.author).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
-          : String(pullRequestsOf(listing, role, this.author).length);
+          ? roles.filter((each) => this.#sectionOf(listing, each).length > 0).map((each) => `${this.#sectionOf(listing, each).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
+          : String(this.#sectionOf(listing, role).length);
         item.description = [owner, counts].filter(Boolean).join(' · ');
         item.tooltip = listing.folder;
         item.contextValue = 'pairReview.repository';
@@ -449,7 +523,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'section': {
         const item = new vscode.TreeItem(sectionLabels[node.role], vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
-        item.description = String(pullRequestsOf(node.listing, node.role, this.author).length);
+        item.description = String(this.#sectionOf(node.listing, node.role).length);
         return item;
       }
       case 'pullRequest': {
@@ -463,7 +537,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const merged = this.#merged.has(pullRequestKey(node));
         const verdict = pr.review === undefined || merged ? undefined : verdicts[pr.review];
         const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;
-        item.description = [`#${pr.number}`, type, verdict?.label, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
+        const pinnedFrom = node.pinned === true ? [splitRepository(node.listing.repository.name).name, node.role === 'author' ? 'mine' : 'review'] : [];
+        item.description = [`#${pr.number}`, ...pinnedFrom, type, verdict?.label, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
         item.tooltip = [
           `#${pr.number} ${pr.title}`,
           `${pr.headBranch} → ${pr.baseBranch}`,
@@ -472,7 +547,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
           [pr.createdAt === undefined ? undefined : `Opened ${new Date(pr.createdAt).toLocaleString()}`, pr.updatedAt === undefined ? undefined : `updated ${ago(pr.updatedAt)}`].filter(Boolean).join(', ') || undefined,
         ].filter(Boolean).join('\n');
         item.iconPath = merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review);
-        item.contextValue = checkedOut ? 'pairReview.pullRequest.checkedOut' : 'pairReview.pullRequest';
+        item.contextValue = `pairReview.pullRequest${checkedOut ? '.checkedOut' : ''}${node.pinned === true ? '.pinned' : ''}`;
         item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node] };
         return item;
       }
@@ -625,12 +700,15 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     void vscode.commands.executeCommand('setContext', 'pairReview.gitHubSignIn', signIn?.kind === 'failed' ? signIn.signIn : undefined);
     if (signIn !== undefined) return [];
     if (ready.length === 0) return failed;
+    const pinnedRows = this.#pinnedRows(ready);
+    const pinned: Node[] = pinnedRows.length === 0 ? [] : [{ kind: 'pinned', rows: pinnedRows }];
     if (this.byRole) {
-      return [...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => pullRequestsOf(listing, role, this.author).length > 0) })), ...failed];
+      return [...pinned, ...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => this.#sectionOf(listing, role).length > 0) })), ...failed];
     }
-    const withPullRequests = ready.filter((listing) => roles.some((role) => pullRequestsOf(listing, role, this.author).length > 0));
+    const withPullRequests = ready.filter((listing) => roles.some((role) => this.#sectionOf(listing, role).length > 0));
     return [
-      ...withPullRequests.length === 0 ? [{ kind: 'message', text: this.author === undefined ? 'No open PRs' : `No open PRs by ${this.author}`, icon: 'check' } as const] : [],
+      ...pinned,
+      ...withPullRequests.length === 0 && pinned.length === 0 ? [{ kind: 'message', text: this.author === undefined ? 'No open PRs' : `No open PRs by ${this.author}`, icon: 'check' } as const] : [],
       ...withPullRequests.map((listing): Node => ({ kind: 'repository', listing })),
       ...failed,
     ];
@@ -683,7 +761,9 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       const [repository, mine, reviewRequested] = await Promise.all([
         provider.readRepository(), provider.listMine(), provider.listReviewRequested(),
       ]);
-      return { kind: 'ready', folder, provider, worktrees, repository, mine, reviewRequested };
+      const listing: Ready = { kind: 'ready', folder, provider, worktrees, repository, mine, reviewRequested };
+      await this.#refreshPins(listing);
+      return listing;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return error instanceof GitHubSignInRequired ? { kind: 'failed', folder, message, signIn: error.provider } : { kind: 'failed', folder, message };
@@ -711,7 +791,22 @@ export function registerPullRequestView(
     void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
   };
   const legend = vscode.window.createTreeView('pairReview.legend', { treeDataProvider: legendProvider });
-  const view = vscode.window.createTreeView('pairReview.pullRequests', { treeDataProvider: tree, manageCheckboxStateManually: true });
+  const dragAndDropController: vscode.TreeDragAndDropController<Node> = {
+    dragMimeTypes: [pinMime],
+    dropMimeTypes: [pinMime],
+    handleDrag: (nodes, data) => {
+      const rows = nodes.filter(isPullRequestNode);
+      if (rows.length > 0) data.set(pinMime, new vscode.DataTransferItem(rows));
+    },
+    handleDrop: async (target, data) => {
+      const dragged: unknown = data.get(pinMime)?.value;
+      const rows = Array.isArray(dragged) ? dragged.filter(isPullRequestNode) : [];
+      if (rows.length === 0) return;
+      if (target?.kind === 'pinned') await tree.pin(rows);
+      else if (target?.kind === 'pullRequest' && target.pinned === true) await tree.pin(rows, target);
+    },
+  };
+  const view = vscode.window.createTreeView('pairReview.pullRequests', { treeDataProvider: tree, manageCheckboxStateManually: true, dragAndDropController });
   const sync = pollWhileFocused(60_000, () => view.visible, () => tree.pollGitHub());
   return vscode.Disposable.from(
     view,
@@ -735,6 +830,12 @@ export function registerPullRequestView(
       } catch (error: unknown) {
         report(error);
       }
+    }),
+    vscode.commands.registerCommand('pairReview.pinPullRequest', async (node: unknown) => {
+      if (isPullRequestNode(node)) await tree.pin([node]);
+    }),
+    vscode.commands.registerCommand('pairReview.unpinPullRequest', async (node: unknown) => {
+      if (isPullRequestNode(node)) await tree.unpin(pullRequestKey(node));
     }),
     vscode.commands.registerCommand('pairReview.markPullRequestMerged', (key: unknown) => {
       if (typeof key === 'string') tree.markMerged(key);

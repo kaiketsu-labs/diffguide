@@ -8,6 +8,7 @@ import type * as vscode from 'vscode';
 import { createReviewController } from '../src/reviewController.js';
 import { createReviewStore } from '../src/store.js';
 import type { ReviewStore, ReviewThread } from '../src/contracts.js';
+import type { ReviewSession } from '../src/reviewSession.js';
 import {
   commands, comments, type FakeCommentController, type FakeCommentThread,
   extensionContext, FakeInteractiveEditor, FakeTextDocument, resetFakeEditor,
@@ -249,4 +250,46 @@ test('empty mode-only native feedback fails without disposing or persisting the 
   await refresh(store);
   assert.equal(store.events.length, 1);
   assert.equal(store.threads[0]?.intent, 'implement');
+});
+
+test('revealing a PR thread whose file was later deleted shows its captured code instead of failing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pair-review-native-'));
+  const local = await createReviewStore(join(root, 'local.json'), root);
+  const store = await createReviewStore(join(root, 'pr.json'), root);
+  const working = Uri.from({ scheme: 'pair-review-pr', authority: 'pr-1', path: '/example.ts', query: 'repo=o%2Fr' });
+  const document = new FakeTextDocument(working, 'before\noriginal();\nafter', 'typescript');
+  const editor = new FakeInteractiveEditor(document);
+  editor.selection = new Selection(1, 0, 1, 11);
+  workspace.textDocuments.push(document);
+  window.visibleTextEditors.push(editor);
+  window.activeTextEditor = editor;
+  commands.handlers.set('setContext', () => undefined);
+  const session: ReviewSession = {
+    key: 'o/r#1', label: '#1', store,
+    resolveBase: async () => 'a'.repeat(40),
+    locate: (uri) => uri.toString() === working.toString() ? { path: 'example.ts', original: false } : undefined,
+    workingUri: () => working as unknown as vscode.Uri,
+    originalUri: (_path, revision) => Uri.from({ scheme: 'pair-review-pr', authority: 'pr-1', path: '/example.ts', query: `rev=${revision}` }) as unknown as vscode.Uri,
+  };
+  const context = { ...extensionContext(), extensionUri: Uri.file('/extension'), subscriptions: [] } as unknown as vscode.ExtensionContext;
+  const registered = await createReviewController(local, context, async () => 'a'.repeat(40), { sessions: [session], onDidChange: () => ({ dispose: () => undefined }) });
+  cleanup.push(async () => {
+    registered.dispose();
+    await local.flush();
+    await store.flush();
+    await rm(root, { recursive: true, force: true });
+  });
+  const controller = comments.controllers[0];
+  assert.ok(controller);
+  const draft = await addDraft(controller);
+  await commands.executeCommand('pairReview.submitInline', { thread: draft, text: 'Explain this code' });
+  await refresh(store);
+  const thread = store.threads[0];
+  assert.ok(thread);
+
+  workspace.textDocuments.splice(workspace.textDocuments.indexOf(document), 1);
+  await commands.executeCommand('pairReview.revealThread', thread.id);
+
+  assert.equal(window.shownDocuments.at(-1)?.document.uri.scheme, 'pair-review-context');
+  assert.equal(window.shownDocuments.at(-1)?.document.getText(), 'before\noriginal();\nafter');
 });

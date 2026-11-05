@@ -316,6 +316,18 @@
         "icon": "$(check-all)"
       },
       {
+        "command": "pairReview.pinPullRequest",
+        "title": "Pin",
+        "category": "Pair Review",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "pairReview.unpinPullRequest",
+        "title": "Unpin",
+        "category": "Pair Review",
+        "icon": "$(pinned)"
+      },
+      {
         "command": "pairReview.removePullRequestWorktree",
         "title": "Remove worktree",
         "category": "Pair Review",
@@ -517,6 +529,16 @@
       ],
       "view/item/context": [
         {
+          "command": "pairReview.pinPullRequest",
+          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest(\\.checkedOut)?$/",
+          "group": "inline@0"
+        },
+        {
+          "command": "pairReview.unpinPullRequest",
+          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest.*\\.pinned$/",
+          "group": "inline@0"
+        },
+        {
           "command": "pairReview.markGuideGroupRead",
           "when": "view == pairReview.pullRequests && viewItem == pairReview.guideGroup",
           "group": "inline@0"
@@ -533,17 +555,17 @@
         },
         {
           "command": "pairReview.showPullRequestClaude",
-          "when": "view == pairReview.pullRequests && viewItem == pairReview.pullRequest.checkedOut",
+          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest\\.checkedOut/",
           "group": "1_pullRequest@1"
         },
         {
           "command": "pairReview.removePullRequestWorktree",
-          "when": "view == pairReview.pullRequests && viewItem == pairReview.pullRequest.checkedOut",
+          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest\\.checkedOut/",
           "group": "2_worktree@0"
         },
         {
           "command": "pairReview.showPullRequestOverview",
-          "when": "view == pairReview.pullRequests && viewItem == pairReview.pullRequest.checkedOut",
+          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest\\.checkedOut/",
           "group": "1_pullRequest@0"
         },
         {
@@ -614,6 +636,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "pairReview.pinPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "pairReview.unpinPullRequest",
+          "when": "false"
+        },
         {
           "command": "pairReview.markGuideGroupRead",
           "when": "false"

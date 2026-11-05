@@ -100,6 +100,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
   deleteBranch: async () => { throw new Error('Sample pull requests cannot be changed.'); },
   pickerOptions: async () => ({ users: [], teams: [], labels: [], milestones: [] }),
   search: async () => [],
+  openPullRequests: async () => [],
   conversation: async () => ({
     timeline: [], description: { id: 'mock', reactions: [], canReact: false }, viewerLogin: 'you', permission: 'read',
     merge: { state: 'clean', canUpdateBranch: false, canBypass: false, canEnableAutoMerge: false, canDisableAutoMerge: false, mergeQueue: false, headOid: '', headDeleted: false },

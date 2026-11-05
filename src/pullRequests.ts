@@ -259,6 +259,8 @@ export interface PullRequestProvider {
   pickerOptions(): Promise<PickerOptions>;
   /** Search this repository's PRs with GitHub search syntax, such as `is:closed` or `assignee:@me`. */
   search(query: string): Promise<readonly PullRequestSummary[]>;
+  /** The PRs among `numbers` that are still open, read fresh. */
+  openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]>;
   conversation(number: number): Promise<PullRequestConversation>;
   /** Post a comment on the PR itself, outside any review. */
   addComment(number: number, body: string): Promise<void>;
@@ -691,10 +693,16 @@ export class GitHubApiProvider implements PullRequestProvider {
     const data = await this.#graphqlOn(host, `query($query:String!){search(query:$query,type:ISSUE,first:50){nodes{... on PullRequest{${searchFields}}}}}`,
       { query: `repo:${owner}/${name} is:pr ${query}` });
     const nodes = list(object(data['search'])['nodes']).filter((node) => typeof node === 'object' && node !== null && 'number' in node);
-    return parsePullRequestList(nodes.map((node) => {
-      const record = object(node);
-      return { ...record, author: record['author'] ?? { login: 'ghost' }, latestReviews: list(object(record['latestReviews'] ?? { nodes: [] })['nodes']) };
-    }));
+    return parsePullRequestList(nodes.map(searchNode));
+  }
+
+  async openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]> {
+    const valid = numbers.filter((number) => Number.isSafeInteger(number) && number > 0);
+    if (valid.length === 0) return [];
+    const fields = valid.map((number) => `pr${number}:pullRequest(number:${number}){state ${searchFields}}`).join(' ');
+    const repository = object((await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`, {}))['repository']);
+    const open = valid.map((number) => object(repository[`pr${number}`])).filter((node) => node['state'] === 'OPEN');
+    return parsePullRequestList(open.map(searchNode));
   }
 
   async conversation(number: number): Promise<PullRequestConversation> {
@@ -931,6 +939,12 @@ export function remoteNameFor(config: string, repository: GitHubRemote): string 
       && remote.name.toLowerCase() === repository.name.toLowerCase()) return match[1];
   }
   return undefined;
+}
+
+/** A search or repository PR node in the shape `parsePullRequestList` reads. */
+function searchNode(node: unknown): Record<string, unknown> {
+  const record = object(node);
+  return { ...record, author: record['author'] ?? { login: 'ghost' }, latestReviews: list(object(record['latestReviews'] ?? { nodes: [] })['nodes']) };
 }
 
 /** Validate a PR list from a GitHub search, rejecting the whole response on any malformed entry. */
