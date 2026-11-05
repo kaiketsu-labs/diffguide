@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { maximumIdentifierLength, maximumPathLength, maximumReplyLength, maximumReviewTextLength } from './limits.js';
+import { maximumIdentifierLength, maximumPathLength, maximumReplyLength, maximumReviewTextLength, maximumTitleLength } from './limits.js';
 
 import type {
   AgentUpdate,
@@ -40,15 +40,16 @@ export class ReviewStoreError extends Error {
 /** Validate an untrusted agent update without allowing human-only operations. */
 export function parseAgentUpdate(value: unknown): AgentUpdate {
   const record = readObject(value, 'agent update');
-  checkKeys(record, ['eventId', 'status', 'text']);
+  checkKeys(record, ['eventId', 'status', 'text', 'title']);
   const status = readStatus(record['status']);
   if (status === 'queued') {
     throw new ReviewStoreError('Agents cannot queue review comments.');
   }
-  const update = { eventId: readId(record['eventId']), status };
-  return record['text'] === undefined
-    ? Object.freeze(update)
-    : Object.freeze({ ...update, text: readBoundedText(record['text'], 'Antwort', maximumReplyLength, true) });
+  return Object.freeze({
+    eventId: readId(record['eventId']), status,
+    ...(record['text'] === undefined ? {} : { text: readBoundedText(record['text'], 'Antwort', maximumReplyLength, true) }),
+    ...(record['title'] === undefined ? {} : { title: readTitle(record['title']) }),
+  });
 }
 
 /** Open durable review storage, rejecting corrupt or unrelated workspace data. */
@@ -140,6 +141,7 @@ class FileReviewStore implements ReviewStore {
         outdated: existing?.outdated ?? false,
         latestEventId: event.id,
         ...(existing?.origin === undefined ? {} : { origin: existing.origin }),
+        ...(existing?.title === undefined ? {} : { title: existing.title }),
       };
       return [
         {
@@ -187,9 +189,10 @@ class FileReviewStore implements ReviewStore {
       const status = current && statusRank[captured.status] > statusRank[thread.status]
         ? captured.status
         : thread.status;
-      const nextThread = messages === thread.messages && status === thread.status
+      const title = thread.title ?? captured.title;
+      const nextThread = messages === thread.messages && status === thread.status && title === thread.title
         ? thread
-        : { ...thread, messages, status };
+        : { ...thread, messages, status, ...(title === undefined ? {} : { title }) };
       if (events === snapshot.events && nextThread === thread) {
         return [snapshot, thread];
       }
@@ -378,10 +381,15 @@ function readSnapshot(value: unknown, workspaceRoot: string): ReviewSnapshot {
   return freezeSnapshot({ version: 1, workspaceRoot, threads, events });
 }
 
+/** One line of at most `maximumTitleLength` characters. */
+function readTitle(value: unknown): string {
+  return readBoundedText(value, 'title', maximumTitleLength, true).replaceAll(/\s+/gu, ' ').trim();
+}
+
 /** Validate a stored review thread and its nested messages. */
 function readThread(value: unknown): ReviewThread {
   const record = readObject(value, 'thread');
-  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin']);
+  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'title']);
   const messages = readArray(record['messages'], 'messages').map(readMessage);
   if (record['origin'] !== undefined && record['origin'] !== 'analysis') {
     throw new ReviewStoreError('Invalid thread origin.');
@@ -396,6 +404,7 @@ function readThread(value: unknown): ReviewThread {
     intent: readIntent(record['intent']), status: readStatus(record['status']),
     resolved: readBoolean(record['resolved'], 'resolved'),
     outdated: readBoolean(record['outdated'], 'outdated'), latestEventId: readId(record['latestEventId']),
+    ...(record['title'] === undefined ? {} : { title: readTitle(record['title']) }),
   };
 }
 

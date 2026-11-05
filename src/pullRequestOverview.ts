@@ -50,8 +50,10 @@ export interface OverviewState {
     /** Commits Claude made while answering this thread, oldest first. */
     readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
     readonly url?: string;
-    /** Set when the thread answers a GitHub thread, so publishing replies inside it. */
-    readonly linked?: true;
+    /** The GitHub thread this one answers; the page shows it inside that thread, and publishing replies there. */
+    readonly linkedTo?: string;
+    /** Claude's few-word name for the thread. */
+    readonly title?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
     readonly side: DiffSide;
@@ -755,6 +757,7 @@ tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
 .thread{--accent:var(--claude);--tint:var(--claude-soft);max-width:860px;box-sizing:border-box;padding:0 var(--space-12) var(--space-12);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:clip;background:var(--surface-raised);font:13px/20px var(--font-ui)}
 .thread.github{--accent:var(--github);--tint:var(--github-soft)}.thread.pending,.thread.draft{border:1px dashed var(--accent)}
 .thread+.thread{margin-top:var(--space-6)}
+.thread .thread{max-width:none;margin-top:var(--space-8)}.thread .thread>summary.strip{position:static}.strip .title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ink)}
 .thread>summary,.thread>.strip{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;margin:0 calc(-1 * var(--space-12));padding:var(--space-4) var(--space-12);font-size:12px;line-height:18px;background:var(--tint);border-bottom:1px solid var(--line-strong)}
 .thread:not([open])>summary{border-bottom:0}
 .thread>summary.strip{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 36px);z-index:0;background:linear-gradient(var(--tint),var(--tint)),var(--surface-raised);cursor:pointer;list-style:none}
@@ -805,7 +808,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .file-note,.step-note{padding:var(--space-8) var(--space-12);border-bottom:1px solid var(--line)}.file-note .tag{font-size:12px;font-weight:600;color:var(--claude)}
 .step>.diff>.thread{max-width:none;margin:var(--space-8) 10px}
 .thread-group{padding:var(--space-2) 0}.thread-group-head{display:flex;align-items:center;gap:var(--space-6);padding:var(--space-4) 0;cursor:pointer;user-select:none}
-.card-thread{display:grid;grid-template-columns:minmax(0,11em) minmax(0,1fr) auto auto;align-items:baseline;column-gap:var(--space-12);padding:var(--space-2) var(--space-6) var(--space-2) var(--space-8);border-left:2px solid var(--accent);font-size:12px;cursor:pointer}.card-thread+.card-thread{border-top:0}.card-thread:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.card-thread{display:grid;grid-template-columns:minmax(0,11em) minmax(0,1fr) auto auto;align-items:baseline;column-gap:var(--space-12);padding:var(--space-2) var(--space-6) var(--space-2) var(--space-8);border-left:2px solid var(--accent);font-size:12px;cursor:pointer}.card-thread+.card-thread{border-top:0}.card-thread.nested .where{padding-left:var(--space-12)}.card-thread:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
 .card-thread .name,.card-thread .text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card-thread .where{display:flex;min-width:0;font-family:var(--font-code);color:var(--ink-muted)}.card-thread .state{color:var(--ink-muted)}
 .card-thread code{font-family:var(--font-code);font-size:.92em}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
@@ -965,6 +968,7 @@ export function buildOverviewState(
     analysis,
     threads: session.store.threads.map((thread) => {
       const publication = session.publication?.(thread.id);
+      const linkedTo = session.linkedGitHubThread?.(thread.id);
       const activity = session.activity?.(thread.id);
       const working = thread.resolved ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
         : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
@@ -990,7 +994,8 @@ export function buildOverviewState(
           return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
         }),
         ...(publication === undefined ? {} : { url: publication.url }),
-        ...(session.linkedToGitHub?.(thread.id) === true ? { linked: true as const } : {}),
+        ...(linkedTo === undefined ? {} : { linkedTo }),
+        ...(thread.title === undefined ? {} : { title: thread.title }),
         ...(opened.commits(thread.id).length === 0 ? {} : { commits: opened.commits(thread.id) }),
       };
     }),

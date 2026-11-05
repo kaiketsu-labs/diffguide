@@ -228,3 +228,18 @@ test('keeps oversized legacy snapshots readable and accepts follow-ups', async (
   assert.equal(followup.messages.length, 2);
   assert.equal(followup.anchor.selectedText, legacyAnchor.selectedText);
 });
+
+test('keeps the first title Claude gives a thread across restarts', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const thread = await store.submit(anchor(), 'Should this handle null?', 'ask');
+  await store.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'Yes.', title: '  Null   check\nin example ' });
+  const followUp = await store.submit(anchor(), 'Add it then.', 'implement', thread.id);
+  await store.updateFromAgent({ eventId: followUp.latestEventId, status: 'ready', text: 'Added.', title: 'Something else' });
+  await store.flush();
+  const reopened = await createReviewStore(file, root);
+  assert.equal(reopened.threads[0]?.title, 'Null check in example');
+});
+
+test('rejects overlong agent titles', () => {
+  assert.throws(() => parseAgentUpdate({ eventId: randomUUID(), status: 'answered', text: 'ok', title: 'x'.repeat(81) }), ReviewStoreError);
+});

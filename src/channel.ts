@@ -16,7 +16,7 @@ import {
 } from './connection.js';
 import { readCustomInstructions } from './customInstructions.js';
 import { buildReviewPrompt, reviewInstructions, reviewReplyInstructions } from './eventPrompt.js';
-import { maximumReplyLength } from './limits.js';
+import { maximumReplyLength, maximumTitleLength } from './limits.js';
 import { ownsSession } from './sessionBinding.js';
 
 /** Produce a tool result without writing non-protocol output to standard output. */
@@ -132,6 +132,7 @@ async function main(): Promise<void> {
             event_id: { type: 'string', minLength: 1, maxLength: 256 },
             text: { type: 'string', description: reviewReplyInstructions, minLength: 1, maxLength: maximumReplyLength },
             status: { type: 'string', enum: ['answered', 'ready'] },
+            title: { type: 'string', description: 'On your first reply in a thread: 3 to 6 words naming what the thread is about, like "Null check in parseUser". Later titles are ignored.', minLength: 1, maxLength: maximumTitleLength },
           },
           required: ['event_id', 'text', 'status'], additionalProperties: false,
         },
@@ -159,7 +160,7 @@ async function main(): Promise<void> {
       const supported = ['acknowledge_review', 'set_review_working', 'reply_to_review'];
       if (!supported.includes(request.params.name)) return result('Unknown Pair Review tool.', true);
       const isReply = request.params.name === 'reply_to_review';
-      const eventId = eventIdFromArguments(request.params.arguments, isReply ? ['event_id', 'text', 'status'] : ['event_id']);
+      const eventId = eventIdFromArguments(request.params.arguments, isReply ? ['event_id', 'text', 'status', 'title'] : ['event_id']);
       let update: AgentUpdate;
       if (isReply) {
         const argsRecord = record(request.params.arguments);
@@ -167,7 +168,10 @@ async function main(): Promise<void> {
           || argsRecord.text.trim().length === 0 || (argsRecord.status !== 'answered' && argsRecord.status !== 'ready')) {
           return result('Provide non-empty reply text and status answered or ready.', true);
         }
-        update = { eventId, status: argsRecord.status, text: argsRecord.text };
+        if (argsRecord.title !== undefined && (!isText(argsRecord.title, maximumTitleLength) || argsRecord.title.trim().length === 0)) {
+          return result(`Provide a title of 1 to ${maximumTitleLength} characters, or leave it out.`, true);
+        }
+        update = { eventId, status: argsRecord.status, text: argsRecord.text, ...(argsRecord.title === undefined ? {} : { title: argsRecord.title }) };
       } else {
         update = { eventId, status: request.params.name === 'acknowledge_review' ? 'received' : 'working' };
       }
