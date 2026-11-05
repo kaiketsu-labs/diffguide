@@ -641,7 +641,7 @@ export async function createReviewController(
     let thread: ReviewThread | undefined = owner.thread;
     if (!visibility.includes(thread)) await showResolved(true);
     let binding = bindings.get(thread.id);
-    if (binding?.native.uri.scheme === 'file') {
+    if (binding !== undefined && binding.native.uri.scheme !== contextScheme) {
       try {
         await vscode.workspace.fs.stat(binding.native.uri);
       } catch {

@@ -564,7 +564,19 @@ interface FakeTreeView {
   readonly provider: vscode.TreeDataProvider<vscode.TreeItem>;
   readonly checkboxes: EventEmitter<{ readonly items: readonly [unknown, number][] }>;
   readonly onDidChangeCheckboxState: vscode.Event<{ readonly items: readonly [unknown, number][] }>;
+  readonly dragAndDrop: vscode.TreeDragAndDropController<unknown> | undefined;
   dispose(): void;
+}
+
+/** Carry dragged tree rows between the drag and drop handlers. */
+export class DataTransferItem {
+  constructor(readonly value: unknown) {}
+}
+
+export class DataTransfer {
+  readonly #items = new Map<string, DataTransferItem>();
+  get(mimeType: string): DataTransferItem | undefined { return this.#items.get(mimeType); }
+  set(mimeType: string, item: DataTransferItem): void { this.#items.set(mimeType, item); }
 }
 export const window = {
   activeColorTheme: { kind: ColorThemeKind.Dark as number },
@@ -587,10 +599,10 @@ export const window = {
   onDidChangeVisibleTextEditors: editorEvents.visible.event,
   onDidChangeTextEditorSelection: editorEvents.selection.event,
   onDidChangeWindowState: editorEvents.focus.event,
-  createTreeView(_id: string, options: { readonly treeDataProvider: vscode.TreeDataProvider<vscode.TreeItem> }): FakeTreeView {
+  createTreeView(_id: string, options: { readonly treeDataProvider: vscode.TreeDataProvider<vscode.TreeItem>; readonly dragAndDropController?: vscode.TreeDragAndDropController<unknown> }): FakeTreeView {
     const checkboxes = new EventEmitter<{ readonly items: readonly [unknown, number][] }>();
     const tree = { title: '', description: '', message: '', visible: true, onDidChangeVisibility: new EventEmitter<{ readonly visible: boolean }>().event,
-      provider: options.treeDataProvider, checkboxes, onDidChangeCheckboxState: checkboxes.event, dispose(): void {} };
+      provider: options.treeDataProvider, checkboxes, onDidChangeCheckboxState: checkboxes.event, dragAndDrop: options.dragAndDropController, dispose(): void {} };
     this.trees.push(tree);
     return tree;
   },

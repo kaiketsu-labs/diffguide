@@ -752,12 +752,13 @@ td.num.pick:hover::after,td.num.pick:has(+td.code:hover)::after,td.num.pick:has(
 td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--brand-soft)}
 td.sel-start{box-shadow:inset 2px 0 0 var(--brand-line),inset 0 0 0 999px var(--brand-soft)}
 tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
-.thread{--accent:var(--claude);--tint:var(--claude-soft);max-width:860px;box-sizing:border-box;padding:0 var(--space-12) var(--space-12);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-raised);font:13px/20px var(--font-ui)}
+.thread{--accent:var(--claude);--tint:var(--claude-soft);max-width:860px;box-sizing:border-box;padding:0 var(--space-12) var(--space-12);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:clip;background:var(--surface-raised);font:13px/20px var(--font-ui)}
 .thread.github{--accent:var(--github);--tint:var(--github-soft)}.thread.pending,.thread.draft{border:1px dashed var(--accent)}
 .thread+.thread{margin-top:var(--space-6)}
 .thread>summary,.thread>.strip{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;margin:0 calc(-1 * var(--space-12));padding:var(--space-4) var(--space-12);font-size:12px;line-height:18px;background:var(--tint);border-bottom:1px solid var(--line-strong)}
 .thread:not([open])>summary{border-bottom:0}
-.thread>summary{cursor:pointer;list-style:none}.thread>summary::-webkit-details-marker{display:none}
+.thread>summary.strip{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 36px);z-index:0;background:linear-gradient(var(--tint),var(--tint)),var(--surface-raised);cursor:pointer;list-style:none}
+.thread>.unfold{display:block;width:calc(100% + 2 * var(--space-12));margin:0 calc(-1 * var(--space-12));border:0;border-radius:0;font-size:12px}.thread>summary::-webkit-details-marker{display:none}
 details.thread:not([open]){padding-bottom:0}
 .source{display:inline-flex;align-items:center;gap:var(--space-4);font-weight:600;color:var(--accent)}.source svg{width:14px;height:14px;fill:currentColor}
 .strip .muted:last-child{margin-left:auto}

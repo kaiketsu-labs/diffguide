@@ -108,6 +108,11 @@ let emojiFor: string | undefined;
 let mergeForm: { readonly auto: boolean } | undefined;
 const sending = new Set<string>();
 const threadOpen = new Map<string, boolean>();
+/** Threads whose earlier messages the user showed. */
+const threadUnfolded = new Set<string>();
+/** Threads longer than this show only their latest `unfoldedMessages` until unfolded. */
+const foldThreadsAbove = 4;
+const unfoldedMessages = 3;
 let focusNext: string | undefined;
 let sentPending = true;
 const contextLines = new Map<string, readonly string[]>();
@@ -1743,6 +1748,13 @@ function kindLabel(kind: 'github' | 'local' | 'analysis'): HTMLElement {
   return label;
 }
 
+/** Collapsing a thread from its stuck header would leave the page far below it; keep the header where it was on screen. */
+function keepInView(box: HTMLElement, summary: HTMLElement): void {
+  const before = summary.getBoundingClientRect().top;
+  if (box.getBoundingClientRect().top >= before) return;
+  box.addEventListener('toggle', () => { window.scrollBy(0, box.getBoundingClientRect().top - before); }, { once: true });
+}
+
 function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | 'local' | 'analysis', note: string, status: readonly string[], right: string): HTMLElementTagNameMap[K] {
   const node = el(tag, 'strip');
   const name = kindLabel(kind);
@@ -1760,11 +1772,28 @@ function threadBox(thread: Thread): HTMLElement {
   box.addEventListener('toggle', () => { if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open); });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
-  box.append(strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
+  const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
-    status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine)));
+    status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine));
+  summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
+  box.append(summary);
+  const folded = thread.messages.length > foldThreadsAbove ? thread.messages.length - unfoldedMessages : 0;
+  const foldedItems: HTMLElement[] = [];
   thread.messages.forEach((entry, index) => {
     const item = message(entry, thread);
+    if (index < folded) {
+      item.hidden = !threadUnfolded.has(thread.id);
+      foldedItems.push(item);
+    }
+    if (index === 0 && folded > 0) {
+      const label = (): string => `${threadUnfolded.has(thread.id) ? 'Hide' : 'Show'} ${folded} earlier ${folded === 1 ? 'message' : 'messages'}`;
+      const toggle = button(label(), () => {
+        if (!threadUnfolded.delete(thread.id)) threadUnfolded.add(thread.id);
+        for (const each of foldedItems) each.hidden = !threadUnfolded.has(thread.id);
+        toggle.textContent = label();
+      }, 'quiet unfold');
+      box.append(toggle);
+    }
     const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
     if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
     box.append(item);

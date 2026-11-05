@@ -10,7 +10,7 @@ import { fileTree, type FileFolder } from '../src/fileTree.js';
 import { registerPullRequestView } from '../src/pullRequestView.js';
 import { groupSearchResults, parseGitRemote, pickGitHubRemote } from '../src/pullRequests.js';
 import type { PullRequestWorktrees } from '../src/pullRequestView.js';
-import { EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
+import { DataTransfer, EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
 
 const ghEntry = {
   author: { id: 'MDQ', is_bot: false, login: 'octo', name: 'Octo' },
@@ -605,3 +605,79 @@ test('filters PRs by author and shows their size and dates', async (t) => {
   assert.equal(workspace.get('pairReview.authorFilter'), undefined);
 });
 
+
+test('pins PRs above the role sections in the dragged order and drops them once GitHub reports them closed', async (t) => {
+  window.trees.length = 0;
+  const pr = (number: number, title: string): PullRequestSummary => ({ ...summary, number, title, draft: false });
+  let reviewRequested = [pr(1, 'One'), pr(2, 'Two'), pr(3, 'Three')];
+  let open = new Set<number>();
+  const asked: number[][] = [];
+  const provider = {
+    ...mockPullRequestProvider,
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [],
+    listReviewRequested: async () => reviewRequested,
+    openPullRequests: async (numbers: readonly number[]) => {
+      asked.push([...numbers]);
+      return numbers.filter((number) => open.has(number)).map((number) => pr(number, `Still open ${number}`));
+    },
+  } as unknown as PullRequestProvider;
+  const workspace = new FakeMemento();
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), workspace);
+  t.after(() => { view.dispose(); });
+  const fake = window.trees.at(-1);
+  const tree = fake?.provider as vscode.TreeDataProvider<unknown>;
+  const reviewRows = async () => {
+    const roles = await level(tree);
+    const review = roles.find(({ item }) => item.label === 'REVIEW REQUESTED');
+    const [repository] = await level(tree, review?.node);
+    return repository === undefined ? [] : await level(tree, repository.node);
+  };
+  const shown = async () => {
+    const roles = await level(tree);
+    const pinned = roles[0]?.item.label === 'PINNED' ? await level(tree, roles[0].node) : [];
+    return {
+      roles: roles.map(({ item }) => `${String(item.label)} ${String(item.description)}`),
+      pinned: pinned.map(({ item }) => `${String(item.label)} · ${String(item.description)} · ${String(item.contextValue)}`),
+    };
+  };
+
+  const [one, two, three] = await reviewRows();
+  await commands.executeCommand('pairReview.pinPullRequest', three?.node);
+  await commands.executeCommand('pairReview.pinPullRequest', one?.node);
+  assert.deepEqual(await shown(), {
+    roles: ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0'],
+    pinned: ['Three · #3 · app · review · octo · pairReview.pullRequest.pinned', 'One · #1 · app · review · octo · pairReview.pullRequest.pinned'],
+  });
+  assert.deepEqual((await reviewRows()).map(({ item }) => item.label), ['Two']);
+
+  const [pinnedThree, pinnedOne] = await level(tree, (await level(tree))[0]?.node);
+  const drag = async (nodes: unknown[], target: unknown): Promise<void> => {
+    const data = new DataTransfer();
+    await fake?.dragAndDrop?.handleDrag?.(nodes, data as unknown as vscode.DataTransfer, undefined as never);
+    await fake?.dragAndDrop?.handleDrop?.(target, data as unknown as vscode.DataTransfer, undefined as never);
+  };
+  await drag([pinnedOne?.node], pinnedThree?.node);
+  assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three']);
+  await drag([two?.node], (await level(tree))[0]?.node);
+  assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three', 'Two']);
+  assert.deepEqual((await shown()).roles, ['PINNED 3', 'REVIEW REQUESTED 0', 'MINE 0']);
+
+  await commands.executeCommand('pairReview.unpinPullRequest', (await level(tree, (await level(tree))[0]?.node))[2]?.node);
+  assert.deepEqual((await shown()).roles, ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0']);
+
+  reviewRequested = [pr(2, 'Two')];
+  open = new Set([1]);
+  await commands.executeCommand('pairReview.refreshPullRequests');
+  await level(tree);
+  await settle();
+  assert.deepEqual(await shown(), {
+    roles: ['PINNED 1', 'REVIEW REQUESTED 1', 'MINE 0'],
+    pinned: ['Still open 1 · #1 · app · review · octo · pairReview.pullRequest.pinned'],
+  });
+  assert.deepEqual(asked, [[1, 3]]);
+
+  await commands.executeCommand('pairReview.markPullRequestMerged', 'acme/app#1');
+  await settle();
+  assert.deepEqual((await shown()).roles, ['REVIEW REQUESTED 1', 'MINE 0']);
+});
