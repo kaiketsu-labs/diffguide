@@ -16,6 +16,7 @@ import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
 import { conflictFixLabel, type LocalCommit } from './conflicts.js';
+import { publishableText } from './pullRequestComments.js';
 import type { MediaPreview } from './media.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
@@ -52,6 +53,8 @@ export interface OverviewState {
     readonly url?: string;
     /** The GitHub thread this one answers; the page shows it inside that thread, and publishing replies there. */
     readonly linkedTo?: string;
+    /** What posting the thread on GitHub sends unless the user edits it; set while it is open and not posted. */
+    readonly draft?: string;
     /** Claude's few-word name for the thread. */
     readonly title?: string;
     readonly path: string;
@@ -163,6 +166,8 @@ export interface OverviewActions {
   /** Comment on the PR diff on GitHub, into the pending review or posted right away. */
   commentOnGitHub(comment: Omit<PageComment, 'intent'>, pending: boolean): Promise<void>;
   replyOnGitHub(threadId: string, text: string): Promise<void>;
+  /** Post a local thread on the PR diff with the text the user edited on the page. */
+  postToGitHub(threadId: string, text: string, pending: boolean): Promise<void>;
   /** Hand a GitHub thread to Claude in a linked local thread; an empty `note` asks Claude to answer or implement the feedback as is. */
   askAboutGitHub(threadId: string, note: string, intent: CommentIntent): Promise<void>;
   resolveOnGitHub(threadId: string, resolved: boolean): Promise<void>;
@@ -273,6 +278,7 @@ export type PageMessage =
   | { readonly action: 'unread'; readonly ids: readonly string[] }
   | { readonly action: 'reply'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
+  | { readonly action: 'github-publish'; readonly form: string; readonly id: string; readonly text: string; readonly pending: boolean }
   | { readonly action: 'github-ask'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
@@ -455,6 +461,9 @@ export async function showPullRequestOverview(
         else if (action === 'publish' && typeof id === 'string') await actions.publish(id);
         else if (action === 'github-reply' && typeof id === 'string' && isText(text) && state.github?.some((thread) => thread.id === id)) {
           await actions.replyOnGitHub(id, text.trim());
+          post({ done: formKey });
+        } else if (action === 'github-publish' && typeof id === 'string' && isText(text) && typeof pending === 'boolean') {
+          await actions.postToGitHub(id, text.trim(), pending);
           post({ done: formKey });
         } else if (action === 'github-ask' && typeof id === 'string' && isOptionalText(text) && commentIntents.includes(intent) && state.github?.some((thread) => thread.id === id)) {
           await actions.askAboutGitHub(id, text ?? '', intent as CommentIntent);
@@ -995,6 +1004,7 @@ export function buildOverviewState(
         }),
         ...(publication === undefined ? {} : { url: publication.url }),
         ...(linkedTo === undefined ? {} : { linkedTo }),
+        ...(publication === undefined && !thread.resolved ? { draft: publishableText(thread) } : {}),
         ...(thread.title === undefined ? {} : { title: thread.title }),
         ...(opened.commits(thread.id).length === 0 ? {} : { commits: opened.commits(thread.id) }),
       };
