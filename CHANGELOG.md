@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- When VS Code has no GitHub sign-in for a host, Pair Review uses GitHub CLI's token for it (`gh auth token --hostname <host>`). GitHub Enterprise users signed in to `gh` no longer sign in again after each window reload.
 - On your own PR, Claude answers Local threads in auto mode, so **Implement** can run tests, builds and git commands. Before, it could only edit files and refused every command.
 - On someone else's PR, Claude also answers Local threads in auto mode, so it can run commands and try a change to test an idea. After each answer, Pair Review discards its edits and commits, unless the worktree already had uncommitted changes. Git hooks, and the checkout's `CLAUDE.md`, skills, hooks, settings and MCP servers, stay off. Commands that run tests or builds still run the PR author's code.
 - Claude can read and search the workspace's other folders while answering a Local thread.

@@ -57,9 +57,9 @@ test('parses PR files and rejects paths outside the repository', () => {
 });
 
 test('sends github.com to its API and only the configured enterprise host to its own', () => {
-  assert.deepEqual(githubEndpoints('github.com', undefined), { rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql', authProvider: 'github' });
-  assert.deepEqual(githubEndpoints('git.acme.dev', 'https://Git.Acme.dev/'), { rest: 'https://git.acme.dev/api/v3', graphql: 'https://git.acme.dev/api/graphql', authProvider: 'github-enterprise' });
-  assert.deepEqual(githubEndpoints('acme.ghe.com', 'https://acme.ghe.com'), { rest: 'https://api.acme.ghe.com', graphql: 'https://api.acme.ghe.com/graphql', authProvider: 'github-enterprise' });
+  assert.deepEqual(githubEndpoints('github.com', undefined), { host: 'github.com', rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql', authProvider: 'github' });
+  assert.deepEqual(githubEndpoints('git.acme.dev', 'https://Git.Acme.dev/'), { host: 'git.acme.dev', rest: 'https://git.acme.dev/api/v3', graphql: 'https://git.acme.dev/api/graphql', authProvider: 'github-enterprise' });
+  assert.deepEqual(githubEndpoints('acme.ghe.com', 'https://acme.ghe.com'), { host: 'acme.ghe.com', rest: 'https://api.acme.ghe.com', graphql: 'https://api.acme.ghe.com/graphql', authProvider: 'github-enterprise' });
   assert.throws(() => githubEndpoints('git.acme.dev', undefined), /github-enterprise\.uri/u);
   assert.throws(() => githubEndpoints('git.acme.dev', 'https://other.example.com'), /github-enterprise\.uri/u);
 });

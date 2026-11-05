@@ -4,7 +4,7 @@ PR handoff is a separate action. `/r` continues to ask Claude for a local conver
 
 ## Preview and publish
 
-The first handoff asks you to sign in to GitHub in VS Code. GitHub Enterprise works for the one host set in `github-enterprise.uri`. Open the local branch that already has an open PR. In VS Code's Review toolbar choose **Pair Review: An GitHub-PR übergeben**.
+The first handoff asks you to sign in to GitHub in VS Code. GitHub Enterprise works for the one host set in `github-enterprise.uri`. Without a VS Code sign-in, Pair Review uses GitHub CLI's token for the host if `gh` is signed in there. Open the local branch that already has an open PR. In VS Code's Review toolbar choose **Pair Review: An GitHub-PR übergeben**.
 
 Choose the available summaries and unresolved questions to include. The preview identifies the destination repository and PR and lets you edit the Markdown before publishing. It is a snapshot: later Claude replies or local comments do not silently change what you are about to send.
 
