@@ -8,9 +8,8 @@
     "color": "#101B29",
     "theme": "dark"
   },
-  "publisher": "pair-review-dev",
-  "private": true,
-  "license": "UNLICENSED",
+  "publisher": "kaiketsu-labs",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/kaiketsu-labs/pair-review.git"
@@ -24,7 +23,21 @@
     "node": ">=20"
   },
   "categories": [
+    "SCM Providers",
+    "Machine Learning",
     "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "code review",
+    "comments",
+    "pull request",
+    "ai",
+    "inline review",
+    "git",
+    "diff",
+    "peer review"
   ],
   "main": "./dist/extension.cjs",
   "activationEvents": [
