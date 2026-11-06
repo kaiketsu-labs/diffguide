@@ -1697,7 +1697,7 @@ function render(state: OverviewState): void {
   if (progress === undefined) claude.textContent = state.claude.text;
   else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), stop, terminal);
   stop.hidden = !state.claude.running;
-  if (!state.claude.running) { stop.disabled = false; stop.textContent = 'Stop'; }
+  if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; stop.textContent = 'Stop'; }
   claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip claude working' : 'chip';
   $('retry').hidden = !state.claude.retry;
   terminal.className = state.claude.running ? 'small' : 'quiet';
@@ -2090,7 +2090,7 @@ function threadBox(thread: Thread): HTMLElement {
     const live = el('div', 'claude-live');
     live.dataset.thread = thread.id;
     const progress = thread.source === 'local' ? thread.progress : undefined;
-    live.append(progress === undefined ? stepLog([{ verb: working, done: false }]) : stepLog(progress.steps, progress.startedAt));
+    live.append(progress === undefined ? stepLog([{ verb: working, done: false }]) : stepLog(progress.steps, progress.startedAt), stopButton());
     box.append(live);
   }
   const key = 'reply:' + thread.id;
@@ -2163,6 +2163,25 @@ function threadBox(thread: Thread): HTMLElement {
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
   return box;
+}
+
+/** Set from a Stop click until the state reports Claude idle, so redrawn Stop buttons keep saying so. */
+let stoppingClaude = false;
+
+/** Stop Claude's run on this PR; every Stop button on the page shows it stopping. */
+function stopClaude(): void {
+  stoppingClaude = true;
+  for (const stop of document.querySelectorAll<HTMLButtonElement>('#stop-claude, .stop-claude')) { stop.disabled = true; stop.textContent = 'Stopping…'; }
+  $('error').textContent = '';
+  post({ action: 'stop-claude' });
+}
+
+/** Stop beside a thread's live log, for the run that is answering it. */
+function stopButton(): HTMLButtonElement {
+  const stop = button(stoppingClaude ? 'Stopping…' : 'Stop', stopClaude, 'small stop-claude');
+  stop.disabled = stoppingClaude;
+  stop.dataset.tip = 'Stop Claude\'s run on this PR. The comments it was answering wait for Retry.';
+  return stop;
 }
 
 /** Reply in the GitHub thread this local thread sits in, else open the box that posts it on the diff. */
@@ -3806,13 +3825,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
 
 $('show-unpushed').addEventListener('click', showUnpushed);
 for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
-$('stop-claude').addEventListener('click', () => {
-  const stop = $<HTMLButtonElement>('stop-claude');
-  stop.disabled = true;
-  stop.textContent = 'Stopping…';
-  $('error').textContent = '';
-  post({ action: 'stop-claude' });
-});
+$('stop-claude').addEventListener('click', stopClaude);
 $('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
   'Remove the worktree for ' + (current?.number === undefined ? 'this PR' : '#' + current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
   'Remove worktree', () => post({ action: 'remove-worktree' })));
