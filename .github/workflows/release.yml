@@ -106,19 +106,24 @@ jobs:
             --title "Pair Review $RELEASE_VERSION" --notes-file release-notes.md
 
       - name: Publish to VS Code Marketplace
-        if: ${{ secrets.VSCE_PAT != '' || vars.VSCE_USE_OIDC == 'true' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           USE_OIDC: ${{ vars.VSCE_USE_OIDC }}
         run: |
           if [ -n "$VSCE_PAT" ]; then
             npx --yes @vscode/vsce publish --packagePath release-assets/*.vsix -p "$VSCE_PAT"
-          else
+          elif [ "$USE_OIDC" = "true" ]; then
             npx --yes @vscode/vsce publish --packagePath release-assets/*.vsix --oidc
+          else
+            echo "Skipping VS Code Marketplace publication (neither VSCE_PAT secret nor VSCE_USE_OIDC variable is configured)."
           fi
 
       - name: Publish to Open VSX Registry
-        if: ${{ secrets.OVSX_PAT != '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx publish release-assets/*.vsix -p "$OVSX_PAT"
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            npx --yes ovsx publish release-assets/*.vsix -p "$OVSX_PAT"
+          else
+            echo "Skipping Open VSX publication (OVSX_PAT secret is not configured)."
+          fi
