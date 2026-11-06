@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Stopping Claude ends the whole run, including the tools and MCP servers it started. A `claude` shell function in your shell setup kept Claude running after a stop before.
+- A thread whose Claude run you stopped reads **Stopped** instead of staying on "Claude is working", and **Retry** sends it to Claude again, also when Claude had already picked it up.
 - After you resolve or reopen a GitHub thread, close or reopen the PR, convert it to draft, mark it ready or edit its title, the review page keeps showing your change. GitHub can answer with the old state for a few seconds after a change, and the page used to jump back to it and later forward again. The page checks again until GitHub reports the change, for up to 30 seconds.
 - The review page and the Pull Requests view show a new PR title after Claude changes it, or after someone edits it on GitHub. The page's tab title follows. The page reloads the PR from GitHub each time a Claude run ends.
 - Refreshing the Pull Requests view no longer pushes the rows down with an "Updating pull requests..." message; it shows only while the list loads for the first time. Rows keep their place and expansion across reloads.

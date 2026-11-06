@@ -69,6 +69,22 @@ test('renders local messages as Markdown with highlighted code, and marks whole-
   assert.equal(view?.messages[1]?.suggestions, undefined);
 });
 
+test('a thread Claude was answering when the user stopped it reads Stopped, not working', () => {
+  const thread = {
+    id: 't1', intent: 'implement', status: 'working', resolved: false, outdated: false, latestEventId: 'e1',
+    anchor: { path: 'src/a.ts', startLine: 1, endLine: 1, side: 'working', selectedText: 'x' },
+    messages: [{ id: 'm1', author: 'human', text: 'Fix it', createdAt: '2026-11-06T10:00:00.000Z' }],
+  };
+  const opened = {
+    session: { store: { threads: [thread] }, activity: () => 'Stopped', publication: () => undefined },
+    runner: { activity: { running: false, threads: new Set(['t1']), skipped: 0, stopped: true, error: undefined } },
+    commits: () => [],
+  } as unknown as PullRequestSession;
+  const [view] = buildOverviewState({ number: 3, title: 'T', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'f', baseBranch: 'main' }, opened, [], [], 1).threads;
+  assert.equal(view?.working, undefined);
+  assert.equal(view?.status, 'Stopped');
+});
+
 test('quotes a GitHub thread for Claude after the user\'s note, or a default for the intent', () => {
   const comments = [{ author: 'bob', body: 'Rename x\n\nto userId.' }, { author: 'alice', body: 'Agreed ' }];
   assert.equal(githubFeedbackRequest(' Also the tests ', 'implement', comments),

@@ -227,6 +227,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         const { running, step, threads, error, skipped, stopped } = runner.activity;
         if (!threads.has(threadId)) return undefined;
         if (running) return `Claude · ${step ?? 'Working'}`;
+        if (stopped === true) return 'Stopped';
         if (error !== undefined) return `Claude failed · ${error}`;
         const waiting = skipped > 0 && store.pendingEvents.some((event) => event.threadId === threadId);
         return waiting && stopped === true ? 'Stopped' : waiting ? 'Not picked up by Claude' : undefined;

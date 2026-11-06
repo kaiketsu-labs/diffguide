@@ -156,6 +156,35 @@ test('stores a comment on a PR file in that PR\'s own review, anchored to the PR
   await stat(path.join(reviewDataPath(worktree), 'connection.json'));
 });
 
+test('a thread whose Claude run the user stopped reads Stopped until Retry', async () => {
+  const { storage, source, context } = await fixture();
+  const { EventEmitter } = await import('node:events');
+  const { PassThrough } = await import('node:stream');
+  const sessions = new PullRequestSessions(context, storage, source, connect, {
+    resolve: async () => ({ executable: '/bin/claude', mcpPath: '/data/mcp.json' }),
+    spawn: (() => {
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null,
+        kill: () => { child.stdout.end(); child.stderr.end(); setImmediate(() => child.emit('close', 143)); return true; } });
+      return child;
+    }) as never,
+  });
+  cleanup.push(async () => { sessions.dispose(); });
+  const opened = await sessions.open('acme/app', 5);
+  const thread = await opened.session.store.submit({
+    path: 'feature.ts', startLine: 1, endLine: 1, selectedText: 'export const feature = 1;',
+    contextBefore: '', contextAfter: '', documentHash: 'a'.repeat(64), side: 'working', baseRevision: 'b'.repeat(40),
+  }, 'Fix it', 'implement');
+  await until(() => opened.runner.activity.running && opened.runner.activity.threads.has(thread.id));
+  await opened.session.store.updateFromAgent({ eventId: thread.latestEventId, status: 'working' });
+  await opened.runner.stop();
+  assert.equal(opened.session.store.threads[0]?.status, 'working');
+  assert.equal(opened.session.activity?.(thread.id), 'Stopped');
+  opened.runner.retry();
+  assert.ok(opened.runner.activity.running);
+  assert.match(opened.session.activity?.(thread.id) ?? '', /^Claude · /u);
+  await opened.runner.stop();
+});
+
 test('restores PR reviews created from this checkout and ignores other checkouts', async () => {
   const { source, storage, context } = await fixture();
   const noClaude = { resolve: () => Promise.reject(new Error('not started in tests')) };
