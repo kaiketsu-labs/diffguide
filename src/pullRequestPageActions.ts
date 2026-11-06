@@ -128,7 +128,7 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       if ((await git(context.folder, ['status', '--porcelain', '--', ...paths])).trim() !== '') throw new Error('Files these suggestions change have uncommitted changes. Commit or discard them first.');
       const { head, ahead } = await syncKeepingLocalCommits(context.folder, number);
       const moved = ahead ? (await git(context.folder, ['diff', '--name-only', head, 'HEAD', '--', ...paths])).trim() : '';
-      if (moved) throw new Error(`Unpushed commits change ${moved.split('\n').join(', ')}, so the suggestion's lines may have moved. Push them first.`);
+      if (moved) throw new Error(`The worktree's ${moved.split('\n').join(', ')} differs from the PR's latest commit on GitHub, so the suggestion's lines may have moved. Push or rebase the unpushed commits first.`);
       const before = new Map<string, string>();
       try {
         for (const [path, suggestions] of edits) {

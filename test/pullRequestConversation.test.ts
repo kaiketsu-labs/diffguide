@@ -31,7 +31,7 @@ test('reads the Conversation tab: comments, reviews, pushes and events, and the 
     { __typename: 'SomethingNew', id: 'E4', createdAt: '2026-01-01T08:00:00Z' },
   ];
   const repository = {
-    viewerPermission: 'WRITE', squashMergeCommitTitle: 'PR_TITLE', squashMergeCommitMessage: 'SOMETHING_NEW', mergeCommitTitle: 'MERGE_MESSAGE', mergeCommitMessage: 'PR_BODY',
+    viewerPermission: 'WRITE', autoMergeAllowed: true, squashMergeCommitTitle: 'PR_TITLE', squashMergeCommitMessage: 'SOMETHING_NEW', mergeCommitTitle: 'MERGE_MESSAGE', mergeCommitMessage: 'PR_BODY',
     pullRequest: {
       id: 'PR_7', viewerCanReact: true, reactionGroups: reactions, mergeStateStatus: 'BLOCKED', reviewDecision: 'REVIEW_REQUIRED', viewerCanUpdateBranch: true, viewerCanMergeAsAdmin: false,
       viewerCanEnableAutoMerge: false, viewerCanDisableAutoMerge: true, isMergeQueueEnabled: true, mergeQueueEntry: { position: 0 }, headRefOid: oid('c'), headRef: null, isCrossRepository: false,
@@ -67,7 +67,7 @@ test('reads the Conversation tab: comments, reviews, pushes and events, and the 
   assert.equal(conversation.permission, 'write');
   assert.deepEqual(conversation.merge, {
     state: 'blocked', reviewDecision: 'required', canUpdateBranch: true, canBypass: false, autoMerge: { method: 'squash', enabledBy: 'alice' },
-    canEnableAutoMerge: false, canDisableAutoMerge: true, mergeQueue: true, queuePosition: 1, headOid: oid('c'), headDeleted: true,
+    canEnableAutoMerge: false, canDisableAutoMerge: true, autoMergeAllowed: true, mergeQueue: true, queuePosition: 1, headOid: oid('c'), headDeleted: true,
   });
   assert.deepEqual(conversation.checks, [
     { name: 'build', required: true, runId: 99, annotations: [{ path: 'src/a.ts', startLine: 4, endLine: 4, level: 'failure', title: 'TS2322', message: 'Wrong type' }] },
@@ -142,7 +142,7 @@ const conversation: PullRequestConversation = {
     { kind: 'comment', id: 'IC1', author: 'bob', avatarUrl: '', createdAt: '', bodyHtml: '', body: 'x', canEdit: false, canDelete: false, canHide: false, canReact: true, edited: false, reactions: [] },
   ],
   description: { id: 'PR_7', reactions: [], canReact: true }, viewerLogin: 'viewer', permission: 'read',
-  merge: { state: 'clean', canUpdateBranch: false, canBypass: false, canEnableAutoMerge: false, canDisableAutoMerge: false, mergeQueue: false, headOid: oid('c'), headDeleted: false },
+  merge: { state: 'clean', canUpdateBranch: false, canBypass: false, canEnableAutoMerge: false, canDisableAutoMerge: false, autoMergeAllowed: false, mergeQueue: false, headOid: oid('c'), headDeleted: false },
   checks: [], linkedIssues: [], reviewIds: {}, awaitingApproval: [],
   commitDefaults: { squashTitle: 'PR_TITLE', squashBody: 'PR_BODY', mergeTitle: 'PR_TITLE', mergeBody: 'BLANK' },
 };

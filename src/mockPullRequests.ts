@@ -104,7 +104,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
   pullRequest: async () => undefined,
   conversation: async () => ({
     timeline: [], description: { id: 'mock', reactions: [], canReact: false }, viewerLogin: 'you', permission: 'read',
-    merge: { state: 'clean', canUpdateBranch: false, canBypass: false, canEnableAutoMerge: false, canDisableAutoMerge: false, mergeQueue: false, headOid: '', headDeleted: false },
+    merge: { state: 'clean', canUpdateBranch: false, canBypass: false, canEnableAutoMerge: false, canDisableAutoMerge: false, autoMergeAllowed: false, mergeQueue: false, headOid: '', headDeleted: false },
     checks: [], linkedIssues: [], reviewIds: {}, awaitingApproval: [],
     commitDefaults: { squashTitle: 'COMMIT_OR_PR_TITLE', squashBody: 'COMMIT_MESSAGES', mergeTitle: 'MERGE_MESSAGE', mergeBody: 'PR_TITLE' },
   }),

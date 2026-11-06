@@ -21,8 +21,9 @@ export async function syncToPullRequestHead(worktree: string, number: number, pu
   const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
   const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
   if (local === head) return;
-  const behind = local === pushedHead || await git(worktree, ['merge-base', '--is-ancestor', local, head]).then(() => true, () => false);
-  if (!behind) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+  const behind = local === pushedHead || await isAncestor(worktree, local, head);
+  if (!behind && await isAncestor(worktree, head, local)) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+  if (!behind) throw new Error('The PR worktree has commits that are not on GitHub, and GitHub has newer commits they do not build on. Rebase them onto the PR\'s latest commit or drop them first.');
   await git(worktree, ['checkout', '--quiet', '--detach', head]).catch((error: unknown) => {
     const blocking = /would be overwritten/u.test(String(error)) ? String(error).split('\n').filter((line) => line.startsWith('\t')).map((line) => line.trim()) : [];
     if (blocking.length === 0) throw error;
@@ -42,17 +43,20 @@ export async function catchUpWithPullRequest(worktree: string, number: number): 
 }
 
 /**
- * Before committing on the PR: move to its latest commit on GitHub unless local commits build on it.
- * Returns that commit, and whether the worktree is ahead of it, so a new commit waits to be pushed with the others.
+ * Before committing on the PR: move to its latest commit on GitHub unless the worktree has commits GitHub does not have.
+ * Returns that commit, and whether the worktree keeps such commits, built on it or on an older one, so a new commit waits to be pushed with them.
  */
 export async function syncKeepingLocalCommits(worktree: string, number: number): Promise<{ readonly head: string; readonly ahead: boolean }> {
   await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]);
   const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
   const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
-  if (local !== head && await git(worktree, ['merge-base', '--is-ancestor', head, local]).then(() => true, () => false)) return { head, ahead: true };
+  if (local !== head && !await isAncestor(worktree, local, head)) return { head, ahead: true };
   await syncToPullRequestHead(worktree, number);
   return { head, ahead: false };
 }
+
+const isAncestor = (worktree: string, older: string, newer: string): Promise<boolean> =>
+  git(worktree, ['merge-base', '--is-ancestor', older, newer]).then(() => true, () => false);
 
 /** Commit files of a PR worktree without pushing. `hooksOff` skips Git hooks, for someone else's PR. */
 export async function commitFiles(worktree: string, { path, message, hooksOff }: { readonly path: string | readonly string[]; readonly message: string; readonly hooksOff: boolean }): Promise<void> {
