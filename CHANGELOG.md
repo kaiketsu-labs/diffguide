@@ -14,7 +14,7 @@
 - The review page draws check marks, crosses and dots as straight codicon icons instead of font glyphs, in checks, reviewers, commits, the merge box, linked issues, read lines and Claude's step log.
 - The Checks list shows only the icon and the check's name. Hovering the icon, or a screen reader, still gives the state: Passed, Failed, Running or Skipped.
 - The expand arrow on Claude's commits inside a thread lines up with the commit's text.
-- While Claude runs on a PR, the review page shows **Stop** next to its steps. It stops the run, the header reads **Claude stopped**, the threads it was answering read **Stopped**, and **Retry** sends them again. No failure message pops up for a run you stopped.
+- While Claude runs on a PR, the review page shows **Stop** next to its steps in the header and in the thread Claude is answering. It stops the run, the header reads **Claude stopped**, the threads it was answering read **Stopped**, and **Retry** sends them again. No failure message pops up for a run you stopped.
 - **Implement** in a reply to a Local thread works without a note: Claude implements what the thread discussed. A new comment still needs text, and **Ask Claude** still needs a note.
 - The comment icon in a file's header on the review page opens a comment about the whole file above its diff. The thread stays there, reads **Whole file** instead of a line, and Claude is told the comment is about the file, not about lines. Posting it on GitHub makes a file-level comment.
 - Local threads have **Archive** next to **Resolve**. Archived threads leave the page and the Threads card; **Show archived threads** in the Files filter menu brings them back with **Unarchive**. Archiving keeps the conversation and is separate from resolving.
