@@ -17,7 +17,14 @@ export interface PullRequestSummary {
   readonly updatedAt?: string;
   /** Lines and files changed across the whole PR. */
   readonly changes?: { readonly additions: number; readonly deletions: number; readonly files: number };
+  /** Reviewers asked for a review who have not reviewed since; absent when nobody is pending. */
+  readonly requestedReviewers?: readonly RequestedReviewer[];
+  /** In the viewer's review requests: whether GitHub asked the viewer directly or one of the viewer's teams. */
+  readonly requestedVia?: 'you' | 'team';
 }
+
+/** A pending review request, to a person or a team; `name` is a login or a team's name. */
+export interface RequestedReviewer { readonly name: string; readonly team: boolean }
 
 export type ReviewVerdict = 'approved' | 'changes' | 'commented';
 
@@ -263,6 +270,8 @@ export interface PullRequestProvider {
   search(query: string): Promise<readonly PullRequestSummary[]>;
   /** The PRs among `numbers` that are still open, read fresh. */
   openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]>;
+  /** One PR in any state, or undefined when the repository has none with that number. */
+  pullRequest(number: number): Promise<PullRequestSummary | undefined>;
   conversation(number: number): Promise<PullRequestConversation>;
   /** Post a comment on the PR itself, outside any review. */
   addComment(number: number, body: string): Promise<void>;
@@ -317,6 +326,27 @@ export function parseGitRemote(url: string): GitHubRemote | undefined {
   return valid.test(owner) && valid.test(name) && valid.test(host) ? { host: host.toLowerCase(), owner, name } : undefined;
 }
 
+/** A pull request a link names; `host` is absent for the short `owner/name#57` form. */
+export interface PullRequestLink {
+  readonly host?: string;
+  readonly owner: string;
+  readonly name: string;
+  readonly number: number;
+}
+
+/** Read a PR from a GitHub link such as `https://github.com/owner/name/pull/57/files#discussion_r1`, or from `owner/name#57`. */
+export function parsePullRequestLink(link: string): PullRequestLink | undefined {
+  const trimmed = link.trim();
+  const short = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/u.exec(trimmed);
+  const full = short === null ? /^(?:https?:\/\/)?([A-Za-z0-9.-]+)(?::\d+)?\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/u.exec(trimmed) : null;
+  const [owner, name, digits] = short === null ? [full?.[2], full?.[3], full?.[4]] : [short[1], short[2], short[3]];
+  if (owner === undefined || name === undefined || digits === undefined) return undefined;
+  const number = Number(digits);
+  if (!Number.isSafeInteger(number) || number <= 0) return undefined;
+  const host = full?.[1]?.toLowerCase();
+  return host === undefined ? { owner, name, number } : { host, owner, name, number };
+}
+
 /** Order GitHub CLI uses when no default repository is set. */
 const remotePriority = ['upstream', 'github', 'origin'];
 
@@ -354,7 +384,8 @@ export function pickGitHubRemote(config: string): GitHubRemote | undefined {
 /** Open PRs by the viewer and requesting the viewer's review, keyed by lowercase `owner/name`. */
 type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>;
 
-const searchFields = 'number title url isDraft headRefName baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}}';
+const searchFields = 'number title url isDraft headRefName baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}} '
+  + 'reviewRequests(first:20){nodes{requestedReviewer{__typename ... on User{login} ... on Team{name} ... on Bot{login} ... on Mannequin{login}}}}';
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
 const viewerField = 'viewer{login name avatarUrl(size:40)}';
@@ -413,8 +444,8 @@ const conversationFields = `viewerPermission squashMergeCommitTitle squashMergeC
     ... on StatusContext{context isRequired(pullRequestNumber:$number)}}}}}}}
   ${timelineField}}`;
 
-/** Group search hits by repository, in the shape `parsePullRequestList` reads. */
-export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[]): SearchResults {
+/** Group search hits by repository, in the shape `parsePullRequestList` reads; with the viewer's login, review requests say whether they came to the viewer or a team. */
+export function groupSearchResults(mine: readonly unknown[], reviewRequested: readonly unknown[], viewer?: string): SearchResults {
   const grouped = new Map<string, { mine: unknown[]; reviewRequested: unknown[] }>();
   const add = (node: unknown, list: 'mine' | 'reviewRequested'): void => {
     const record = object(node);
@@ -431,7 +462,13 @@ export function groupSearchResults(mine: readonly unknown[], reviewRequested: re
   };
   for (const node of mine) add(node, 'mine');
   for (const node of reviewRequested) add(node, 'reviewRequested');
-  return new Map([...grouped].map(([key, entry]) => [key, { mine: parsePullRequestList(entry.mine), reviewRequested: parsePullRequestList(entry.reviewRequested) }]));
+  const via = (pullRequest: PullRequestSummary): PullRequestSummary => {
+    const reviewers = pullRequest.requestedReviewers ?? [];
+    const requestedVia = viewer !== undefined && reviewers.some((reviewer) => !reviewer.team && reviewer.name.toLowerCase() === viewer.toLowerCase()) ? 'you'
+      : reviewers.some((reviewer) => reviewer.team) ? 'team' : undefined;
+    return requestedVia === undefined ? pullRequest : { ...pullRequest, requestedVia };
+  };
+  return new Map([...grouped].map(([key, entry]) => [key, { mine: parsePullRequestList(entry.mine), reviewRequested: parsePullRequestList(entry.reviewRequested).map(via) }]));
 }
 
 /** Query pull requests through the user's GitHub sign-in in VS Code. */
@@ -498,12 +535,15 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   async #search(host: string): Promise<SearchResults> {
+    let viewer: string | undefined;
     const all = async (query: string): Promise<unknown[]> => {
       const nodes: unknown[] = [];
       let after: string | null = null;
       for (let page = 0; page < searchPages; page += 1) {
-        const data = await this.#graphqlOn(host, `query($query:String!,$after:String){search(query:$query,type:ISSUE,first:100,after:$after){
+        const data = await this.#graphqlOn(host, `query($query:String!,$after:String){viewer{login} search(query:$query,type:ISSUE,first:100,after:$after){
           pageInfo{hasNextPage endCursor} nodes{... on PullRequest{${searchFields}}}}}`, { query, after });
+        const login = object(data['viewer'] ?? {})['login'];
+        if (typeof login === 'string') viewer = login;
         const result = object(data['search']);
         if (Array.isArray(result['nodes'])) nodes.push(...(result['nodes'] as unknown[]).filter((node) => typeof node === 'object' && node !== null && 'number' in node));
         const info = object(result['pageInfo']);
@@ -516,7 +556,7 @@ export class GitHubApiProvider implements PullRequestProvider {
       all('is:pr is:open author:@me sort:created-desc'),
       all('is:pr is:open review-requested:@me sort:created-desc'),
     ]);
-    return groupSearchResults(mine, reviewRequested);
+    return groupSearchResults(mine, reviewRequested, viewer);
   }
 
   async listFiles(number: number): Promise<readonly PullRequestFile[]> {
@@ -705,6 +745,12 @@ export class GitHubApiProvider implements PullRequestProvider {
     const repository = object((await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`, {}))['repository']);
     const open = valid.map((number) => object(repository[`pr${number}`])).filter((node) => node['state'] === 'OPEN');
     return parsePullRequestList(open.map(searchNode));
+  }
+
+  async pullRequest(number: number): Promise<PullRequestSummary | undefined> {
+    if (!Number.isSafeInteger(number) || number <= 0) return undefined;
+    const repository = object((await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pr:pullRequest(number:${number}){${searchFields}}}}`, {}))['repository']);
+    return repository['pr'] === null || repository['pr'] === undefined ? undefined : parsePullRequestList([searchNode(repository['pr'])])[0];
   }
 
   async conversation(number: number): Promise<PullRequestConversation> {
@@ -963,6 +1009,7 @@ export function parsePullRequestList(value: unknown): readonly PullRequestSummar
     const createdAt = isoTime(record['createdAt']);
     const updatedAt = isoTime(record['updatedAt']);
     const [additions, deletions, files] = [record['additions'], record['deletions'], record['changedFiles']].map(count);
+    const requestedReviewers = requestedReviewersOf(record['reviewRequests']);
     return {
       number,
       title: text(record['title']),
@@ -975,7 +1022,22 @@ export function parsePullRequestList(value: unknown): readonly PullRequestSummar
       ...createdAt === undefined ? {} : { createdAt },
       ...updatedAt === undefined ? {} : { updatedAt },
       ...additions === undefined || deletions === undefined || files === undefined ? {} : { changes: { additions, deletions, files } },
+      ...requestedReviewers.length === 0 ? {} : { requestedReviewers },
     };
+  });
+}
+
+/** Pending reviewers from a `reviewRequests` connection, skipping entries GitHub left incomplete. */
+function requestedReviewersOf(value: unknown): readonly RequestedReviewer[] {
+  const nodes = typeof value === 'object' && value !== null ? (value as { nodes?: unknown }).nodes : undefined;
+  if (!Array.isArray(nodes)) return [];
+  return (nodes as readonly unknown[]).flatMap((node): RequestedReviewer[] => {
+    const reviewer = typeof node === 'object' && node !== null ? (node as { requestedReviewer?: unknown }).requestedReviewer : undefined;
+    if (typeof reviewer !== 'object' || reviewer === null) return [];
+    const { __typename: type, login, name } = reviewer as { __typename?: unknown; login?: unknown; name?: unknown };
+    const team = type === 'Team';
+    const label = team ? name : login;
+    return typeof label === 'string' && label ? [{ name: label, team }] : [];
   });
 }
 

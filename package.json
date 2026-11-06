@@ -241,6 +241,30 @@
         "icon": "$(search)"
       },
       {
+        "command": "pairReview.openPullRequestLink",
+        "title": "Open PR in Pair Review",
+        "category": "Pair Review",
+        "icon": "$(link)"
+      },
+      {
+        "command": "pairReview.copyPullRequestLink",
+        "title": "Copy Link",
+        "category": "Pair Review",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "pairReview.showAwaitingReviewOnly",
+        "title": "Show only my PRs awaiting review",
+        "category": "Pair Review",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "pairReview.showAllMine",
+        "title": "Show all my PRs",
+        "category": "Pair Review",
+        "icon": "$(eye-closed)"
+      },
+      {
         "command": "pairReview.cleanUpWorktrees",
         "title": "Clean up worktrees",
         "category": "Pair Review",
@@ -495,6 +519,21 @@
           "group": "2_grouping@1"
         },
         {
+          "command": "pairReview.showAwaitingReviewOnly",
+          "when": "view == pairReview.pullRequests && !pairReview.awaitingReviewOnly",
+          "group": "3_filter@1"
+        },
+        {
+          "command": "pairReview.showAllMine",
+          "when": "view == pairReview.pullRequests && pairReview.awaitingReviewOnly",
+          "group": "3_filter@1"
+        },
+        {
+          "command": "pairReview.openPullRequestLink",
+          "when": "view == pairReview.pullRequests",
+          "group": "0_open@1"
+        },
+        {
           "command": "pairReview.startClaude",
           "when": "view == pairReview.threads",
           "group": "navigation@1"
@@ -565,6 +604,11 @@
           "command": "pairReview.openPullRequestInBrowser",
           "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest/",
           "group": "1_pullRequest@2"
+        },
+        {
+          "command": "pairReview.copyPullRequestLink",
+          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest/",
+          "group": "1_pullRequest@3"
         },
         {
           "command": "pairReview.showPullRequestClaude",
@@ -735,6 +779,10 @@
         },
         {
           "command": "pairReview.hideRepository",
+          "when": "false"
+        },
+        {
+          "command": "pairReview.copyPullRequestLink",
           "when": "false"
         }
       ]
