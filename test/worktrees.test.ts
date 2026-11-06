@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { listChangedFiles } from '../src/git.js';
 import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/worktrees.js';
+import { createReviewData, ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/worktrees.js';
 import { cleanUpWorktrees } from '../src/worktreeCleanup.js';
 import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/pullRequestDiff.js';
 import { commands, Uri, workspace } from './fakes/vscode.js';
@@ -235,4 +235,16 @@ test('rejects PR file addresses that escape the worktree or use a moving revisio
   assert.equal(parsePullRequestFileUri(pullRequestFileUri({ ...address, relativePath: '../secret' })), undefined);
   assert.equal(parsePullRequestFileUri(pullRequestFileUri({ ...address, revision: 'HEAD' })), undefined);
   assert.equal(parsePullRequestFileUri(pullRequestFileUri({ ...address, repository: '../../etc' })), undefined);
+});
+
+test('retries creating the review data folder on a transient EIO and explains a lasting one', async () => {
+  const failure = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });
+  let calls = 0;
+  const flaky = async (): Promise<void> => { if (++calls < 3) throw failure('EIO'); };
+  assert.equal(await createReviewData('/tmp/pr-57', flaky, 5, 0), '/tmp/pr-57.review');
+  assert.equal(calls, 3);
+  await assert.rejects(createReviewData('/tmp/pr-57', async () => { throw failure('EBUSY'); }, 2, 0), /Could not create \/tmp\/pr-57\.review \(EBUSY\)/u);
+  let denied = 0;
+  await assert.rejects(createReviewData('/tmp/pr-57', async () => { denied++; throw failure('EACCES'); }, 5, 0), /EACCES/u);
+  assert.equal(denied, 1);
 });

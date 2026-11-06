@@ -1,4 +1,3 @@
-import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -15,7 +14,7 @@ import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
 import { createReviewStore } from './store.js';
-import { listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, reviewDataPath, worktreePath } from './worktrees.js';
+import { createReviewData, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath } from './worktrees.js';
 
 /** A PR's review: its comments, the bridge Claude replies through, and the background Claude that answers them. */
 export interface PullRequestSession {
@@ -136,8 +135,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     const worktree = worktreePath(this.storageRoot, repository, number);
     const metadata = await readWorktree(this.storageRoot, worktree);
     if (metadata === undefined) throw new Error(`#${number} has no worktree.`);
-    const dataPath = reviewDataPath(worktree);
-    await mkdir(dataPath, { recursive: true, mode: 0o700 });
+    const dataPath = await createReviewData(worktree);
     const store = await createReviewStore(join(dataPath, 'review.json'), worktree);
     const bridge = await createReviewBridge(store, join(dataPath, 'selected-session.json'));
     try {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { anchorFromText, locateCodeAnchor } from './anchors.js';
@@ -7,7 +7,7 @@ import type { CodeAnchor } from './contracts.js';
 import { isWorkspaceRelativePath, readGitBase } from './git.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 import type { PullRequestProvider } from './pullRequests.js';
-import { reviewDataPath, worktreePath } from './worktrees.js';
+import { createReviewData, reviewDataPath, worktreePath } from './worktrees.js';
 
 /** Hashes by file, reused while size, inode and change times match; any write changes the change time. */
 const fingerprints = new Map<string, { readonly version: string; readonly hash: string }>();
@@ -75,7 +75,7 @@ function noMarks(): Marks {
 }
 
 async function writeMarks(worktree: string, marks: Marks): Promise<void> {
-  await mkdir(reviewDataPath(worktree), { recursive: true, mode: 0o700 });
+  await createReviewData(worktree);
   await writePrivateJson(marksPath(worktree), marks);
 }
 

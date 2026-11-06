@@ -13,7 +13,7 @@ import { mockPullRequestProvider } from './mockPullRequests.js';
 import { commitAndPush, commitFiles, conflictTask, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
-import { sharedPerTurn } from './autoSync.js';
+import { PendingWrites, sharedPerTurn } from './autoSync.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, reviewDataPath, worktreePath } from './worktrees.js';
 import { buildGuide, groupReadMarks, guideOutline } from './prAnalysis.js';
 import { readSavedAnalysis } from './prAnalysisRunner.js';
@@ -160,6 +160,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         };
       };
       const detailsChanged = new vscode.EventEmitter<void>();
+      /** The user's own changes on GitHub, kept on the page until GitHub's reads catch up with them. */
+      const written = new PendingWrites();
       let details: Promise<PullRequestDetails | Error> | undefined;
       const asError = (error: unknown): Error => error instanceof Error ? error : new Error(String(error));
       const currentDetails = async (): Promise<PullRequestDetails> => {
@@ -220,9 +222,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           fileReviews.reviewed(provider, repository, pullRequest.number, all),
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
-        const [loadedDetails, loadedThreads, analysis, loadedConversation] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis(), conversation ?? loadConversation()]);
+        const [readDetails, readThreads, analysis, loadedConversation] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis(), conversation ?? loadConversation()]);
+        const loadedDetails = readDetails instanceof Error ? readDetails : {
+          ...readDetails, title: written.apply('title', readDetails.title), draft: written.apply('draft', readDetails.draft), open: written.apply('open', readDetails.open),
+        };
+        const loadedThreads = readThreads instanceof Error ? readThreads : readThreads.map((thread) => ({ ...thread, resolved: written.apply(`resolved:${thread.id}`, thread.resolved) }));
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
-        const state = buildOverviewState(current(), opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
+        const summary = loadedDetails instanceof Error ? current() : { ...current(), title: loadedDetails.title, draft: loadedDetails.draft };
+        const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
         const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
         const unpushed = loadedConversation instanceof Error ? [] : await unpushedCommits(folder, loadedConversation.merge.headOid);
         return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }) };
@@ -231,6 +238,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
         fileReviews.onDidChange((changed) => { if (changed === `${repository}#${pullRequest.number}`) listener(changed); }),
         detailsChanged.event(listener),
+        claudeFinished(opened.runner, changedOnGitHub),
       );
       await showPullRequestOverview(`${repository}#${pullRequest.number}`, read, changed, {
         readFiles,
@@ -319,6 +327,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         resolveOnGitHub: async (id, resolved) => {
           await provider.resolveThread(id, resolved);
+          written.expect(`resolved:${id}`, resolved);
           await loadThreads();
         },
         deleteOnGitHub: async (id) => {
@@ -434,6 +443,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const { title } = await currentDetails();
           if (next === title) return;
           await provider.editPullRequest(pullRequest.number, { title: next });
+          written.expect('title', next);
           changedOnGitHub();
         },
         editBody: async (body) => {
@@ -447,10 +457,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         setDraft: async (draft) => {
           await provider.setDraft(pullRequest.number, draft);
+          written.expect('draft', draft);
           changedOnGitHub();
         },
         setOpen: async (open) => {
           await provider.editPullRequest(pullRequest.number, { state: open ? 'open' : 'closed' });
+          written.expect('open', open);
           changedOnGitHub();
         },
         deleteBranch: async () => {
@@ -466,7 +478,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         pollGitHub: async () => {
           const previous = version;
           version = await provider.version(pullRequest.number, previous);
-          const reload = previous !== undefined && version !== previous;
+          const reload = (previous !== undefined && version !== previous) || written.waiting;
           if (opened.runner.activity.running) return { reload, files: false };
           const before = await readHead();
           shownHead ??= before;
@@ -657,6 +669,15 @@ export async function deactivate(): Promise<void> {
   activePullRequests = undefined;
   activeBridge = undefined;
   activeStore = undefined;
+}
+
+/** Call `then` each time a Claude run ends, since Claude may have changed the PR on GitHub, such as its title with `gh pr edit`. */
+function claudeFinished(runner: Pick<PullRequestSession['runner'], 'activity' | 'onDidChange'>, then: () => void): vscode.Disposable {
+  let running = runner.activity.running;
+  return runner.onDidChange(() => {
+    if (running && !runner.activity.running) then();
+    running = runner.activity.running;
+  });
 }
 
 /** Open a PR's Claude log, and send comments again after a failed or skipped run. */
