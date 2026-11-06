@@ -141,6 +141,8 @@ export interface MergeStatus {
   readonly autoMerge?: { readonly method: MergeMethod; readonly enabledBy: string };
   readonly canEnableAutoMerge: boolean;
   readonly canDisableAutoMerge: boolean;
+  /** The repository's settings allow auto-merge; GitHub offers it only while requirements are pending. */
+  readonly autoMergeAllowed: boolean;
   readonly mergeQueue: boolean;
   /** 1-based place in the merge queue while queued. */
   readonly queuePosition?: number;
@@ -434,7 +436,7 @@ const timelineField = `timelineItems(first:100,after:$after,itemTypes:[${timelin
   ... on MilestonedEvent{id createdAt ${actorField} milestoneTitle}
   ... on DemilestonedEvent{id createdAt ${actorField} milestoneTitle}}}`;
 /** `latestOpinionatedReviews` comes first: after `reviewDecision`, GitHub lists only reviews by people with write access. */
-const conversationFields = `viewerPermission squashMergeCommitTitle squashMergeCommitMessage mergeCommitTitle mergeCommitMessage pullRequest(number:$number){
+const conversationFields = `viewerPermission autoMergeAllowed squashMergeCommitTitle squashMergeCommitMessage mergeCommitTitle mergeCommitMessage pullRequest(number:$number){
   latestOpinionatedReviews(first:30){nodes{id author{login}}}
   id viewerCanReact ${reactionFields} mergeStateStatus reviewDecision viewerCanUpdateBranch viewerCanMergeAsAdmin viewerCanEnableAutoMerge viewerCanDisableAutoMerge
   isMergeQueueEnabled mergeQueueEntry{position} headRefOid headRef{id} isCrossRepository autoMergeRequest{mergeMethod enabledBy{login}}
@@ -1341,6 +1343,7 @@ export function parseConversation(repository: Record<string, unknown>, viewer: R
       ...autoMethod === undefined ? {} : { autoMerge: { method: autoMethod, enabledBy: login(auto?.['enabledBy']) } },
       canEnableAutoMerge: pullRequest['viewerCanEnableAutoMerge'] === true,
       canDisableAutoMerge: pullRequest['viewerCanDisableAutoMerge'] === true,
+      autoMergeAllowed: repository['autoMergeAllowed'] === true,
       mergeQueue: pullRequest['isMergeQueueEnabled'] === true,
       ...Number.isSafeInteger(queue) ? { queuePosition: (queue as number) + 1 } : {},
       headOid,

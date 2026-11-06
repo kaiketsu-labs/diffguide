@@ -1410,6 +1410,7 @@ function mergeChecklist(details: PullRequestDetails, conversation: PullRequestCo
   else if (running.length) add('wait', 'active', running.length + (running.length === 1 ? ' check running' : ' checks running'));
   else if (details.checks.length) add('ok', 'done', 'All checks passed');
   if (merge.state === 'blocked') add('bad', 'failed', 'Merging is blocked' + (merge.canBypass ? '. You may merge anyway, bypassing the rules.' : '.'));
+  if (merge.state !== 'clean' && !merge.autoMergeAllowed && merge.autoMerge === undefined && !merge.mergeQueue && isWriter(conversation)) add('muted', 'idle', 'Auto-merge is off in this repository\'s settings.');
   return rows;
 }
 

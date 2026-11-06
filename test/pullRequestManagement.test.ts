@@ -214,3 +214,24 @@ test('page-confirmed actions carry the choice the page made, and malformed choic
   ]);
   panel.dispose();
 });
+
+test('enables auto-merge only when GitHub offers it, and says why not otherwise', async () => {
+  const cases = [
+    { merge: { canEnableAutoMerge: true, autoMergeAllowed: true }, error: undefined },
+    { merge: { canEnableAutoMerge: false, autoMergeAllowed: false }, error: 'Auto-merge is off in this repository\'s settings.' },
+    { merge: { canEnableAutoMerge: false, autoMergeAllowed: true }, error: 'GitHub does not offer auto-merge for this PR right now.' },
+  ];
+  for (const { merge, error } of cases) {
+    resetFakeWindow();
+    const calls: unknown[] = [];
+    const actions = { enableAutoMerge: async (...args: unknown[]) => { calls.push(args); }, refresh: () => undefined } as unknown as OverviewActions;
+    const state = { ...base, details, conversation: { merge } } as unknown as OverviewState;
+    await showPullRequestOverview('auto-merge', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+    const panel = window.panels.at(-1)!;
+    panel.receive({ action: 'auto-merge', method: 'squash', headline: ' Ship it ', body: '' }); await tick();
+    assert.deepEqual(calls, error === undefined ? [['squash', { headline: 'Ship it', body: '' }]] : []);
+    assert.equal(panel.sent.some((m) => (m as { done?: string }).done === 'merge'), error === undefined);
+    if (error !== undefined) assert.ok(panel.sent.some((m) => (m as { error?: string }).error === error));
+    panel.dispose();
+  }
+});

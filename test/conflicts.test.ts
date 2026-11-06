@@ -177,3 +177,38 @@ test('lists the commits Claude made, counts and pushes them, and can undo a run\
   await discardSince(worktree, before.head);
   assert.deepEqual(await worktreeSnapshot(worktree), before);
 });
+
+test('commits a suggestion after unpushed commits built on an older PR commit, keeping them', async (t) => {
+  const { origin, worktree, older, latest } = await fixture(t);
+  for (const [key, value] of [['user.name', 't'], ['user.email', 't@example.invalid'], ['commit.gpgSign', 'false']] as const) await git(worktree, 'config', key, value);
+  await writeFile(path.join(worktree, 'c.txt'), 'claude\n');
+  await git(worktree, 'add', 'c.txt');
+  await git(worktree, 'commit', '--quiet', '-m', 'by claude');
+  const claude = await git(worktree, 'rev-parse', 'HEAD');
+  assert.deepEqual(await syncKeepingLocalCommits(worktree, 7), { head: latest, ahead: true });
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), claude);
+  await writeFile(path.join(worktree, 'a.txt'), 'suggested\n');
+  await commitFiles(worktree, { path: 'a.txt', message: 'Apply suggestion from code review', hooksOff: true });
+  assert.equal(await git(worktree, 'log', '--format=%s', `${older}..HEAD`), 'Apply suggestion from code review\nby claude');
+  assert.equal(await git(origin, 'rev-parse', 'feature'), latest);
+});
+
+test('commits a suggestion after Claude rewrote the pushed commits locally', async (t) => {
+  const { worktree, latest } = await fixture(t);
+  for (const [key, value] of [['user.name', 't'], ['user.email', 't@example.invalid'], ['commit.gpgSign', 'false']] as const) await git(worktree, 'config', key, value);
+  await syncToPullRequestHead(worktree, 7);
+  await git(worktree, 'commit', '--quiet', '--amend', '-m', 'latest, reworded');
+  const rewritten = await git(worktree, 'rev-parse', 'HEAD');
+  assert.deepEqual(await syncKeepingLocalCommits(worktree, 7), { head: latest, ahead: true });
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), rewritten);
+});
+
+test('says to push commits GitHub lacks, or to rebase them when GitHub moved on', async (t) => {
+  const { worktree } = await fixture(t);
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'on the older commit');
+  await assert.rejects(syncToPullRequestHead(worktree, 7), /GitHub has newer commits they do not build on\. Rebase them onto the PR's latest commit or drop them first\./u);
+  await git(worktree, 'fetch', '--quiet', 'origin', 'pull/7/head');
+  await git(worktree, 'checkout', '--quiet', '--detach', 'FETCH_HEAD');
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'on the latest commit');
+  await assert.rejects(syncToPullRequestHead(worktree, 7), /^Error: The PR worktree has commits that are not on GitHub\. Push or drop them first\.$/u);
+});

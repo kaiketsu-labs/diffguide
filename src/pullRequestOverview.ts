@@ -586,6 +586,7 @@ export async function showPullRequestOverview(
               && (deleteBranch === undefined || typeof deleteBranch === 'boolean')) {
               if (action === 'merge') await actions.merge(method as MergeMethod, mergeMessage(), deleteBranch === true);
               else if (merge?.canEnableAutoMerge === true) await actions.enableAutoMerge(method as MergeMethod, mergeMessage());
+              else throw new Error(merge?.autoMergeAllowed === false ? 'Auto-merge is off in this repository\'s settings.' : 'GitHub does not offer auto-merge for this PR right now.');
               post({ done: 'merge' });
             } else if (action === 'auto-merge-off' && merge?.canDisableAutoMerge === true) await actions.disableAutoMerge();
             else if (action === 'enqueue' && merge?.mergeQueue === true) await actions.enqueue();
