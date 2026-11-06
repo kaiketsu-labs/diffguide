@@ -138,11 +138,15 @@ let author = true;
 /** The description is open for editing, so redraws leave it alone. */
 let editingBody = false;
 const reviewButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-event]')];
-const labels: Record<ReviewerState | CheckState, readonly [string, string, string]> = {
-  approved: ['✓', 'ok', 'Approved'], changes: ['✗', 'bad', 'Requested changes'], commented: ['●', 'muted', 'Commented'],
-  dismissed: ['○', 'muted', 'Dismissed'], requested: ['○', 'wait', 'Review requested'],
-  success: ['✓', 'ok', 'Passed'], failure: ['✗', 'bad', 'Failed'], pending: ['●', 'wait', 'Running'], neutral: ['○', 'muted', 'Skipped'],
+const stateShapes = { done: codicons.check, failed: codicons.close, active: codicons.circleFilled, idle: codicons.circle } as const;
+type StateShape = keyof typeof stateShapes;
+const labels: Record<ReviewerState | CheckState, readonly [StateShape, string, string]> = {
+  approved: ['done', 'ok', 'Approved'], changes: ['failed', 'bad', 'Requested changes'], commented: ['active', 'muted', 'Commented'],
+  dismissed: ['idle', 'muted', 'Dismissed'], requested: ['idle', 'wait', 'Review requested'],
+  success: ['done', 'ok', 'Passed'], failure: ['failed', 'bad', 'Failed'], pending: ['active', 'wait', 'Running'], neutral: ['idle', 'muted', 'Skipped'],
 };
+/** Checks show their state by icon alone; reviewers keep the word, since requested and dismissed share an icon. */
+const checkStates: ReadonlySet<string> = new Set<CheckState>(['success', 'failure', 'pending', 'neutral']);
 const methodLabels: Record<MergeMethod, string> = { squash: 'Squash and merge', merge: 'Create a merge commit', rebase: 'Rebase and merge' };
 const hideReasons: readonly (readonly [HideReason, string])[] = [['OUTDATED', 'Outdated'], ['RESOLVED', 'Resolved'], ['DUPLICATE', 'Duplicate'], ['OFF_TOPIC', 'Off-topic'],
   ['LOW_QUALITY', 'Low quality'], ['SPAM', 'Spam'], ['ABUSE', 'Abuse']];
@@ -260,7 +264,7 @@ function stepLog(steps: readonly ClaudeStep[], startedAt?: number): HTMLElement 
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
     const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
-    row.append(step.done ? el('span', 'mark', step.failed ? '✕' : '✓') : el('span', 'clawd'));
+    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : el('span', 'clawd'));
     const title = el('span', 'step-call');
     title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
     row.append(title);
@@ -285,6 +289,18 @@ function icon(svg: string): Element {
   const template = document.createElement('template');
   template.innerHTML = svg;
   return template.content.firstElementChild as Element;
+}
+
+/** A state icon colored by `tone`; `label` names the state for screen readers and on hover. */
+function stateIcon(shape: StateShape, tone: string, label?: string): HTMLElement {
+  const node = el('span', 'state-icon ' + tone);
+  node.append(icon(stateShapes[shape]));
+  if (label !== undefined) {
+    node.title = label;
+    node.setAttribute('role', 'img');
+    node.setAttribute('aria-label', label);
+  }
+  return node;
 }
 
 /** A branch name that copies itself, like GitHub's. */
@@ -316,16 +332,14 @@ function closestTo<T extends Element = HTMLElement>(event: Event, selector: stri
 
 function status(key: ReviewerState | CheckState, name: string, url?: string, tools: readonly HTMLElement[] = []): HTMLLIElement {
   const item = el('li', 'row');
-  const [icon, tone, label] = labels[key];
-  const mark = el('span', tone, icon);
-  mark.title = label;
-  item.append(mark);
+  const [shape, tone, label] = labels[key];
+  item.append(stateIcon(shape, tone, label));
   if (url) {
     const link = el('a', '', name);
     link.href = url;
     item.append(link);
   } else item.append(el('span', '', name));
-  item.append(el('span', 'muted', label));
+  if (!checkStates.has(key)) item.append(el('span', 'muted', label));
   if (tools.length) {
     const box = el('span', 'reviewer-tools');
     box.append(...tools);
@@ -970,7 +984,9 @@ function commitGroup(commits: readonly Extract<TimelineItem, { kind: 'commit' }>
   return node;
 }
 
-const checkMarks: Record<NonNullable<Extract<TimelineItem, { kind: 'commit' }>['checks']>, readonly [string, string]> = { success: ['✓', 'ok'], failure: ['✗', 'bad'], pending: ['●', 'wait'] };
+const checkMarks: Record<NonNullable<Extract<TimelineItem, { kind: 'commit' }>['checks']>, readonly [StateShape, string, string]> = {
+  success: ['done', 'ok', 'Checks passed'], failure: ['failed', 'bad', 'Checks failed'], pending: ['active', 'wait', 'Checks running'],
+};
 
 function commitRow(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement {
   const row = el('div', 'commit-row');
@@ -987,8 +1003,8 @@ function commitTitle(commit: Extract<TimelineItem, { kind: 'commit' }>): string 
 
 function checkMark(commit: Extract<TimelineItem, { kind: 'commit' }>): HTMLElement[] {
   if (!commit.checks) return [];
-  const [mark, tone] = checkMarks[commit.checks];
-  return [el('span', tone, mark)];
+  const [shape, tone, label] = checkMarks[commit.checks];
+  return [stateIcon(shape, tone, label)];
 }
 
 /** Files, added and removed lines: always three cells, empty when GitHub could not count them. */
@@ -1378,22 +1394,22 @@ function closeTitleForm(): void {
 /** GitHub's merge box checklist: reviews, checks and branch protection. */
 function mergeChecklist(details: PullRequestDetails, conversation: PullRequestConversation): HTMLLIElement[] {
   const rows: HTMLLIElement[] = [];
-  const add = (tone: string, mark: string, text: string): void => {
+  const add = (tone: string, shape: StateShape, text: string): void => {
     const row = el('li');
-    row.append(el('span', tone, mark), el('span', '', text));
+    row.append(stateIcon(shape, tone), el('span', '', text));
     rows.push(row);
   };
   const { merge } = conversation;
-  if (merge.reviewDecision === 'approved') add('ok', '✓', 'Approved');
-  else if (merge.reviewDecision === 'changes') add('bad', '✗', 'Changes requested');
-  else if (merge.reviewDecision === 'required') add('wait', '●', 'Review required');
+  if (merge.reviewDecision === 'approved') add('ok', 'done', 'Approved');
+  else if (merge.reviewDecision === 'changes') add('bad', 'failed', 'Changes requested');
+  else if (merge.reviewDecision === 'required') add('wait', 'active', 'Review required');
   const required = new Set(conversation.checks.filter((check) => check.required).map((check) => check.name));
   const failing = details.checks.filter((check) => check.state === 'failure');
   const running = details.checks.filter((check) => check.state === 'pending');
-  if (failing.length) add('bad', '✗', failing.length + (failing.length === 1 ? ' failing check' : ' failing checks') + (failing.some((check) => required.has(check.name)) ? ', some required' : ''));
-  else if (running.length) add('wait', '●', running.length + (running.length === 1 ? ' check running' : ' checks running'));
-  else if (details.checks.length) add('ok', '✓', 'All checks passed');
-  if (merge.state === 'blocked') add('bad', '✗', 'Merging is blocked' + (merge.canBypass ? '. You may merge anyway, bypassing the rules.' : '.'));
+  if (failing.length) add('bad', 'failed', failing.length + (failing.length === 1 ? ' failing check' : ' failing checks') + (failing.some((check) => required.has(check.name)) ? ', some required' : ''));
+  else if (running.length) add('wait', 'active', running.length + (running.length === 1 ? ' check running' : ' checks running'));
+  else if (details.checks.length) add('ok', 'done', 'All checks passed');
+  if (merge.state === 'blocked') add('bad', 'failed', 'Merging is blocked' + (merge.canBypass ? '. You may merge anyway, bypassing the rules.' : '.'));
   return rows;
 }
 
@@ -1605,7 +1621,7 @@ function render(state: OverviewState): void {
     const item = el('li', 'row');
     const link = el('a', '', '#' + issue.number + ' ' + issue.title);
     link.href = issue.url;
-    item.append(el('span', issue.open ? 'ok' : 'muted', issue.open ? '○' : '✓'), link);
+    item.append(stateIcon(issue.open ? 'idle' : 'done', issue.open ? 'ok' : 'muted'), link);
     item.title = issue.open ? 'Open; merging this PR closes it' : 'Closed';
     return item;
   }));
@@ -2686,8 +2702,8 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
     const cell = el('td');
     cell.colSpan = widths.length;
     row.append(cell);
-    const label = el('span', 'read-label', '✓ ' + lines.length + (lines.length === 1 ? ' line read' : ' lines read'));
-    label.prepend(chevronMark(!open));
+    const label = el('span', 'read-label');
+    label.append(chevronMark(!open), stateIcon('done', ''), lines.length + (lines.length === 1 ? ' line read' : ' lines read'));
     label.title = open ? 'Hide these lines' : 'Show these lines';
     label.addEventListener('click', () => {
       if (open) openReads.delete(key);
