@@ -224,11 +224,12 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       workingUri: (relativePath) => pullRequestFileUri({ repository, number, relativePath }),
       originalUri: (relativePath, revision) => pullRequestFileUri({ repository, number, relativePath, revision }),
       activity: (threadId) => {
-        const { running, step, threads, error, skipped } = runner.activity;
+        const { running, step, threads, error, skipped, stopped } = runner.activity;
         if (!threads.has(threadId)) return undefined;
         if (running) return `Claude · ${step ?? 'Working'}`;
         if (error !== undefined) return `Claude failed · ${error}`;
-        return skipped > 0 && store.pendingEvents.some((event) => event.threadId === threadId) ? 'Not picked up by Claude' : undefined;
+        const waiting = skipped > 0 && store.pendingEvents.some((event) => event.threadId === threadId);
+        return waiting && stopped === true ? 'Stopped' : waiting ? 'Not picked up by Claude' : undefined;
       },
       publication: (threadId) => publications.get(threadId),
       publish: async (threadId) => {
@@ -259,9 +260,9 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         }
         const placement = await place(thread.anchor);
         const panel = showPublishPanel({
-          title: `#${number} · ${path}:${lines}`,
-          placement: placement.lines === undefined ? `Whole file: line ${lines} is outside the PR diff` : `${endLine === startLine ? 'Line' : 'Lines'} ${lines}`,
-          body: `${placement.lines === undefined ? `Line ${lines}:\n\n` : ''}${text}`,
+          title: thread.anchor.scope === 'file' ? `#${number} · ${path}` : `#${number} · ${path}:${lines}`,
+          placement: thread.anchor.scope === 'file' ? 'Whole file' : placement.lines === undefined ? `Whole file: line ${lines} is outside the PR diff` : `${endLine === startLine ? 'Line' : 'Lines'} ${lines}`,
+          body: `${outsideDiff(thread.anchor, placement)}${text}`,
         }, (body, pending) => commentOnDiff(threadId, placement, body, pending));
         publishing.set(threadId, panel);
         panel.onDidDispose(() => { publishing.delete(threadId); });
@@ -270,7 +271,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         const thread = store.threads.find((candidate) => candidate.id === threadId);
         if (thread === undefined) throw new Error('This thread no longer exists.');
         const placement = await place(thread.anchor);
-        await commentOnDiff(threadId, placement, `${placement.lines === undefined ? `Line ${lineLabel(thread.anchor)}:\n\n` : ''}${body}`, pending);
+        await commentOnDiff(threadId, placement, `${outsideDiff(thread.anchor, placement)}${body}`, pending);
       },
       linkToGitHub: async (threadId, link) => {
         links.set(threadId, link);
@@ -281,6 +282,11 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [] };
     return result;
   }
+}
+
+/** "Line 12:" before a line comment GitHub can only take on the whole file; nothing for a whole-file thread or one on its lines. */
+function outsideDiff(anchor: CodeAnchor, placement: CommentPlacement): string {
+  return anchor.scope === 'file' || placement.lines !== undefined ? '' : `Line ${lineLabel(anchor)}:\n\n`;
 }
 
 /** Such as "12" or "12–14". */

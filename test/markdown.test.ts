@@ -22,6 +22,20 @@ test('keeps identifiers with underscores and stars intact', () => {
   assert.equal(markdownHtml('snake_case_name and a*b*c'), '<p>snake_case_name and a*b*c</p>');
 });
 
+test('bolds labels ending in punctuation, bold around inline code or emphasis, and __bold__', () => {
+  assert.equal(markdownHtml('**Why asdf :** because'), '<p><strong>Why asdf :</strong> because</p>');
+  assert.equal(markdownHtml('**Use `retry()` here**'), '<p><strong>Use <code>retry()</code> here</strong></p>');
+  assert.equal(markdownHtml('**bold *and* more**'), '<p><strong>bold <em>and</em> more</strong></p>');
+  assert.equal(markdownHtml('__bold__ and ** not bold**'), '<p><strong>bold</strong> and ** not bold**</p>');
+  assert.equal(markdownHtml('`**not bold**` and `a\u0000`'), '<p><code>**not bold**</code> and <code>a</code></p>');
+});
+
+test('highlights fenced code inside list items and diff fences, without the list indent', () => {
+  assert.equal(markdownHtml('1. Change it:\n   ```ts\n   const a = 1;\n   ```\n2. Test it'),
+    '<ol><li>Change it:<pre><code><span class="hljs-keyword">const</span> a = <span class="hljs-number">1</span>;</code></pre></li><li>Test it</li></ol>');
+  assert.equal(markdownHtml('```diff\n-old\n+new\n```'), '<pre><code><span class="hljs-deletion">-old</span>\n<span class="hljs-addition">+new</span></code></pre>');
+});
+
 test('never emits markup from the text itself', () => {
   const html = markdownHtml('<img src=x onerror=alert(1)> [x](javascript:alert(1)) [y](https://a.test/"onmouseover=alert(1)) `<b>`\n```html\n</code><script>alert(1)</script>\n```');
   assert.ok(!/<img|<script|<b>|href="javascript/u.test(html), html);
@@ -39,5 +53,5 @@ test('a Markdown file renders block by block with the source lines of each block
 });
 
 test('names a stand-in file for each known code fence language', () => {
-  assert.deepEqual(fenceFilePaths('Text\n```python\nx = 1\n```\n  ~~~TS\nlet a\n~~~\n```\nplain\n```\n```brainfuck\n+\n```'), ['x.py', 'x.ts']);
+  assert.deepEqual(fenceFilePaths('Text\n```python\nx = 1\n```\n  ~~~TS\nlet a\n~~~\n```\nplain\n```\n```brainfuck\n+\n```\n```diff\n-a\n```'), ['x.py', 'x.ts', 'x.diff']);
 });

@@ -18,6 +18,8 @@ type Layout = 'unified' | 'split';
 type View = 'files' | 'guide';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
+/** A new comment on a whole file, written above its diff. */
+interface FileComposer { path: string; text: string }
 interface Saved {
   /** 'guided' is how pages saved before Files and Guide became tabs remember the guide. */
   readonly layout?: Layout | 'guided';
@@ -28,6 +30,8 @@ interface Saved {
   readonly collapsed?: Record<string, boolean>;
   readonly previewing?: readonly string[];
   readonly composer?: Composer | undefined;
+  readonly fileComposer?: FileComposer | undefined;
+  readonly showArchived?: boolean;
   readonly replies?: Record<string, string>;
   readonly publishing?: Record<string, string>;
   readonly range?: DiffRange;
@@ -77,6 +81,10 @@ let readRanges: readonly MarkedRange[] = [];
 const openReads = new Set<string>();
 const fileKeys = new Map<string, string>();
 let composer = saved.composer;
+let fileComposer = saved.fileComposer;
+let showArchived = saved.showArchived === true;
+/** Archive toggles the page shows before the extension's next state confirms them, by thread id. */
+const archiving = new Map<string, boolean>();
 const replies = new Map(Object.entries(saved.replies ?? {}));
 /** Local threads being posted on GitHub, with the text the user is editing. */
 const publishing = new Map(Object.entries(saved.publishing ?? {}));
@@ -242,7 +250,7 @@ function frameMain(): void {
 }
 
 function save(): void {
-  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
+  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
     range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded });
 }
 
@@ -562,15 +570,33 @@ function verdict(reviewers: PullRequestDetails['reviewers']): readonly [string, 
   return waiting.length ? ['wait', 'Waiting for ' + waiting.join(', ')] : ['muted', 'No reviews yet'];
 }
 
+function isArchived(thread: { readonly id: string; readonly archived?: true }): boolean {
+  return archiving.get(thread.id) ?? thread.archived === true;
+}
+
+/** Local threads the page shows: archived ones only while Show archived threads is on. */
+function localThreads(): Thread[] {
+  return (current?.threads ?? []).filter((thread) => showArchived || !isArchived(thread)).map((thread) => ({ ...thread, source: 'local' as const }));
+}
+
 function allThreads(): Thread[] {
   if (!current) return [];
-  return [...current.threads.map((thread) => ({ ...thread, source: 'local' as const })), ...(current.github ?? []).map((thread) => ({ ...thread, source: 'github' as const }))];
+  return [...localThreads(), ...(current.github ?? []).map((thread) => ({ ...thread, source: 'github' as const }))];
 }
 
 /** Local threads Claude opened from this GitHub thread; the page shows them inside it. */
 function nestedIn(githubId: string): Thread[] {
-  return (current?.threads ?? []).filter((thread) => thread.linkedTo === githubId).map((thread) => ({ ...thread, source: 'local' as const }))
-    .sort((left, right) => started(left) - started(right));
+  return localThreads().filter((thread) => thread.source === 'local' && thread.linkedTo === githubId).sort((left, right) => started(left) - started(right));
+}
+
+/** Archive or unarchive a local thread on the page right away; the extension's next state confirms it. */
+function setArchived(thread: Thread, archived: boolean): void {
+  archiving.set(thread.id, archived);
+  replies.delete(thread.id);
+  save();
+  post({ action: 'archive', id: thread.id, archived });
+  renderFiles([thread.path]);
+  renderThreadList();
 }
 
 function started(thread: Thread): number {
@@ -1259,6 +1285,8 @@ function openFilterMenu(): void {
   const rows = types.map((type) => menuRow([type, el('span', 'muted', String((files ?? []).filter((file) => fileType(file.path) === type).length))], !hiddenTypes.has(type),
     (on) => { if (on) hiddenTypes.delete(type); else hiddenTypes.add(type); applyFilters(); }));
   rows.push(menuRow(['Hide viewed files'], hideViewed, (on) => { hideViewed = on; applyFilters(); }));
+  const archived = (current?.threads ?? []).filter(isArchived).length;
+  rows.push(menuRow(['Show archived threads', el('span', 'muted', String(archived))], showArchived, (on) => { showArchived = on; save(); renderFiles(); renderThreadList(); }));
   const reset = button('Clear filters', () => { clearFilters(); closeToolbarMenu(); }, 'small');
   reset.disabled = !filtersOn();
   const foot = el('div', 'menu-foot');
@@ -1579,6 +1607,7 @@ function renderBaseMenu(): void {
 
 function render(state: OverviewState): void {
   current = state;
+  for (const thread of state.threads) if (archiving.get(thread.id) === (thread.archived === true)) archiving.delete(thread.id);
   $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
   $('title').textContent = state.heading ?? state.title;
   const canChangeBase = state.details?.canEdit === true && state.details.open;
@@ -1662,10 +1691,13 @@ function render(state: OverviewState): void {
   }
   const claude = $('claude');
   const terminal = $('terminal');
+  const stop = $<HTMLButtonElement>('stop-claude');
   const progress = state.claude.running ? state.claude.progress : undefined;
-  claude.after(terminal);
+  claude.after(stop, terminal);
   if (progress === undefined) claude.textContent = state.claude.text;
-  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), terminal);
+  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), stop, terminal);
+  stop.hidden = !state.claude.running;
+  if (!state.claude.running) { stop.disabled = false; stop.textContent = 'Stop'; }
   claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip claude working' : 'chip';
   $('retry').hidden = !state.claude.retry;
   terminal.className = state.claude.running ? 'small' : 'quiet';
@@ -2024,7 +2056,7 @@ function threadBox(thread: Thread): HTMLElement {
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
-    status, (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
+    status, thread.source === 'local' && thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
   box.append(summary);
   const folded = thread.messages.length > foldThreadsAbove ? thread.messages.length - unfoldedMessages : 0;
@@ -2074,7 +2106,8 @@ function threadBox(thread: Thread): HTMLElement {
     };
     const submit = (intent: Intent = 'ask'): void => {
       const text = replies.get(thread.id) ?? '';
-      if (!text.trim() || sending.has(key)) return;
+      // A local thread already holds the request, so Implement may go without a note.
+      if ((!text.trim() && (github || intent !== 'implement')) || sending.has(key)) return;
       send(github ? { action: 'github-reply', form: key, id: thread.id, text } : { action: 'reply', form: key, id: thread.id, text, intent });
     };
     const askClaude = (intent: Intent): void => {
@@ -2098,12 +2131,18 @@ function threadBox(thread: Thread): HTMLElement {
     } else {
       primary.title = 'Claude answers without editing';
       const implement = button('Implement', () => submit('implement'));
-      implement.title = 'Claude changes the code';
-      needText.push(implement, primary);
+      implement.title = 'Claude changes the code. Without a note, it implements what the thread discussed';
+      implement.disabled = busySending;
+      needText.push(primary);
       onReply(reply);
       actions.append(implement);
     }
     actions.append(primary);
+    box.append(actions);
+    return box;
+  }
+  if (thread.source === 'local' && isArchived(thread)) {
+    actions.append(el('span', 'gap'), button('Unarchive', () => setArchived(thread, false)));
     box.append(actions);
     return box;
   }
@@ -2115,6 +2154,11 @@ function threadBox(thread: Thread): HTMLElement {
   actions.append(el('span', 'gap'), thread.url
     ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
     : thread.source === 'local' ? toGitHubButton(thread) : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
+  if (thread.source === 'local') {
+    const archive = button('Archive', () => setArchived(thread, true), 'quiet');
+    archive.title = 'Hide this thread. Show archived threads in the filter menu brings it back';
+    actions.append(archive);
+  }
   actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
   if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
@@ -2983,7 +3027,7 @@ function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, 
   })?.key;
   for (const thread of all) {
     if (noted.has(thread.id) || thread.outdated) continue;
-    const key = owner(thread.path, thread.side, thread.endLine);
+    const key = thread.source === 'local' && thread.scope === 'file' ? steps.find((step) => step.path === thread.path && slices.has(step.key))?.key : owner(thread.path, thread.side, thread.endLine);
     if (key !== undefined) threads.set(key, [...threads.get(key) ?? [], thread]);
   }
   const draft = composer ? owner(composer.path, composer.side, composer.end) : undefined;
@@ -3263,11 +3307,14 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   }
   if (note) diff.append(threadBox(note));
   else if (step.note) diff.append(el('div', 'step-note', step.note));
+  const placed = new Set<string>();
+  const whole = wholeFileBlock(file.path, threads, placed, false);
+  if (whole) diff.append(whole);
   if (showPreview && kind === 'media') diff.append(mediaNode(file));
   else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
-  else if (showPreview) diff.append(previewNode(file, threads, new Set()));
+  else if (showPreview) diff.append(previewNode(file, threads, placed));
   else if (!slice.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
-  else diff.append(table(slice, threads, new Set(), hasDraft ? composer : null, 'step:' + step.key));
+  else diff.append(table(slice, threads, placed, hasDraft ? composer : null, 'step:' + step.key));
   box.append(diff);
   wrap.append(box);
   return wrap;
@@ -3337,10 +3384,15 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   const comments = el('span', 'muted comments', !threads.length ? '' : threads.length + (threads.length === 1 ? ' comment' : ' comments') + (unresolved === threads.length ? '' : ', ' + unresolved + ' open'));
   const chips = file.generated ? [el('span', 'file-chip', 'Generated')] : isLarge(file) ? [el('span', 'file-chip', 'Large diff')] : [];
   for (const chip of chips) chip.title = file.generated ? 'Generated file. GitHub folds these by default.' : 'Large diff, folded by default.';
-  head.append(chevron, name, badge, stats, ...chips, comments, mode, label, full, open);
+  const commentFile = toolButton(codicons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
+  commentFile.classList.add('icon-button');
+  commentFile.hidden = !atHead || file.change === 'deleted';
+  head.append(chevron, name, badge, stats, ...chips, comments, mode, label, commentFile, full, open);
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
+  const fileThreads = wholeFileBlock(file.path, threads, placed, true);
+  if (fileThreads) diff.append(fileThreads);
   if (showPreview && kind === 'media') diff.append(mediaNode(file));
   else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, placed));
@@ -3350,9 +3402,56 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   if (outside.length) {
     const block = el('div', 'outside');
     block.append(el('div', 'muted', 'Comments on lines this diff does not show'), ...outside.map(threadBox));
-    diff.prepend(block);
+    diff.insertBefore(block, fileThreads?.nextSibling ?? diff.firstChild);
   }
   box.append(diff);
+  return box;
+}
+
+/** Threads about the whole file, and its new-comment box when `withComposer`, above the diff; marks those threads placed. */
+function wholeFileBlock(path: string, threads: readonly Thread[], placed: Set<string>, withComposer: boolean): HTMLElement | undefined {
+  const own = threads.filter((thread) => thread.source === 'local' && thread.scope === 'file' && !placed.has(thread.id));
+  const draft = withComposer && fileComposer?.path === path ? fileComposer : undefined;
+  if (!own.length && !draft) return undefined;
+  for (const thread of own) placed.add(thread.id);
+  const block = el('div', 'file-threads');
+  block.append(...own.map(threadBox), ...draft ? [fileComposerBox(draft)] : []);
+  return block;
+}
+
+function openFileComposer(path: string): void {
+  const before = fileComposer?.path;
+  if (before !== path) fileComposer = { path, text: '' };
+  collapsed.set(path, false);
+  focusNext = 'file-composer';
+  save();
+  renderFiles([before, path]);
+}
+
+/** A new Local comment about a whole file: Claude answers it or changes the code, like a comment on lines. */
+function fileComposerBox(draft: FileComposer): HTMLElement {
+  const box = el('div', 'thread draft');
+  const head = el('div', 'strip');
+  head.append(el('span', 'source', 'New comment'), el('span', 'gap'), el('span', 'muted', 'Whole file'));
+  const cancel = (): void => { fileComposer = undefined; save(); renderFiles([draft.path]); };
+  const busySending = sending.has('file-composer');
+  const send = (intent: Intent): void => {
+    if (!draft.text.trim() || sending.has('file-composer')) return;
+    sending.add('file-composer');
+    $('error').textContent = '';
+    renderFiles([draft.path]);
+    post({ action: 'file-comment', form: 'file-composer', path: draft.path, text: draft.text, intent });
+  };
+  const implement = button('Implement', () => send('implement'));
+  implement.title = 'Claude changes the code';
+  const ask = button(busySending ? 'Sending…' : 'Ask Claude', () => send('ask'), 'claude');
+  ask.title = 'Claude answers without editing';
+  const onDraft = (value: string): void => { draft.text = value; save(); for (const each of [implement, ask]) each.disabled = sending.has('file-composer') || !value.trim(); };
+  const area = textarea('file-composer', draft.text, 'Ask Claude about this file', onDraft, () => send('ask'), cancel);
+  onDraft(draft.text);
+  const row = el('div', 'row actions composer-actions');
+  row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), implement, ask);
+  box.append(head, area, row);
   return box;
 }
 
@@ -3669,6 +3768,13 @@ function onExtensionMessage(data: ExtensionMessage): void {
     renderFiles([allThreads().find((thread) => thread.messages.some((entry) => 'id' in entry && entry.id === id))?.path]);
   }
   if (data.done === 'body') { editingBody = false; if (current) render(current); }
+  if (data.done === 'file-composer') {
+    sending.delete('file-composer');
+    const path = fileComposer?.path;
+    fileComposer = undefined;
+    save();
+    renderFiles([path]);
+  }
   if (data.done === 'composer') {
     sending.delete('composer');
     const path = composer?.path;
@@ -3700,6 +3806,13 @@ function onExtensionMessage(data: ExtensionMessage): void {
 
 $('show-unpushed').addEventListener('click', showUnpushed);
 for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
+$('stop-claude').addEventListener('click', () => {
+  const stop = $<HTMLButtonElement>('stop-claude');
+  stop.disabled = true;
+  stop.textContent = 'Stopping…';
+  $('error').textContent = '';
+  post({ action: 'stop-claude' });
+});
 $('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
   'Remove the worktree for ' + (current?.number === undefined ? 'this PR' : '#' + current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
   'Remove worktree', () => post({ action: 'remove-worktree' })));

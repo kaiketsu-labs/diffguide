@@ -301,5 +301,9 @@ test('stop ends the running answer without an error and leaves its comments wait
   assert.equal(instance.activity.error, undefined);
   assert.equal(instance.activity.progress, undefined);
   assert.equal(instance.activity.skipped, 1);
+  assert.equal(instance.activity.stopped, true);
   assert.equal(children.length, 1);
+  instance.retry();
+  assert.equal(instance.activity.stopped, undefined);
+  await until(() => children.length === 2);
 });

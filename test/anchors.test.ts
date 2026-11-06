@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { anchorFromText, capturedCodeContext, hashDocumentText, locateCodeAnchor } from '../src/anchors.js';
+import { anchorFromText, capturedCodeContext, fileAnchor, hashDocumentText, locateCodeAnchor } from '../src/anchors.js';
 import type { CodeAnchor } from '../src/contracts.js';
 
 /** Capture a full-line review selection with neighboring code for restoration tests. */
@@ -82,4 +82,11 @@ test('captures page comments like editor selections, and refuses lines past the 
   assert.deepEqual(captured, anchor(text, 4, 5));
   assert.deepEqual(locateCodeAnchor(text, captured), { startLine: 4, endLine: 5 });
   assert.throws(() => anchorFromText(text, { ...captured, startLine: 9, endLine: 9 }), /outside src\/example\.ts/u);
+});
+
+test('a whole-file anchor names no lines and stays on the file\'s first line as the file changes', () => {
+  const captured = fileAnchor('one\ntwo\n', { path: 'src/example.ts', side: 'working', baseRevision: 'a'.repeat(40) });
+  assert.deepEqual(captured, { path: 'src/example.ts', side: 'working', baseRevision: 'a'.repeat(40), scope: 'file', startLine: 1, endLine: 1,
+    selectedText: '', contextBefore: '', contextAfter: '', documentHash: hashDocumentText('one\ntwo\n') });
+  assert.deepEqual(locateCodeAnchor('zero\none\ntwo\nthree\n', captured), { startLine: 1, endLine: 1 });
 });

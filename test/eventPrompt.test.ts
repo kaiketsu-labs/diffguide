@@ -55,3 +55,12 @@ test('custom instructions follow the built-in ones and are left out when empty',
   assert.ok(prompt.indexOf(reviewInstructions) < prompt.indexOf('Prefer short answers.'));
   assert.ok(prompt.indexOf('Prefer short answers.') < prompt.indexOf('BEGIN REVIEW DATA'));
 });
+
+test('tells Claude a whole-file comment is about the file, not about lines', () => {
+  const whole = event('file', 'Split this module.');
+  const fileEvent = { ...whole, anchor: { ...whole.anchor, startLine: 1, endLine: 1, selectedText: '', scope: 'file' as const } };
+  const prompt = buildReviewBatchPrompt([fileEvent], []);
+  assert.ok(prompt.startsWith('VS Code review · Implement · "retry.js (whole file)"'));
+  assert.match(prompt, /"scope": "Whole file: the comment is about the file as a whole, not about particular lines\./u);
+  assert.doesNotMatch(buildReviewBatchPrompt([whole], []), /"scope"/u);
+});

@@ -89,7 +89,7 @@ function parseAnchor(value: unknown): CodeAnchor {
     || data.endLine < data.startLine
     || !isText(data.selectedText) || !isText(data.contextBefore) || !isText(data.contextAfter)
     || !isIdentifier(data.documentHash) || !isText(data.baseRevision, maximumPathLength)
-    || (data.side !== 'working' && data.side !== 'original')) {
+    || (data.side !== 'working' && data.side !== 'original') || (data.scope !== undefined && data.scope !== 'file')) {
     throw new BridgeProtocolError('The review bridge returned invalid source context.');
   }
   return {
@@ -102,6 +102,7 @@ function parseAnchor(value: unknown): CodeAnchor {
     documentHash: data.documentHash,
     side: data.side,
     baseRevision: data.baseRevision,
+    ...(data.scope === 'file' ? { scope: 'file' as const } : {}),
   };
 }
 

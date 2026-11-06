@@ -10,6 +10,7 @@ const fenceFiles: Readonly<Record<string, string>> = {
   swift: 'x.swift', go: 'x.go', rust: 'x.rs', rs: 'x.rs', kotlin: 'x.kt', kt: 'x.kt', java: 'x.java', ruby: 'x.rb', rb: 'x.rb',
   c: 'x.c', cpp: 'x.cpp', csharp: 'x.cs', cs: 'x.cs', css: 'x.css', scss: 'x.scss', html: 'x.html', xml: 'x.xml',
   yaml: 'x.yaml', yml: 'x.yaml', toml: 'x.toml', sql: 'x.sql', md: 'x.md', markdown: 'x.md', php: 'x.php', dart: 'x.dart',
+  diff: 'x.diff', patch: 'x.diff', jsonc: 'x.jsonc', scala: 'x.scala', objc: 'x.m', 'objective-c': 'x.m', ini: 'x.ini',
 };
 /** One top-level block of a rendered Markdown file and the source lines it came from. */
 export interface MarkdownBlock {
@@ -84,13 +85,10 @@ export function markdownHtml(markdown: string): string {
   let index = 0;
   while (index < lines.length) {
     const line = lines[index] ?? '';
-    const fence = /^\s*(`{3,}|~{3,})\s*([\w+-]*)/u.exec(line);
-    if (fence !== null) {
-      const body: string[] = [];
-      index += 1;
-      while (index < lines.length && !(lines[index] ?? '').trim().startsWith(fence[1] ?? '```')) body.push(lines[index++] ?? '');
-      index += 1;
-      out.push(`<pre><code>${codePreviewHtml(body.join('\n'), fenceFiles[(fence[2] ?? '').toLowerCase()] ?? 'x.txt')}</code></pre>`);
+    if (fenceStart.test(line)) {
+      const block = fencedCode(lines, index);
+      out.push(block.html);
+      index = block.next;
       continue;
     }
     if (line.trim() === '') {
@@ -122,17 +120,23 @@ export function markdownHtml(markdown: string): string {
     const first = listItem.exec(line);
     if (first !== null) {
       const ordered = /\d/u.test(first[1] ?? '');
-      const items: string[] = [];
+      const items: { text: string; code: string }[] = [];
       while (index < lines.length) {
         const current = lines[index] ?? '';
         const item = listItem.exec(current);
-        if (item !== null) items.push(item[2] ?? '');
-        else if (/^\s+\S/u.test(current) && items.length > 0) items[items.length - 1] += ` ${current.trim()}`;
+        const last = items.at(-1);
+        if (item !== null) items.push({ text: item[2] ?? '', code: '' });
+        else if (last !== undefined && /^\s+/u.test(current) && fenceStart.test(current)) {
+          const block = fencedCode(lines, index);
+          last.code += block.html;
+          index = block.next;
+          continue;
+        } else if (/^\s+\S/u.test(current) && last !== undefined) last.text += ` ${current.trim()}`;
         else break;
         index += 1;
       }
       const tag = ordered ? 'ol' : 'ul';
-      out.push(`<${tag}>${items.map((item) => `<li>${inline(item)}</li>`).join('')}</${tag}>`);
+      out.push(`<${tag}>${items.map((item) => `<li>${inline(item.text)}${item.code}</li>`).join('')}</${tag}>`);
       continue;
     }
     const paragraph: string[] = [];
@@ -144,16 +148,31 @@ export function markdownHtml(markdown: string): string {
   return out.join('');
 }
 
-/** Inline code, bold, italics and https links; everything else stays escaped text. */
+const fenceStart = /^\s*(?:`{3,}|~{3,})/u;
+
+/** The fenced block starting at `start`, rendered with its language's highlighting, and the line after its closing fence. Indented fences lose their indent from each code line, as in CommonMark. */
+function fencedCode(lines: readonly string[], start: number): { readonly html: string; readonly next: number } {
+  const [, indent = '', marker = '```', language = ''] = /^(\s*)(`{3,}|~{3,})\s*([\w+-]*)/u.exec(lines[start] ?? '') ?? [];
+  const body: string[] = [];
+  let index = start + 1;
+  while (index < lines.length && !(lines[index] ?? '').trim().startsWith(marker)) {
+    const line = lines[index++] ?? '';
+    body.push(line.startsWith(indent) ? line.slice(indent.length) : line.trimStart());
+  }
+  return { html: `<pre><code>${codePreviewHtml(body.join('\n'), fenceFiles[language.toLowerCase()] ?? 'x.txt')}</code></pre>`, next: index + 1 };
+}
+
+/** Inline code, bold, italics and https links; everything else stays escaped text. Emphasis may span inline code, as on GitHub. */
 function inline(text: string): string {
-  return text.split(/(`[^`]+`)/u).map((part) => {
-    if (part.length > 2 && part.startsWith('`') && part.endsWith('`')) return `<code>${escapeCode(part.slice(1, -1))}</code>`;
-    return escapeCode(part)
-      .replaceAll(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/gu, '<a href="$2">$1</a>')
-      .replaceAll(/\*\*([^*]+)\*\*/gu, '<strong>$1</strong>')
-      .replaceAll(/(^|[^\w*])\*([^*\s][^*]*)\*(?![\w*])/gu, '$1<em>$2</em>')
-      .replaceAll(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/gu, '$1<em>$2</em>');
-  }).join('');
+  const spans: string[] = [];
+  const marked = text.replaceAll('\u0000', '').replaceAll(/`([^`]+)`/gu, (_match, code: string) => `\u0000${spans.push(`<code>${escapeCode(code)}</code>`) - 1}\u0000`);
+  return escapeCode(marked)
+    .replaceAll(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/gu, '<a href="$2">$1</a>')
+    .replaceAll(/\*\*(?!\s)(.+?)\*\*/gu, '<strong>$1</strong>')
+    .replaceAll(/(^|[^\w])__(?!\s)(.+?)__(?!\w)/gu, '$1<strong>$2</strong>')
+    .replaceAll(/(^|[^\w*])\*([^*\s][^*]*)\*(?![\w*])/gu, '$1<em>$2</em>')
+    .replaceAll(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/gu, '$1<em>$2</em>')
+    .replaceAll(/\u0000(\d+)\u0000/gu, (_match, at: string) => spans[Number(at)] ?? '');
 }
 
 /**
