@@ -147,11 +147,21 @@ export class ClaudeRunner implements vscode.Disposable {
     return this.#command(executable, shell, [...this.#flags(mcpPath, [], 'auto'), ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId])]);
   }
 
-  /** Send comments Claude did not pick up again, and clear the last error. */
+  /** Send comments Claude did not pick up again, and those of a stopped run it did not answer, and clear the last error. */
   retry(): void {
     this.#sent.clear();
+    const resend = this.#activity.stopped === true ? this.#unanswered(this.#activity.threads) : [];
     this.#set({ ...this.#activity, skipped: 0, error: undefined, stopped: undefined });
-    this.#next();
+    if (resend.length > 0 && this.#child === undefined && !this.#activity.running && !this.#disposed) void this.#run(resend);
+    else this.#next();
+  }
+
+  /** The latest comment of each of these open threads that Claude acknowledged but did not answer. */
+  #unanswered(threadIds: ReadonlySet<string>): readonly ReviewEvent[] {
+    const { threads, events } = this.options.store;
+    const latest = new Set(threads.filter((thread) => threadIds.has(thread.id) && !thread.resolved && !thread.messages.some((message) => message.author === 'claude' && message.eventId === thread.latestEventId))
+      .map((thread) => thread.latestEventId));
+    return events.filter((event) => latest.has(event.id));
   }
 
   /** Stop the current run, if any, and resolve once it ended; its comments wait for a retry. */
