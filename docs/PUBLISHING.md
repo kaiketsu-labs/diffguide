@@ -8,21 +8,15 @@ Use the owner's Microsoft account to sign in to [Marketplace publisher managemen
 
 Publishing is supported both via Trusted Publishing (OIDC) and via Personal Access Tokens (`VSCE_PAT`). For Open VSX (Cursor / VSCodium), configure `OVSX_PAT`.
 
-For the first release, browser upload is the simplest route: package the extension, open the publisher's management page, and upload the VSIX as a VS Code extension. This uses the signed-in account; no CLI personal access token is needed for this route. Review the listing and confirm its published status before adding a Marketplace install link. [Manual upload instructions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-an-extension)
-
 Account sign-in, publisher creation, and acceptance of Marketplace terms belong to the account owner. Do not commit credentials.
 
-## Prepare a GitHub release
+## Automated releases via Release Please
 
-Update the version in `package.json` and its lockfile, and describe the change in `CHANGELOG.md`. Resolve the source findings and complete the checks recorded in [REVIEW.md](REVIEW.md). Before Marketplace upload, also settle the publisher ID, licensing, repository metadata, and listing assets.
+Releases and versioning are fully automated using **Release Please**:
 
-A developer preview can be shared earlier for evaluation when its release notes explicitly list unfinished verification. The initial 0.1.1 GitHub prerelease follows this route: packaging succeeded, while type checking, automated tests, and a live authenticated Claude walkthrough remain pending. It is not a validated stable release.
-
-The **Validate and package** workflow is manual. On the repository's **Actions** page, select it, choose the intended branch, and explicitly approve the checks. It installs locked dependencies, runs type checking and tests, builds the extension, and uploads the VSIX as a workflow artifact. A successful run is evidence for that commit only.
-
-The **Prepare release** workflow is also manual. Run it on `main`, supply the version already committed in `package.json`, and approve checks and draft-release creation. It validates, packages, creates a **draft GitHub prerelease** with the VSIX attached, and automatically publishes to the VS Code Marketplace and Open VSX when publishing tokens (`VSCE_PAT`, `OVSX_PAT`) or Trusted Publishing (`VSCE_USE_OIDC`) are configured. Review the draft, install its VSIX, record the live smoke-test result, then publish the release in GitHub when ready.
-
-Run these workflows only after human approval. They are deliberately not triggered by pushes, pull requests, or tags. GitHub explains [how to run a manual workflow](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+1. **Conventional Commits**: Every change merged into `main` follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, etc.).
+2. **Release PR**: On every push to `main`, Release Please automatically maintains an open Release Pull Request that bumps `package.json`, `package-lock.json`, and records changelog entries in `CHANGELOG.md`.
+3. **Triggering a release**: Merging that Release PR creates the GitHub tag and Release, builds the VSIX package, attaches it to the release, and automatically publishes it to the VS Code Marketplace and Open VSX.
 
 ## Listing assets
 
