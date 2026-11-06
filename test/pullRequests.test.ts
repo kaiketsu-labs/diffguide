@@ -8,7 +8,7 @@ import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githu
 import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
 import { fileTree, type FileFolder } from '../src/fileTree.js';
 import { registerPullRequestView } from '../src/pullRequestView.js';
-import { groupSearchResults, parseGitRemote, pickGitHubRemote } from '../src/pullRequests.js';
+import { groupSearchResults, parseGitRemote, parsePullRequestLink, pickGitHubRemote } from '../src/pullRequests.js';
 import type { PullRequestWorktrees } from '../src/pullRequestView.js';
 import { DataTransfer, EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
 
@@ -215,7 +215,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
   const roleRows = await level(tree);
-  assert.deepEqual(roleRows.map(({ item }) => [item.label, item.description]), [['REVIEW REQUESTED', '1'], ['MINE', '0']]);
+  assert.deepEqual(roleRows.map(({ item }) => [item.label, item.description]), [['REVIEW REQUESTED', '1'], ['MINE', '0'], ['ALL OPEN', undefined]]);
   const [empty] = await level(tree, roleRows[1]?.node);
   assert.equal(empty?.item.label, 'No open PRs');
   const [repository] = await level(tree, roleRows[0]?.node);
@@ -239,7 +239,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
 
   const legend = await level(window.trees.at(-2)?.provider as vscode.TreeDataProvider<unknown>);
   assert.deepEqual(legend.map(({ item }) => [item.label, (item.iconPath as vscode.ThemeIcon).id]), [
-    ['Repository', 'repo'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'], ['Merged', 'git-merge'],
+    ['Repository', 'repo'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'], ['Merged', 'git-merge'], ['Awaiting review', 'eye'],
     ['Approved', 'pass'], ['Changes requested', 'request-changes'], ['Commented', 'comment-discussion'], ['Checked out in a worktree', 'git-pull-request'],
   ]);
   assert.equal(decoratePullRequest(legend.at(-1)?.item)?.badge, 'W');
@@ -382,7 +382,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   ]);
   const pullRequestIn = async (row: number): Promise<{ node: unknown; item: vscode.TreeItem } | undefined> => {
     const sections = await level(tree, rows[row]?.node);
-    assert.deepEqual(sections.map(({ item }) => item.label), ['Mine']);
+    assert.deepEqual(sections.map(({ item }) => item.label), ['Mine', 'All open']);
     return (await level(tree, sections[0]?.node))[0];
   };
   const firstPr = await pullRequestIn(0);
@@ -411,7 +411,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   assert.deepEqual(connected, ['acme/service-a', 'acme/service-b', 'acme/service-c']);
 
   await commands.executeCommand('pairReview.groupByRole');
-  assert.deepEqual(await labels(), ['REVIEW REQUESTED', 'MINE']);
+  assert.deepEqual(await labels(), ['REVIEW REQUESTED', 'MINE', 'ALL OPEN']);
 });
 
 test('reads GitHub repositories from remote URLs and picks the remote GitHub CLI would use', () => {
@@ -509,12 +509,12 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
 
   worktrees.reviewed.add('a.ts');
   status.fire('acme/app#7');
-  assert.deepEqual(redrawn, [pr?.node]);
+  assert.deepEqual(redrawn, [[pr?.node]]);
   assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · octo · Draft · Worktree · 1/2 reviewed');
   assert.equal(reads, 2);
 
   status.fire('acme/other#1');
-  assert.deepEqual(redrawn, [pr?.node, undefined]);
+  assert.deepEqual(redrawn, [[pr?.node], undefined]);
 });
 
 test('lists a checked-out PR\'s files or its guide steps, opens the review page at a step or section, and marks a section read', async (t) => {
@@ -653,7 +653,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   await commands.executeCommand('pairReview.pinPullRequest', three?.node);
   await commands.executeCommand('pairReview.pinPullRequest', one?.node);
   assert.deepEqual(await shown(), {
-    roles: ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0'],
+    roles: ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
     pinned: ['Three · #3 · app · review · octo · pairReview.pullRequest.pinned', 'One · #1 · app · review · octo · pairReview.pullRequest.pinned'],
   });
   assert.deepEqual((await reviewRows()).map(({ item }) => item.label), ['Two']);
@@ -668,10 +668,10 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three']);
   await drag([two?.node], (await level(tree))[0]?.node);
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three', 'Two']);
-  assert.deepEqual((await shown()).roles, ['PINNED 3', 'REVIEW REQUESTED 0', 'MINE 0']);
+  assert.deepEqual((await shown()).roles, ['PINNED 3', 'REVIEW REQUESTED 0', 'MINE 0', 'ALL OPEN undefined']);
 
   await commands.executeCommand('pairReview.unpinPullRequest', (await level(tree, (await level(tree))[0]?.node))[2]?.node);
-  assert.deepEqual((await shown()).roles, ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0']);
+  assert.deepEqual((await shown()).roles, ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
 
   reviewRequested = [pr(2, 'Two')];
   open = new Set([1]);
@@ -679,12 +679,148 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   await level(tree);
   await settle();
   assert.deepEqual(await shown(), {
-    roles: ['PINNED 1', 'REVIEW REQUESTED 1', 'MINE 0'],
+    roles: ['PINNED 1', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
     pinned: ['Still open 1 · #1 · app · review · octo · pairReview.pullRequest.pinned'],
   });
   assert.deepEqual(asked, [[1, 3]]);
 
   await commands.executeCommand('pairReview.markPullRequestMerged', 'acme/app#1');
   await settle();
-  assert.deepEqual((await shown()).roles, ['REVIEW REQUESTED 1', 'MINE 0']);
+  assert.deepEqual((await shown()).roles, ['REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
+});
+
+test('reads a PR from a GitHub link with any tab, comment anchor or query, or from owner/repo#57', () => {
+  const pr = { host: 'github.com', owner: 'acme', name: 'app', number: 57 };
+  for (const link of [
+    'https://github.com/acme/app/pull/57', 'https://github.com/acme/app/pull/57/', 'https://github.com/acme/app/pull/57/files',
+    'https://github.com/acme/app/pull/57/commits/abc123', 'https://github.com/acme/app/pull/57#discussion_r123', 'https://github.com/acme/app/pull/57?w=1',
+    '  https://GitHub.com/acme/app/pull/57/files#diff-1  ', 'github.com/acme/app/pull/57',
+  ]) assert.deepEqual(parsePullRequestLink(link), pr, link);
+  assert.deepEqual(parsePullRequestLink('https://github.example.com/acme/app/pull/57'), { ...pr, host: 'github.example.com' });
+  assert.deepEqual(parsePullRequestLink('acme/app#57'), { owner: 'acme', name: 'app', number: 57 });
+  for (const link of ['https://github.com/acme/app/issues/57', 'https://github.com/acme/app/pull/', 'https://github.com/acme/app/pull/0', 'acme#57', 'https://github.com/acme/app/pull/57x', '']) {
+    assert.equal(parsePullRequestLink(link), undefined, link);
+  }
+});
+
+test('reads pending reviewers and whether a review request reached the viewer directly or through a team', () => {
+  const requests = (...reviewers: unknown[]) => ({ nodes: reviewers.map((requestedReviewer) => ({ requestedReviewer })) });
+  const hit = (number: number, reviewRequests: unknown) => ({
+    number, title: `PR ${number}`, url: `https://github.com/acme/app/pull/${number}`, isDraft: false, headRefName: 'feature', baseRefName: 'main',
+    author: { login: 'octo' }, repository: { nameWithOwner: 'acme/app' }, reviewRequests,
+  });
+  const grouped = groupSearchResults(
+    [hit(1, requests({ __typename: 'User', login: 'alice' }, { __typename: 'Team', name: 'Core' }, null, {})), hit(2, requests())],
+    [hit(3, requests({ __typename: 'User', login: 'Me' }, { __typename: 'Team', name: 'Core' })), hit(4, requests({ __typename: 'Team', name: 'Core' })), hit(5, undefined)],
+    'me',
+  ).get('acme/app');
+  assert.deepEqual(grouped?.mine.map((pr) => pr.requestedReviewers), [[{ name: 'alice', team: false }, { name: 'Core', team: true }], undefined]);
+  assert.deepEqual(grouped?.reviewRequested.map((pr) => pr.requestedVia), ['you', 'team', undefined]);
+});
+
+test('marks my PRs awaiting review, filters Mine to them, tells direct from team requests, and copies a PR link', async (t) => {
+  window.trees.length = 0;
+  env.clipboard.writes.length = 0;
+  const waiting: PullRequestSummary = { ...summary, number: 8, draft: false, requestedReviewers: [{ name: 'alice', team: false }, { name: 'Core', team: true }] };
+  const idle: PullRequestSummary = { ...summary, number: 9, draft: false };
+  const provider = {
+    ...mockPullRequestProvider,
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [waiting, idle],
+    listReviewRequested: async () => [{ ...summary, number: 10, requestedVia: 'you' }, { ...summary, number: 11, requestedVia: 'team', requestedReviewers: [{ name: 'Core', team: true }] }],
+  } as unknown as PullRequestProvider;
+  const settings = new FakeMemento();
+  await settings.update('pairReview.groupBy', 'repository');
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, settings, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+  const sections = async () => level(tree, (await level(tree))[0]?.node);
+
+  const [review, mine] = await sections();
+  const reviewRows = await level(tree, review?.node);
+  assert.deepEqual(reviewRows.map(({ item }) => item.description), ['#10 · Direct · octo · Draft', '#11 · via Core · octo · Draft']);
+  assert.match(String(reviewRows[1]?.item.tooltip), /You were asked through a team/u);
+  const mineRows = await level(tree, mine?.node);
+  assert.deepEqual(mineRows.map(({ item }) => [item.description, (item.iconPath as vscode.ThemeIcon).id]), [['#8 · Awaiting review · octo', 'eye'], ['#9 · octo', 'git-pull-request']]);
+  assert.match(String(mineRows[0]?.item.tooltip), /Review requested from alice, team Core/u);
+
+  await commands.executeCommand('pairReview.showAwaitingReviewOnly');
+  assert.deepEqual((await level(tree, (await sections())[1]?.node)).map(({ item }) => String(item.description).split(' · ')[0]), ['#8']);
+  assert.equal(window.trees.at(-1)?.description, 'Awaiting review');
+  await commands.executeCommand('pairReview.showAllMine');
+  assert.equal((await level(tree, (await sections())[1]?.node)).length, 2);
+
+  await commands.executeCommand('pairReview.copyPullRequestLink', mineRows[0]?.node);
+  await commands.executeCommand('pairReview.copyPullRequestLink', { kind: 'pullRequest', pullRequest: { url: 'https://evil.example' } });
+  assert.deepEqual(env.clipboard.writes, ['https://github.com/acme/app/pull/7']);
+});
+
+test('lists every open PR of a repository under All open only once expanded, with rows that open like the others', async (t) => {
+  window.trees.length = 0;
+  const searched: string[] = [];
+  const provider = {
+    ...mockPullRequestProvider,
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [summary],
+    listReviewRequested: async () => [],
+    search: async (query: string) => { searched.push(query); return [summary, { ...summary, number: 12, title: 'Someone else', author: 'bob' }]; },
+  } as unknown as PullRequestProvider;
+  const worktrees = recordingWorktrees();
+  const settings = new FakeMemento();
+  await settings.update('pairReview.groupBy', 'repository');
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+
+  const [repository] = await level(tree);
+  const groups = await level(tree, repository?.node);
+  const allOpen = groups.at(-1);
+  assert.deepEqual([allOpen?.item.label, allOpen?.item.collapsibleState], ['All open', 1]);
+  assert.deepEqual(searched, []);
+  const rows = await level(tree, allOpen?.node);
+  assert.deepEqual(searched, ['is:open sort:updated-desc']);
+  assert.deepEqual(rows.map(({ item }) => [item.label, item.contextValue]), [['Add review sidebar', 'pairReview.pullRequest'], ['Someone else', 'pairReview.pullRequest']]);
+  await level(tree, allOpen?.node);
+  assert.equal(searched.length, 1);
+  const command = rows[1]?.item.command as vscode.Command;
+  await commands.executeCommand(command.command, ...(command.arguments ?? []));
+  await commands.executeCommand('pairReview.openPullRequest', rows[0]?.node);
+  assert.deepEqual(worktrees.opened, ['acme/app#12:reviewer', 'acme/app#7:author']);
+});
+
+test('opens a PR from a pasted link in the workspace folder of its repository, or says which repository is missing', async (t) => {
+  window.trees.length = 0;
+  window.errors.length = 0;
+  const asked: number[] = [];
+  const provider = (name: string) => ({
+    ...mockPullRequestProvider,
+    readRepository: async () => ({ name, url: `https://github.com/${name}` }),
+    listMine: async () => [],
+    listReviewRequested: async () => [],
+    pullRequest: async (number: number) => { asked.push(number); return number === 57 ? { ...summary, number } : undefined; },
+  } as unknown as PullRequestProvider);
+  const other = recordingWorktrees();
+  const app = recordingWorktrees();
+  const shown: string[] = [];
+  app.showOverview = async (_provider, repository, pullRequest, role) => { shown.push(`${repository}#${pullRequest.number}:${role}`); };
+  const view = registerPullRequestView(async () => [
+    { folder: 'other', connect: async () => provider('acme/other'), worktrees: other },
+    { folder: 'app', connect: async () => provider('Acme/App'), worktrees: app },
+  ], noStatusChanges, new FakeMemento(), new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const inputs = [
+    'https://github.com/acme/app/pull/57/files#discussion_r1', 'acme/app#58', 'https://github.com/acme/missing/pull/1', 'https://ghe.example.com/acme/app/pull/57', undefined,
+  ];
+  const original = (window as { showInputBox?: unknown }).showInputBox;
+  (window as { showInputBox?: unknown }).showInputBox = async () => inputs.shift();
+  t.after(() => { (window as { showInputBox?: unknown }).showInputBox = original; });
+
+  for (let run = 0; run < 5; run += 1) await commands.executeCommand('pairReview.openPullRequestLink');
+  assert.deepEqual(shown, ['Acme/App#57:reviewer']);
+  assert.deepEqual(asked, [57, 58]);
+  assert.deepEqual(window.errors, [
+    'acme/app has no PR #58.',
+    'No workspace folder holds acme/missing. Open a clone of it to review #1.',
+    'No workspace folder holds acme/app. Open a clone of it to review #57.',
+  ]);
 });

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import type { ListVersion, PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, ReviewVerdict } from './pullRequests.js';
+import { parsePullRequestLink, type ListVersion, type PullRequestFile, type PullRequestProvider, type PullRequestRepository, type PullRequestSummary, type ReviewVerdict } from './pullRequests.js';
 import type { PullRequestRole } from './worktrees.js';
 import { pollWhileFocused } from './autoSync.js';
 import { GitHubSignInRequired } from './githubApi.js';
@@ -13,7 +13,10 @@ type Listing =
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
 
-type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary; readonly pinned?: true };
+/** Where a PR row sits, so a PR shown in two places redraws in both. */
+type Placement = 'pinned' | PullRequestRole | 'allOpen';
+
+type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary; readonly pinned?: true; readonly placement?: Placement };
 
 type RepositoryNode = { readonly kind: 'repository'; readonly listing: Ready; /** Set when grouped by role: the row then holds only that role's PRs. */ readonly role?: PullRequestRole };
 
@@ -22,6 +25,10 @@ type Node =
   | { readonly kind: 'role'; readonly role: PullRequestRole; readonly listings: readonly Ready[] }
   | RepositoryNode
   | { readonly kind: 'section'; readonly listing: Ready; readonly role: PullRequestRole }
+  /** One repository's open PRs, loaded when expanded. */
+  | { readonly kind: 'allOpen'; readonly listing: Ready }
+  /** The All open section when grouped by role, with one row per repository. */
+  | { readonly kind: 'allOpenRoot'; readonly listings: readonly Ready[] }
   | PullRequestNode
   | FileNode
   | FolderNode
@@ -39,6 +46,7 @@ const authorKey = 'pairReview.authorFilter';
 const childViewKey = 'pairReview.pullRequestChildren';
 const snapshotKey = 'pairReview.pullRequestSnapshot';
 const pinnedKey = 'pairReview.pinnedPullRequests';
+const awaitingReviewKey = 'pairReview.awaitingReviewOnly';
 const pinMime = 'application/vnd.code.tree.pairreview.pullrequests';
 
 /** A PR the user pinned, with its last known summary so it stays listed after it leaves the role searches, such as once reviewed. */
@@ -137,8 +145,11 @@ const repositoryIcon = new vscode.ThemeIcon('repo', new vscode.ThemeColor('chart
 
 const mergedIcon = new vscode.ThemeIcon('git-merge', new vscode.ThemeColor('charts.purple'));
 
-function pullRequestIcon(draft: boolean, review?: ReviewVerdict): vscode.ThemeIcon {
+const awaitingReviewIcon = new vscode.ThemeIcon('eye', new vscode.ThemeColor('charts.yellow'));
+
+function pullRequestIcon(draft: boolean, review?: ReviewVerdict, awaitingReview = false): vscode.ThemeIcon {
   if (review !== undefined) return new vscode.ThemeIcon(verdicts[review].icon, new vscode.ThemeColor(verdicts[review].color));
+  if (awaitingReview && !draft) return awaitingReviewIcon;
   return draft
     ? new vscode.ThemeIcon('git-pull-request-draft', new vscode.ThemeColor('descriptionForeground'))
     : new vscode.ThemeIcon('git-pull-request', new vscode.ThemeColor('charts.green'));
@@ -160,6 +171,7 @@ const legendProvider: vscode.TreeDataProvider<vscode.TreeItem> = {
       row('Open', pullRequestIcon(false)),
       row('Draft', pullRequestIcon(true)),
       row('Merged', mergedIcon),
+      row('Awaiting review', awaitingReviewIcon),
       ...(['approved', 'changes', 'commented'] as const).map((review) => row(verdicts[review].label, pullRequestIcon(false, review))),
       row('Checked out in a worktree', pullRequestIcon(false), pullRequestRowUri('legend', 0, true)),
     ];
@@ -169,6 +181,19 @@ const legendProvider: vscode.TreeDataProvider<vscode.TreeItem> = {
 const sectionLabels: Record<PullRequestRole, string> = { author: 'Mine', reviewer: 'Review requested' };
 const roleIcons: Record<PullRequestRole, string> = { author: 'account', reviewer: 'eye' };
 const roles: readonly PullRequestRole[] = ['reviewer', 'author'];
+
+/** "alice, team Core" for a PR's pending reviewers. */
+function reviewerNames(pullRequest: PullRequestSummary): string {
+  return (pullRequest.requestedReviewers ?? []).map((reviewer) => reviewer.team ? `team ${reviewer.name}` : reviewer.name).join(', ');
+}
+
+/** "Direct" or "via Core" for a review request to the viewer, or undefined when unknown. */
+function requestedViaLabel(pullRequest: PullRequestSummary): string | undefined {
+  if (pullRequest.requestedVia === 'you') return 'Direct';
+  if (pullRequest.requestedVia !== 'team') return undefined;
+  const teams = (pullRequest.requestedReviewers ?? []).filter((reviewer) => reviewer.team);
+  return teams.length === 1 && teams[0] !== undefined ? `via ${teams[0].name}` : 'via team';
+}
 
 /** Split `owner/name` so the name can lead the row. */
 function splitRepository(fullName: string): { readonly owner: string; readonly name: string } {
@@ -221,7 +246,7 @@ function limited(count: number): <T>(task: () => Promise<T>) => Promise<T> {
 
 /** List each repository's open pull requests by the user's role in them. */
 class PullRequestTree implements vscode.TreeDataProvider<Node> {
-  readonly #changed = new vscode.EventEmitter<Node | undefined>();
+  readonly #changed = new vscode.EventEmitter<Node | Node[] | undefined>();
   readonly onDidChangeTreeData = this.#changed.event;
   #checkouts: Promise<readonly PullRequestCheckout[]> | undefined;
   #listed: readonly PullRequestCheckout[] = [];
@@ -230,8 +255,10 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   #saving: Promise<void> = Promise.resolve();
   readonly #queue = limited(parallelListings);
   readonly #files = new Map<string, Promise<readonly PullRequestFile[]>>();
-  /** The row shown for each PR, so a change to one PR redraws only that row. */
-  readonly #rows = new Map<string, PullRequestNode>();
+  /** The rows shown for each PR by placement, so a change to one PR redraws only its rows. */
+  readonly #rows = new Map<string, Map<Placement, PullRequestNode>>();
+  /** Each repository's open PRs, loaded once its All open group is expanded. */
+  readonly #allOpen = new Map<string, Promise<readonly PullRequestSummary[]>>();
   /** Worktree and reviewed state per PR, read once per redraw and shared by the PR's row and its file rows. */
   readonly #checkedOut = new Map<string, Promise<boolean>>();
   readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
@@ -308,10 +335,67 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#changed.fire(undefined);
   }
 
-  /** A listing's PRs in a role section: those by the chosen author, without the pinned ones. */
+  /** A listing's PRs in a role section: those by the chosen author, without the pinned ones; in Mine only those awaiting review while that filter is on. */
   #sectionOf(listing: Ready, role: PullRequestRole): readonly PullRequestSummary[] {
     const pinned = new Set(this.#pins.map(pinKey));
-    return pullRequestsOf(listing, role, this.author).filter((pullRequest) => !pinned.has(`${listing.repository.name}#${pullRequest.number}`));
+    const awaitingOnly = role === 'author' && this.awaitingReviewOnly;
+    return pullRequestsOf(listing, role, this.author).filter((pullRequest) => !pinned.has(`${listing.repository.name}#${pullRequest.number}`)
+      && (!awaitingOnly || pullRequest.requestedReviewers !== undefined));
+  }
+
+  /** Remember a row by its PR and placement, so `redraw` reaches it. */
+  #row(row: PullRequestNode): PullRequestNode {
+    const key = pullRequestKey(row);
+    const placed = this.#rows.get(key) ?? new Map<Placement, PullRequestNode>();
+    placed.set(row.placement ?? row.role, row);
+    this.#rows.set(key, placed);
+    return row;
+  }
+
+  /** Whether Mine lists only PRs with pending review requests. */
+  get awaitingReviewOnly(): boolean {
+    return this.workspace.get<boolean>(awaitingReviewKey, false);
+  }
+
+  async setAwaitingReviewOnly(only: boolean): Promise<void> {
+    await this.workspace.update(awaitingReviewKey, only ? true : undefined);
+    this.#changed.fire(undefined);
+  }
+
+  /** A repository's open PRs by the chosen author, searched once until refresh. */
+  async #allOpenOf(listing: Ready): Promise<readonly PullRequestSummary[]> {
+    let all = this.#allOpen.get(listing.folder);
+    if (all === undefined) {
+      all = listing.provider.search('is:open sort:updated-desc');
+      all.catch(() => { this.#allOpen.delete(listing.folder); });
+      this.#allOpen.set(listing.folder, all);
+    }
+    const author = this.author;
+    return (await all).filter((pullRequest) => author === undefined || pullRequest.author === author);
+  }
+
+  /** Open the review page of a PR named by a GitHub link or `owner/name#57`, from the workspace folder that holds its repository. */
+  async openLink(link: string): Promise<void> {
+    const parsed = parsePullRequestLink(link);
+    if (parsed === undefined) throw new Error(`Not a GitHub PR link: ${link.trim()}`);
+    const fullName = `${parsed.owner}/${parsed.name}`;
+    const listing = await this.#listingFor(parsed.host, fullName);
+    if (listing === undefined) throw new Error(`No workspace folder holds ${fullName}. Open a clone of it to review #${parsed.number}.`);
+    const pullRequest = await listing.provider.pullRequest(parsed.number);
+    if (pullRequest === undefined) throw new Error(`${fullName} has no PR #${parsed.number}.`);
+    const role: PullRequestRole = listing.mine.some((mine) => mine.number === pullRequest.number) ? 'author' : 'reviewer';
+    await listing.worktrees.showOverview(listing.provider, listing.repository.name, pullRequest, role);
+  }
+
+  /** The listing of a repository by name, among hidden folders too; `host` must match when given. */
+  async #listingFor(host: string | undefined, fullName: string): Promise<Ready | undefined> {
+    const matches = (listing: Listing): listing is Ready => listing.kind === 'ready' && listing.repository.name.toLowerCase() === fullName.toLowerCase()
+      && (host === undefined || new URL(listing.repository.url).host.toLowerCase() === host);
+    for (const checkout of await this.#allCheckouts()) {
+      const listing = await this.#listingOf(checkout);
+      if (matches(listing)) return listing;
+    }
+    return undefined;
   }
 
   /** Pinned PRs of the loaded repositories, in the user's order, with their freshest summary. */
@@ -320,9 +404,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       const listing = ready.find((each) => each.repository.name === pin.repository);
       if (listing === undefined) return [];
       const fresh = [...listing.mine, ...listing.reviewRequested].find((pullRequest) => pullRequest.number === pin.pullRequest.number);
-      const row: PullRequestNode = { kind: 'pullRequest', listing, role: pin.role, pullRequest: fresh ?? pin.pullRequest, pinned: true };
-      this.#rows.set(pullRequestKey(row), row);
-      return [row];
+      return [this.#row({ kind: 'pullRequest', listing, role: pin.role, pullRequest: fresh ?? pin.pullRequest, pinned: true, placement: 'pinned' })];
     });
   }
 
@@ -413,6 +495,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#done.clear();
     this.#files.clear();
     this.#rows.clear();
+    this.#allOpen.clear();
     this.#forgetState();
     for (const checkout of this.#listed) checkout.worktrees.forget();
     this.#changed.fire(undefined);
@@ -439,11 +522,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     void this.unpin(pullRequest);
   }
 
-  /** Redraw checkout state without querying the code host again: one PR's row when it is shown, else the whole tree. */
+  /** Redraw checkout state without querying the code host again: one PR's rows when it is shown, else the whole tree. */
   redraw(pullRequest?: string): void {
-    const row = pullRequest === undefined ? undefined : this.#rows.get(pullRequest);
-    this.#forgetState(row === undefined ? undefined : pullRequest);
-    this.#changed.fire(row);
+    const rows = pullRequest === undefined ? undefined : this.#rows.get(pullRequest);
+    this.#forgetState(rows === undefined ? undefined : pullRequest);
+    this.#changed.fire(rows === undefined ? undefined : [...rows.values()]);
   }
 
   #forgetState(pullRequest?: string): void {
@@ -467,15 +550,26 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === 'pinned') return [...node.rows];
     if (node.kind === 'repository' && node.role === undefined) {
-      return roles.filter((role) => this.#sectionOf(node.listing, role).length > 0).map((role) => ({ kind: 'section', listing: node.listing, role }));
+      return [
+        ...roles.filter((role) => this.#sectionOf(node.listing, role).length > 0).map((role): Node => ({ kind: 'section', listing: node.listing, role })),
+        { kind: 'allOpen', listing: node.listing },
+      ];
     }
     if (node.kind === 'repository' || node.kind === 'section') {
       const role = node.role as PullRequestRole;
-      return this.#sectionOf(node.listing, role).map((pullRequest) => {
-        const row: PullRequestNode = { kind: 'pullRequest', listing: node.listing, role, pullRequest };
-        this.#rows.set(pullRequestKey(row), row);
-        return row;
-      });
+      return this.#sectionOf(node.listing, role).map((pullRequest) => this.#row({ kind: 'pullRequest', listing: node.listing, role, pullRequest }));
+    }
+    if (node.kind === 'allOpenRoot') return node.listings.map((listing): Node => ({ kind: 'allOpen', listing }));
+    if (node.kind === 'allOpen') {
+      const { listing } = node;
+      try {
+        const all = await this.#allOpenOf(listing);
+        if (all.length === 0) return [{ kind: 'message', text: 'No open PRs', icon: 'check' }];
+        const mine = new Set(listing.mine.map((pullRequest) => pullRequest.number));
+        return all.map((pullRequest) => this.#row({ kind: 'pullRequest', listing, role: mine.has(pullRequest.number) ? 'author' : 'reviewer', pullRequest, placement: 'allOpen' }));
+      } catch (error: unknown) {
+        return [{ kind: 'message', text: error instanceof Error ? error.message : String(error), icon: 'warning' }];
+      }
     }
     if (node.kind === 'folder') return this.#folderChildren(node.parent, node.folder);
     if (node.kind === 'pullRequest') {
@@ -532,6 +626,19 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         item.description = String(this.#sectionOf(node.listing, node.role).length);
         return item;
       }
+      case 'allOpenRoot': {
+        const item = new vscode.TreeItem('ALL OPEN', vscode.TreeItemCollapsibleState.Collapsed);
+        item.iconPath = new vscode.ThemeIcon('git-pull-request');
+        return item;
+      }
+      case 'allOpen': {
+        const { owner, name } = splitRepository(node.listing.repository.name);
+        const item = new vscode.TreeItem(this.byRole ? name : 'All open', vscode.TreeItemCollapsibleState.Collapsed);
+        item.iconPath = this.byRole ? repositoryIcon : new vscode.ThemeIcon('git-pull-request');
+        if (this.byRole) item.description = owner;
+        item.tooltip = `Every open PR in ${node.listing.repository.name}`;
+        return item;
+      }
       case 'pullRequest': {
         const pr = node.pullRequest;
         const checkedOut = await this.#isCheckedOut(node);
@@ -545,15 +652,19 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const verdict = pr.review === undefined || merged ? undefined : verdicts[pr.review];
         const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;
         const pinnedFrom = node.pinned === true ? [splitRepository(node.listing.repository.name).name, node.role === 'author' ? 'mine' : 'review'] : [];
-        item.description = [`#${pr.number}`, ...pinnedFrom, type, verdict?.label, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
+        const awaitingReview = node.role === 'author' && !merged && pr.requestedReviewers !== undefined;
+        const via = node.role === 'reviewer' && node.placement !== 'allOpen' ? requestedViaLabel(pr) : undefined;
+        item.description = [`#${pr.number}`, ...pinnedFrom, type, verdict?.label, awaitingReview ? 'Awaiting review' : undefined, via, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
         item.tooltip = [
           `#${pr.number} ${pr.title}`,
           `${pr.headBranch} → ${pr.baseBranch}`,
           verdict?.label,
+          pr.requestedReviewers === undefined ? undefined : `Review requested from ${reviewerNames(pr)}`,
+          via === undefined ? undefined : pr.requestedVia === 'you' ? 'You were asked directly' : 'You were asked through a team',
           pr.changes === undefined ? undefined : `${size} in ${pr.changes.files} ${pr.changes.files === 1 ? 'file' : 'files'}`,
           [pr.createdAt === undefined ? undefined : `Opened ${new Date(pr.createdAt).toLocaleString()}`, pr.updatedAt === undefined ? undefined : `updated ${ago(pr.updatedAt)}`].filter(Boolean).join(', ') || undefined,
         ].filter(Boolean).join('\n');
-        item.iconPath = merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review);
+        item.iconPath = merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review, awaitingReview);
         item.contextValue = `pairReview.pullRequest${checkedOut ? '.checkedOut' : ''}${node.pinned === true ? '.pinned' : ''}`;
         item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node] };
         return item;
@@ -685,7 +796,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     const hidden = this.#hidden;
     const shown = all.filter((checkout) => !hidden.has(checkout.folder));
     const author = this.author;
-    this.describe([author === undefined ? undefined : `Author: ${author}`, shown.length < all.length ? `${all.length - shown.length} hidden` : undefined].filter(Boolean).join(' · ') || undefined);
+    this.describe([author === undefined ? undefined : `Author: ${author}`, this.awaitingReviewOnly ? 'Awaiting review' : undefined, shown.length < all.length ? `${all.length - shown.length} hidden` : undefined].filter(Boolean).join(' · ') || undefined);
     if (shown.length === 0 && all.length > 0) return [{ kind: 'message', text: 'All repositories are hidden', icon: 'eye-closed' }];
     const loading = Promise.all(shown.map((checkout) => this.#listingOf(checkout)));
     let listings: readonly Listing[];
@@ -711,7 +822,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     const pinnedRows = this.#pinnedRows(ready);
     const pinned: Node[] = pinnedRows.length === 0 ? [] : [{ kind: 'pinned', rows: pinnedRows }];
     if (this.byRole) {
-      return [...pinned, ...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => this.#sectionOf(listing, role).length > 0) })), ...failed];
+      return [...pinned, ...roles.map((role): Node => ({ kind: 'role', role, listings: ready.filter((listing) => this.#sectionOf(listing, role).length > 0) })),
+        { kind: 'allOpenRoot', listings: ready }, ...failed];
     }
     const withPullRequests = ready.filter((listing) => roles.some((role) => this.#sectionOf(listing, role).length > 0));
     return [
@@ -793,6 +905,7 @@ export function registerPullRequestView(
     void vscode.commands.executeCommand('setContext', 'pairReview.groupByRole', tree.byRole);
     void vscode.commands.executeCommand('setContext', 'pairReview.authorFiltered', tree.author !== undefined);
     void vscode.commands.executeCommand('setContext', 'pairReview.treeShowsGuide', tree.showsGuide);
+    void vscode.commands.executeCommand('setContext', 'pairReview.awaitingReviewOnly', tree.awaitingReviewOnly);
   };
   showMode();
   const report = (error: unknown): void => {
@@ -855,6 +968,23 @@ export function registerPullRequestView(
     vscode.commands.registerCommand('pairReview.chooseRepositories', async () => { await tree.chooseRepositories(); }),
     vscode.commands.registerCommand('pairReview.filterByAuthor', async () => { await tree.chooseAuthor(); showMode(); }),
     vscode.commands.registerCommand('pairReview.filterByAuthorActive', async () => { await tree.chooseAuthor(); showMode(); }),
+    vscode.commands.registerCommand('pairReview.showAwaitingReviewOnly', async () => { await tree.setAwaitingReviewOnly(true); showMode(); }),
+    vscode.commands.registerCommand('pairReview.showAllMine', async () => { await tree.setAwaitingReviewOnly(false); showMode(); }),
+    vscode.commands.registerCommand('pairReview.openPullRequestLink', async () => {
+      const link = await vscode.window.showInputBox({
+        title: 'Open PR in Pair Review', prompt: 'GitHub PR link, or owner/repo#57', placeHolder: 'https://github.com/owner/repo/pull/57',
+        validateInput: (value) => !value.trim() || parsePullRequestLink(value) !== undefined ? undefined : 'Paste a GitHub PR link, such as https://github.com/owner/repo/pull/57',
+      });
+      if (link === undefined || !link.trim()) return;
+      try {
+        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Opening PR' }, () => tree.openLink(link));
+      } catch (error: unknown) {
+        report(error);
+      }
+    }),
+    vscode.commands.registerCommand('pairReview.copyPullRequestLink', async (node: unknown) => {
+      if (isPullRequestNode(node)) await vscode.env.clipboard.writeText(node.pullRequest.url);
+    }),
     vscode.commands.registerCommand('pairReview.showGuideInTree', async () => { await tree.setShowsGuide(true); showMode(); }),
     vscode.commands.registerCommand('pairReview.showFilesInTree', async () => { await tree.setShowsGuide(false); showMode(); }),
     vscode.commands.registerCommand('pairReview.hideRepository', async (node: unknown) => {
