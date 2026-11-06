@@ -149,7 +149,7 @@ export class PullRequestAnalysis implements vscode.Disposable {
     ];
     this.options.log('Building the PR guide');
     const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
-    const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.#child = child;
     child.stdin?.end(prompt);
     let stderr = '';

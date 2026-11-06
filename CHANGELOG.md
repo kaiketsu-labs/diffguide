@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Stopping Claude ends the whole run, including the tools and MCP servers it started. A `claude` shell function in your shell setup kept Claude running after a stop before.
 - After you resolve or reopen a GitHub thread, close or reopen the PR, convert it to draft, mark it ready or edit its title, the review page keeps showing your change. GitHub can answer with the old state for a few seconds after a change, and the page used to jump back to it and later forward again. The page checks again until GitHub reports the change, for up to 30 seconds.
 - The review page and the Pull Requests view show a new PR title after Claude changes it, or after someone edits it on GitHub. The page's tab title follows. The page reloads the PR from GitHub each time a Claude run ends.
 - Refreshing the Pull Requests view no longer pushes the rows down with an "Updating pull requests..." message; it shows only while the list loads for the first time. Rows keep their place and expansion across reloads.
@@ -14,7 +15,7 @@
 - The review page draws check marks, crosses and dots as straight codicon icons instead of font glyphs, in checks, reviewers, commits, the merge box, linked issues, read lines and Claude's step log.
 - The Checks list shows only the icon and the check's name. Hovering the icon, or a screen reader, still gives the state: Passed, Failed, Running or Skipped.
 - The expand arrow on Claude's commits inside a thread lines up with the commit's text.
-- While Claude runs on a PR, the review page shows **Stop** next to its steps in the header and in the thread Claude is answering. It stops the run, the header reads **Claude stopped**, the threads it was answering read **Stopped**, and **Retry** sends them again. No failure message pops up for a run you stopped.
+- While Claude runs on a PR, the review page shows a stop icon next to its steps in the header and in the thread Claude is answering. It stops the run, the header reads **Claude stopped**, the threads it was answering read **Stopped**, and **Retry** sends them again. No failure message pops up for a run you stopped.
 - **Implement** in a reply to a Local thread works without a note: Claude implements what the thread discussed. A new comment still needs text, and **Ask Claude** still needs a note.
 - The comment icon in a file's header on the review page opens a comment about the whole file above its diff. The thread stays there, reads **Whole file** instead of a line, and Claude is told the comment is about the file, not about lines. Posting it on GitHub makes a file-level comment.
 - Local threads have **Archive** next to **Resolve**. Archived threads leave the page and the Threads card; **Show archived threads** in the Files filter menu brings them back with **Unarchive**. Archiving keeps the conversation and is separate from resolving.

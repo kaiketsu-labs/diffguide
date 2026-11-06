@@ -1697,7 +1697,7 @@ function render(state: OverviewState): void {
   if (progress === undefined) claude.textContent = state.claude.text;
   else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), stop, terminal);
   stop.hidden = !state.claude.running;
-  if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; stop.textContent = 'Stop'; }
+  if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; }
   claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip claude working' : 'chip';
   $('retry').hidden = !state.claude.retry;
   terminal.className = state.claude.running ? 'small' : 'quiet';
@@ -2165,22 +2165,23 @@ function threadBox(thread: Thread): HTMLElement {
   return box;
 }
 
-/** Set from a Stop click until the state reports Claude idle, so redrawn Stop buttons keep saying so. */
+/** Set from a Stop click until the state reports Claude idle, so redrawn Stop buttons stay disabled. */
 let stoppingClaude = false;
 
-/** Stop Claude's run on this PR; every Stop button on the page shows it stopping. */
+/** Stop Claude's run on this PR; every Stop button on the page turns disabled until it ends. */
 function stopClaude(): void {
   stoppingClaude = true;
-  for (const stop of document.querySelectorAll<HTMLButtonElement>('#stop-claude, .stop-claude')) { stop.disabled = true; stop.textContent = 'Stopping…'; }
+  for (const stop of document.querySelectorAll<HTMLButtonElement>('#stop-claude, .stop-claude')) stop.disabled = true;
   $('error').textContent = '';
   post({ action: 'stop-claude' });
 }
 
 /** Stop beside a thread's live log, for the run that is answering it. */
 function stopButton(): HTMLButtonElement {
-  const stop = button(stoppingClaude ? 'Stopping…' : 'Stop', stopClaude, 'small stop-claude');
+  const stop = button('', stopClaude, 'icon-button stop-claude');
+  stop.append(icon(codicons.stopCircle));
+  setTip(stop, 'Stop Claude. The comments it was answering wait for Retry.');
   stop.disabled = stoppingClaude;
-  stop.dataset.tip = 'Stop Claude\'s run on this PR. The comments it was answering wait for Retry.';
   return stop;
 }
 

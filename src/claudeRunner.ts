@@ -264,7 +264,7 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#reply = undefined;
     this.options.log(`Starting Claude for ${run.label} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);
     const launch = this.#command(executable, shell, args);
-    const child = (this.options.spawn ?? spawnProcess)(launch.command, launch.args, { cwd: launch.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...launch.env } });
+    const child = (this.options.spawn ?? spawnProcess)(launch.command, launch.args, { cwd: launch.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...launch.env }, detached: true });
     this.#child = child;
     let stderr = '';
     child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
