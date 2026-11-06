@@ -166,6 +166,13 @@
 - Add the `localReview.mockPullRequests` setting, which fills the Pull Requests view with sample data for testing.
 - Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
 
+## [0.5.1](https://github.com/kaiketsu-labs/pair-review/compare/v0.5.0...v0.5.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **ci:** bump @vscode/vsce to 4.1.0 for marketplace oidc token exchange ([#34](https://github.com/kaiketsu-labs/pair-review/issues/34)) ([1c57e34](https://github.com/kaiketsu-labs/pair-review/commit/1c57e3493c0532d1d2d416d7e784971fad0aa4ac))
+
 ## [0.5.0](https://github.com/kaiketsu-labs/pair-review/compare/v0.4.12...v0.5.0) (2026-11-06)
 
 
