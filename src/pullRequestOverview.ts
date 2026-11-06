@@ -700,6 +700,7 @@ h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;col
 ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px}li+li{border-top:1px solid var(--line)}
 .where{font-family:var(--font-code);font-size:12px}.text{overflow-wrap:anywhere}
 .ok{color:var(--success)}.bad{color:var(--danger)}.wait{color:var(--warning)}
+.state-icon{display:inline-flex;flex:none;align-items:center;justify-content:center;width:16px;height:16px}.state-icon svg{width:14px;height:14px;fill:currentColor}
 #body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
@@ -747,7 +748,7 @@ tr.del td,td.del{background:var(--diff-del)}
 td.empty{background:color-mix(in srgb,var(--ink) 4%,transparent)}
 tr.hunk td{padding:var(--space-2) var(--space-12);color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 6%,transparent);font-size:11px}
 tr.read-run td{padding:var(--space-2) var(--space-12);color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 3%,transparent);box-shadow:inset 2px 0 0 var(--brand);font-family:var(--font-ui);font-size:11px}
-tr.read-run .read-label{cursor:pointer;margin-right:10px}
+tr.read-run .read-label{display:inline-flex;align-items:center;gap:var(--space-4);vertical-align:middle;cursor:pointer;margin-right:10px}
 tr.read-run button,.expand button{min-height:18px;padding:0 var(--space-8);font-size:11px;line-height:1.6}
 .expand{display:inline-flex;gap:var(--space-2);margin-right:10px}
 .composer-actions{gap:var(--space-8);margin-top:var(--space-8)}.composer-actions .gap,.actions .gap{flex:1}
@@ -865,7 +866,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .section-fold{gap:var(--space-6);min-height:22px;margin:0 0 var(--space-8) calc(-1 * var(--space-4));padding:0 var(--space-4);border:0;color:var(--ink);background:none}.section-fold:hover{filter:none}.section-fold h3{margin:0}.section-fold svg{color:var(--ink-muted);transition:transform .15s}.section-fold .count{font-size:12px;color:var(--ink-muted)}.section-fold .count::before{content:'· '}.section-fold .count:empty{display:none}#conversation.folded .section-fold{margin-bottom:0}#conversation.folded .section-fold svg{transform:rotate(-90deg)}#conversation.folded #timeline,#conversation.folded #conversation-form{display:none}
 .timeline-item .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.timeline-item .avatar svg{width:16px;height:16px;fill:currentColor}.timeline-item .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
 .timeline-item.event,.timeline-item.commits{font-size:12px;color:var(--ink-muted)}.timeline-item.event b,.timeline-item.commits b{color:var(--ink);font-weight:600}
-.commit-list{margin-top:var(--space-4)}.commit-row{display:flex;align-items:baseline;gap:var(--space-8);padding:var(--space-2) 0;font-size:12px}.commit-row code{font-family:var(--font-code);color:var(--ink-muted)}.commit-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.commit-list{margin-top:var(--space-4)}.commit-row{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-2) 0;font-size:12px}.commit-row code{font-family:var(--font-code);color:var(--ink-muted)}.commit-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
 .commit-row .ref{flex:none}.commit-lines{display:inline-flex;gap:var(--space-4);font-family:var(--font-code);font-size:11px}
 .msg-tools{display:flex;align-items:center;gap:var(--space-2);margin-left:auto}.msg-tools button{min-height:20px;width:22px;padding:0;border:0;background:none;color:var(--ink-muted)}.msg-tools button:hover{color:var(--ink);filter:none}.msg-tools svg{width:14px;height:14px;fill:currentColor}
 .edited{font-size:12px;color:var(--ink-muted)}.verb{color:var(--ink-muted)}
@@ -879,7 +880,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .field{position:relative}.mentions{position:absolute;left:0;z-index:7;display:flex;flex-direction:column;min-width:180px;max-height:200px;overflow:auto;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}
 .mentions button{justify-content:flex-start;min-height:22px;padding:0 var(--space-8);border:0;background:none;font-size:12px}.mentions button[aria-selected=true]{background:color-mix(in srgb,var(--ink) 12%,transparent)}
 #conversation-form .row{margin-top:var(--space-8)}#timeline:empty{display:none}
-.merge-status:not(:empty){margin-bottom:var(--space-8)}.merge-status li{display:flex;gap:var(--space-8)}
+.merge-status:not(:empty){margin-bottom:var(--space-8)}.merge-status li{display:flex;align-items:center;gap:var(--space-8)}
 #merge-form{margin-bottom:var(--space-8)}#merge-row .gap{flex:1}.merge-delete{display:inline-flex;align-items:center;gap:var(--space-4);font-size:12px;cursor:pointer}.merge-delete input{margin:0;accent-color:var(--brand)}.method-menu{left:0;right:auto}
 .ask-row{justify-content:flex-end;margin-top:var(--space-6)}.ask-row .gap{flex:1 1 180px}.ask-buttons{display:flex;gap:var(--space-8);margin-left:auto}.ask-row .muted{font-size:12px}.ask-menu{width:280px}.ask-text{margin:var(--space-4) var(--space-4) var(--space-8);font-size:12px}.ask-actions{justify-content:flex-end}
 .title-row:has(.title-form){flex:1;min-width:0}.title-form{display:flex;flex:1;align-items:center;gap:var(--space-8);min-width:0}.title-form input{flex:1;min-width:0;height:28px;padding:0 var(--space-8);font-size:14px}.dismiss-form{display:block}.dismiss-form textarea{width:100%;min-height:60px}#merge-form input{width:100%;height:26px;box-sizing:border-box;padding:0 var(--space-8);font-size:12px}#merge-form textarea{margin-top:var(--space-6)}
