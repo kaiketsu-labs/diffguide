@@ -166,6 +166,89 @@
 - Add the `localReview.mockPullRequests` setting, which fills the Pull Requests view with sample data for testing.
 - Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
 
+## [0.5.0](https://github.com/kaiketsu-labs/pair-review/compare/v0.4.12...v0.5.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* the extension ID is now pair-review-dev.pair-review. Settings move from localReview.* to pairReview.*, PR worktrees from .git/local-review to .git/pair-review, and the Claude plugin from local-review to pair-review. Nothing is migrated.
+* **github:** sign in through vs code instead of the github cli
+
+### Features
+
+* **ci:** automate releases with release please and marketplace publishing ([6d5e3bf](https://github.com/kaiketsu-labs/pair-review/commit/6d5e3bfb6fbdf00331d1c824dae8c5f46028e39c))
+* **ci:** switch release workflow to release please and marketplace publishing ([e0708ff](https://github.com/kaiketsu-labs/pair-review/commit/e0708ffc7e81c2759523ca506ee06f973321d37d))
+* **claude:** commit, preview and push Claude's changes from the review page ([e145e8b](https://github.com/kaiketsu-labs/pair-review/commit/e145e8b624487321965306d2c84e34a958ca7d2f))
+* **github:** sign in through vs code instead of the github cli ([f948502](https://github.com/kaiketsu-labs/pair-review/commit/f94850217be31da8dd81fe5b32c730e87c3da8fa))
+* new design and PR management on the review page ([#8](https://github.com/kaiketsu-labs/pair-review/issues/8)) ([e5584f6](https://github.com/kaiketsu-labs/pair-review/commit/e5584f61c5f288d83c1b8cde5c3e41c37c593b08))
+* **pr:** add custom review instructions and isolate untrusted checkouts ([99dc317](https://github.com/kaiketsu-labs/pair-review/commit/99dc3174c1b11c41f3576a77c4b4ab0ebd3f66db))
+* **pr:** add guided review and threaded file layout ([8288a10](https://github.com/kaiketsu-labs/pair-review/commit/8288a1076ae16966efc837c17647619a09d4d326))
+* **pr:** add pull request review workbench ([2b7e8d7](https://github.com/kaiketsu-labs/pair-review/commit/2b7e8d7422279810e8a7a4b41c0f61ea562f3889))
+* **pr:** ask on the review page instead of in VS Code dialogs ([#28](https://github.com/kaiketsu-labs/pair-review/issues/28)) ([056f5ef](https://github.com/kaiketsu-labs/pair-review/commit/056f5efae39b1220a7e94173c280327a3930dd9d))
+* **pr:** bring the review page to parity with GitHub's pull request page ([#24](https://github.com/kaiketsu-labs/pair-review/issues/24)) ([65d4e74](https://github.com/kaiketsu-labs/pair-review/commit/65d4e74df60959d4c639eb12d3f5cfa1d00bbf66))
+* **pr:** code suggestions with options from Claude, apply and publish ([#18](https://github.com/kaiketsu-labs/pair-review/issues/18)) ([8020b0b](https://github.com/kaiketsu-labs/pair-review/commit/8020b0bfc0a8ae799a5e96b523df4e438ae09891))
+* prepare for VS Code Marketplace and Open VSX release ([#27](https://github.com/kaiketsu-labs/pair-review/issues/27)) ([a534633](https://github.com/kaiketsu-labs/pair-review/commit/a5346332db85760534fb1b348884760908449e4f))
+* **pr:** files and guide tabs, resizable definition panel, comment plus on hover ([#15](https://github.com/kaiketsu-labs/pair-review/issues/15)) ([06c42b7](https://github.com/kaiketsu-labs/pair-review/commit/06c42b71bb46524c5e5c3977edbf837b7a56c95a))
+* **pr:** filter sidebar by author, show files or guide, PR dates and size ([#13](https://github.com/kaiketsu-labs/pair-review/issues/13)) ([51a76e8](https://github.com/kaiketsu-labs/pair-review/commit/51a76e8830365d498b0cfc39677260ea8407d980))
+* **pr:** hand GitHub threads to Claude from the review page ([a04561e](https://github.com/kaiketsu-labs/pair-review/commit/a04561e6566fdb15205b9ccc25f0f19ffe2bc222))
+* **pr:** jump to and mark guide sections read ([12782d5](https://github.com/kaiketsu-labs/pair-review/commit/12782d58dedc4619c812ba622fefb48dfdd4479d))
+* **pr:** keep PRs in sync with GitHub ([30df344](https://github.com/kaiketsu-labs/pair-review/commit/30df344c8a91725d8a41a578443b0b2c13093611))
+* **pr:** list pull requests of nested repositories ([061bfa3](https://github.com/kaiketsu-labs/pair-review/commit/061bfa3415719c1ac35917dbb77cb3e0e89d715c))
+* **pr:** live Claude status on comments and fix conflicts with Claude ([#17](https://github.com/kaiketsu-labs/pair-review/issues/17)) ([444b759](https://github.com/kaiketsu-labs/pair-review/commit/444b75919677015c9df68b99ac28327e4f7dd659))
+* **pr:** mark line ranges read and speed up the review page ([4e8c908](https://github.com/kaiketsu-labs/pair-review/commit/4e8c908d2c8cc9f830265c32374660fef71b6d81))
+* **pr:** nest Claude's threads in their GitHub thread and give local threads titles ([0b8e248](https://github.com/kaiketsu-labs/pair-review/commit/0b8e248c9567e7a515053ea620543cf98e5b97d3))
+* **pr:** open prs by link and show review requests in the sidebar ([1aa8a22](https://github.com/kaiketsu-labs/pair-review/commit/1aa8a221671a1103206c6277553f48e78a419885))
+* **pr:** pick reviewers, assignees and labels in a popover ([360d195](https://github.com/kaiketsu-labs/pair-review/commit/360d1954c27924a49efc484bf4e55415e023bef8))
+* **pr:** pin PRs in the sidebar and tame long threads on the review page ([fe5ea57](https://github.com/kaiketsu-labs/pair-review/commit/fe5ea57c459dabe5d554abe27323f5ad72477e9a))
+* **pr:** post Claude's threads on GitHub from the review page ([2f85582](https://github.com/kaiketsu-labs/pair-review/commit/2f855821b91ff08ef48aed6d1b11715079ec63d4))
+* **pr:** preview images, SVGs and PDFs, and Markdown in the guide ([#16](https://github.com/kaiketsu-labs/pair-review/issues/16)) ([52cbadc](https://github.com/kaiketsu-labs/pair-review/commit/52cbadc9d1461678661c686d4202f846d4da0780))
+* **pr:** show Claude's runs as a Clawd step log and hop into its reply ([0755f09](https://github.com/kaiketsu-labs/pair-review/commit/0755f0978cc81cb4867773a3d435000886c65a60))
+* **pr:** speed up the sidebar and color code like the editor ([0351fd8](https://github.com/kaiketsu-labs/pair-review/commit/0351fd82be4e8fcb91080fb93ff14453ba89a3ba))
+* **pr:** stop claude, archive threads and comment on whole files ([976ac9f](https://github.com/kaiketsu-labs/pair-review/commit/976ac9fb64c4b4858749398a2acd062098ff206e))
+* rename local-review to pair-review ([718d2cf](https://github.com/kaiketsu-labs/pair-review/commit/718d2cf4ee402ed7c6338b8007a17a597d1cbbb6))
+
+
+### Bug Fixes
+
+* **ci:** avoid secrets context in workflow if conditions ([14f9d6c](https://github.com/kaiketsu-labs/pair-review/commit/14f9d6c49d9416d59d5af77d9e0519a77685789c))
+* **ci:** handle marketplace tokens and oidc inside release steps ([b63b8f4](https://github.com/kaiketsu-labs/pair-review/commit/b63b8f417232486ef553cb5145e1f851e9cb3e8c))
+* **claude:** let Local threads run commands and start from the PR's latest commit ([#25](https://github.com/kaiketsu-labs/pair-review/issues/25)) ([487d33e](https://github.com/kaiketsu-labs/pair-review/commit/487d33e221a38b40544df90cef1aec23943c2d8f))
+* **github:** fall back to the gh cli token when vs code has no sign-in ([a4832d8](https://github.com/kaiketsu-labs/pair-review/commit/a4832d88f5cec88cde22a36f0ee0e9bf72f7114b))
+* **pr-management:** refresh partial writes and guard editing permissions ([#10](https://github.com/kaiketsu-labs/pair-review/issues/10)) ([dfa68f5](https://github.com/kaiketsu-labs/pair-review/commit/dfa68f597acc96d99a036325dacded7dd1bbeff8))
+* **pr:** clear the missing-definition hint and find same-file definitions ([#14](https://github.com/kaiketsu-labs/pair-review/issues/14)) ([fd12e0f](https://github.com/kaiketsu-labs/pair-review/commit/fd12e0f239cf34be08e4f70919b0282279cfa66c))
+* **pr:** color diff hunks from the whole file ([#23](https://github.com/kaiketsu-labs/pair-review/issues/23)) ([e88ec84](https://github.com/kaiketsu-labs/pair-review/commit/e88ec84c37200024ba8082285b3dd4477e686a6e))
+* **pr:** color the pending chip GitHub yellow ([bf8bc41](https://github.com/kaiketsu-labs/pair-review/commit/bf8bc41008a09b181035a0d771dbe80ffea8112d))
+* **pr:** commit suggestions after unpushed commits and stop leaked claude runs ([3929581](https://github.com/kaiketsu-labs/pair-review/commit/39295816671d22098911baa84f428614880e0b0d))
+* **pr:** commit suggestions over diverged local commits and explain missing auto-merge ([cd6eed2](https://github.com/kaiketsu-labs/pair-review/commit/cd6eed2545bbfd9cfc3f521fe122c4f5612456f5))
+* **pr:** give all open rows their own tree ids ([b490132](https://github.com/kaiketsu-labs/pair-review/commit/b490132bedd1314df3e428121cb0c80c94fecb7e))
+* **pr:** guide expanders, fold resolved threads, mark merged PRs ([7a56367](https://github.com/kaiketsu-labs/pair-review/commit/7a56367a37914b0bcd930b5cb1e0fbe433ac6e9a))
+* **pr:** keep read marks once they outgrow 64 KB ([430f878](https://github.com/kaiketsu-labs/pair-review/commit/430f87875a93590ce0b693cf2ba44f4b0f8d7cde))
+* **pr:** keep the review page and sidebar steady ([4896a01](https://github.com/kaiketsu-labs/pair-review/commit/4896a01d49409dfbacfe4ae754fd2e927a3f8195))
+* **pr:** keep the scroll position when commenting in html previews ([09a79ef](https://github.com/kaiketsu-labs/pair-review/commit/09a79ef18c93c852d01302d32a1a670d6f6b747b))
+* **pr:** let local replies ask Claude to implement ([ff0e029](https://github.com/kaiketsu-labs/pair-review/commit/ff0e02996f071c11f3b2979f6ae3775c3887f2ec))
+* **pr:** list every latest review for dismissing ([f02afbf](https://github.com/kaiketsu-labs/pair-review/commit/f02afbf8824d8c70f733106ccc3dbf6bc060e882))
+* **pr:** list PRs of repositories renamed on GitHub ([#20](https://github.com/kaiketsu-labs/pair-review/issues/20)) ([1d83fac](https://github.com/kaiketsu-labs/pair-review/commit/1d83fac09b84b7495a429743cc92be2e951b56f7))
+* **pr:** move worktrees to .claude/worktrees and clean them up ([#12](https://github.com/kaiketsu-labs/pair-review/issues/12)) ([5c8f335](https://github.com/kaiketsu-labs/pair-review/commit/5c8f335002669cd68fd01d9a3797fa2df2f7ac6c))
+* **pr:** render markdown tables in comments and replies ([#21](https://github.com/kaiketsu-labs/pair-review/issues/21)) ([0fe7974](https://github.com/kaiketsu-labs/pair-review/commit/0fe7974d917081340351063e910cec82db75faf4))
+* **pr:** request read:org so the review page loads details ([#9](https://github.com/kaiketsu-labs/pair-review/issues/9)) ([c5b4bbf](https://github.com/kaiketsu-labs/pair-review/commit/c5b4bbfc5e51e162884bc92d37c03efb34c46b2b))
+* **pr:** show initials when a comment avatar is missing or fails to load ([eb365ac](https://github.com/kaiketsu-labs/pair-review/commit/eb365ac510838c64d186810f66e1530b540bddbb))
+* **pr:** show stopped threads as stopped and retry them ([64b221b](https://github.com/kaiketsu-labs/pair-review/commit/64b221beacad9a27cebc7f5a7748fe7d99717f6a))
+* **pr:** stop a state refresh from undoing Viewed ticks still being saved ([af6cb4f](https://github.com/kaiketsu-labs/pair-review/commit/af6cb4fb70f080a1e5b6f67edea850cb2bf056df))
+* **pr:** stop claude for real and show a stop icon ([d9578e7](https://github.com/kaiketsu-labs/pair-review/commit/d9578e735bd7ddde8d6af1a35a5ba420868b2f09))
+* **pr:** stop claude from the thread it is answering ([8f9f3c4](https://github.com/kaiketsu-labs/pair-review/commit/8f9f3c48d5272bcb1bc67e59e11dcb6e322740de))
+* **runtime:** support node.js 20 ([2d6bf4a](https://github.com/kaiketsu-labs/pair-review/commit/2d6bf4a6cb14959b3c6b9ad2b82bd75384ab7ed1))
+
+
+### Performance Improvements
+
+* **pr:** fewer GitHub reads and faster review page redraws ([8b814e9](https://github.com/kaiketsu-labs/pair-review/commit/8b814e978ad625a5d20d3eba0ab08b03873be956))
+* **pr:** redraw only changed prs and cache per-pr state ([3c4c85e](https://github.com/kaiketsu-labs/pair-review/commit/3c4c85ea2b00905e73ca7392fec62eb7a20cdbc4))
+
+
+### Miscellaneous Chores
+
+* bump minor pre major in release-please ([#33](https://github.com/kaiketsu-labs/pair-review/issues/33)) ([f90b6cb](https://github.com/kaiketsu-labs/pair-review/commit/f90b6cb2babf2188c45d75df3e87759963e4b40d))
+
 ## 0.4.12
 
 - Search this project's recent Claude conversations by name or branch in VS Code; show which ones are running and retain Claude's own picker as a fallback.
