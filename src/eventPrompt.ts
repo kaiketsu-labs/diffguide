@@ -29,6 +29,7 @@ function reviewData(event: ReviewEvent, thread?: ReviewThread): string {
     currentHumanFeedback: event.text,
     capturedAt: event.createdAt,
     code: {
+      ...(event.anchor.scope === 'file' ? { scope: 'Whole file: the comment is about the file as a whole, not about particular lines. Read the current file.' } : {}),
       path: event.anchor.path,
       side: event.anchor.side,
       baseRevision: event.anchor.baseRevision,
@@ -64,8 +65,8 @@ export function buildReviewPrompt(event: ReviewEvent, thread?: ReviewThread, cus
 export function buildReviewBatchPrompt(events: readonly ReviewEvent[], threads: readonly ReviewThread[], custom = ''): string {
   const labels = { ask: 'Ask', implement: 'Implement', summarize: 'Summarize' } as const;
   const summary = events.map((event) => {
-    const { path, startLine, endLine } = event.anchor;
-    const location = `${path}:${startLine}${endLine === startLine ? '' : `–${endLine}`}`;
+    const { path, startLine, endLine, scope } = event.anchor;
+    const location = scope === 'file' ? `${path} (whole file)` : `${path}:${startLine}${endLine === startLine ? '' : `–${endLine}`}`;
     const preview = event.text.replace(/\s+/gu, ' ').trim();
     const excerpt = preview.length > 160 ? `${preview.slice(0, 157)}…` : preview;
     return `VS Code review · ${labels[event.intent]} · ${JSON.stringify(location)}\nFeedback: ${JSON.stringify(excerpt)}`;

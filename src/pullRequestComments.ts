@@ -19,9 +19,10 @@ export function publishableText(thread: ReviewThread): string {
 /** Where a thread lands on the code host, minus the text. */
 export type CommentPlacement = Omit<PullRequestComment, 'body'>;
 
-/** Place a thread on the PR diff: on its lines when the diff shows them, else on the whole file. */
+/** Place a thread on the PR diff: on its lines when the diff shows them, else on the whole file, as a whole-file thread always goes. */
 export async function placeComment(worktree: string, base: string, anchor: CodeAnchor): Promise<CommentPlacement> {
   const side = anchor.side === 'original' ? 'LEFT' : 'RIGHT';
+  if (anchor.scope === 'file') return { path: anchor.path, commitId: (await git(worktree, ['rev-parse', 'HEAD'])).trim(), side };
   if (side === 'RIGHT' && (await git(worktree, ['status', '--porcelain', '--', anchor.path])).trim() !== '') {
     throw new Error(`${anchor.path} has uncommitted changes, so its lines may not match GitHub. Commit and push them first.`);
   }

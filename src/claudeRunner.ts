@@ -23,6 +23,8 @@ export interface ClaudeActivity {
   readonly error?: string;
   /** Comments sent to Claude that it did not pick up; they wait for a retry. */
   readonly skipped: number;
+  /** The last run ended because the user stopped it. */
+  readonly stopped?: true;
 }
 
 /** One step of a Claude run, shown like a Claude Code transcript line: `verb(target)`, then `detail`. */
@@ -120,18 +122,19 @@ export class ClaudeRunner implements vscode.Disposable {
    */
   async runTask(task: ClaudeTask): Promise<ClaudeTaskResult> {
     if (this.#disposed || this.#child !== undefined || this.#activity.running) throw new Error('Claude is still working on this PR. Try again when it is done.');
-    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, task: task.label, threads: new Set(), skipped: 0, error: undefined });
+    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, task: task.label, threads: new Set(), skipped: 0, error: undefined, stopped: undefined });
     let error: string | undefined;
     try {
       error = await this.#spawn({ prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, mode: this.options.role === 'author' ? 'auto' : 'acceptEdits' });
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
-    if (this.#stopping) error = 'Stopped.';
+    const stopped = this.#stopping ? true : undefined;
+    if (stopped) error = 'Stopped.';
     if (error !== undefined) this.options.log(`Failed: ${error}`);
     this.#child = undefined;
     this.#stopping = false;
-    this.#set({ running: false, step: undefined, progress: undefined, task: undefined, threads: new Set(), skipped: 0, error });
+    this.#set({ running: false, step: undefined, progress: undefined, task: undefined, threads: new Set(), skipped: 0, error, stopped });
     this.#next();
     return error !== undefined ? { error } : this.#reply === undefined ? {} : { reply: this.#reply };
   }
@@ -147,7 +150,7 @@ export class ClaudeRunner implements vscode.Disposable {
   /** Send comments Claude did not pick up again, and clear the last error. */
   retry(): void {
     this.#sent.clear();
-    this.#set({ ...this.#activity, skipped: 0, error: undefined });
+    this.#set({ ...this.#activity, skipped: 0, error: undefined, stopped: undefined });
     this.#next();
   }
 
@@ -169,10 +172,10 @@ export class ClaudeRunner implements vscode.Disposable {
   }
 
   #set(activity: { [K in keyof ClaudeActivity]: ClaudeActivity[K] | undefined }): void {
-    const { step, progress, task, error, ...rest } = activity;
+    const { step, progress, task, error, stopped, ...rest } = activity;
     this.#activity = {
       ...rest, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
-      ...(task === undefined ? {} : { task }), ...(error === undefined ? {} : { error }),
+      ...(task === undefined ? {} : { task }), ...(error === undefined ? {} : { error }), ...(stopped === undefined ? {} : { stopped }),
     } as ClaudeActivity;
     if (!this.#disposed) this.#changed.fire();
   }
@@ -192,7 +195,7 @@ export class ClaudeRunner implements vscode.Disposable {
   async #run(events: readonly ReviewEvent[]): Promise<void> {
     for (const event of events) this.#sent.add(event.id);
     const threads = new Set(events.map((event) => event.threadId));
-    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, threads, skipped: 0, error: undefined });
+    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, threads, skipped: 0, error: undefined, stopped: undefined });
     let error: string | undefined;
     try {
       await this.options.prepare?.();
@@ -205,14 +208,15 @@ export class ClaudeRunner implements vscode.Disposable {
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
-    if (this.#stopping) {
+    const stopped = this.#stopping ? true : undefined;
+    if (stopped) {
       this.options.log('Stopped.');
       error = undefined;
     }
     if (error !== undefined) this.options.log(`Failed: ${error}`);
     this.#child = undefined;
     this.#stopping = false;
-    this.#set({ running: false, step: undefined, progress: undefined, threads, skipped: 0, error });
+    this.#set({ running: false, step: undefined, progress: undefined, threads, skipped: 0, error, stopped });
     this.#next();
   }
 

@@ -243,3 +243,30 @@ test('keeps the first title Claude gives a thread across restarts', async (t) =>
 test('rejects overlong agent titles', () => {
   assert.throws(() => parseAgentUpdate({ eventId: randomUUID(), status: 'answered', text: 'ok', title: 'x'.repeat(81) }), ReviewStoreError);
 });
+
+test('archiving keeps a thread\'s events and ids, survives a restart, and unarchives', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const thread = await store.submit(anchor(), 'Is this needed?', 'ask');
+  const events = store.events;
+  await store.archive(thread.id, true);
+  assert.equal(store.threads[0]?.archived, true);
+  assert.equal(store.threads[0]?.latestEventId, thread.latestEventId);
+  assert.deepEqual(store.threads[0]?.messages, thread.messages);
+  assert.equal(store.events, events);
+  const reopened = await createReviewStore(file, root);
+  assert.equal(reopened.threads[0]?.archived, true);
+  await reopened.archive(thread.id, false);
+  assert.equal('archived' in (reopened.threads[0] ?? {}), false);
+  assert.deepEqual((await createReviewStore(file, root)).threads, reopened.threads);
+});
+
+test('keeps a whole-file anchor across restarts and reads older anchors without one', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const whole: CodeAnchor = { ...anchor(), startLine: 1, endLine: 1, selectedText: '', contextBefore: '', contextAfter: '', scope: 'file' };
+  await store.submit(whole, 'Split this file.', 'ask');
+  await store.submit(anchor(), 'Why?', 'ask');
+  const reopened = await createReviewStore(file, root);
+  assert.equal(reopened.threads[0]?.anchor.scope, 'file');
+  assert.equal(reopened.events[0]?.anchor.scope, 'file');
+  assert.equal('scope' in (reopened.threads[1]?.anchor ?? {}), false);
+});

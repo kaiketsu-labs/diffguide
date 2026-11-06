@@ -127,9 +127,9 @@ function latestReply(thread: ReviewThread, eventId: string): ReviewMessage | und
 /** Keep locations honest when local files or their comparison base have moved. */
 function location(thread: ReviewThread): string {
   const anchor = thread.anchor;
-  const lines = anchor.startLine === anchor.endLine ? String(anchor.startLine) : `${anchor.startLine}–${anchor.endLine}`;
+  const lines = anchor.scope === 'file' ? undefined : anchor.startLine === anchor.endLine ? String(anchor.startLine) : `${anchor.startLine}–${anchor.endLine}`;
   const revision = /^[a-f\d]{40,64}$/u.test(anchor.baseRevision) ? anchor.baseRevision.slice(0, 12) : 'uncommitted repository';
-  return `#### ${codeSpan(`${anchor.path}:${lines}`)}\n\n*Captured ${anchor.side === 'working' ? 'working file' : 'original file'} · base ${revision}${thread.outdated ? ' · local context changed' : ''}${thread.resolved ? ' · resolved locally' : ''}*`;
+  return `#### ${codeSpan(lines === undefined ? anchor.path : `${anchor.path}:${lines}`)}${lines === undefined ? ' (whole file)' : ''}\n\n*Captured ${anchor.side === 'working' ? 'working file' : 'original file'} · base ${revision}${thread.outdated ? ' · local context changed' : ''}${thread.resolved ? ' · resolved locally' : ''}*`;
 }
 
 /** Render an arbitrary file name without allowing it to break a Markdown code span. */

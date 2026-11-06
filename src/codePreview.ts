@@ -6,6 +6,7 @@ import cpp from 'highlight.js/lib/languages/cpp';
 import csharp from 'highlight.js/lib/languages/csharp';
 import css from 'highlight.js/lib/languages/css';
 import dart from 'highlight.js/lib/languages/dart';
+import diff from 'highlight.js/lib/languages/diff';
 import go from 'highlight.js/lib/languages/go';
 import ini from 'highlight.js/lib/languages/ini';
 import java from 'highlight.js/lib/languages/java';
@@ -32,6 +33,7 @@ highlight.registerLanguage('cpp', cpp);
 highlight.registerLanguage('csharp', csharp);
 highlight.registerLanguage('css', css);
 highlight.registerLanguage('dart', dart);
+highlight.registerLanguage('diff', diff);
 highlight.registerLanguage('go', go);
 highlight.registerLanguage('ini', ini);
 highlight.registerLanguage('java', java);
@@ -59,7 +61,7 @@ const languages: Readonly<Record<string, string>> = {
   '.py': 'python', '.pyi': 'python', '.pyw': 'python',
   '.cts': 'typescript', '.mts': 'typescript', '.ts': 'typescript', '.tsx': 'typescript',
   '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hh': 'cpp', '.hpp': 'cpp', '.cs': 'csharp',
-  '.css': 'css', '.scss': 'scss', '.dart': 'dart', '.go': 'go', '.ini': 'ini', '.toml': 'ini', '.java': 'java',
+  '.css': 'css', '.scss': 'scss', '.dart': 'dart', '.diff': 'diff', '.patch': 'diff', '.go': 'go', '.ini': 'ini', '.toml': 'ini', '.java': 'java',
   '.kt': 'kotlin', '.kts': 'kotlin', '.md': 'markdown', '.markdown': 'markdown', '.m': 'objectivec', '.mm': 'objectivec',
   '.php': 'php', '.rb': 'ruby', '.rs': 'rust', '.scala': 'scala', '.sql': 'sql', '.swift': 'swift',
   '.htm': 'xml', '.html': 'xml', '.plist': 'xml', '.svg': 'xml', '.xml': 'xml', '.yaml': 'yaml', '.yml': 'yaml',

@@ -47,6 +47,28 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
   assert.ok(!html.includes('</script><b>') && !html.includes('</script><i>') );
 });
 
+test('renders local messages as Markdown with highlighted code, and marks whole-file and archived threads', () => {
+  const thread = {
+    id: 't1', intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: 'e1', archived: true,
+    anchor: { path: 'src/a.ts', startLine: 1, endLine: 1, side: 'working', selectedText: '', scope: 'file' },
+    messages: [{ id: 'm1', author: 'human', text: '**Why asdf :** split it?', createdAt: '' },
+      { id: 'm2', author: 'claude', text: 'Yes:\n\n```ts\nconst a = 1;\n```\n\n```suggestion\nnot a suggestion here\n```', createdAt: '' }],
+  };
+  const opened = {
+    session: { store: { threads: [thread] }, activity: () => undefined, publication: () => undefined },
+    runner: { activity: { running: false, threads: new Set(), skipped: 0 } },
+    commits: () => [],
+  } as unknown as PullRequestSession;
+  const [view] = buildOverviewState({ number: 3, title: 'T', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'f', baseBranch: 'main' }, opened, [], [], 1).threads;
+  assert.equal(view?.scope, 'file');
+  assert.equal(view?.archived, true);
+  assert.equal(view?.location, 'src/a.ts');
+  assert.equal(view?.status, 'Answered · Archived');
+  assert.equal(view?.messages[0]?.html, '<p><strong>Why asdf :</strong> split it?</p>');
+  assert.match(view?.messages[1]?.html ?? '', /<span class="hljs-keyword">const<\/span>/u);
+  assert.equal(view?.messages[1]?.suggestions, undefined);
+});
+
 test('quotes a GitHub thread for Claude after the user\'s note, or a default for the intent', () => {
   const comments = [{ author: 'bob', body: 'Rename x\n\nto userId.' }, { author: 'alice', body: 'Agreed ' }];
   assert.equal(githubFeedbackRequest(' Also the tests ', 'implement', comments),

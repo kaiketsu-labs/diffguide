@@ -66,7 +66,11 @@ export interface OverviewState {
     readonly side: DiffSide;
     readonly startLine: number;
     readonly endLine: number;
+    /** Set when the comment is about the whole file; the page shows it above the file's diff. */
+    readonly scope?: 'file';
     readonly resolved: boolean;
+    /** Put away by the user; the page hides it unless archived threads are shown. */
+    readonly archived?: true;
     /** Set when the thread holds a note from Claude's analysis. */
     readonly origin?: 'analysis';
     /** The commented code, shown as the lines a suggestion replaces. */
@@ -166,9 +170,13 @@ export interface PageComment {
 /** What the page's buttons do. */
 export interface OverviewActions {
   comment(comment: PageComment): Promise<void>;
-  /** Reply in a local thread; `intent` decides whether Claude answers or changes the code. */
+  /** A new local comment about a whole file rather than some of its lines. */
+  commentOnFile(path: string, text: string, intent: CommentIntent): Promise<void>;
+  /** Reply in a local thread; `intent` decides whether Claude answers or changes the code. An empty `text` asks Claude to implement what the thread discussed. */
   reply(threadId: string, text: string, intent: CommentIntent): Promise<void>;
   resolve(threadId: string, resolved: boolean): Promise<void>;
+  /** Hide a local thread from the page, or show it again; it keeps its conversation. */
+  archive(threadId: string, archived: boolean): Promise<void>;
   publish(threadId: string): Promise<void>;
   /** Comment on the PR diff on GitHub, into the pending review or posted right away. */
   commentOnGitHub(comment: Omit<PageComment, 'intent'>, pending: boolean): Promise<void>;
@@ -207,6 +215,8 @@ export interface OverviewActions {
   /** The changes of one commit in the worktree, for a preview in the thread that made it. */
   readCommit(oid: string): Promise<readonly FileDiff[]>;
   retry(): void;
+  /** Stop Claude's current run on this PR; resolves once it ended. */
+  stopClaude(): Promise<void>;
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   /** Merge the PR, then delete its branch when `deleteBranch` is set and GitHub allows it. */
@@ -278,10 +288,11 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor'; readonly path: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
+  | { readonly action: 'file-comment'; readonly form: string; readonly path: string; readonly text: string; readonly intent: CommentIntent }
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
   | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
   | { readonly action: 'unread'; readonly ids: readonly string[] }
@@ -290,6 +301,7 @@ export type PageMessage =
   | { readonly action: 'github-publish'; readonly form: string; readonly id: string; readonly text: string; readonly pending: boolean }
   | { readonly action: 'github-ask'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
+  | { readonly action: 'archive'; readonly id: string; readonly archived: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
   | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
   | { readonly action: 'discard-suggestion'; readonly id: string }
@@ -455,7 +467,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, pending, form, peek, line, column, view, extension, message, option,
+      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, view, extension, message, option,
         range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
@@ -464,14 +476,18 @@ export async function showPullRequestOverview(
           && startLine <= endLine && isText(text) && commentIntents.includes(intent)) {
           await actions.comment({ path, side, startLine, endLine, text: text.trim(), intent: intent as CommentIntent });
           post({ done: formKey });
+        } else if (action === 'file-comment' && typeof path === 'string' && isText(text) && commentIntents.includes(intent)) {
+          await actions.commentOnFile(path, text.trim(), intent as CommentIntent);
+          post({ done: formKey });
         } else if (action === 'github-comment' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
           && startLine <= endLine && isText(text) && typeof pending === 'boolean') {
           await actions.commentOnGitHub({ path, side, startLine, endLine, text: text.trim() }, pending);
           post({ done: formKey });
-        } else if (action === 'reply' && typeof id === 'string' && isText(text) && commentIntents.includes(intent)) {
-          await actions.reply(id, text.trim(), intent as CommentIntent);
+        } else if (action === 'reply' && typeof id === 'string' && commentIntents.includes(intent) && (isText(text) || (intent === 'implement' && isOptionalText(text)))) {
+          await actions.reply(id, (text ?? '').trim(), intent as CommentIntent);
           post({ done: formKey });
         } else if (action === 'resolve' && typeof id === 'string' && typeof resolved === 'boolean') await actions.resolve(id, resolved);
+        else if (action === 'archive' && typeof id === 'string' && typeof archived === 'boolean' && state.threads.some((thread) => thread.id === id)) await actions.archive(id, archived);
         else if (action === 'publish' && typeof id === 'string') await actions.publish(id);
         else if (action === 'github-reply' && typeof id === 'string' && isText(text) && state.github?.some((thread) => thread.id === id)) {
           await actions.replyOnGitHub(id, text.trim());
@@ -555,6 +571,7 @@ export async function showPullRequestOverview(
         else if (action === 'terminal') await actions.openTerminal();
         else if (action === 'push') await actions.push();
         else if (action === 'retry') actions.retry();
+        else if (action === 'stop-claude') await actions.stopClaude();
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
@@ -737,7 +754,8 @@ ${clawdPoseStyles()}
 label.viewed{display:inline-flex;align-items:center;gap:var(--space-4);height:22px;box-sizing:border-box;padding:0 var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-sm);font-size:12px;cursor:pointer}
 label.viewed:has(input:checked){color:var(--brand);font-weight:600;background:color-mix(in srgb,var(--ink) 6%,transparent)}
 label.viewed input,label.check input{margin:0;accent-color:var(--brand)}
-.file-head button{min-height:22px;padding:0 var(--space-8);font-size:12px}
+.file-head button{min-height:22px;padding:0 var(--space-8);font-size:12px}.file-head .icon-button{width:22px;height:22px;padding:0}
+.file-threads{padding:var(--space-8) 10px;border-bottom:1px solid var(--line)}
 table{border-collapse:collapse;width:100%;table-layout:fixed;font-family:var(--vscode-editor-font-family,var(--font-code));font-size:var(--vscode-editor-font-size,12px);line-height:1.6}
 col.num{width:52px}td{vertical-align:top;padding:0}
 td.num{text-align:right;padding:0 var(--space-8);color:var(--vscode-editorLineNumber-foreground,var(--ink-muted));user-select:none}
@@ -898,7 +916,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${codicons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button" data-tip="Open on GitHub" aria-label="Open on GitHub">${codicons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${codicons.refresh}</button><span class="menu-anchor"><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree" aria-haspopup="true" aria-expanded="false">${codicons.trash}</button></span></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div id="facts" class="muted facts"></div>
-<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">Open in terminal</button><button id="retry" class="small">Retry</button></div>
+<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="stop-claude" class="small" data-tip="Stop Claude's run. The comments it was answering wait for Retry." hidden>Stop</button><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">Open in terminal</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
 <p id="notice" role="status"></p>
 <aside id="peek" hidden aria-label="Definition"><div id="peek-resize" title="Drag to resize. Double-click to reset."></div><div class="peek-head">
@@ -1020,6 +1038,7 @@ export function buildOverviewState(
       const linkedTo = session.linkedGitHubThread?.(thread.id);
       const activity = session.activity?.(thread.id);
       const last = thread.messages.at(-1);
+      const wholeFile = thread.anchor.scope === 'file';
       // Claude's reply ends the thread's live log, even while the run is still wrapping up.
       const replied = last?.author === 'claude' && Date.parse(last.createdAt) >= (runner.activity.progress?.startedAt ?? Infinity);
       const working = thread.resolved || replied ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
@@ -1027,10 +1046,11 @@ export function buildOverviewState(
       const status = [
         thread.resolved ? 'Resolved' : working !== undefined ? undefined : replied ? threadStatus[thread.status] : activity ?? threadStatus[thread.status],
         publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
+        thread.archived ? 'Archived' : undefined,
       ].filter(Boolean).join(' · ');
       return {
         id: thread.id,
-        location: `${thread.anchor.path}:${thread.anchor.startLine}`,
+        location: wholeFile ? thread.anchor.path : `${thread.anchor.path}:${thread.anchor.startLine}`,
         text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
         status,
         ...(working === undefined ? {} : { working }),
@@ -1039,11 +1059,14 @@ export function buildOverviewState(
         side: thread.anchor.side === 'original' ? 'old' : 'new',
         startLine: thread.anchor.startLine,
         endLine: thread.anchor.endLine,
+        ...(wholeFile ? { scope: 'file' as const } : {}),
         resolved: thread.resolved,
+        ...(thread.archived ? { archived: true as const } : {}),
         ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        ...(thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
+        ...(!wholeFile && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
         messages: thread.messages.map(({ author, text, createdAt }) => {
-          const suggestions = parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
+          // A suggestion replaces the commented lines, and a whole-file comment has none.
+          const suggestions = wholeFile ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
           return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
         }),
         ...(publication === undefined ? {} : { url: publication.url }),

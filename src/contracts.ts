@@ -15,6 +15,8 @@ export interface CodeAnchor {
   readonly documentHash: string;
   readonly side: 'working' | 'original';
   readonly baseRevision: string;
+  /** Set when the comment is about the whole file; its lines are then a placeholder for line 1. */
+  readonly scope?: 'file';
 }
 
 /** A comment displayed in a native VS Code thread. */
@@ -40,6 +42,8 @@ export interface ReviewThread {
   readonly origin?: 'analysis';
   /** A few words naming what the thread is about, written by Claude with its first reply. */
   readonly title?: string;
+  /** The human put the thread away; it keeps its events and can be unarchived. */
+  readonly archived?: true;
 }
 
 /** A single immutable work item sent to Claude at least once. */
@@ -93,6 +97,8 @@ export interface ReviewStore {
   submit(anchor: CodeAnchor, text: string, intent: ReviewIntent, threadId?: string): Promise<ReviewThread>;
   updateFromAgent(update: AgentUpdate): Promise<ReviewThread>;
   resolve(threadId: string, resolved: boolean): Promise<void>;
+  /** Hide a thread from the review page, or show it again, without touching its events. */
+  archive(threadId: string, archived: boolean): Promise<void>;
   setOutdated(threadId: string, outdated: boolean): Promise<void>;
   /** Replace the analysis's notes that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
   replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]>;

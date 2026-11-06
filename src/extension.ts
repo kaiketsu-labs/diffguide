@@ -33,7 +33,7 @@ import { claudeStatus } from './claudeStatus.js';
 import { getHeadRevision, readGitBase, readGitBaseBytes } from './git.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
 import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
-import { anchorFromText } from './anchors.js';
+import { anchorFromText, fileAnchor } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
 import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
@@ -296,12 +296,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const { anchor } = await pageAnchor(lines);
           await opened.session.store.submit(anchor, text, intent);
         },
+        commentOnFile: async (path, text, intent) => {
+          if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
+          if (!selectionAtHead) throw new Error('Show all changes to comment on this file.');
+          const base = await readBase();
+          await opened.session.store.submit(fileAnchor(await readFile(join(folder, path), 'utf8'), { path, side: 'working', baseRevision: base }), text, intent);
+        },
         reply: async (id, text, intent) => {
           const thread = findThread(id);
           if (thread.resolved) throw new Error('Reopen this thread before replying.');
-          await opened.session.store.submit(thread.anchor, text, intent, id);
+          if (thread.archived) throw new Error('Unarchive this thread before replying.');
+          await opened.session.store.submit(thread.anchor, text || implementThreadRequest, intent, id);
         },
         resolve: (id, resolved) => opened.session.store.resolve(findThread(id).id, resolved),
+        archive: (id, archived) => opened.session.store.archive(findThread(id).id, archived),
         publish: async (id) => { await opened.session.publish?.(findThread(id).id); },
         postToGitHub: async (id, text, pending) => { await opened.session.postToGitHub?.(findThread(id).id, text, pending); },
         commentOnGitHub: async ({ text, ...lines }, pending) => {
@@ -360,6 +368,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           changedOnGitHub();
         },
         retry: () => { opened.runner.retry(); },
+        stopClaude: () => opened.runner.stop(),
         revealThread: async (id) => { await vscode.commands.executeCommand('pairReview.revealThread', id); },
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
@@ -368,7 +377,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         applySuggestion: async (id, message, option) => {
           const { anchor, messages } = findThread(id);
           const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
-          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (suggestion === undefined || anchor.scope === 'file') throw new Error('This suggestion no longer exists.');
           if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
           if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Apply the suggestion when it is done.');
           const loaded = await currentDetails();
@@ -404,7 +413,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         publishSuggestion: async (id, message, option) => {
           const { anchor, messages } = findThread(id);
           const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
-          if (suggestion === undefined) throw new Error('This suggestion no longer exists.');
+          if (suggestion === undefined || anchor.scope === 'file') throw new Error('This suggestion no longer exists.');
           if (anchor.side !== 'working') throw new Error('GitHub takes suggestions only on the PR\'s version of a file.');
           const head = await readHead();
           const lines = suggestionLines(await readGitBase(folder, anchor.path, head), anchor);
@@ -661,6 +670,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 }
 
+/** What an Implement without a note asks Claude in a thread that already has a conversation. */
+const implementThreadRequest = 'Implement what this thread discussed.';
+
 /** Finish persisted mutations before VS Code unloads the extension. */
 export async function deactivate(): Promise<void> {
   activeBridge?.dispose();
@@ -690,8 +702,8 @@ function showClaude({ runner, output }: PullRequestSession): void {
 function reportClaudeFailures(sessions: Pick<Checkouts, 'onDidChangeState'>): vscode.Disposable {
   const reported = new WeakMap<PullRequestSession, string>();
   return sessions.onDidChangeState((opened) => {
-    const { running, error } = opened.runner.activity;
-    if (running || error === undefined) {
+    const { running, error, stopped } = opened.runner.activity;
+    if (running || error === undefined || stopped === true) {
       reported.delete(opened);
       return;
     }

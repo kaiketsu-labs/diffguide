@@ -14,3 +14,8 @@ test('offers a retry after a failure or skipped comments, and is idle otherwise'
   assert.equal(claudeStatus({ ...idle, skipped: 2 }).text, 'Claude skipped 2');
   assert.deepEqual(claudeStatus(idle), { text: 'Claude idle', icon: 'comment-discussion', retry: false });
 });
+
+test('says Claude stopped after the user stops it, offering a retry for the comments it left', () => {
+  assert.deepEqual(claudeStatus({ ...idle, stopped: true, skipped: 1 }), { text: 'Claude stopped', icon: 'debug-stop', retry: true });
+  assert.equal(claudeStatus({ ...idle, stopped: true }).retry, false);
+});

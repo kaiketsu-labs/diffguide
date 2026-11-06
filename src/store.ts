@@ -216,6 +216,18 @@ class FileReviewStore implements ReviewStore {
     });
   }
 
+  /** Archive or unarchive from an explicit human action; events and ids stay as they are. */
+  archive(threadId: string, archived: boolean): Promise<void> {
+    const id = readId(threadId);
+    const value = readBoolean(archived, 'archived');
+    return this.#mutate((snapshot) => {
+      const thread = requireThread(snapshot, id);
+      if ((thread.archived === true) === value) return [snapshot, undefined];
+      const { archived: _was, ...rest } = thread;
+      return [replaceThread(snapshot, value ? { ...rest, archived: true } : rest), undefined];
+    });
+  }
+
   /** Update the editor's assessment of the captured code context. */
   setOutdated(threadId: string, outdated: boolean): Promise<void> {
     const id = readId(threadId);
@@ -389,7 +401,8 @@ function readTitle(value: unknown): string {
 /** Validate a stored review thread and its nested messages. */
 function readThread(value: unknown): ReviewThread {
   const record = readObject(value, 'thread');
-  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'title']);
+  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'title', 'archived']);
+  if (record['archived'] !== undefined && record['archived'] !== true) throw new ReviewStoreError('Invalid archived flag.');
   const messages = readArray(record['messages'], 'messages').map(readMessage);
   if (record['origin'] !== undefined && record['origin'] !== 'analysis') {
     throw new ReviewStoreError('Invalid thread origin.');
@@ -405,6 +418,7 @@ function readThread(value: unknown): ReviewThread {
     resolved: readBoolean(record['resolved'], 'resolved'),
     outdated: readBoolean(record['outdated'], 'outdated'), latestEventId: readId(record['latestEventId']),
     ...(record['title'] === undefined ? {} : { title: readTitle(record['title']) }),
+    ...(record['archived'] === true ? { archived: true as const } : {}),
   };
 }
 
@@ -439,7 +453,8 @@ function readMessage(value: unknown): ReviewMessage {
 /** Copy and validate line coordinates and workspace-relative code context. */
 function readAnchor(value: unknown): CodeAnchor {
   const record = readObject(value, 'anchor');
-  checkKeys(record, ['path', 'startLine', 'endLine', 'selectedText', 'contextBefore', 'contextAfter', 'documentHash', 'side', 'baseRevision']);
+  checkKeys(record, ['path', 'startLine', 'endLine', 'selectedText', 'contextBefore', 'contextAfter', 'documentHash', 'side', 'baseRevision', 'scope']);
+  if (record['scope'] !== undefined && record['scope'] !== 'file') throw new ReviewStoreError('Invalid anchor scope.');
   const filePath = readNonemptyText(record['path'], 'path').replaceAll('\\', '/');
   if (path.posix.isAbsolute(filePath) || path.win32.isAbsolute(filePath)
     || filePath.split('/').includes('..') || filePath.includes('\0') || path.posix.normalize(filePath) === '.') {
@@ -457,6 +472,7 @@ function readAnchor(value: unknown): CodeAnchor {
     contextAfter: readText(record['contextAfter'], 'contextAfter'),
     documentHash: readNonemptyText(record['documentHash'], 'documentHash'), side: record['side'],
     baseRevision: readText(record['baseRevision'], 'baseRevision'),
+    ...(record['scope'] === 'file' ? { scope: 'file' as const } : {}),
   });
 }
 
