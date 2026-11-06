@@ -780,6 +780,9 @@ test('lists every open PR of a repository under All open only once expanded, wit
   const rows = await level(tree, allOpen?.node);
   assert.deepEqual(searched, ['is:open sort:updated-desc']);
   assert.deepEqual(rows.map(({ item }) => [item.label, item.contextValue]), [['Add review sidebar', 'pairReview.pullRequest'], ['Someone else', 'pairReview.pullRequest']]);
+  const mineRows = await level(tree, groups[0]?.node);
+  const ids = [...mineRows, ...rows].map(({ item }) => item.id);
+  assert.equal(new Set(ids).size, ids.length, 'a PR under Mine and All open needs distinct tree ids');
   await level(tree, allOpen?.node);
   assert.equal(searched.length, 1);
   const command = rows[1]?.item.command as vscode.Command;

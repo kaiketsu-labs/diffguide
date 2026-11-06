@@ -644,7 +644,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const checkedOut = await this.#isCheckedOut(node);
         const { type, subject } = splitCommitType(pr.title);
         const item = new vscode.TreeItem(subject, vscode.TreeItemCollapsibleState.Collapsed);
-        item.id = `pullRequest:${node.pinned === true ? 'pinned' : node.role}:${node.listing.folder}:${pr.number}`;
+        item.id = `pullRequest:${node.placement ?? node.role}:${node.listing.folder}:${pr.number}`;
         item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
