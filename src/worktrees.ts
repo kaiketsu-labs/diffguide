@@ -89,6 +89,25 @@ export function reviewDataPath(worktree: string): string {
   return `${worktree}.review`;
 }
 
+/** Create a worktree's review data folder, retrying briefly when the file system reports a transient error. */
+export async function createReviewData(
+  worktree: string, create = async (folder: string): Promise<void> => { await mkdir(folder, { recursive: true, mode: 0o700 }); }, attempts = 5, delayMs = 200,
+): Promise<string> {
+  const folder = reviewDataPath(worktree);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await create(folder);
+      return folder;
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== 'EIO' && code !== 'EBUSY') || attempt >= attempts) {
+        throw new Error(`Could not create ${folder} (${code ?? String(error)}). If iCloud or another sync service manages this folder, wait for it to finish or move VS Code's storage out of it, then try again.`, { cause: error });
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+}
+
 /** Check whether a PR already has a worktree. */
 export async function hasWorktree(storageRoot: string, repository: string, number: number): Promise<boolean> {
   return await readWorktree(storageRoot, worktreePath(storageRoot, repository, number)) !== undefined;

@@ -468,6 +468,13 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   assert.deepEqual(await titles(), [['Fresh', '#8 · feat(ui) · octo · Draft']]);
   assert.equal(window.trees.at(-1)?.message, '');
   assert.deepEqual((workspace.get('pairReview.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
+
+  await commands.executeCommand('pairReview.refreshPullRequests');
+  const [mine] = (await level(tree)).slice(1);
+  const [repository] = await level(tree, mine?.node);
+  const rows = await level(tree, repository?.node);
+  assert.equal(window.trees.at(-1)?.message, '', 'a reload keeps the rows in place instead of adding a message above them');
+  assert.deepEqual(rows.map(({ item }) => item.id), ['pullRequest:author:app:8']);
 });
 
 test('reads a PR\'s reviewed files once for its row and file rows, and redraws only that PR when its status changes', async (t) => {

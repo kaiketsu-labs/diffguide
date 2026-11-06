@@ -440,6 +440,7 @@ export async function showPullRequestOverview(
       void read().then((next) => {
         if (started !== generation) return;
         state = next;
+        panel.title = next.title;
         post({ state: next });
       }, () => undefined);
     }, 150);

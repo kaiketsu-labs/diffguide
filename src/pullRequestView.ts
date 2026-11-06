@@ -242,6 +242,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #versions = new Map<string, ListVersion>();
   /** GitHub search can lag behind a change, so the check after one reloads again. */
   #settling = false;
+  /** Fresh lists were shown once; later reloads keep the rows still instead of adding a message above them. */
+  #loadedOnce = false;
 
   constructor(
     private readonly checkouts: () => Promise<readonly PullRequestCheckout[]>,
@@ -496,6 +498,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     switch (node.kind) {
       case 'pinned': {
         const item = new vscode.TreeItem('PINNED', vscode.TreeItemCollapsibleState.Expanded);
+        item.id = 'pinned';
         item.iconPath = new vscode.ThemeIcon('pinned');
         item.description = String(node.rows.length);
         item.tooltip = 'Drag PRs here to pin them, and within this section to reorder them.';
@@ -503,6 +506,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'role': {
         const item = new vscode.TreeItem(sectionLabels[node.role].toUpperCase(), vscode.TreeItemCollapsibleState.Expanded);
+        item.id = `role:${node.role}`;
         item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
         item.description = String(node.listings.reduce((sum, listing) => sum + this.#sectionOf(listing, node.role).length, 0));
         return item;
@@ -511,6 +515,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const { listing, role } = node;
         const { owner, name } = splitRepository(listing.repository.name);
         const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Expanded);
+        item.id = `repository:${role ?? ''}:${listing.folder}`;
         item.iconPath = repositoryIcon;
         const counts = role === undefined
           ? roles.filter((each) => this.#sectionOf(listing, each).length > 0).map((each) => `${this.#sectionOf(listing, each).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
@@ -522,6 +527,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'section': {
         const item = new vscode.TreeItem(sectionLabels[node.role], vscode.TreeItemCollapsibleState.Expanded);
+        item.id = `section:${node.role}:${node.listing.folder}`;
         item.iconPath = new vscode.ThemeIcon(roleIcons[node.role]);
         item.description = String(this.#sectionOf(node.listing, node.role).length);
         return item;
@@ -531,6 +537,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const checkedOut = await this.#isCheckedOut(node);
         const { type, subject } = splitCommitType(pr.title);
         const item = new vscode.TreeItem(subject, vscode.TreeItemCollapsibleState.Collapsed);
+        item.id = `pullRequest:${node.pinned === true ? 'pinned' : node.role}:${node.listing.folder}:${pr.number}`;
         item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
@@ -685,10 +692,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     const cached = shown.every((checkout) => this.#done.has(checkout.folder)) ? undefined : await this.#cachedListings(shown);
     if (cached === undefined) {
       listings = await loading;
+      this.#loadedOnce = true;
       this.report(undefined);
     } else {
       listings = cached;
-      this.report('Updating pull requests...');
+      if (!this.#loadedOnce) this.report('Updating pull requests...');
       void loading.then(() => { this.#changed.fire(undefined); });
     }
     const failed = listings.flatMap((listing): Node[] => listing.kind === 'failed'
