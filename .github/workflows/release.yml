@@ -1,129 +1,84 @@
-name: Prepare release
+name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Version already committed in package.json, without a v prefix
-        required: true
-        type: string
-      approve_release:
-        description: I approve checks, packaging, and creation of a draft GitHub prerelease
-        required: true
-        type: boolean
-        default: false
+  push:
+    branches:
+      - main
 
 permissions:
-  contents: read
-
-concurrency:
-  group: pair-review-release
-  cancel-in-progress: false
+  contents: write
+  pull-requests: write
+  id-token: write
 
 jobs:
-  package:
+  release:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    outputs:
-      version: ${{ steps.metadata.outputs.version }}
     steps:
-      - name: Require approval and the main branch
-        env:
-          APPROVE_RELEASE: ${{ inputs.approve_release }}
-        run: |
-          if [ "$APPROVE_RELEASE" != "true" ] || [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "::error::Run from main and explicitly approve checks and draft-release creation."
-            exit 1
-          fi
-      - uses: actions/checkout@v7
+      - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - uses: actions/checkout@v5
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Setup Node.js
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/setup-node@v5
         with:
-          node-version: 22
-          package-manager-cache: false
-      - name: Match the committed version
-        id: metadata
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          node --input-type=module <<'NODE'
-          import { appendFileSync, readFileSync } from 'node:fs';
-          const version = process.env.RELEASE_VERSION;
-          const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
-          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version ?? '') || version !== manifest.version) {
-            throw new Error('The requested version must match the committed package.json version.');
-          }
-          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
-          NODE
-      - name: Install locked dependencies
+          node-version: "22"
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.release_created }}
         run: npm ci --ignore-scripts
+
       - name: Check TypeScript
+        if: ${{ steps.release.outputs.release_created }}
         run: npm run typecheck
+
       - name: Run regression tests
+        if: ${{ steps.release.outputs.release_created }}
         run: npm test
-      - name: Package VSIX
-        run: npm run package
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-vsix
-          path: '*.vsix'
-          if-no-files-found: error
-          retention-days: 14
 
-  draft-release:
-    needs: package
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-vsix
-          path: release-assets
-      - name: Create a draft prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_VERSION: ${{ needs.package.outputs.version }}
+      - name: Build VSIX
+        if: ${{ steps.release.outputs.release_created }}
+        id: build
         run: |
-          RELEASE_TAG="v$RELEASE_VERSION"
-          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" > /dev/null 2>&1; then
-            echo "::error::This version tag already exists. Prepare a new version or manage that release manually."
-            exit 1
-          fi
-          cat > release-notes.md <<'NOTES'
-          Early preview of native VS Code reviews with automatic Claude Code feedback.
+          npm run package
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          cp "${NAME}-${VERSION}.vsix" "${NAME}.vsix"
+          echo "vsix=${NAME}-${VERSION}.vsix" >> "$GITHUB_OUTPUT"
+          echo "vsix_latest=${NAME}.vsix" >> "$GITHUB_OUTPUT"
 
-          Type checking and automated tests completed in this workflow. Live VS Code and authenticated Claude verification remains a separate release check; see docs/REVIEW.md.
-
-          Install the attached VSIX through Extensions → … → Install from VSIX…. The demo uses a staged interface with simulated responses. Marketplace publication is a separate manual step.
-          NOTES
-          gh release create "$RELEASE_TAG" release-assets/*.vsix \
-            --draft --prerelease --target "$GITHUB_SHA" \
-            --title "Pair Review $RELEASE_VERSION" --notes-file release-notes.md
+      - name: Upload VSIX to GitHub Release
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ steps.release.outputs.tag_name }}" "${{ steps.build.outputs.vsix }}" "${{ steps.build.outputs.vsix_latest }}" --clobber
 
       - name: Publish to VS Code Marketplace
+        if: ${{ steps.release.outputs.release_created }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           USE_OIDC: ${{ vars.VSCE_USE_OIDC }}
         run: |
           if [ -n "$VSCE_PAT" ]; then
-            npx --yes @vscode/vsce publish --packagePath release-assets/*.vsix -p "$VSCE_PAT"
+            npx --yes @vscode/vsce publish --packagePath "${{ steps.build.outputs.vsix }}" -p "$VSCE_PAT"
           elif [ "$USE_OIDC" = "true" ]; then
-            npx --yes @vscode/vsce publish --packagePath release-assets/*.vsix --oidc
+            npx --yes @vscode/vsce publish --packagePath "${{ steps.build.outputs.vsix }}" --oidc
           else
-            echo "Skipping VS Code Marketplace publication (neither VSCE_PAT secret nor VSCE_USE_OIDC variable is configured)."
+            echo "Skipping VS Code Marketplace publishing"
           fi
 
       - name: Publish to Open VSX Registry
+        if: ${{ steps.release.outputs.release_created }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           if [ -n "$OVSX_PAT" ]; then
-            npx --yes ovsx publish release-assets/*.vsix -p "$OVSX_PAT"
+            npx --yes ovsx publish "${{ steps.build.outputs.vsix }}" -p "$OVSX_PAT"
           else
-            echo "Skipping Open VSX publication (OVSX_PAT secret is not configured)."
+            echo "Skipping Open VSX publishing"
           fi
