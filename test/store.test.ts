@@ -13,7 +13,7 @@ import { publishableText } from '../src/pullRequestComments.js';
 
 /** Create isolated storage and register cleanup with the test lifecycle. */
 async function fixture(t: TestContext): Promise<{ store: ReviewStore; file: string; root: string }> {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-store-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-store-'));
   const file = path.join(root, 'storage', 'review.json');
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   return { store: await createReviewStore(file, root), file, root };

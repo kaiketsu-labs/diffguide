@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import * as vscode from 'vscode';
 
-const storageKey = 'pairReview.appearance.v1';
+const storageKey = 'diffGuide.appearance.v1';
 const colorSetting = 'colorCustomizations';
 const tokens = ['peekViewResult.background', 'editorCommentsWidget.replyInputBackground',
   'editorCommentsWidget.unresolvedBorder', 'editorCommentsWidget.resolvedBorder', 'contrastBorder'] as const;
@@ -59,7 +59,7 @@ export function registerReviewAppearance(context: vscode.ExtensionContext): vsco
 
   /** Serialize our own commands without changing settings when the extension loads. */
   function command(id: string, work: () => Promise<void>): vscode.Disposable {
-    return vscode.commands.registerCommand(`pairReview.${id}`, () => {
+    return vscode.commands.registerCommand(`diffGuide.${id}`, () => {
       pending = pending.then(work).catch((error: unknown) => {
         void vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Die Darstellung konnte nicht geändert werden.');
       });

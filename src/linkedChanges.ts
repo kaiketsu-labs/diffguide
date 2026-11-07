@@ -173,7 +173,7 @@ export async function isWorktreeIdle(worktree: string, mine: boolean): Promise<b
 /** A branch name for a linked repository without a PR, taken from this PR's head branch. */
 export function linkedBranchName(headBranch: string): string {
   const safe = headBranch.replace(/[^\w./-]+/gu, '-').replace(/^[-./]+|\.lock$|\.+$/gu, '');
-  return safe === '' ? 'pair-review/linked' : safe;
+  return safe === '' ? 'diffguide/linked' : safe;
 }
 
 /** Folder of this PR's own worktree in another repository that has no PR for the change yet. */

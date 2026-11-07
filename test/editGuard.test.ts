@@ -3,11 +3,11 @@ import test from 'node:test';
 
 import { editedPaths, editRefusal } from '../src/editGuard.js';
 
-test('lets Claude edit read-only repositories only inside their Pair Review worktrees', () => {
+test('lets Claude edit read-only repositories only inside their DiffGuide worktrees', () => {
   const readOnly = ['/repos/a', '/repos/b'];
-  const own = '/repos/a/.claude/worktrees/pair-review/acme__a/pr-3';
+  const own = '/repos/a/.claude/worktrees/diffguide/acme__a/pr-3';
   assert.match(editRefusal('/repos/b/src/x.ts', own, readOnly) ?? '', /\/repos\/b is open for reading only/u);
-  assert.equal(editRefusal('/repos/b/.claude/worktrees/pair-review/acme__b/pr-9/x.ts', own, readOnly), undefined);
+  assert.equal(editRefusal('/repos/b/.claude/worktrees/diffguide/acme__b/pr-9/x.ts', own, readOnly), undefined);
   assert.equal(editRefusal('src/x.ts', own, readOnly), undefined);
   assert.match(editRefusal('../../../../../src/x.ts', own, readOnly) ?? '', /\/repos\/a/u);
   assert.equal(editRefusal('/repos/bb/x.ts', own, readOnly), undefined);

@@ -1,6 +1,6 @@
 # Code reviewen. Gemeinsam mit deinem Agenten.
 
-![Änderungen ansehen, direkt am Code kommentieren, gemeinsam klären und prüfen](media/pair-review-flow.svg)
+![Änderungen ansehen, direkt am Code kommentieren, gemeinsam klären und prüfen](media/diffguide-flow.svg)
 
 **Änderungen ansehen, Fragen klären und den Code gemeinsam verbessern — direkt in VS Code.** Dein Agent bekommt gesendetes Feedback automatisch und antwortet im selben Kommentarverlauf.
 
@@ -8,7 +8,7 @@ Die Bilder sind nachgestellte Beispiele der Bedienung, keine Aufnahme einer gepr
 
 ## Einmal verbinden
 
-Öffne dein Projekt in VS Code und wähle **Pair Review: Mit Claude verbinden**. Starte eine neue Claude-Code-Unterhaltung oder setze die letzte fort. Die verbundene Unterhaltung läuft im integrierten Terminal. Eine unabhängig gestartete Claude-Sitzung wird nicht automatisch verbunden. [Installation und Verbindung](INSTALL.md)
+Öffne dein Projekt in VS Code und wähle **DiffGuide: Mit Claude verbinden**. Starte eine neue Claude-Code-Unterhaltung oder setze die letzte fort. Die verbundene Unterhaltung läuft im integrierten Terminal. Eine unabhängig gestartete Claude-Sitzung wird nicht automatisch verbunden. [Installation und Verbindung](INSTALL.md)
 
 ## Direkt im Code kommentieren
 
@@ -43,7 +43,7 @@ Wähle **An GitHub-PR übergeben**, um verfügbare Zusammenfassungen und offene 
 
 Der Standardweg kombiniert Claude-Code-Hooks mit MCP-Werkzeugen. Das Modell führt keine wiederkehrende Abfrage aus; ein lokaler Hilfsprozess verwendet **Long Polling**.
 
-Pair Review speichert jeden Auftrag zuerst mit unveränderlicher Ereignis-ID, Datei, Zeilen und Codekontext im lokalen Workspace-Speicher von VS Code. Erst nach erfolgreichem Speichern werden wartende Komponenten benachrichtigt. [Speicherung](../src/store.ts) · [Übergebener Kontext](../src/eventPrompt.ts)
+DiffGuide speichert jeden Auftrag zuerst mit unveränderlicher Ereignis-ID, Datei, Zeilen und Codekontext im lokalen Workspace-Speicher von VS Code. Erst nach erfolgreichem Speichern werden wartende Komponenten benachrichtigt. [Speicherung](../src/store.ts) · [Übergebener Kontext](../src/eventPrompt.ts)
 
 Der Hook-Helfer liest ausstehende Aufträge über `GET /pending` und hält anschließend eine lokale Anfrage über `GET /events?after=<sequence>` offen. Ein neues gespeichertes Ereignis beantwortet diese Anfrage sofort. Ohne Arbeit läuft eine leere Anfrage nach spätestens 20 Sekunden aus; der Helfer prüft den aktuellen Arbeitsstand und wartet erneut. **Die 20 Sekunden sind kein Zustellintervall.** Der Helfer liefert den Auftrag über einen `asyncRewake`-Hook an Claude Code. Claude erhält ihn an einem sicheren Verarbeitungspunkt; laufende Werkzeugaufrufe werden nicht abgebrochen. [Hook-Helfer](../src/hookWaiter.ts) · [Long Polling](../src/bridge.ts)
 
@@ -64,9 +64,9 @@ Die PR-Aktion erzeugt eine geprüfte Momentaufnahme. Sie bestätigt keine lokale
 <details>
 <summary>Zur Grafik und zum Prüfstand</summary>
 
-Die [SVG-Grafik](media/pair-review-flow.svg) zeigt den gemeinsamen Review-Zyklus mit nachgestellten Kommentaren und echten JavaScript-Ausschnitten. Neutrale helle Flächen, klare Typografie und dezente Akzente halten den Fokus auf dem Code und den Entscheidungen im Review. Die Grafik enthält keine externen Abhängigkeiten.
+Die [SVG-Grafik](media/diffguide-flow.svg) zeigt den gemeinsamen Review-Zyklus mit nachgestellten Kommentaren und echten JavaScript-Ausschnitten. Neutrale helle Flächen, klare Typografie und dezente Akzente halten den Fokus auf dem Code und den Entscheidungen im Review. Die Grafik enthält keine externen Abhängigkeiten.
 
-Die daraus gerenderte [PNG-Version](media/pair-review-flow.png) wird im README und Installationspaket verwendet, weil VS Codes Paketprüfung SVG-Bilder im README ablehnt.
+Die daraus gerenderte [PNG-Version](media/diffguide-flow.png) wird im README und Installationspaket verwendet, weil VS Codes Paketprüfung SVG-Bilder im README ablehnt.
 
 Stand: Version 0.4.4. Die Darstellung erklärt die implementierte Bedienung und ist kein Nachweis einer bereits vollständig geprüften Live-Sitzung. Den aktuellen Prüfstand dokumentiert [REVIEW.md](REVIEW.md).
 

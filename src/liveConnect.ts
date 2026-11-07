@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   if (args[0] === '--release') {
     const [, connectionPath, bindingPath, expected] = args;
     if (args.length !== 4 || connectionPath === undefined || bindingPath === undefined || !isSessionId(expected)) {
-      throw new Error('Invalid Pair Review launch handoff.');
+      throw new Error('Invalid DiffGuide launch handoff.');
     }
     const descriptor = await readDescriptor(connectionPath);
     if (await realpath(process.cwd()) !== await realpath(descriptor.workspaceRoot)) throw new Error('Das ausgewählte Projekt hat sich geändert.');
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     return;
   }
   const fields = ['--connection', '--binding', '--ticket', '--session'];
-  if (args.length !== 8 || fields.some((field, index) => args[index * 2] !== field)) throw new Error('Invalid Pair Review connect command.');
+  if (args.length !== 8 || fields.some((field, index) => args[index * 2] !== field)) throw new Error('Invalid DiffGuide connect command.');
   const [connectionPath, bindingPath, ticketPath, sessionId] = [args[1], args[3], args[5], args[7]];
   if (connectionPath === undefined || bindingPath === undefined || ticketPath === undefined || !isSessionId(sessionId)) {
     throw new Error('Claude did not supply a valid session identity.');
@@ -42,12 +42,12 @@ async function main(): Promise<void> {
   }
   const descriptor = await readDescriptor(connectionPath);
   if (await realpath(process.cwd()) !== await realpath(descriptor.workspaceRoot)) {
-    throw new Error('Pair Review gehört zu einem anderen Projekt. Im passenden VS-Code-Projekt verbinden.');
+    throw new Error('DiffGuide gehört zu einem anderen Projekt. Im passenden VS-Code-Projekt verbinden.');
   }
   await withSelectionLock(bindingPath, async () => {
     const existing = await readSessionBinding(bindingPath, descriptor.workspaceRoot);
     if (existing?.sessionId === sessionId) {
-      process.stdout.write('Pair Review ist bereits mit dieser Unterhaltung verbunden.\n');
+      process.stdout.write('DiffGuide ist bereits mit dieser Unterhaltung verbunden.\n');
       return;
     }
     const ticket = record(await readPrivateJson(ticketPath));
@@ -58,11 +58,11 @@ async function main(): Promise<void> {
     if (existing !== undefined) throw new Error('Eine andere Unterhaltung ist ausgewählt. Zuerst in VS Code die Verbindung wechseln.');
     await writePrivateJson(bindingPath, { version: 1, workspaceRoot: descriptor.workspaceRoot, sessionId });
     await unlink(ticketPath);
-    process.stdout.write('Pair Review mit dieser Unterhaltung verbunden. Feedback kommt automatisch; nur der Mensch löst Threads auf.\n');
+    process.stdout.write('DiffGuide mit dieser Unterhaltung verbunden. Feedback kommt automatisch; nur der Mensch löst Threads auf.\n');
   });
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`Pair Review: ${error instanceof Error ? error.message : 'Verbindung fehlgeschlagen.'}\n`);
+  process.stderr.write(`DiffGuide: ${error instanceof Error ? error.message : 'Verbindung fehlgeschlagen.'}\n`);
   process.exitCode = 1;
 });

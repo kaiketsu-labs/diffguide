@@ -210,7 +210,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   };
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
-  await settings.update('pairReview.fileView', 'list');
+  await settings.update('diffGuide.fileView', 'list');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -229,13 +229,13 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const decoratePullRequest = (item: vscode.TreeItem | undefined) => window.fileDecorations.at(-1)?.provideFileDecoration(item?.resourceUri as vscode.Uri, undefined as never) as { badge?: string; color?: vscode.ThemeColor } | undefined;
   assert.equal(decoratePullRequest(pr?.item), undefined);
 
-  assert.equal(pr?.item.contextValue, 'pairReview.pullRequest');
+  assert.equal(pr?.item.contextValue, 'diffGuide.pullRequest');
 
   const command = pr?.item.command as vscode.Command;
   await commands.executeCommand(command.command, ...(command.arguments ?? []));
   assert.deepEqual(worktrees.opened, ['acme/app#7:reviewer']);
   const [reopened] = await level(tree, repository?.node);
-  assert.equal(reopened?.item.contextValue, 'pairReview.pullRequest.checkedOut');
+  assert.equal(reopened?.item.contextValue, 'diffGuide.pullRequest.checkedOut');
   assert.deepEqual([decoratePullRequest(reopened?.item)?.badge, decoratePullRequest(reopened?.item)?.color], ['W', undefined]);
 
   const legend = await level(window.trees.at(-2)?.provider as vscode.TreeDataProvider<unknown>);
@@ -245,10 +245,10 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   ]);
   assert.equal(decoratePullRequest(legend.at(-1)?.item)?.badge, 'W');
 
-  await commands.executeCommand('pairReview.openPullRequestInBrowser', pr?.node);
+  await commands.executeCommand('diffGuide.openPullRequestInBrowser', pr?.node);
   assert.deepEqual(env.opened.map(String), ['https://github.com/acme/app/pull/7']);
-  await commands.executeCommand('pairReview.openPullRequestInBrowser', { kind: 'pullRequest', pullRequest: { url: 'https://evil.example' } });
-  await commands.executeCommand('pairReview.openPullRequest', { kind: 'pullRequest', pullRequest: summary });
+  await commands.executeCommand('diffGuide.openPullRequestInBrowser', { kind: 'pullRequest', pullRequest: { url: 'https://evil.example' } });
+  await commands.executeCommand('diffGuide.openPullRequest', { kind: 'pullRequest', pullRequest: summary });
   assert.equal(env.opened.length, 1);
   assert.equal(worktrees.opened.length, 1);
 
@@ -268,13 +268,13 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   await commands.executeCommand(fileCommand.command, ...(fileCommand.arguments ?? []));
   assert.deepEqual(worktrees.opened, ['acme/app#7:reviewer', 'acme/app#7:reviewer@src/sidebar.ts']);
 
-  await commands.executeCommand('pairReview.viewFilesAsTree');
+  await commands.executeCommand('diffGuide.viewFilesAsTree');
   const tree2 = await level(tree, pr?.node);
   assert.deepEqual(tree2.map(({ item }) => [item.label, item.description]), [['src', undefined], ['README.md', '']]);
   assert.deepEqual((await level(tree, tree2[0]?.node)).map(({ item }) => [item.label, item.description]), [['sidebar.ts', '']]);
-  assert.equal(settings.get('pairReview.fileView'), 'tree');
+  assert.equal(settings.get('diffGuide.fileView'), 'tree');
 
-  await commands.executeCommand('pairReview.markPullRequestMerged', 'acme/app#7');
+  await commands.executeCommand('diffGuide.markPullRequestMerged', 'acme/app#7');
   const [merged] = await level(tree, repository?.node);
   assert.equal((merged?.item.iconPath as vscode.ThemeIcon).id, 'git-merge');
   assert.equal(merged?.item.description, '#7 · octo · Merged · Worktree · 1/2 reviewed');
@@ -307,7 +307,7 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
   assert.equal(message?.item.label, 'GitHub CLI wurde nicht gefunden.');
   await level(tree);
   assert.equal(attempts, 1);
-  await commands.executeCommand('pairReview.refreshPullRequests');
+  await commands.executeCommand('diffGuide.refreshPullRequests');
   await level(tree);
   assert.equal(attempts, 2);
 });
@@ -320,17 +320,17 @@ test('offers GitHub sign-in as the welcome button, or on the repository row when
   } as unknown as PullRequestProvider);
   let checkouts = [{ folder: 'app', connect: signedOut, worktrees: recordingWorktrees() }];
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
+  await settings.update('diffGuide.groupBy', 'repository');
   const view = registerPullRequestView(async () => checkouts, noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
   assert.deepEqual(await level(tree), []);
   checkouts = [{ folder: 'app', connect: loaded, worktrees: recordingWorktrees() }, { folder: 'enterprise', connect: signedOut, worktrees: recordingWorktrees() }];
-  await commands.executeCommand('pairReview.refreshPullRequests');
+  await commands.executeCommand('diffGuide.refreshPullRequests');
   const row = (await level(tree)).at(-1)?.item;
   assert.equal(row?.label, 'enterprise: Sign in to GitHub to load pull requests.');
-  assert.deepEqual(row?.command, { command: 'pairReview.signInToGitHub', title: 'Sign in to GitHub', arguments: ['github'] });
+  assert.deepEqual(row?.command, { command: 'diffGuide.signInToGitHub', title: 'Sign in to GitHub', arguments: ['github'] });
 });
 
 test('lists repositories with PRs, routes actions to the PR\'s own repository and hides unticked repositories', async (t) => {
@@ -366,7 +366,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   const serviceA = recordingWorktrees();
   const serviceB = recordingWorktrees();
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
+  await settings.update('diffGuide.groupBy', 'repository');
   const view = registerPullRequestView(async () => [
     { folder: 'service-a', connect: connect('acme/service-a', [summary]), worktrees: serviceA },
     { folder: 'service-b', connect: connect('acme/service-b', [summary]), worktrees: serviceB },
@@ -397,13 +397,13 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   assert.deepEqual(serviceB.opened, ['acme/service-b#7:author']);
   assert.deepEqual(serviceA.opened, []);
 
-  assert.equal(rows[0]?.item.contextValue, 'pairReview.repository');
-  await commands.executeCommand('pairReview.hideRepository', rows[0]?.node);
+  assert.equal(rows[0]?.item.contextValue, 'diffGuide.repository');
+  await commands.executeCommand('diffGuide.hideRepository', rows[0]?.node);
   assert.deepEqual(await labels(), ['service-b', 'scratch: no GitHub remote']);
   assert.equal(window.trees.at(-1)?.description, '1 hidden');
 
   window.quickPickIndex = 0;
-  await commands.executeCommand('pairReview.chooseRepositories');
+  await commands.executeCommand('diffGuide.chooseRepositories');
   assert.deepEqual(window.quickPicks.at(-1)?.map(({ label, picked }) => [label, picked]), [
     ['service-a', false], ['service-b', true], ['service-c', true], ['scratch', true],
   ]);
@@ -411,7 +411,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   assert.equal(window.trees.at(-1)?.description, '3 hidden');
   assert.deepEqual(connected, ['acme/service-a', 'acme/service-b', 'acme/service-c']);
 
-  await commands.executeCommand('pairReview.groupByRole');
+  await commands.executeCommand('diffGuide.groupByRole');
   assert.deepEqual(await labels(), ['REVIEW REQUESTED', 'MINE', 'ALL OPEN']);
 });
 
@@ -452,7 +452,7 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
     listReviewRequested: async () => [],
   } as unknown as PullRequestProvider;
   const workspace = new FakeMemento();
-  await workspace.update('pairReview.pullRequestSnapshot', { app: { repository: { name: 'acme/app', url: 'https://github.com/acme/app' }, mine: [summary], reviewRequested: [] } });
+  await workspace.update('diffGuide.pullRequestSnapshot', { app: { repository: { name: 'acme/app', url: 'https://github.com/acme/app' }, mine: [summary], reviewRequested: [] } });
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), workspace);
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -468,9 +468,9 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   await settle();
   assert.deepEqual(await titles(), [['Fresh', '#8 · feat(ui) · octo · Draft']]);
   assert.equal(window.trees.at(-1)?.message, '');
-  assert.deepEqual((workspace.get('pairReview.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
+  assert.deepEqual((workspace.get('diffGuide.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
 
-  await commands.executeCommand('pairReview.refreshPullRequests');
+  await commands.executeCommand('diffGuide.refreshPullRequests');
   const [mine] = (await level(tree)).slice(1);
   const [repository] = await level(tree, mine?.node);
   const rows = await level(tree, repository?.node);
@@ -493,8 +493,8 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   worktrees.reviewedFiles = async (...arguments_) => { reads += 1; return await reviewedFiles(...arguments_); };
   const status = new EventEmitter<string | undefined>();
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
-  await settings.update('pairReview.fileView', 'list');
+  await settings.update('diffGuide.groupBy', 'repository');
+  await settings.update('diffGuide.fileView', 'list');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], status.event, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -538,8 +538,8 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
     { key: 'g1', severity: 'trivial', title: 'Format', steps: [{ key: 'g1.0', path: 'README.md', viewed: false }] },
   ] });
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
-  await settings.update('pairReview.fileView', 'list');
+  await settings.update('diffGuide.groupBy', 'repository');
+  await settings.update('diffGuide.fileView', 'list');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -552,7 +552,7 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
   assert.match(String(pr?.item.description), / · ↑2 · ✎1/u);
   const local = window.fileDecorations.map((each) => each.provideFileDecoration(fileRow?.item.resourceUri as vscode.Uri, undefined as never) as { badge?: string } | undefined);
   assert.deepEqual(local.map((each) => each?.badge), ['↑✎', 'A']);
-  await commands.executeCommand('pairReview.showGuideInTree');
+  await commands.executeCommand('diffGuide.showGuideInTree');
   const [outdated, ...groups] = await level(tree, pr?.node);
   assert.equal(outdated?.item.label, 'Guide is outdated. Rebuild it on the review page');
   assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
@@ -564,8 +564,8 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
   const open = groups[0]?.item.command;
   await commands.executeCommand(open?.command ?? '', ...open?.arguments ?? []);
   assert.deepEqual(shown, [{ step: 'g0.0' }, { group: 'g0' }]);
-  assert.deepEqual(groups.map(({ item }) => item.contextValue), ['pairReview.guideGroup', 'pairReview.guideGroup']);
-  await commands.executeCommand('pairReview.markGuideGroupRead', groups[1]?.node);
+  assert.deepEqual(groups.map(({ item }) => item.contextValue), ['diffGuide.guideGroup', 'diffGuide.guideGroup']);
+  await commands.executeCommand('diffGuide.markGuideGroupRead', groups[1]?.node);
   assert.deepEqual(marked, ['g1']);
 
   worktrees.checkedOut.delete(7);
@@ -591,7 +591,7 @@ test('filters PRs by author and shows their size and dates', async (t) => {
     listReviewRequested: async () => [pr(7, 'octo'), pr(8, 'alice')],
   } as unknown as PullRequestProvider;
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
+  await settings.update('diffGuide.groupBy', 'repository');
   const workspace = new FakeMemento();
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, settings, workspace);
   t.after(() => { view.dispose(); });
@@ -608,15 +608,15 @@ test('filters PRs by author and shows their size and dates', async (t) => {
   assert.match(String(first?.item.tooltip), /\+312 −48 in 14 files\nOpened .+, updated 2h ago$/u);
 
   window.quickPickIndex = 2;
-  await commands.executeCommand('pairReview.filterByAuthor');
+  await commands.executeCommand('diffGuide.filterByAuthor');
   assert.deepEqual(window.quickPicks.at(-1), ['$(clear-all) All authors', 'alice', 'octo']);
   assert.deepEqual((await rows()).map(({ item }) => item.description), ['#7 · octo · +312 −48']);
   assert.equal(registered?.description, 'Author: octo');
 
   window.quickPickIndex = 0;
-  await commands.executeCommand('pairReview.filterByAuthorActive');
+  await commands.executeCommand('diffGuide.filterByAuthorActive');
   assert.equal((await rows()).length, 2);
-  assert.equal(workspace.get('pairReview.authorFilter'), undefined);
+  assert.equal(workspace.get('diffGuide.authorFilter'), undefined);
 });
 
 
@@ -657,11 +657,11 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   };
 
   const [one, two, three] = await reviewRows();
-  await commands.executeCommand('pairReview.pinPullRequest', three?.node);
-  await commands.executeCommand('pairReview.pinPullRequest', one?.node);
+  await commands.executeCommand('diffGuide.pinPullRequest', three?.node);
+  await commands.executeCommand('diffGuide.pinPullRequest', one?.node);
   assert.deepEqual(await shown(), {
     roles: ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
-    pinned: ['Three · #3 · app · review · octo · pairReview.pullRequest.pinned', 'One · #1 · app · review · octo · pairReview.pullRequest.pinned'],
+    pinned: ['Three · #3 · app · review · octo · diffGuide.pullRequest.pinned', 'One · #1 · app · review · octo · diffGuide.pullRequest.pinned'],
   });
   assert.deepEqual((await reviewRows()).map(({ item }) => item.label), ['Two']);
 
@@ -677,21 +677,21 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three', 'Two']);
   assert.deepEqual((await shown()).roles, ['PINNED 3', 'REVIEW REQUESTED 0', 'MINE 0', 'ALL OPEN undefined']);
 
-  await commands.executeCommand('pairReview.unpinPullRequest', (await level(tree, (await level(tree))[0]?.node))[2]?.node);
+  await commands.executeCommand('diffGuide.unpinPullRequest', (await level(tree, (await level(tree))[0]?.node))[2]?.node);
   assert.deepEqual((await shown()).roles, ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
 
   reviewRequested = [pr(2, 'Two')];
   open = new Set([1]);
-  await commands.executeCommand('pairReview.refreshPullRequests');
+  await commands.executeCommand('diffGuide.refreshPullRequests');
   await level(tree);
   await settle();
   assert.deepEqual(await shown(), {
     roles: ['PINNED 1', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
-    pinned: ['Still open 1 · #1 · app · review · octo · pairReview.pullRequest.pinned'],
+    pinned: ['Still open 1 · #1 · app · review · octo · diffGuide.pullRequest.pinned'],
   });
   assert.deepEqual(asked, [[1, 3]]);
 
-  await commands.executeCommand('pairReview.markPullRequestMerged', 'acme/app#1');
+  await commands.executeCommand('diffGuide.markPullRequestMerged', 'acme/app#1');
   await settle();
   assert.deepEqual((await shown()).roles, ['REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
 });
@@ -737,7 +737,7 @@ test('marks my PRs awaiting review, filters Mine to them, tells direct from team
     listReviewRequested: async () => [{ ...summary, number: 10, requestedVia: 'you' }, { ...summary, number: 11, requestedVia: 'team', requestedReviewers: [{ name: 'Core', team: true }] }],
   } as unknown as PullRequestProvider;
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
+  await settings.update('diffGuide.groupBy', 'repository');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -751,14 +751,14 @@ test('marks my PRs awaiting review, filters Mine to them, tells direct from team
   assert.deepEqual(mineRows.map(({ item }) => [item.description, (item.iconPath as vscode.ThemeIcon).id]), [['#8 · Awaiting review · octo', 'eye'], ['#9 · octo', 'git-pull-request']]);
   assert.match(String(mineRows[0]?.item.tooltip), /Review requested from alice, team Core/u);
 
-  await commands.executeCommand('pairReview.showAwaitingReviewOnly');
+  await commands.executeCommand('diffGuide.showAwaitingReviewOnly');
   assert.deepEqual((await level(tree, (await sections())[1]?.node)).map(({ item }) => String(item.description).split(' · ')[0]), ['#8']);
   assert.equal(window.trees.at(-1)?.description, 'Awaiting review');
-  await commands.executeCommand('pairReview.showAllMine');
+  await commands.executeCommand('diffGuide.showAllMine');
   assert.equal((await level(tree, (await sections())[1]?.node)).length, 2);
 
-  await commands.executeCommand('pairReview.copyPullRequestLink', mineRows[0]?.node);
-  await commands.executeCommand('pairReview.copyPullRequestLink', { kind: 'pullRequest', pullRequest: { url: 'https://evil.example' } });
+  await commands.executeCommand('diffGuide.copyPullRequestLink', mineRows[0]?.node);
+  await commands.executeCommand('diffGuide.copyPullRequestLink', { kind: 'pullRequest', pullRequest: { url: 'https://evil.example' } });
   assert.deepEqual(env.clipboard.writes, ['https://github.com/acme/app/pull/7']);
 });
 
@@ -774,7 +774,7 @@ test('lists every open PR of a repository under All open only once expanded, wit
   } as unknown as PullRequestProvider;
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
-  await settings.update('pairReview.groupBy', 'repository');
+  await settings.update('diffGuide.groupBy', 'repository');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -786,7 +786,7 @@ test('lists every open PR of a repository under All open only once expanded, wit
   assert.deepEqual(searched, []);
   const rows = await level(tree, allOpen?.node);
   assert.deepEqual(searched, ['is:open sort:updated-desc']);
-  assert.deepEqual(rows.map(({ item }) => [item.label, item.contextValue]), [['Add review sidebar', 'pairReview.pullRequest'], ['Someone else', 'pairReview.pullRequest']]);
+  assert.deepEqual(rows.map(({ item }) => [item.label, item.contextValue]), [['Add review sidebar', 'diffGuide.pullRequest'], ['Someone else', 'diffGuide.pullRequest']]);
   const mineRows = await level(tree, groups[0]?.node);
   const ids = [...mineRows, ...rows].map(({ item }) => item.id);
   assert.equal(new Set(ids).size, ids.length, 'a PR under Mine and All open needs distinct tree ids');
@@ -794,7 +794,7 @@ test('lists every open PR of a repository under All open only once expanded, wit
   assert.equal(searched.length, 1);
   const command = rows[1]?.item.command as vscode.Command;
   await commands.executeCommand(command.command, ...(command.arguments ?? []));
-  await commands.executeCommand('pairReview.openPullRequest', rows[0]?.node);
+  await commands.executeCommand('diffGuide.openPullRequest', rows[0]?.node);
   assert.deepEqual(worktrees.opened, ['acme/app#12:reviewer', 'acme/app#7:author']);
 });
 
@@ -825,7 +825,7 @@ test('opens a PR from a pasted link in the workspace folder of its repository, o
   (window as { showInputBox?: unknown }).showInputBox = async () => inputs.shift();
   t.after(() => { (window as { showInputBox?: unknown }).showInputBox = original; });
 
-  for (let run = 0; run < 5; run += 1) await commands.executeCommand('pairReview.openPullRequestLink');
+  for (let run = 0; run < 5; run += 1) await commands.executeCommand('diffGuide.openPullRequestLink');
   assert.deepEqual(shown, ['Acme/App#57:reviewer']);
   assert.deepEqual(asked, [57, 58]);
   assert.deepEqual(window.errors, [

@@ -1,6 +1,6 @@
 # Contributing
 
-Start with an [issue](https://github.com/flucas96/local-review/issues/new/choose) describing the user problem and a concrete example. For UX changes, include the intended interaction and keyboard behavior. Existing review findings are tracked in [docs/REVIEW.md](docs/REVIEW.md).
+Start with an [issue](https://github.com/kaiketsu-labs/diffguide/issues/new/choose) describing the user problem and a concrete example. For UX changes, include the intended interaction and keyboard behavior. Existing review findings are tracked in [docs/REVIEW.md](docs/REVIEW.md).
 
 ## Local development
 
@@ -10,7 +10,7 @@ Use Node.js 22+ and install the locked dependencies:
 npm ci --ignore-scripts
 ```
 
-Build with `npm run build`, then open this folder in VS Code and launch **Pair Review ausprobieren** from Run and Debug. This opens an extension development host. End users install a VSIX and do not need the development dependencies.
+Build with `npm run build`, then open this folder in VS Code and launch **DiffGuide ausprobieren** from Run and Debug. This opens an extension development host. End users install a VSIX and do not need the development dependencies.
 
 After human approval, run the checks relevant to the change:
 

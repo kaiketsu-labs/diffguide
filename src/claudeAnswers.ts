@@ -38,7 +38,7 @@ export function latestAnswers(pullRequests: readonly AnsweredPullRequest[], limi
 
 /** Which Claude answers the user has seen on a review page, by thread id and answer time; kept per workspace. */
 export class SeenAnswers implements vscode.Disposable {
-  static readonly key = 'pairReview.seenAnswers';
+  static readonly key = 'diffGuide.seenAnswers';
   readonly #changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.#changed.event;
 
@@ -101,7 +101,7 @@ export class ClaudeAnswersTree implements vscode.TreeDataProvider<ClaudeAnswer>,
     item.description = `#${answer.number} · ${path.posix.basename(answer.path)}:${answer.line} · ${ago(answer.createdAt)}`;
     item.iconPath = new vscode.ThemeIcon(fresh ? 'circle-filled' : 'comment', new vscode.ThemeColor(fresh ? 'charts.orange' : 'descriptionForeground'));
     item.tooltip = new vscode.MarkdownString().appendText(`${answer.pullRequest} · ${answer.path}:${answer.line}${fresh ? ' · New' : ''}\n\n`).appendMarkdown(answer.text.slice(0, 1500));
-    item.command = { command: 'pairReview.openAnswer', title: 'Open answer', arguments: [answer.pullRequest, answer.threadId] };
+    item.command = { command: 'diffGuide.openAnswer', title: 'Open answer', arguments: [answer.pullRequest, answer.threadId] };
     return item;
   }
 

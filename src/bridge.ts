@@ -38,7 +38,7 @@ interface PendingPoll {
 
 /** Start an authenticated, workspace-scoped review bridge on a random loopback port. */
 export async function createReviewBridge(store: ReviewStore, sessionBindingPath?: string, linkedRepository?: LinkedRepositoryHandler): Promise<ReviewBridge> {
-  const bridge = new PairReviewBridge(store, sessionBindingPath, linkedRepository);
+  const bridge = new DiffGuideBridge(store, sessionBindingPath, linkedRepository);
   try {
     await bridge.listen();
     return bridge;
@@ -49,7 +49,7 @@ export async function createReviewBridge(store: ReviewStore, sessionBindingPath?
 }
 
 /** Serve local editor events without exposing an unauthenticated HTTP interface. */
-class PairReviewBridge implements ReviewBridge {
+class DiffGuideBridge implements ReviewBridge {
   readonly #store: ReviewStore;
   readonly #server: Server;
   readonly #token = randomBytes(32).toString('hex');
@@ -67,7 +67,7 @@ class PairReviewBridge implements ReviewBridge {
     this.#server = createServer({ maxHeaderSize: 16 * 1024 }, (request, response) => {
       void this.#handle(request, response).catch((error: unknown) => {
         const status = error instanceof ReviewStoreError ? error.statusCode : 500;
-        const message = error instanceof ReviewStoreError ? error.message : 'Pair Review request failed.';
+        const message = error instanceof ReviewStoreError ? error.message : 'DiffGuide request failed.';
         respond(response, status, { error: message });
       });
     });
@@ -160,7 +160,7 @@ class PairReviewBridge implements ReviewBridge {
     }
     if (this.sessionBindingPath !== undefined) {
       const binding = await readSessionBinding(this.sessionBindingPath, this.#store.workspaceRoot);
-      if (binding !== undefined && request.headers['x-pair-review-session'] !== binding.sessionId) {
+      if (binding !== undefined && request.headers['x-diffguide-session'] !== binding.sessionId) {
         request.resume();
         respond(response, 403, { error: 'Diese Claude-Unterhaltung ist nicht für dieses Review ausgewählt.' });
         return;
@@ -171,7 +171,7 @@ class PairReviewBridge implements ReviewBridge {
       respond(response, 403, { error: 'Browser-origin requests are not supported.' });
       return;
     }
-    this.#touch(request.headers['x-pair-review-client']);
+    this.#touch(request.headers['x-diffguide-client']);
     const declaredLength = request.headers['content-length'];
     if (declaredLength !== undefined && Number(declaredLength) > maximumBodyBytes) {
       request.resume();
@@ -196,7 +196,7 @@ class PairReviewBridge implements ReviewBridge {
       if (events.length > 0) {
         respond(response, 200, this.#payload(events));
       } else {
-        const sessionId = request.headers['x-pair-review-session'];
+        const sessionId = request.headers['x-diffguide-session'];
         this.#beginPoll(after, response, typeof sessionId === 'string' ? sessionId : undefined);
       }
       return;
@@ -217,7 +217,7 @@ class PairReviewBridge implements ReviewBridge {
       }
       if (this.sessionBindingPath !== undefined) {
         const binding = await readSessionBinding(this.sessionBindingPath, this.#store.workspaceRoot);
-        if (binding !== undefined && request.headers['x-pair-review-session'] !== binding.sessionId) {
+        if (binding !== undefined && request.headers['x-diffguide-session'] !== binding.sessionId) {
           respond(response, 403, { error: 'Die ausgewählte Claude-Unterhaltung hat sich geändert.' });
           return;
         }
@@ -373,7 +373,7 @@ class PairReviewBridge implements ReviewBridge {
 function projectText(text: string, maximum: number): string {
   const escaped = text.replaceAll('\0', '\\0');
   if (escaped.length <= maximum) return escaped;
-  const marker = '\n[Pair Review: text truncated for delivery; the original remains in VS Code.]';
+  const marker = '\n[DiffGuide: text truncated for delivery; the original remains in VS Code.]';
   return `${escaped.slice(0, Math.max(0, maximum - marker.length))}${marker}`;
 }
 
@@ -402,7 +402,7 @@ function projectThread(thread: ReviewThread): ReviewThread {
   }
   const first = messages[0];
   if (first !== undefined && messages.length < thread.messages.length) {
-    const marker = '[Pair Review: earlier conversation omitted from delivery; the original remains in VS Code.]\n';
+    const marker = '[DiffGuide: earlier conversation omitted from delivery; the original remains in VS Code.]\n';
     messages[0] = { ...first, text: projectText(`${marker}${first.text}`, maximumConversationTextLength) };
   }
   return { ...thread, anchor: projectAnchor(thread.anchor), messages };

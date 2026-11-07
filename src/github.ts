@@ -1,7 +1,7 @@
 import { endpointsFor, githubRequest } from './githubApi.js';
 import { parseGitRemote, pickGitHubRemote } from './pullRequests.js';
 import { git } from './worktrees.js';
-import { prExportEnd, prExportStart, readManagedPrContent, replaceManagedPrContent } from './prExport.js';
+import { hasPrExportMarker, readManagedPrContent, replaceManagedPrContent } from './prExport.js';
 
 /** Open PR whose head is the current workspace branch. */
 export interface GitHubPullRequest {
@@ -62,14 +62,14 @@ export class GitHubReviewClient {
         const author = optionalObject(record['user']);
         if (typeof author?.['login'] !== 'string' || author['login'].toLowerCase() !== viewerLogin.toLowerCase()) continue;
         const body = text(record['body'], 'Kommentartext', true);
-        if (!body.includes(prExportStart) && !body.includes(prExportEnd)) continue;
+        if (!hasPrExportMarker(body)) continue;
         readManagedPrContent(body);
         matches.push(parseComment(record));
       }
       if (comments.length < 100) break;
     }
     if (matches.length > 1) {
-      throw new Error('Dieser PR enthält mehrere Pair-Review-Übergaben von deinem Konto. Kläre die doppelten Kommentare auf GitHub, bevor du aktualisierst.');
+      throw new Error('Dieser PR enthält mehrere DiffGuide-Übergaben von deinem Konto. Kläre die doppelten Kommentare auf GitHub, bevor du aktualisierst.');
     }
     const comment = matches[0];
     return comment === undefined ? { pullRequest, viewerLogin } : { pullRequest, viewerLogin, comment };

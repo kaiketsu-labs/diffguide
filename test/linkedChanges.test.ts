@@ -36,7 +36,7 @@ test('reads PRs in other repositories from cross-references in both directions',
 });
 
 test('stores manual links, unlinks and the repositories Claude worked in', async () => {
-  const data = await mkdtemp(join(tmpdir(), 'pair-review-links-'));
+  const data = await mkdtemp(join(tmpdir(), 'diffguide-links-'));
   assert.deepEqual(await readStoredLinks(data), { added: [], removed: [], worked: [] });
   let links = addLink(await readStoredLinks(data), { repository: 'acme/api', number: 12 });
   links = addWorked(links, 'acme/web');
@@ -53,11 +53,11 @@ test('stores manual links, unlinks and the repositories Claude worked in', async
 test('names a linked branch after the PR head branch', () => {
   assert.equal(linkedBranchName('feat/retry'), 'feat/retry');
   assert.equal(linkedBranchName('weird name!'), 'weird-name-');
-  assert.equal(linkedBranchName('...'), 'pair-review/linked');
+  assert.equal(linkedBranchName('...'), 'diffguide/linked');
 });
 
 test('lets one run at a time into a worktree, reports who holds it, and frees a dead holder', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'pair-review-lock-'));
+  const root = await mkdtemp(join(tmpdir(), 'diffguide-lock-'));
   const worktree = join(root, 'pr-12');
   const releaseFirst = await lockWorktree(worktree, 'acme/app#3');
   const waited: string[] = [];
@@ -83,7 +83,7 @@ test('lets one run at a time into a worktree, reports who holds it, and frees a 
 });
 
 test('reads a pinned branch from GitHub, detaches when it is checked out elsewhere, and refuses to edit it twice', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'pair-review-branch-'));
+  const root = await mkdtemp(join(tmpdir(), 'diffguide-branch-'));
   const run = (cwd: string, ...args: string[]): Promise<string> => git(cwd, args);
   await run(root, 'init', '--quiet', '--bare', 'remote.git');
   await run(join(root, 'remote.git'), 'symbolic-ref', 'HEAD', 'refs/heads/main');
@@ -97,7 +97,7 @@ test('reads a pinned branch from GitHub, detaches when it is checked out elsewhe
   await run(b, 'add', '.');
   await commit('retry');
   await run(b, 'push', '--quiet', 'origin', 'feat/retry');
-  const storage = join(b, '.claude', 'worktrees', 'pair-review');
+  const storage = join(b, '.claude', 'worktrees', 'diffguide');
   assert.equal(await ensureBranchWorktree(b, join(storage, 'read'), 'feat/retry', 'read'), 'feat/retry');
   assert.equal(await readFile(join(storage, 'read', 'api.txt'), 'utf8'), 'retry v2\n');
   await assert.rejects(ensureBranchWorktree(b, join(storage, 'edit'), 'feat/retry', 'edit'), /checked out in another worktree/u);

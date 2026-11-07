@@ -17,7 +17,7 @@ const maximumLength = 60_000;
 
 /** Let the user edit a comment and pick pending review or direct; the panel closes once `submit` succeeds. */
 export function showPublishPanel(draft: PublishDraft, submit: (body: string, pending: boolean) => Promise<void>): vscode.WebviewPanel {
-  const panel = vscode.window.createWebviewPanel('pairReview.publishThread', `Publish · ${draft.title}`, vscode.ViewColumn.Beside,
+  const panel = vscode.window.createWebviewPanel('diffGuide.publishThread', `Publish · ${draft.title}`, vscode.ViewColumn.Beside,
     { enableScripts: true, localResourceRoots: [] });
   panel.webview.html = publishHtml(draft);
   let busy = false;

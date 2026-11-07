@@ -461,7 +461,7 @@ export async function showPullRequestOverview(
   }
   let reveal = revealAt;
   let state = await read();
-  const panel = vscode.window.createWebviewPanel('pairReview.pullRequestOverview', state.title, vscode.ViewColumn.Active,
+  const panel = vscode.window.createWebviewPanel('diffGuide.pullRequestOverview', state.title, vscode.ViewColumn.Active,
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
   panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
@@ -564,7 +564,7 @@ export async function showPullRequestOverview(
           post({ probe: { id, found } });
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
         else if (action === 'view' && (view === 'files' || view === 'guide')) {
-          await vscode.commands.executeCommand(view === 'guide' ? 'pairReview.showGuideInTree' : 'pairReview.showFilesInTree');
+          await vscode.commands.executeCommand(view === 'guide' ? 'diffGuide.showGuideInTree' : 'diffGuide.showFilesInTree');
         } else if ((action === 'apply-suggestion' || action === 'publish-suggestion') && typeof id === 'string' && state.threads.some((thread) => thread.id === id)
           && Number.isSafeInteger(message) && (message as number) >= 0 && Number.isSafeInteger(option) && (option as number) >= 0) {
           await (action === 'apply-suggestion' ? actions.applySuggestion : actions.publishSuggestion)(id, message as number, option as number);

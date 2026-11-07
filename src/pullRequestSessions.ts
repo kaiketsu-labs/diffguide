@@ -64,7 +64,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     private readonly connect: () => Promise<PullRequestProvider>,
     /** Replaces how Claude is found and started, for tests. */
     private readonly claude: Partial<Pick<ClaudeRunnerOptions, 'resolve' | 'spawn'>> = {},
-    /** Other repositories of the workspace by `owner/name`, which Claude reaches only through Pair Review worktrees. */
+    /** Other repositories of the workspace by `owner/name`, which Claude reaches only through DiffGuide worktrees. */
     private readonly repositories: () => Promise<ReadonlyMap<string, WorkspaceRepository>> = async () => new Map(),
   ) {}
 
@@ -115,7 +115,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
   async restore(): Promise<void> {
     const stuck = await migrateWorktrees(this.sourceRoot, this.storageRoot);
     if (stuck.length > 0) {
-      void vscode.window.showWarningMessage(`Pair Review could not move ${stuck.length === 1 ? 'a PR worktree' : `${stuck.length} PR worktrees`} out of the Git folder, so Claude cannot edit there: ${stuck.join(', ')}`);
+      void vscode.window.showWarningMessage(`DiffGuide could not move ${stuck.length === 1 ? 'a PR worktree' : `${stuck.length} PR worktrees`} to its folder, so their comments do not show and Claude cannot edit there: ${stuck.join(', ')}`);
     }
     for (const { metadata } of await listWorktrees(this.storageRoot, this.sourceRoot)) {
       await this.open(metadata.repository, metadata.pullRequest.number);
@@ -171,7 +171,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     const commits = await readClaudeCommits(dataPath);
     const publishing = new Map<string, vscode.WebviewPanel>();
     const output = vscode.window.createOutputChannel(`Claude · #${number}`);
-    const configuration = vscode.workspace.getConfiguration('pairReview');
+    const configuration = vscode.workspace.getConfiguration('diffGuide');
     const log = (line: string): void => { output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`); };
     const resolve: ClaudeRunnerOptions['resolve'] = async () => {
       const claudePath = configuration.get<string>('claudePath', 'claude');

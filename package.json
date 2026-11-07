@@ -1,7 +1,7 @@
 {
-  "name": "pair-review",
-  "displayName": "Pair Review",
-  "description": "Review local changes with Claude Code using native inline comments and automatic feedback delivery.",
+  "name": "diffguide",
+  "displayName": "DiffGuide",
+  "description": "An AI-powered code review companion that helps you explore changes, ask questions and improve code while keeping you in control.",
   "version": "0.5.1",
   "icon": "resources/icon.png",
   "galleryBanner": {
@@ -12,11 +12,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kaiketsu-labs/pair-review.git"
+    "url": "https://github.com/kaiketsu-labs/diffguide.git"
   },
-  "homepage": "https://github.com/kaiketsu-labs/pair-review#readme",
+  "homepage": "https://github.com/kaiketsu-labs/diffguide#readme",
   "bugs": {
-    "url": "https://github.com/kaiketsu-labs/pair-review/issues"
+    "url": "https://github.com/kaiketsu-labs/diffguide/issues"
   },
   "engines": {
     "vscode": "^1.100.0",
@@ -42,13 +42,13 @@
   "main": "./dist/extension.cjs",
   "activationEvents": [
     "onStartupFinished",
-    "onView:pairReview.pullRequests",
-    "onFileSystem:pair-review-pr"
+    "onView:diffGuide.pullRequests",
+    "onFileSystem:diffguide-pr"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "Pair Review connects to a coding agent that can edit workspace files."
+      "description": "DiffGuide connects to a coding agent that can edit workspace files."
     },
     "virtualWorkspaces": {
       "supported": false
@@ -82,7 +82,7 @@
   "contributes": {
     "colors": [
       {
-        "id": "pairReview.selectionBackground",
+        "id": "diffGuide.selectionBackground",
         "description": "Hintergrund der fixierten Codeauswahl für den aktiven Review-Kommentar.",
         "defaults": {
           "dark": "#FFFFFF1A",
@@ -92,7 +92,7 @@
         }
       },
       {
-        "id": "pairReview.selectionBorder",
+        "id": "diffGuide.selectionBorder",
         "description": "Rahmen der fixierten Codeauswahl für den aktiven Review-Kommentar.",
         "defaults": {
           "dark": "#FFFFFF66",
@@ -104,325 +104,325 @@
     ],
     "commands": [
       {
-        "command": "pairReview.startClaude",
+        "command": "diffGuide.startClaude",
         "title": "Mit Claude verbinden",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(plug)"
       },
       {
-        "command": "pairReview.copyClaudeCommand",
+        "command": "diffGuide.copyClaudeCommand",
         "title": "Verbindungsbefehl kopieren",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(terminal)"
       },
       {
-        "command": "pairReview.connectRunningClaude",
+        "command": "diffGuide.connectRunningClaude",
         "title": "Laufende Unterhaltung verbinden",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(plug)"
       },
       {
-        "command": "pairReview.addComment",
+        "command": "diffGuide.addComment",
         "title": "Kommentar hinzufügen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(comment-add)"
       },
       {
-        "command": "pairReview.openComposer",
+        "command": "diffGuide.openComposer",
         "title": "Feedback in Seitenansicht schreiben",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(open-preview)"
       },
       {
-        "command": "pairReview.openCode",
+        "command": "diffGuide.openCode",
         "title": "Code im Editor öffnen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(go-to-file)"
       },
       {
-        "command": "pairReview.openCommentCode",
+        "command": "diffGuide.openCommentCode",
         "title": "Code im Editor öffnen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(go-to-file)"
       },
       {
-        "command": "pairReview.submitInline",
+        "command": "diffGuide.submitInline",
         "title": "Senden",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "enablement": "!commentIsEmpty"
       },
       {
-        "command": "pairReview.cancelDraft",
+        "command": "diffGuide.cancelDraft",
         "title": "Entwurf verwerfen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(close)"
       },
       {
-        "command": "pairReview.openChanges",
+        "command": "diffGuide.openChanges",
         "title": "Änderungen reviewen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(git-compare)"
       },
       {
-        "command": "pairReview.revealThread",
+        "command": "diffGuide.revealThread",
         "title": "Zum Kommentar springen",
-        "category": "Pair Review"
+        "category": "DiffGuide"
       },
       {
-        "command": "pairReview.composeReply",
+        "command": "diffGuide.composeReply",
         "title": "In Seitenansicht antworten",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(open-preview)"
       },
       {
-        "command": "pairReview.resumeDraft",
+        "command": "diffGuide.resumeDraft",
         "title": "Entwurf fortsetzen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(edit)"
       },
       {
-        "command": "pairReview.exportToPr",
+        "command": "diffGuide.exportToPr",
         "title": "An GitHub-PR übergeben",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(git-pull-request)"
       },
       {
-        "command": "pairReview.resolve",
+        "command": "diffGuide.resolve",
         "title": "Als erledigt markieren",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(check)"
       },
       {
-        "command": "pairReview.showResolved",
+        "command": "diffGuide.showResolved",
         "title": "Erledigte anzeigen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(eye)"
       },
       {
-        "command": "pairReview.hideResolved",
+        "command": "diffGuide.hideResolved",
         "title": "Erledigte ausblenden",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "pairReview.enhanceContrast",
+        "command": "diffGuide.enhanceContrast",
         "title": "Kommentarfenster hervorheben",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(color-mode)"
       },
       {
-        "command": "pairReview.toggleCenteredLayout",
+        "command": "diffGuide.toggleCenteredLayout",
         "title": "Zentrierte Ansicht",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(layout-centered)"
       },
       {
-        "command": "pairReview.resetContrast",
+        "command": "diffGuide.resetContrast",
         "title": "Standarddarstellung wiederherstellen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(discard)"
       },
       {
-        "command": "pairReview.reopen",
+        "command": "diffGuide.reopen",
         "title": "Wieder öffnen",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(debug-restart)"
       },
       {
-        "command": "pairReview.refreshPullRequests",
+        "command": "diffGuide.refreshPullRequests",
         "title": "Refresh pull requests",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(refresh)"
       },
       {
-        "command": "pairReview.searchPullRequests",
+        "command": "diffGuide.searchPullRequests",
         "title": "Search pull requests",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(search)"
       },
       {
-        "command": "pairReview.openPullRequestLink",
-        "title": "Open PR in Pair Review",
-        "category": "Pair Review",
+        "command": "diffGuide.openPullRequestLink",
+        "title": "Open PR in DiffGuide",
+        "category": "DiffGuide",
         "icon": "$(link)"
       },
       {
-        "command": "pairReview.copyPullRequestLink",
+        "command": "diffGuide.copyPullRequestLink",
         "title": "Copy Link",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(copy)"
       },
       {
-        "command": "pairReview.showAwaitingReviewOnly",
+        "command": "diffGuide.showAwaitingReviewOnly",
         "title": "Show only my PRs awaiting review",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(eye)"
       },
       {
-        "command": "pairReview.showAllMine",
+        "command": "diffGuide.showAllMine",
         "title": "Show all my PRs",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "pairReview.cleanUpWorktrees",
+        "command": "diffGuide.cleanUpWorktrees",
         "title": "Clean up worktrees",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(trash)"
       },
       {
-        "command": "pairReview.signInToGitHub",
+        "command": "diffGuide.signInToGitHub",
         "title": "Sign in to GitHub",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(account)"
       },
       {
-        "command": "pairReview.filterByAuthor",
+        "command": "diffGuide.filterByAuthor",
         "title": "Filter by author",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(filter)"
       },
       {
-        "command": "pairReview.filterByAuthorActive",
+        "command": "diffGuide.filterByAuthorActive",
         "title": "Filter by author",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(filter-filled)"
       },
       {
-        "command": "pairReview.showGuideInTree",
+        "command": "diffGuide.showGuideInTree",
         "title": "Show guide steps under PRs",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(map)"
       },
       {
-        "command": "pairReview.showFilesInTree",
+        "command": "diffGuide.showFilesInTree",
         "title": "Show files under PRs",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(files)"
       },
       {
-        "command": "pairReview.viewFilesAsTree",
+        "command": "diffGuide.viewFilesAsTree",
         "title": "View as tree",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(list-tree)"
       },
       {
-        "command": "pairReview.viewFilesAsList",
+        "command": "diffGuide.viewFilesAsList",
         "title": "View as list",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(list-flat)"
       },
       {
-        "command": "pairReview.groupByRole",
+        "command": "diffGuide.groupByRole",
         "title": "Group by role",
-        "category": "Pair Review"
+        "category": "DiffGuide"
       },
       {
-        "command": "pairReview.groupByRepository",
+        "command": "diffGuide.groupByRepository",
         "title": "Group by repository",
-        "category": "Pair Review"
+        "category": "DiffGuide"
       },
       {
-        "command": "pairReview.chooseRepositories",
+        "command": "diffGuide.chooseRepositories",
         "title": "Choose repositories...",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(filter)"
       },
       {
-        "command": "pairReview.hideRepository",
+        "command": "diffGuide.hideRepository",
         "title": "Hide repository",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "pairReview.openPullRequestInBrowser",
+        "command": "diffGuide.openPullRequestInBrowser",
         "title": "Open in browser",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(link-external)"
       },
       {
-        "command": "pairReview.openPullRequest",
+        "command": "diffGuide.openPullRequest",
         "title": "Open review page",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(diff-multiple)"
       },
       {
-        "command": "pairReview.markGuideGroupRead",
+        "command": "diffGuide.markGuideGroupRead",
         "title": "Mark section read",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(check-all)"
       },
       {
-        "command": "pairReview.pinPullRequest",
+        "command": "diffGuide.pinPullRequest",
         "title": "Pin",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(pin)"
       },
       {
-        "command": "pairReview.unpinPullRequest",
+        "command": "diffGuide.unpinPullRequest",
         "title": "Unpin",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(pinned)"
       },
       {
-        "command": "pairReview.removePullRequestWorktree",
+        "command": "diffGuide.removePullRequestWorktree",
         "title": "Remove worktree",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(trash)"
       },
       {
-        "command": "pairReview.showPullRequestClaude",
+        "command": "diffGuide.showPullRequestClaude",
         "title": "Show Claude activity",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(output)"
       },
       {
-        "command": "pairReview.showPullRequestOverview",
+        "command": "diffGuide.showPullRequestOverview",
         "title": "Open review page",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(dashboard)"
       },
       {
-        "command": "pairReview.publishThread",
+        "command": "diffGuide.publishThread",
         "title": "Publish to GitHub",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "pairReview.openPublishedThread",
+        "command": "diffGuide.openPublishedThread",
         "title": "Open on GitHub",
-        "category": "Pair Review",
+        "category": "DiffGuide",
         "icon": "$(github)"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "pairReview",
-          "title": "Pair Review",
+          "id": "diffGuide",
+          "title": "DiffGuide",
           "icon": "resources/review.svg"
         }
       ]
     },
     "views": {
-      "pairReview": [
+      "diffGuide": [
         {
-          "id": "pairReview.pullRequests",
+          "id": "diffGuide.pullRequests",
           "name": "Pull Requests",
           "icon": "resources/review.svg"
         },
         {
-          "id": "pairReview.answers",
+          "id": "diffGuide.answers",
           "name": "Claude Answers",
           "icon": "resources/review.svg"
         },
         {
-          "id": "pairReview.threads",
+          "id": "diffGuide.threads",
           "name": "Review",
           "icon": "resources/review.svg"
         },
         {
-          "id": "pairReview.legend",
+          "id": "diffGuide.legend",
           "name": "Legend",
           "icon": "resources/review.svg",
           "visibility": "collapsed"
@@ -431,395 +431,395 @@
     },
     "viewsWelcome": [
       {
-        "view": "pairReview.threads",
-        "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:pairReview.startClaude)\n[Änderungen reviewen](command:pairReview.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
+        "view": "diffGuide.threads",
+        "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:diffGuide.startClaude)\n[Änderungen reviewen](command:diffGuide.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
       },
       {
-        "view": "pairReview.answers",
+        "view": "diffGuide.answers",
         "contents": "Claude's latest answers on your PRs show up here, newest first. New ones stay marked until you see them on the review page."
       },
       {
-        "view": "pairReview.pullRequests",
-        "contents": "Sign in to GitHub to see your pull requests.\n[Sign in to GitHub](command:pairReview.signInToGitHub)",
-        "when": "pairReview.gitHubSignIn == github"
+        "view": "diffGuide.pullRequests",
+        "contents": "Sign in to GitHub to see your pull requests.\n[Sign in to GitHub](command:diffGuide.signInToGitHub)",
+        "when": "diffGuide.gitHubSignIn == github"
       },
       {
-        "view": "pairReview.pullRequests",
-        "contents": "Sign in to your GitHub Enterprise host to see your pull requests.\n[Sign in to GitHub Enterprise](command:pairReview.signInToGitHub)",
-        "when": "pairReview.gitHubSignIn == github-enterprise"
+        "view": "diffGuide.pullRequests",
+        "contents": "Sign in to your GitHub Enterprise host to see your pull requests.\n[Sign in to GitHub Enterprise](command:diffGuide.signInToGitHub)",
+        "when": "diffGuide.gitHubSignIn == github-enterprise"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "pairReview.addComment",
-          "when": "(resourceScheme == file || resourceScheme == pair-review-base || resourceScheme == pair-review-pr) && isWorkspaceTrusted",
+          "command": "diffGuide.addComment",
+          "when": "(resourceScheme == file || resourceScheme == diffguide-base || resourceScheme == diffguide-pr) && isWorkspaceTrusted",
           "group": "navigation@20"
         }
       ],
       "editor/title": [
         {
-          "command": "pairReview.addComment",
-          "when": "(resourceScheme == file || resourceScheme == pair-review-base || resourceScheme == pair-review-pr) && isWorkspaceTrusted",
+          "command": "diffGuide.addComment",
+          "when": "(resourceScheme == file || resourceScheme == diffguide-base || resourceScheme == diffguide-pr) && isWorkspaceTrusted",
           "group": "navigation@20"
         }
       ],
       "scm/title": [
         {
-          "command": "pairReview.openChanges",
+          "command": "diffGuide.openChanges",
           "when": "scmProvider == git",
           "group": "navigation@20"
         }
       ],
       "view/title": [
         {
-          "command": "pairReview.searchPullRequests",
-          "when": "view == pairReview.pullRequests",
+          "command": "diffGuide.searchPullRequests",
+          "when": "view == diffGuide.pullRequests",
           "group": "navigation@-1"
         },
         {
-          "command": "pairReview.refreshPullRequests",
-          "when": "view == pairReview.pullRequests",
+          "command": "diffGuide.refreshPullRequests",
+          "when": "view == diffGuide.pullRequests",
           "group": "navigation@1"
         },
         {
-          "command": "pairReview.filterByAuthor",
-          "when": "view == pairReview.pullRequests && !pairReview.authorFiltered",
+          "command": "diffGuide.filterByAuthor",
+          "when": "view == diffGuide.pullRequests && !diffGuide.authorFiltered",
           "group": "navigation@0"
         },
         {
-          "command": "pairReview.filterByAuthorActive",
-          "when": "view == pairReview.pullRequests && pairReview.authorFiltered",
+          "command": "diffGuide.filterByAuthorActive",
+          "when": "view == diffGuide.pullRequests && diffGuide.authorFiltered",
           "group": "navigation@0"
         },
         {
-          "command": "pairReview.showGuideInTree",
-          "when": "view == pairReview.pullRequests && !pairReview.treeShowsGuide",
+          "command": "diffGuide.showGuideInTree",
+          "when": "view == diffGuide.pullRequests && !diffGuide.treeShowsGuide",
           "group": "navigation@3"
         },
         {
-          "command": "pairReview.showFilesInTree",
-          "when": "view == pairReview.pullRequests && pairReview.treeShowsGuide",
+          "command": "diffGuide.showFilesInTree",
+          "when": "view == diffGuide.pullRequests && diffGuide.treeShowsGuide",
           "group": "navigation@3"
         },
         {
-          "command": "pairReview.viewFilesAsTree",
-          "when": "view == pairReview.pullRequests && !pairReview.filesAsTree",
+          "command": "diffGuide.viewFilesAsTree",
+          "when": "view == diffGuide.pullRequests && !diffGuide.filesAsTree",
           "group": "navigation@2"
         },
         {
-          "command": "pairReview.viewFilesAsList",
-          "when": "view == pairReview.pullRequests && pairReview.filesAsTree",
+          "command": "diffGuide.viewFilesAsList",
+          "when": "view == diffGuide.pullRequests && diffGuide.filesAsTree",
           "group": "navigation@2"
         },
         {
-          "command": "pairReview.chooseRepositories",
-          "when": "view == pairReview.pullRequests",
+          "command": "diffGuide.chooseRepositories",
+          "when": "view == diffGuide.pullRequests",
           "group": "1_repositories@1"
         },
         {
-          "command": "pairReview.groupByRepository",
-          "when": "view == pairReview.pullRequests && pairReview.groupByRole",
+          "command": "diffGuide.groupByRepository",
+          "when": "view == diffGuide.pullRequests && diffGuide.groupByRole",
           "group": "2_grouping@1"
         },
         {
-          "command": "pairReview.groupByRole",
-          "when": "view == pairReview.pullRequests && !pairReview.groupByRole",
+          "command": "diffGuide.groupByRole",
+          "when": "view == diffGuide.pullRequests && !diffGuide.groupByRole",
           "group": "2_grouping@1"
         },
         {
-          "command": "pairReview.showAwaitingReviewOnly",
-          "when": "view == pairReview.pullRequests && !pairReview.awaitingReviewOnly",
+          "command": "diffGuide.showAwaitingReviewOnly",
+          "when": "view == diffGuide.pullRequests && !diffGuide.awaitingReviewOnly",
           "group": "3_filter@1"
         },
         {
-          "command": "pairReview.showAllMine",
-          "when": "view == pairReview.pullRequests && pairReview.awaitingReviewOnly",
+          "command": "diffGuide.showAllMine",
+          "when": "view == diffGuide.pullRequests && diffGuide.awaitingReviewOnly",
           "group": "3_filter@1"
         },
         {
-          "command": "pairReview.openPullRequestLink",
-          "when": "view == pairReview.pullRequests",
+          "command": "diffGuide.openPullRequestLink",
+          "when": "view == diffGuide.pullRequests",
           "group": "0_open@1"
         },
         {
-          "command": "pairReview.startClaude",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.startClaude",
+          "when": "view == diffGuide.threads",
           "group": "navigation@1"
         },
         {
-          "command": "pairReview.copyClaudeCommand",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.copyClaudeCommand",
+          "when": "view == diffGuide.threads",
           "group": "connection@1"
         },
         {
-          "command": "pairReview.openChanges",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.openChanges",
+          "when": "view == diffGuide.threads",
           "group": "navigation@2"
         },
         {
-          "command": "pairReview.exportToPr",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.exportToPr",
+          "when": "view == diffGuide.threads",
           "group": "navigation@3"
         },
         {
-          "command": "pairReview.showResolved",
-          "when": "view == pairReview.threads && !pairReview.showResolved",
+          "command": "diffGuide.showResolved",
+          "when": "view == diffGuide.threads && !diffGuide.showResolved",
           "group": "navigation@4"
         },
         {
-          "command": "pairReview.hideResolved",
-          "when": "view == pairReview.threads && pairReview.showResolved",
+          "command": "diffGuide.hideResolved",
+          "when": "view == diffGuide.threads && diffGuide.showResolved",
           "group": "navigation@4"
         },
         {
-          "command": "pairReview.enhanceContrast",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.enhanceContrast",
+          "when": "view == diffGuide.threads",
           "group": "navigation@5"
         },
         {
-          "command": "pairReview.toggleCenteredLayout",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.toggleCenteredLayout",
+          "when": "view == diffGuide.threads",
           "group": "appearance@1"
         },
         {
-          "command": "pairReview.resetContrast",
-          "when": "view == pairReview.threads",
+          "command": "diffGuide.resetContrast",
+          "when": "view == diffGuide.threads",
           "group": "appearance@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "pairReview.pinPullRequest",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest(\\.checkedOut)?$/",
+          "command": "diffGuide.pinPullRequest",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest(\\.checkedOut)?$/",
           "group": "inline@0"
         },
         {
-          "command": "pairReview.unpinPullRequest",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest.*\\.pinned$/",
+          "command": "diffGuide.unpinPullRequest",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest.*\\.pinned$/",
           "group": "inline@0"
         },
         {
-          "command": "pairReview.markGuideGroupRead",
-          "when": "view == pairReview.pullRequests && viewItem == pairReview.guideGroup",
+          "command": "diffGuide.markGuideGroupRead",
+          "when": "view == diffGuide.pullRequests && viewItem == diffGuide.guideGroup",
           "group": "inline@0"
         },
         {
-          "command": "pairReview.hideRepository",
-          "when": "view == pairReview.pullRequests && viewItem == pairReview.repository",
+          "command": "diffGuide.hideRepository",
+          "when": "view == diffGuide.pullRequests && viewItem == diffGuide.repository",
           "group": "1_repository@1"
         },
         {
-          "command": "pairReview.openPullRequestInBrowser",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest/",
+          "command": "diffGuide.openPullRequestInBrowser",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest/",
           "group": "1_pullRequest@2"
         },
         {
-          "command": "pairReview.copyPullRequestLink",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest/",
+          "command": "diffGuide.copyPullRequestLink",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest/",
           "group": "1_pullRequest@3"
         },
         {
-          "command": "pairReview.showPullRequestClaude",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest\\.checkedOut/",
+          "command": "diffGuide.showPullRequestClaude",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest\\.checkedOut/",
           "group": "1_pullRequest@1"
         },
         {
-          "command": "pairReview.removePullRequestWorktree",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest\\.checkedOut/",
+          "command": "diffGuide.removePullRequestWorktree",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest\\.checkedOut/",
           "group": "2_worktree@0"
         },
         {
-          "command": "pairReview.showPullRequestOverview",
-          "when": "view == pairReview.pullRequests && viewItem =~ /^pairReview\\.pullRequest\\.checkedOut/",
+          "command": "diffGuide.showPullRequestOverview",
+          "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest\\.checkedOut/",
           "group": "1_pullRequest@0"
         },
         {
-          "command": "pairReview.resolve",
-          "when": "view == pairReview.threads && viewItem =~ /^pairReview\\.open/",
+          "command": "diffGuide.resolve",
+          "when": "view == diffGuide.threads && viewItem =~ /^diffGuide\\.open/",
           "group": "inline@1"
         },
         {
-          "command": "pairReview.reopen",
-          "when": "view == pairReview.threads && viewItem =~ /^pairReview\\.resolved/",
+          "command": "diffGuide.reopen",
+          "when": "view == diffGuide.threads && viewItem =~ /^diffGuide\\.resolved/",
           "group": "inline@1"
         },
         {
-          "command": "pairReview.publishThread",
-          "when": "view == pairReview.threads && viewItem =~ /\\.publishable$/",
+          "command": "diffGuide.publishThread",
+          "when": "view == diffGuide.threads && viewItem =~ /\\.publishable$/",
           "group": "inline@0"
         },
         {
-          "command": "pairReview.openPublishedThread",
-          "when": "view == pairReview.threads && viewItem =~ /\\.published$/",
+          "command": "diffGuide.openPublishedThread",
+          "when": "view == diffGuide.threads && viewItem =~ /\\.published$/",
           "group": "inline@0"
         }
       ],
       "comments/commentThread/context": [
         {
-          "command": "pairReview.submitInline",
-          "when": "commentController == pairReview",
+          "command": "diffGuide.submitInline",
+          "when": "commentController == diffGuide",
           "group": "inline@1"
         }
       ],
       "comments/comment/title": [
         {
-          "command": "pairReview.openCommentCode",
-          "when": "commentController == pairReview && comment == pairReview.code",
+          "command": "diffGuide.openCommentCode",
+          "when": "commentController == diffGuide && comment == diffGuide.code",
           "group": "inline@1"
         }
       ],
       "comments/commentThread/title": [
         {
-          "command": "pairReview.cancelDraft",
-          "when": "commentController == pairReview && commentThreadIsEmpty",
+          "command": "diffGuide.cancelDraft",
+          "when": "commentController == diffGuide && commentThreadIsEmpty",
           "group": "inline@1"
         },
         {
-          "command": "pairReview.composeReply",
-          "when": "commentController == pairReview && commentThread =~ /^pairReview\\.open/",
+          "command": "diffGuide.composeReply",
+          "when": "commentController == diffGuide && commentThread =~ /^diffGuide\\.open/",
           "group": "navigation@1"
         },
         {
-          "command": "pairReview.publishThread",
-          "when": "commentController == pairReview && commentThread =~ /\\.publishable$/",
+          "command": "diffGuide.publishThread",
+          "when": "commentController == diffGuide && commentThread =~ /\\.publishable$/",
           "group": "inline@1"
         },
         {
-          "command": "pairReview.openPublishedThread",
-          "when": "commentController == pairReview && commentThread =~ /\\.published$/",
+          "command": "diffGuide.openPublishedThread",
+          "when": "commentController == diffGuide && commentThread =~ /\\.published$/",
           "group": "inline@1"
         },
         {
-          "command": "pairReview.resolve",
-          "when": "commentController == pairReview && commentThread =~ /^pairReview\\.open/",
+          "command": "diffGuide.resolve",
+          "when": "commentController == diffGuide && commentThread =~ /^diffGuide\\.open/",
           "group": "inline@2"
         },
         {
-          "command": "pairReview.reopen",
-          "when": "commentController == pairReview && commentThread =~ /^pairReview\\.resolved/",
+          "command": "diffGuide.reopen",
+          "when": "commentController == diffGuide && commentThread =~ /^diffGuide\\.resolved/",
           "group": "inline@1"
         }
       ],
       "commandPalette": [
         {
-          "command": "pairReview.pinPullRequest",
+          "command": "diffGuide.pinPullRequest",
           "when": "false"
         },
         {
-          "command": "pairReview.unpinPullRequest",
+          "command": "diffGuide.unpinPullRequest",
           "when": "false"
         },
         {
-          "command": "pairReview.markGuideGroupRead",
+          "command": "diffGuide.markGuideGroupRead",
           "when": "false"
         },
         {
-          "command": "pairReview.filterByAuthorActive",
+          "command": "diffGuide.filterByAuthorActive",
           "when": "false"
         },
         {
-          "command": "pairReview.openPullRequestInBrowser",
+          "command": "diffGuide.openPullRequestInBrowser",
           "when": "false"
         },
         {
-          "command": "pairReview.openPullRequest",
+          "command": "diffGuide.openPullRequest",
           "when": "false"
         },
         {
-          "command": "pairReview.removePullRequestWorktree",
+          "command": "diffGuide.removePullRequestWorktree",
           "when": "false"
         },
         {
-          "command": "pairReview.showPullRequestClaude",
+          "command": "diffGuide.showPullRequestClaude",
           "when": "false"
         },
         {
-          "command": "pairReview.showPullRequestOverview",
+          "command": "diffGuide.showPullRequestOverview",
           "when": "false"
         },
         {
-          "command": "pairReview.publishThread",
+          "command": "diffGuide.publishThread",
           "when": "false"
         },
         {
-          "command": "pairReview.openPublishedThread",
+          "command": "diffGuide.openPublishedThread",
           "when": "false"
         },
         {
-          "command": "pairReview.openCode",
+          "command": "diffGuide.openCode",
           "when": "false"
         },
         {
-          "command": "pairReview.openCommentCode",
+          "command": "diffGuide.openCommentCode",
           "when": "false"
         },
         {
-          "command": "pairReview.submitInline",
+          "command": "diffGuide.submitInline",
           "when": "false"
         },
         {
-          "command": "pairReview.cancelDraft",
+          "command": "diffGuide.cancelDraft",
           "when": "false"
         },
         {
-          "command": "pairReview.composeReply",
+          "command": "diffGuide.composeReply",
           "when": "false"
         },
         {
-          "command": "pairReview.showResolved",
-          "when": "!pairReview.showResolved"
+          "command": "diffGuide.showResolved",
+          "when": "!diffGuide.showResolved"
         },
         {
-          "command": "pairReview.hideResolved",
-          "when": "pairReview.showResolved"
+          "command": "diffGuide.hideResolved",
+          "when": "diffGuide.showResolved"
         },
         {
-          "command": "pairReview.resolve",
+          "command": "diffGuide.resolve",
           "when": "false"
         },
         {
-          "command": "pairReview.reopen",
+          "command": "diffGuide.reopen",
           "when": "false"
         },
         {
-          "command": "pairReview.revealThread",
+          "command": "diffGuide.revealThread",
           "when": "false"
         },
         {
-          "command": "pairReview.hideRepository",
+          "command": "diffGuide.hideRepository",
           "when": "false"
         },
         {
-          "command": "pairReview.copyPullRequestLink",
+          "command": "diffGuide.copyPullRequestLink",
           "when": "false"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "pairReview.addComment",
+        "command": "diffGuide.addComment",
         "key": "ctrl+alt+m",
         "mac": "cmd+alt+m",
-        "when": "editorTextFocus && (resourceScheme == file || resourceScheme == pair-review-base)"
+        "when": "editorTextFocus && (resourceScheme == file || resourceScheme == diffguide-base)"
       }
     ],
     "configuration": {
-      "title": "Pair Review",
+      "title": "DiffGuide",
       "properties": {
-        "pairReview.claudePath": {
+        "diffGuide.claudePath": {
           "type": "string",
           "default": "claude",
           "scope": "machine-overridable",
           "description": "Pfad zur Claude-Code-Anwendung. In vertrauenswürdigen Projekten überschreibbar."
         },
-        "pairReview.nodePath": {
+        "diffGuide.nodePath": {
           "type": "string",
           "default": "node",
           "scope": "machine-overridable",
           "description": "Pfad zu Node.js 20 oder neuer. In vertrauenswürdigen Projekten überschreibbar."
         },
-        "pairReview.transport": {
+        "diffGuide.transport": {
           "type": "string",
           "enum": [
             "hooks",
@@ -828,13 +828,13 @@
           "default": "hooks",
           "description": "Automatische Zustellung im Hintergrund (Standard: hooks). channels ist eine experimentelle Alternative mit zusätzlichen Voraussetzungen."
         },
-        "pairReview.worktreeCleanupDays": {
+        "diffGuide.worktreeCleanupDays": {
           "type": "number",
           "default": 14,
           "minimum": 0,
           "description": "Remove a PR worktree that was not opened for this many days. Worktrees of merged or closed PRs are removed regardless. Worktrees with uncommitted changes or unpushed commits are always kept. 0 removes only merged or closed ones."
         },
-        "pairReview.mockPullRequests": {
+        "diffGuide.mockPullRequests": {
           "type": "boolean",
           "default": false,
           "description": "Show sample pull requests instead of querying GitHub. For development and testing only."

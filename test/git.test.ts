@@ -16,14 +16,14 @@ async function git(root: string, args: readonly string[]): Promise<void> {
 }
 
 test('keeps both sides of a staged rename available with the correct original contents', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-git-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-git-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   await git(root, ['init', '--quiet']);
   const original = 'export const cachedValue = 42;\n';
   await writeFile(path.join(root, 'before.ts'), original);
   await git(root, ['add', '--', 'before.ts']);
   await git(root, [
-    '-c', 'user.name=Pair Review Test', '-c', 'user.email=pair-review@example.invalid',
+    '-c', 'user.name=DiffGuide Test', '-c', 'user.email=diffguide@example.invalid',
     '-c', 'commit.gpgSign=false', '-c', `core.hooksPath=${path.join(root, 'no-hooks')}`,
     'commit', '--quiet', '-m', 'create fixture',
   ]);
@@ -39,7 +39,7 @@ test('keeps both sides of a staged rename available with the correct original co
 /** Commit everything staged in a fixture without user Git configuration or hooks. */
 async function commit(root: string, message: string): Promise<void> {
   await git(root, [
-    '-c', 'user.name=Pair Review Test', '-c', 'user.email=pair-review@example.invalid',
+    '-c', 'user.name=DiffGuide Test', '-c', 'user.email=diffguide@example.invalid',
     '-c', 'commit.gpgSign=false', '-c', `core.hooksPath=${path.join(root, 'no-hooks')}`,
     'commit', '--quiet', '-m', message,
   ]);
@@ -47,7 +47,7 @@ async function commit(root: string, message: string): Promise<void> {
 
 /** Create a fixture repository with one committed file. */
 async function fixture(t: { after(callback: () => Promise<void>): void }): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-git-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-git-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   await git(root, ['init', '--quiet']);
   await writeFile(path.join(root, 'kept.ts'), 'export const kept = 1;\n');
@@ -73,7 +73,7 @@ test('lists nothing for a clean working tree', async (t) => {
 });
 
 test('lists staged and untracked files in a repository without commits', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-git-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-git-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   await git(root, ['init', '--quiet']);
   await writeFile(path.join(root, 'staged.ts'), 'export const staged = 1;\n');

@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
-/** The folder inside a repository where Pair Review keeps its worktrees; Claude may edit only below it. */
-export const worktreeFolder = ['.claude', 'worktrees', 'pair-review'].join(sep);
+/** The folder inside a repository where DiffGuide keeps its worktrees; Claude may edit only below it. */
+export const worktreeFolder = ['.claude', 'worktrees', 'diffguide'].join(sep);
 
 function inside(folder: string, path: string): boolean {
   const rest = relative(folder, path);
@@ -9,7 +9,7 @@ function inside(folder: string, path: string): boolean {
 }
 
 /**
- * Why Claude may not edit `path`, or undefined when it may: inside a read-only repository only its Pair Review worktrees are editable.
+ * Why Claude may not edit `path`, or undefined when it may: inside a read-only repository only its DiffGuide worktrees are editable.
  * `path` is resolved against `cwd`, as Claude's file tools do.
  */
 export function editRefusal(path: string, cwd: string, readOnly: readonly string[]): string | undefined {

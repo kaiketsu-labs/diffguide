@@ -118,7 +118,7 @@ const anchor = (startLine: number): CodeAnchor => ({
 });
 
 test('opens analysis notes as threads that start with Claude, and replaces only untouched ones', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-analysis-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-analysis-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const file = path.join(root, 'review.json');
   const store = await createReviewStore(file, root);
@@ -160,7 +160,7 @@ async function until(check: () => boolean): Promise<void> {
 }
 
 test('runs Claude read-only, saves the analysis and links each step to its note thread', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-analysis-run-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-analysis-run-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const store = await createReviewStore(path.join(root, 'review.json'), root);
   const children: FakeChild[] = [];

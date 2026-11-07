@@ -19,7 +19,7 @@ test('previews images, SVG and PDF by extension, and nothing else', () => {
 });
 
 test('reads binary bytes at a commit unchanged and refuses oversized files and moving revisions', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-media-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-media-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const git = (...args: string[]) => promisify(execFile)('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args]);
   await git('init', '--quiet');

@@ -1,5 +1,5 @@
 name: UX or feature request
-description: Suggest an improvement to the Pair Review workflow.
+description: Suggest an improvement to the DiffGuide workflow.
 title: "[UX] "
 body:
   - type: textarea

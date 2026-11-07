@@ -3,9 +3,13 @@ import type { ReviewEvent, ReviewMessage, ReviewThread } from './contracts.js';
 /** Conservative limit that leaves room for managed markers in a GitHub comment. */
 export const maximumPrExportLength = 60_000;
 
-/** Markers delimit only the section owned by Pair Review in a PR conversation. */
-export const prExportStart = '<!-- pair-review:handoff:v1:start -->';
-export const prExportEnd = '<!-- pair-review:handoff:v1:end -->';
+/** Markers delimit only the section owned by DiffGuide in a PR conversation. */
+export const prExportStart = '<!-- diffguide:handoff:v1:start -->';
+export const prExportEnd = '<!-- diffguide:handoff:v1:end -->';
+// Pair Review markers, read only so older handoff comments update in place.
+export const legacyPrExportStart = '<!-- pair-review:handoff:v1:start -->';
+export const legacyPrExportEnd = '<!-- pair-review:handoff:v1:end -->';
+const markerPairs = [[prExportStart, prExportEnd], [legacyPrExportStart, legacyPrExportEnd]] as const;
 
 /** Frozen handoff content that does not alter local delivery or resolution state. */
 export interface PrExportDraft {
@@ -67,7 +71,7 @@ export function createPrExportDraft(
     ].join('\n\n'));
   }
   const sections = [
-    '## Pair Review handoff',
+    '## DiffGuide handoff',
     `Snapshot prepared in VS Code at ${capturedAt}. Only selected local conversations are included. Resolved conversations contribute summaries only.`,
     'File names and line ranges below describe captured local code, which may include unpublished edits. They are not verified positions in the PR diff.',
   ];
@@ -82,19 +86,27 @@ export function createPrExportDraft(
 
 /** Recognize exactly one complete managed section, rejecting ambiguous marker collisions. */
 export function readManagedPrContent(body: string): ManagedPrContent | undefined {
-  const start = body.indexOf(prExportStart);
-  const end = body.indexOf(prExportEnd);
-  if (start < 0 && end < 0) return undefined;
-  if (start < 0 || end < start + prExportStart.length
-    || body.indexOf(prExportStart, start + prExportStart.length) >= 0
-    || body.indexOf(prExportEnd, end + prExportEnd.length) >= 0) {
-    throw new Error('Der vorhandene Pair-Review-Kommentar enthält unklare Markierungen. Prüfe ihn auf GitHub, bevor du ihn aktualisierst.');
+  const present = markerPairs.filter(([startMarker, endMarker]) => body.includes(startMarker) || body.includes(endMarker));
+  const [pair] = present;
+  if (pair === undefined) return undefined;
+  const [startMarker, endMarker] = pair;
+  const start = body.indexOf(startMarker);
+  const end = body.indexOf(endMarker);
+  if (present.length > 1 || start < 0 || end < start + startMarker.length
+    || body.indexOf(startMarker, start + startMarker.length) >= 0
+    || body.indexOf(endMarker, end + endMarker.length) >= 0) {
+    throw new Error('Der vorhandene DiffGuide-Kommentar enthält unklare Markierungen. Prüfe ihn auf GitHub, bevor du ihn aktualisierst.');
   }
   return {
     before: body.slice(0, start),
-    content: body.slice(start + prExportStart.length, end).trim(),
-    after: body.slice(end + prExportEnd.length),
+    content: body.slice(start + startMarker.length, end).trim(),
+    after: body.slice(end + endMarker.length),
   };
+}
+
+/** Whether `text` contains any current or legacy handoff marker. */
+export function hasPrExportMarker(text: string): boolean {
+  return markerPairs.some((pair) => pair.some((marker) => text.includes(marker)));
 }
 
 /** Replace only the managed content and preserve manually authored surrounding text. */
@@ -104,12 +116,12 @@ export function replaceManagedPrContent(body: string | undefined, content: strin
   if (trimmed.length > maximumPrExportLength) {
     throw new Error(`Die Übergabe ist zu lang. Kürze den Entwurf auf höchstens ${maximumPrExportLength.toLocaleString('de-DE')} Zeichen.`);
   }
-  if (trimmed.includes(prExportStart) || trimmed.includes(prExportEnd)) {
-    throw new Error('Entferne die reservierten Pair-Review-Markierungen aus deinem Entwurf.');
+  if (hasPrExportMarker(trimmed)) {
+    throw new Error('Entferne die reservierten DiffGuide-Markierungen aus deinem Entwurf.');
   }
   const managed = body === undefined ? undefined : readManagedPrContent(body);
   if (body !== undefined && managed === undefined) {
-    throw new Error('Dieser GitHub-Kommentar gehört nicht zu Pair Review und wird nicht überschrieben.');
+    throw new Error('Dieser GitHub-Kommentar gehört nicht zu DiffGuide und wird nicht überschrieben.');
   }
   const wrapped = `${prExportStart}\n${trimmed}\n${prExportEnd}`;
   const result = managed === undefined ? wrapped : `${managed.before}${wrapped}${managed.after}`;
@@ -142,6 +154,5 @@ function codeSpan(value: string): string {
 
 /** Keep quoted user or agent text from creating a managed-section boundary. */
 function exportText(text: string): string {
-  return text.replaceAll(prExportStart, '&lt;!-- pair-review:handoff:v1:start --&gt;')
-    .replaceAll(prExportEnd, '&lt;!-- pair-review:handoff:v1:end --&gt;');
+  return markerPairs.flat().reduce((escaped, marker) => escaped.replaceAll(marker, marker.replace('<', '&lt;').replace(/>$/u, '&gt;')), text);
 }

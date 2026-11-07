@@ -28,14 +28,14 @@ interface ChannelFixture {
 async function fixture(t: TestContext, noPush = false): Promise<ChannelFixture> {
   const channelPath = path.resolve('dist', 'channel.cjs');
   await access(channelPath);
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-channel-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-channel-'));
   const store = await createReviewStore(path.join(root, 'review.json'), root);
   const connectionPath = path.join(root, 'connection.json');
   const bridges: ReviewBridge[] = [await createReviewBridge(store)];
   const first = bridges[0];
   assert.ok(first);
   await writeFile(connectionPath, JSON.stringify(first.descriptor), { mode: 0o600 });
-  const client = new Client({ name: 'pair-review-tests', version: '1.0.0' }, { capabilities: {} });
+  const client = new Client({ name: 'diffguide-tests', version: '1.0.0' }, { capabilities: {} });
   const deliveries = new Map<string, string[]>();
   const listeners = new Set<() => void>();
   client.fallbackNotificationHandler = async (notification) => {

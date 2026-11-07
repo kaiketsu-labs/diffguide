@@ -13,7 +13,7 @@ const git = async (root: string, ...args: string[]): Promise<string> => (await r
 
 /** An origin with `main` and PR #7, and a worktree checked out at an older PR commit. */
 async function fixture(t: test.TestContext): Promise<{ origin: string; worktree: string; older: string; latest: string; base: string }> {
-  const scratch = await mkdtemp(path.join(tmpdir(), 'pair-review-conflicts-'));
+  const scratch = await mkdtemp(path.join(tmpdir(), 'diffguide-conflicts-'));
   t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
   const origin = path.join(scratch, 'origin');
   await git(scratch, 'init', '--quiet', '--initial-branch=main', origin);

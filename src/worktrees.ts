@@ -53,20 +53,20 @@ export async function repositoryStorage(sourceRoot: string): Promise<string | un
   const common = await gitCommonDir(sourceRoot);
   if (common === undefined) return undefined;
   const mainRoot = basename(common) === '.git' ? dirname(common) : (await git(sourceRoot, ['rev-parse', '--show-toplevel'])).trim();
-  return join(mainRoot, '.claude', 'worktrees', 'pair-review');
+  return join(mainRoot, '.claude', 'worktrees', 'diffguide');
 }
 
-/** Where PR worktrees lived before they moved out of the Git folder. */
-async function legacyStorage(sourceRoot: string): Promise<string | undefined> {
+/** Where PR worktrees lived earlier: in the Git folder, then in Pair Review's folder beside `storageRoot`. */
+async function legacyStorage(sourceRoot: string, storageRoot: string): Promise<readonly string[]> {
   const common = await gitCommonDir(sourceRoot);
-  return common === undefined ? undefined : join(common, 'pair-review', 'worktrees');
+  return [...common === undefined ? [] : [join(common, 'pair-review', 'worktrees')], join(dirname(storageRoot), 'pair-review')];
 }
 
 /** Hide worktree storage from Git through the repository's local exclude file, so no `.gitignore` changes are needed. */
 async function excludeFromGit(sourceRoot: string): Promise<void> {
   const common = await gitCommonDir(sourceRoot);
   if (common === undefined) return;
-  const pattern = '/.claude/worktrees/pair-review/';
+  const pattern = '/.claude/worktrees/diffguide/';
   const file = join(common, 'info', 'exclude');
   const current = await readFile(file, 'utf8').catch(() => '');
   if (current.split('\n').some((line) => line.trim() === pattern)) return;
@@ -169,23 +169,23 @@ export async function listWorktrees(storageRoot: string, sourceRoot: string): Pr
 }
 
 /**
- * Move PR worktrees from the Git folder to `storageRoot`, with their comments and review marks.
+ * Move PR worktrees from earlier storage folders to `storageRoot`, with their comments and review marks.
  * Uncommitted changes move along. Claude starts a new conversation afterwards, since its saved one belongs to the old folder.
  * Returns the worktrees Git refused to move, which stay where they were.
  */
 export async function migrateWorktrees(sourceRoot: string, storageRoot: string): Promise<readonly string[]> {
-  const legacy = await legacyStorage(sourceRoot);
-  if (legacy === undefined) return [];
-  const found = await storedWorktrees(legacy);
-  if (found.length === 0) return [];
-  await excludeFromGit(sourceRoot);
   const failed: string[] = [];
-  for (const { folder } of found) {
-    const target = join(storageRoot, relative(legacy, folder));
-    try {
-      await moveWorktree(sourceRoot, folder, target);
-    } catch {
-      failed.push(folder);
+  for (const legacy of await legacyStorage(sourceRoot, storageRoot)) {
+    const found = await storedWorktrees(legacy);
+    if (found.length === 0) continue;
+    await excludeFromGit(sourceRoot);
+    for (const { folder } of found) {
+      const target = join(storageRoot, relative(legacy, folder));
+      try {
+        await moveWorktree(sourceRoot, folder, target);
+      } catch {
+        failed.push(folder);
+      }
     }
   }
   return failed;
