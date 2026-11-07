@@ -17,7 +17,7 @@ import { prepareConnection } from './setup.js';
 import { createReviewStore } from './store.js';
 import { addWorked, crossReferences, ensureBranchWorktree, isWorktreeIdle, linkedBranchName, linkedWorktreePath, lockWorktree, readStoredLinks, writeStoredLinks } from './linkedChanges.js';
 import { findLinked } from './linkedController.js';
-import { createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath } from './worktrees.js';
+import { createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath, type PullRequestWorktree } from './worktrees.js';
 
 /** Another workspace repository Claude may change for a PR: where its worktrees live and how to reach its PRs. */
 export interface WorkspaceRepository {
@@ -40,6 +40,8 @@ export interface PullRequestSession {
   /** Where this PR keeps manual links, unlinks and the repositories Claude worked in. */
   readonly dataPath: string;
   readonly worktree: string;
+  /** The PR as it was when its worktree was made, and whose PR it is. */
+  readonly metadata: PullRequestWorktree;
 }
 
 /** Review sessions for the PR worktrees of one checkout, opened on demand and restored on startup. */
@@ -68,6 +70,11 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
 
   get sessions(): readonly ReviewSession[] {
     return [...this.#ready.values()].map(({ session }) => session);
+  }
+
+  /** Every open PR session of this checkout. */
+  get opened(): readonly PullRequestSession[] {
+    return [...this.#ready.values()];
   }
 
   /** Session that owns a PR file document, if it is open. */
@@ -367,7 +374,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       linkedGitHubThread: (threadId) => links.get(threadId)?.id,
     };
-    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree };
+    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, metadata };
     return result;
   }
 }

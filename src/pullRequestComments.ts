@@ -11,9 +11,10 @@ export interface Publication {
   readonly pending: boolean;
 }
 
-/** What a thread posts on GitHub unless the user edits it: Claude's latest answer, else the opening comment. */
+/** What a thread posts on GitHub unless the user edits it: Claude's proposed GitHub reply or latest answer, else the opening comment. */
 export function publishableText(thread: ReviewThread): string {
-  return ([...thread.messages].reverse().find((message) => message.author === 'claude') ?? thread.messages[0])?.text ?? '';
+  const latest = [...thread.messages].reverse().find((message) => message.author === 'claude') ?? thread.messages[0];
+  return latest?.githubReply ?? latest?.text ?? '';
 }
 
 /** Where a thread lands on the code host, minus the text. */

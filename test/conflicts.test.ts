@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { catchUpWithPullRequest, commitAndPush, commitFiles, commitsSince, conflictTask, discardSince, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/conflicts.js';
+import { catchUpWithPullRequest, commitAndPush, commitFiles, commitsSince, conflictTask, discardSince, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/conflicts.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
@@ -211,4 +211,19 @@ test('says to push commits GitHub lacks, or to rebase them when GitHub moved on'
   await git(worktree, 'checkout', '--quiet', '--detach', 'FETCH_HEAD');
   await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'on the latest commit');
   await assert.rejects(syncToPullRequestHead(worktree, 7), /^Error: The PR worktree has commits that are not on GitHub\. Push or drop them first\.$/u);
+});
+
+test('tells which files hold unpushed commits and which hold uncommitted edits', async (t) => {
+  const { worktree, latest } = await fixture(t);
+  await syncToPullRequestHead(worktree, 7);
+  assert.deepEqual(await localChanges(worktree, latest), { commits: 0, files: new Map() });
+  await writeFile(path.join(worktree, 'a.txt'), 'claude\n');
+  await git(worktree, 'commit', '--quiet', '-am', 'Use the configured limit');
+  await writeFile(path.join(worktree, 'a.txt'), 'claude again\n');
+  await writeFile(path.join(worktree, 'b.txt'), 'edited\n');
+  await writeFile(path.join(worktree, 'new.txt'), 'untracked\n');
+  const changes = await localChanges(worktree, latest);
+  assert.equal(changes.commits, 1);
+  assert.deepEqual([...changes.files].sort(), [['a.txt', 'both'], ['b.txt', 'edited'], ['new.txt', 'edited']]);
+  assert.deepEqual((await localChanges(worktree, 'f'.repeat(40))).commits, 0);
 });

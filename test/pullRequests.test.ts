@@ -87,6 +87,7 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
     setReviewed: async (_provider, _repository, _number, file, done) => { if (done) reviewed.add(file); else reviewed.delete(file); },
     showOverview: async () => undefined,
     guide: async () => undefined,
+    localChanges: async () => ({ commits: 0, files: new Map() }),
     markGuideGroupRead: async () => undefined,
     forget: () => undefined,
   };
@@ -531,10 +532,11 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
   worktrees.showOverview = async (_provider, _repository, _pullRequest, _role, at) => { shown.push(at); };
   const marked: string[] = [];
   worktrees.markGuideGroupRead = async (_provider, _repository, _pullRequest, group) => { marked.push(group); };
-  worktrees.guide = async () => [
+  worktrees.localChanges = async () => ({ commits: 2, files: new Map([['src/a.ts', 'both' as const]]) });
+  worktrees.guide = async () => ({ stale: true, groups: [
     { key: 'g0', severity: 'critical', title: 'Auth', steps: [{ key: 'g0.0', path: 'src/a.ts', title: 'Check tokens', note: 'Rejects expired tokens.', viewed: true }, { key: 'g0.1', path: 'src/b.ts', viewed: false }] },
     { key: 'g1', severity: 'trivial', title: 'Format', steps: [{ key: 'g1.0', path: 'README.md', viewed: false }] },
-  ];
+  ] });
   const settings = new FakeMemento();
   await settings.update('pairReview.groupBy', 'repository');
   await settings.update('pairReview.fileView', 'list');
@@ -545,9 +547,14 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
   const [repository] = await level(tree);
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
-  assert.deepEqual((await level(tree, pr?.node)).map(({ item }) => item.label), ['a.ts']);
+  const [fileRow] = await level(tree, pr?.node);
+  assert.equal(fileRow?.item.label, 'a.ts');
+  assert.match(String(pr?.item.description), / · ↑2 · ✎1/u);
+  const local = window.fileDecorations.map((each) => each.provideFileDecoration(fileRow?.item.resourceUri as vscode.Uri, undefined as never) as { badge?: string } | undefined);
+  assert.deepEqual(local.map((each) => each?.badge), ['↑✎', 'A']);
   await commands.executeCommand('pairReview.showGuideInTree');
-  const groups = await level(tree, pr?.node);
+  const [outdated, ...groups] = await level(tree, pr?.node);
+  assert.equal(outdated?.item.label, 'Guide is outdated. Rebuild it on the review page');
   assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
   const steps = await level(tree, groups[0]?.node);
   assert.deepEqual(steps.map(({ item }) => [item.label, item.description, (item.iconPath as vscode.ThemeIcon).id]), [['1. Check tokens', 'a.ts', 'pass-filled'], ['2. b.ts', 'src', 'circle-large-outline']]);

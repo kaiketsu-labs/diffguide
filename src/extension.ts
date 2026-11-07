@@ -10,7 +10,7 @@ import { registerReviewAppearance } from './reviewAppearance.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
-import { commitAndPush, commitFiles, conflictTask, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits } from './conflicts.js';
+import { commitAndPush, commitFiles, conflictTask, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits } from './conflicts.js';
 import { registerPullRequestView, type PullRequestWorktrees } from './pullRequestView.js';
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { PendingWrites, sharedPerTurn } from './autoSync.js';
@@ -38,6 +38,7 @@ import { anchorFromText, fileAnchor } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
 import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
+import { ClaudeAnswersTree, latestAnswers, SeenAnswers, type ClaudeAnswer } from './claudeAnswers.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
 
 let activeStore: ReviewStore | undefined;
@@ -85,6 +86,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   context.subscriptions.push(checkouts, registerPullRequestDiffs(async (repository, number) => (await checkouts.locate(repository, number))?.storageRoot));
+  const seenAnswers = new SeenAnswers(context.workspaceState);
+  const allAnswers = (): ClaudeAnswer[] => latestAnswers(checkouts.opened.map(({ session }) => ({ key: session.session.key, number: session.metadata.pullRequest.number, threads: session.session.store.threads })));
+  const answersTree = new ClaudeAnswersTree(allAnswers, seenAnswers);
+  const answersView = vscode.window.createTreeView('pairReview.answers', { treeDataProvider: answersTree });
+  const showAnswerCount = (): void => {
+    const fresh = allAnswers().filter((answer) => seenAnswers.isNew(answer)).length;
+    answersView.badge = fresh === 0 ? undefined : { value: fresh, tooltip: `${fresh} new ${fresh === 1 ? 'answer' : 'answers'} from Claude` };
+  };
+  const answersChanged = (): void => { answersTree.refresh(); showAnswerCount(); };
+  showAnswerCount();
+  context.subscriptions.push(seenAnswers, answersTree, answersView, checkouts.onDidChangeState(answersChanged), checkouts.onDidChange(answersChanged), seenAnswers.onDidChange(answersChanged));
   const storage = context.storageUri;
   if (storage === undefined) return;
   try {
@@ -164,8 +176,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const result = await opened.analysis.result();
         const { running, step, progress, error } = opened.analysis.activity;
         const stale = result !== undefined && result.head !== await readHead().catch(() => result.head);
+        const behind = stale ? await git(folder, ['rev-list', '--count', `${result.head}..HEAD`]).then((count) => Number(count.trim()), () => undefined) : undefined;
         return {
-          running, stale, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
+          running, stale, ...(behind === undefined ? {} : { behind }), ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
           ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }),
         };
       };
@@ -240,10 +253,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
         const summary = loadedDetails instanceof Error ? current() : { ...current(), title: loadedDetails.title, draft: loadedDetails.draft };
         const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
-        const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
-        const unpushed = loadedConversation instanceof Error ? [] : await unpushedCommits(folder, loadedConversation.merge.headOid);
+        const answers = new Map(latestAnswers([{ key: opened.session.key, number: pullRequest.number, threads: opened.session.store.threads }], Infinity).filter((answer) => seenAnswers.isNew(answer)).map((answer) => [answer.threadId, answer.createdAt]));
+        const threads = state.threads.map((thread) => {
+          const done = applied.get(thread.id);
+          const newAnswer = answers.get(thread.id);
+          return { ...thread, ...(done === undefined ? {} : { applied: done }), ...(newAnswer === undefined ? {} : { newAnswer }) };
+        });
+        const pushedHead = loadedConversation instanceof Error ? undefined : loadedConversation.merge.headOid;
+        const [unpushed, local] = await Promise.all([pushedHead === undefined ? [] : unpushedCommits(folder, pushedHead), localChanges(folder, pushedHead)]);
         const linkedNow = await readLinked();
-        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }), linked: linkedNow };
+        return {
+          ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
+          ...(local.files.size === 0 ? {} : { local: Object.fromEntries(local.files) }), linked: linkedNow,
+        };
       };
       const publishedThreads = (): number => opened.session.store.threads.filter((thread) => opened.session.publication?.(thread.id) !== undefined).length;
       /** Local threads posted on GitHub at the last state change; one more means GitHub has a comment the page has not read yet. */
@@ -383,6 +405,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await Promise.all([loadThreads(), loadDetails()]);
         },
         setViewed: (path, viewed) => fileReviews.set(provider, repository, pullRequest.number, path, viewed),
+        seeAnswers: async (ids) => {
+          const answers = latestAnswers([{ key: opened.session.key, number: pullRequest.number, threads: opened.session.store.threads }], Infinity);
+          await seenAnswers.see(answers.filter((answer) => ids.includes(answer.threadId)));
+        },
         markRead: async (range, fileDone) => {
           if (!diffPaths.includes(range.path)) throw new Error(`${range.path} is not part of this PR's changes.`);
           if (selection.range.kind !== 'all') throw new Error('Show all changes to mark lines read.');
@@ -581,7 +607,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           fileReviews.readRanges(repository, pullRequest.number, base),
           fileReviews.reviewed(provider, repository, pullRequest.number, files.map((file) => file.path)),
         ]);
-        return { groups: buildGuide(analysis, files), files, read, viewed, base };
+        const stale = analysis.head !== await git(folder, ['rev-parse', 'HEAD']).then((head) => head.trim(), () => analysis.head);
+        return { groups: buildGuide(analysis, files), files, read, viewed, base, stale };
       };
       return {
         exists: (repository, number) => hasWorktree(storageRoot, repository, number),
@@ -598,13 +625,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const opened = sessions.get(repository, number);
           return opened === undefined ? undefined : claudeStatus(opened.runner.activity).text;
         },
+        localChanges: (repository, number, pushedHead) => localChanges(worktreePath(storageRoot, repository, number), pushedHead),
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         setReviewed: (provider, repository, number, path, reviewed) => fileReviews.set(provider, repository, number, path, reviewed),
         forget: () => { fileReviews.forget(); GitHubApiProvider.forget(); checkouts.rescan(); },
         showOverview: (provider, repository, pullRequest, role, at) => showOverview(checkout, provider, repository, pullRequest, role, at),
         guide: async (provider, repository, pullRequest) => {
           const loaded = await loadGuide(provider, repository, pullRequest);
-          return loaded === undefined ? undefined : guideOutline(loaded.groups, loaded.files, loaded.read, loaded.viewed);
+          return loaded === undefined ? undefined : { groups: guideOutline(loaded.groups, loaded.files, loaded.read, loaded.viewed), stale: loaded.stale };
         },
         markGuideGroupRead: async (provider, repository, pullRequest, key) => {
           const loaded = await loadGuide(provider, repository, pullRequest);
@@ -645,6 +673,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.workspaceState,
       ),
       watchGitHubSessions(() => { void vscode.commands.executeCommand('pairReview.refreshPullRequests'); }),
+      vscode.commands.registerCommand('pairReview.openAnswer', async (pullRequest: unknown, threadId: unknown) => {
+        const found = checkouts.opened.find(({ session }) => session.session.key === pullRequest);
+        if (found === undefined || typeof threadId !== 'string') return;
+        const { checkout, session } = found;
+        try {
+          const provider = await checkout.connect();
+          await showOverview(checkout, provider, session.metadata.repository, session.metadata.pullRequest, session.metadata.role, { thread: threadId });
+        } catch (error: unknown) {
+          void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+        }
+      }),
       vscode.commands.registerCommand('pairReview.cleanUpWorktrees', async () => {
         try {
           await cleanUp(true);

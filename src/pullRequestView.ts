@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { parsePullRequestLink, type ListVersion, type PullRequestFile, type PullRequestProvider, type PullRequestRepository, type PullRequestSummary, type ReviewVerdict } from './pullRequests.js';
+import type { LocalChange } from './conflicts.js';
 import type { PullRequestRole } from './worktrees.js';
 import { pollWhileFocused } from './autoSync.js';
 import { GitHubSignInRequired } from './githubApi.js';
@@ -70,9 +71,15 @@ const changeDecorations: Record<PullRequestFile['change'], { readonly badge: str
   renamed: { badge: 'R', color: 'gitDecoration.renamedResourceForeground', tooltip: 'Renamed' },
 };
 
-/** Address for a PR file row, so the icon theme picks its file icon and the decoration its change letter. */
-function fileRowUri(number: number, file: PullRequestFile): vscode.Uri {
-  return vscode.Uri.from({ scheme: fileScheme, authority: `pr-${number}`, path: `/${file.path}`, query: `change=${file.change}` });
+/** What a file row says about work in the worktree that GitHub does not have. */
+const localChangeLabels: Record<LocalChange, string> = {
+  unpushed: 'Changed in commits not pushed yet', edited: 'Uncommitted edits in the worktree', both: 'Unpushed commits and uncommitted edits',
+};
+const localChangeBadges: Record<LocalChange, string> = { unpushed: '↑', edited: '✎', both: '↑✎' };
+
+/** Address for a PR file row, so the icon theme picks its file icon and the decoration its change letter and local work. */
+function fileRowUri(number: number, file: PullRequestFile, local?: LocalChange): vscode.Uri {
+  return vscode.Uri.from({ scheme: fileScheme, authority: `pr-${number}`, path: `/${file.path}`, query: new URLSearchParams({ change: file.change, ...(local === undefined ? {} : { local }) }).toString() });
 }
 
 /** Address for a PR row, so the decoration can badge checked-out PRs. */
@@ -91,6 +98,14 @@ const rowDecorationProvider: vscode.FileDecorationProvider = {
   },
 };
 
+/** Badge PR file rows with work the worktree has and GitHub does not; a second provider, so the change letter stays. */
+const localDecorationProvider: vscode.FileDecorationProvider = {
+  provideFileDecoration: (uri) => {
+    const local = uri.scheme === fileScheme ? new URLSearchParams(uri.query).get('local') : null;
+    return local !== null && Object.hasOwn(localChangeBadges, local) ? new vscode.FileDecoration(localChangeBadges[local as LocalChange], localChangeLabels[local as LocalChange]) : undefined;
+  },
+};
+
 /** Worktree operations the sidebar triggers, kept separate so the tree stays testable. */
 export interface PullRequestWorktrees {
   exists(repository: string, number: number): Promise<boolean>;
@@ -106,8 +121,10 @@ export interface PullRequestWorktrees {
   setReviewed(provider: PullRequestProvider, repository: string, number: number, path: string, reviewed: boolean): Promise<void>;
   /** Open a tab with the PR's review progress, threads and Claude activity; with `at`, in the guided layout at that step or section. */
   showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, at?: { readonly step: string } | { readonly group: string }): Promise<void>;
-  /** The steps of a checked-out PR's guided review, or undefined before it is analyzed. */
-  guide(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary): Promise<readonly OutlineGroup[] | undefined>;
+  /** What a checked-out PR's worktree has that GitHub does not: commits ahead of `pushedHead`, and each changed file. */
+  localChanges(repository: string, number: number, pushedHead: string | undefined): Promise<{ readonly commits: number; readonly files: ReadonlyMap<string, LocalChange> }>;
+  /** The steps of a checked-out PR's guided review, `stale` when built for an older head; undefined before it is analyzed. */
+  guide(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary): Promise<{ readonly groups: readonly OutlineGroup[]; readonly stale: boolean } | undefined>;
   /** Mark every step of a guide section read, and Viewed the files that leaves fully read. */
   markGuideGroupRead(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, group: string): Promise<void>;
   /** Drop cached code host state so the next read is fresh. */
@@ -213,7 +230,7 @@ function pullRequestsOf(listing: Ready, role: PullRequestRole, author?: string):
 }
 
 /** "3d ago", or the date after a month. */
-function ago(iso: string, now = Date.now()): string {
+export function ago(iso: string, now = Date.now()): string {
   const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
@@ -262,7 +279,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   /** Worktree and reviewed state per PR, read once per redraw and shared by the PR's row and its file rows. */
   readonly #checkedOut = new Map<string, Promise<boolean>>();
   readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
-  readonly #guides = new Map<string, Promise<readonly OutlineGroup[] | undefined>>();
+  readonly #guides = new Map<string, ReturnType<PullRequestWorktrees['guide']>>();
+  readonly #local = new Map<string, ReturnType<PullRequestWorktrees['localChanges']>>();
   /** PRs merged from this window; GitHub's search keeps listing them as open for a while. */
   readonly #merged = new Set<string>();
   /** Each listed repository's latest PR update at the last check. */
@@ -534,10 +552,12 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       this.#checkedOut.clear();
       this.#reviewed.clear();
       this.#guides.clear();
+      this.#local.clear();
     } else {
       this.#checkedOut.delete(pullRequest);
       this.#reviewed.delete(pullRequest);
       this.#guides.delete(pullRequest);
+      this.#local.delete(pullRequest);
     }
   }
 
@@ -573,8 +593,14 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === 'folder') return this.#folderChildren(node.parent, node.folder);
     if (node.kind === 'pullRequest') {
-      const groups = this.showsGuide ? await this.#isCheckedOut(node).then((checkedOut) => checkedOut ? this.#guideOf(node) : undefined).catch(() => undefined) : undefined;
-      if (groups !== undefined && groups.length > 0) return groups.map((group): Node => ({ kind: 'guideGroup', parent: node, group }));
+      const guide = this.showsGuide ? await this.#isCheckedOut(node).then((checkedOut) => checkedOut ? this.#guideOf(node) : undefined).catch(() => undefined) : undefined;
+      if (guide !== undefined && guide.groups.length > 0) {
+        const groups = guide.groups.map((group): Node => ({ kind: 'guideGroup', parent: node, group }));
+        const first = guide.groups[0];
+        return guide.stale && first !== undefined
+          ? [{ kind: 'message', text: 'Guide is outdated. Rebuild it on the review page', icon: 'warning', command: { command: 'pairReview.showGuideGroup', title: 'Show guide', arguments: [node, first.key] } }, ...groups]
+          : groups;
+      }
       try {
         const files = await this.#filesOf(node);
         return files.length === 0
@@ -648,16 +674,21 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
+        const local = checkedOut ? await this.#localOf(node).catch(() => undefined) : undefined;
+        const ahead = local === undefined || local.commits === 0 ? undefined : `↑${local.commits}`;
+        const edited = local === undefined ? 0 : [...local.files.values()].filter((change) => change !== 'unpushed').length;
         const merged = this.#merged.has(pullRequestKey(node));
         const verdict = pr.review === undefined || merged ? undefined : verdicts[pr.review];
         const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;
         const pinnedFrom = node.pinned === true ? [splitRepository(node.listing.repository.name).name, node.role === 'author' ? 'mine' : 'review'] : [];
         const awaitingReview = node.role === 'author' && !merged && pr.requestedReviewers !== undefined;
         const via = node.role === 'reviewer' && node.placement !== 'allOpen' ? requestedViaLabel(pr) : undefined;
-        item.description = [`#${pr.number}`, ...pinnedFrom, type, verdict?.label, awaitingReview ? 'Awaiting review' : undefined, via, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), progress, size].filter(Boolean).join(' · ');
+        item.description = [`#${pr.number}`, ...pinnedFrom, type, verdict?.label, awaitingReview ? 'Awaiting review' : undefined, via, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), ahead, edited === 0 ? undefined : `✎${edited}`, progress, size].filter(Boolean).join(' · ');
         item.tooltip = [
           `#${pr.number} ${pr.title}`,
           `${pr.headBranch} → ${pr.baseBranch}`,
+          ahead === undefined ? undefined : `${local?.commits} ${local?.commits === 1 ? 'commit' : 'commits'} in the worktree not pushed to GitHub`,
+          edited === 0 ? undefined : `${edited} ${edited === 1 ? 'file' : 'files'} with uncommitted edits`,
           verdict?.label,
           pr.requestedReviewers === undefined ? undefined : `Review requested from ${reviewerNames(pr)}`,
           via === undefined ? undefined : pr.requestedVia === 'you' ? 'You were asked directly' : 'You were asked through a team',
@@ -675,9 +706,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const folder = path.posix.dirname(file.path);
         item.description = node.inTree || folder === '.' ? '' : folder;
         item.tooltip = `${file.path} · +${file.additions} −${file.deletions}`;
-        item.resourceUri = fileRowUri(node.parent.pullRequest.number, file);
         item.iconPath = vscode.ThemeIcon.File;
-        if (await this.#isCheckedOut(node.parent)) {
+        const checkedOut = await this.#isCheckedOut(node.parent);
+        const local = checkedOut ? (await this.#localOf(node.parent).catch(() => undefined))?.files.get(file.path) : undefined;
+        item.resourceUri = fileRowUri(node.parent.pullRequest.number, file, local);
+        if (checkedOut) {
           const reviewed = await this.#reviewedOf(node.parent).catch(() => new Set<string>());
           item.checkboxState = reviewed.has(file.path) ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
         }
@@ -752,7 +785,18 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     return reviewed === undefined ? undefined : `${reviewed.size}/${files.length} reviewed`;
   }
 
-  #guideOf(node: PullRequestNode): Promise<readonly OutlineGroup[] | undefined> {
+  #localOf(node: PullRequestNode): ReturnType<PullRequestWorktrees['localChanges']> {
+    const key = pullRequestKey(node);
+    let local = this.#local.get(key);
+    if (local === undefined) {
+      local = node.listing.worktrees.localChanges(node.listing.repository.name, node.pullRequest.number, node.pullRequest.headOid);
+      local.catch(() => { this.#local.delete(key); });
+      this.#local.set(key, local);
+    }
+    return local;
+  }
+
+  #guideOf(node: PullRequestNode): ReturnType<PullRequestWorktrees['guide']> {
     const key = pullRequestKey(node);
     let guide = this.#guides.get(key);
     if (guide === undefined) {
@@ -932,6 +976,7 @@ export function registerPullRequestView(
   return vscode.Disposable.from(
     view,
     legend,
+    vscode.window.registerFileDecorationProvider(localDecorationProvider),
     vscode.window.registerFileDecorationProvider(rowDecorationProvider),
     view.onDidChangeCheckboxState(async (event) => {
       try {

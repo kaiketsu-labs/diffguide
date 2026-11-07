@@ -18,7 +18,7 @@ import { type FileDiff, highlightSource } from './unifiedDiff.js';
 import type { DefinitionPeek } from './definitions.js';
 import type { LineRange, ReadRange } from './reviewedFiles.js';
 import type { Analysis } from './prAnalysis.js';
-import { conflictFixLabel, type LocalCommit } from './conflicts.js';
+import { conflictFixLabel, type LocalChange, type LocalCommit } from './conflicts.js';
 import { publishableText } from './pullRequestComments.js';
 import type { MediaPreview } from './media.js';
 
@@ -62,6 +62,8 @@ export interface OverviewState {
     readonly draft?: string;
     /** Claude's few-word name for the thread. */
     readonly title?: string;
+    /** When Claude's latest answer, unseen on a review page yet, was written. */
+    readonly newAnswer?: string;
     readonly path: string;
     /** Which diff side the comment is on: the base ("old") or the PR's version ("new"). */
     readonly side: DiffSide;
@@ -94,6 +96,8 @@ export interface OverviewState {
   readonly conflictQuestion?: string;
   /** Commits in the worktree that the PR's branch on GitHub does not have yet, oldest first. */
   readonly unpushed?: readonly LocalCommit[];
+  /** Files the worktree changed beyond GitHub's head, by path: in unpushed commits, uncommitted, or both. */
+  readonly local?: Readonly<Record<string, LocalChange>>;
   /** PRs and branches in other repositories this PR goes with; undefined until they are read. */
   readonly linked?: readonly LinkedChange[];
 }
@@ -123,6 +127,8 @@ export interface AnalysisView {
   readonly result?: Analysis;
   /** The result was made for an older head commit. */
   readonly stale: boolean;
+  /** Commits since the result's head, or undefined when that head is no longer in the branch's history, as after a force push. */
+  readonly behind?: number;
 }
 
 export type DiffSide = 'old' | 'new';
@@ -223,6 +229,8 @@ export interface OverviewActions {
   /** The file extension to search language extensions for, when VS Code has no language support for the file. */
   missingLanguage(at: { readonly path: string } | { readonly peek: string }): Promise<string | undefined>;
   setViewed(path: string, viewed: boolean): Promise<void>;
+  /** The user saw Claude's latest answers in these threads. */
+  seeAnswers(threadIds: readonly string[]): Promise<void>;
   /** Mark lines read; `fileDone` also marks the whole file reviewed. */
   markRead(range: LineRange, fileDone: boolean): Promise<void>;
   unmarkRead(ids: readonly string[]): Promise<void>;
@@ -327,6 +335,7 @@ export type PageMessage =
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
   | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
   | { readonly action: 'unread'; readonly ids: readonly string[] }
+  | { readonly action: 'seen-answers'; readonly ids: readonly string[] }
   | { readonly action: 'reply'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'github-publish'; readonly form: string; readonly id: string; readonly text: string; readonly pending: boolean }
@@ -383,6 +392,8 @@ export interface ExtensionMessage {
   readonly revealStep?: string | undefined;
   /** A guide group's key: show the guided layout at that section. */
   readonly revealGroup?: string | undefined;
+  /** A thread's id: open it and scroll to it. */
+  readonly revealThread?: string | undefined;
   readonly filesError?: string;
   readonly preview?: FilePreview & { readonly path: string };
   readonly media?: MediaPreview & { readonly path: string };
@@ -433,10 +444,10 @@ const isLine = (value: unknown): value is number => Number.isSafeInteger(value) 
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '' && value.length <= maximumReviewLength;
 
 /** Where the review page scrolls when it opens: a file, or a step of the guided review. */
-export type OverviewReveal = { readonly path: string } | { readonly step: string } | { readonly group: string };
+export type OverviewReveal = { readonly path: string } | { readonly step: string } | { readonly group: string } | { readonly thread: string };
 
 const revealMessage = (reveal: OverviewReveal | undefined): ExtensionMessage => reveal === undefined ? {}
-  : 'path' in reveal ? { reveal: reveal.path } : 'step' in reveal ? { revealStep: reveal.step } : { revealGroup: reveal.group };
+  : 'path' in reveal ? { reveal: reveal.path } : 'step' in reveal ? { revealStep: reveal.step } : 'thread' in reveal ? { revealThread: reveal.thread } : { revealGroup: reveal.group };
 
 /** Show a PR's review page, reusing it when already open, and redraw it whenever `onDidChange` fires. */
 export async function showPullRequestOverview(
@@ -626,6 +637,7 @@ export async function showPullRequestOverview(
         else if (action === 'viewed' && typeof path === 'string' && typeof viewed === 'boolean') await marking(actions.setViewed(path, viewed));
         else if (action === 'read' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
           && startLine <= endLine && typeof viewed === 'boolean') await marking(actions.markRead({ path, side, startLine, endLine }, viewed));
+        else if (action === 'seen-answers' && isNameList(ids)) await actions.seeAnswers(ids.filter((each) => state.threads.some((thread) => thread.id === each)));
         else if (action === 'unread' && Array.isArray(ids) && ids.length <= 1000 && ids.every((item) => typeof item === 'string')) await marking(actions.unmarkRead(ids as string[]));
         else if (action === 'editor' && typeof path === 'string') await actions.openInEditor(path);
         else if (action === 'github' && typeof id === 'string') {
@@ -778,6 +790,10 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .state-actions:not(:empty){margin-top:var(--space-8)}.state-actions .gap{flex:1}#body textarea{width:100%;min-height:120px}
 .verdict{display:inline-flex;align-items:center;height:24px;box-sizing:border-box;padding:0 var(--space-12);border:1px solid currentColor;border-radius:var(--radius-pill);font-size:12px;font-weight:600}
 .verdict.muted{color:var(--ink-muted)}
+.answers{position:fixed;right:var(--space-24);bottom:var(--space-16);z-index:5;display:flex;flex-direction:column;width:min(340px,calc(100vw - 32px));border:1px solid var(--claude);border-radius:var(--radius-lg);overflow:hidden;color:var(--ink);background:var(--surface-raised);box-shadow:var(--shadow-overlay);font-size:12px}
+.answers[hidden]{display:none}.answers .answers-head{display:flex;align-items:center;gap:var(--space-6);padding:var(--space-6) var(--space-8) var(--space-6) var(--space-12);font-weight:600;color:var(--claude)}.answers .answers-head .gap{flex:1}
+.answers .answer{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;column-gap:var(--space-6);width:100%;min-height:28px;padding:0 var(--space-12);border:0;border-top:1px solid var(--line);color:var(--ink);background:none;font:inherit;text-align:left;cursor:pointer}.answers .answer:hover{background:var(--claude-soft)}.answers .answer:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}
+.answers .answer .text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.answers .answer .muted{white-space:nowrap}.answers .answer svg{width:14px;height:14px;fill:var(--ink-muted)}
 #notice{position:fixed;left:var(--space-24);bottom:var(--space-16);z-index:5;display:flex;align-items:center;gap:var(--space-12);max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-lg);color:var(--ink);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}#notice:empty{display:none}
 #error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
 #files-bar{position:sticky;top:0;z-index:2;margin-top:var(--space-24);padding:var(--space-8) 0;background:var(--surface)}
@@ -796,6 +812,7 @@ ${clawdPoseStyles()}
 .file.collapsed{border:0}.file.collapsed .file-head{margin:0;border-bottom-color:var(--line-strong);border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
 .file-head .name{font-family:var(--font-code);font-size:12px;overflow-wrap:anywhere;flex:1;cursor:pointer}
 .chevron{display:inline-block;flex-shrink:0;width:16px;height:16px;vertical-align:-3px;color:var(--ink-muted);background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;transition:transform .1s}.chevron{cursor:pointer}.chevron.closed{transform:rotate(-90deg)}.badge{width:14px;font:700 11px var(--font-code);text-align:center}
+.local-mark{flex:none;font:600 11px var(--font-code);color:var(--warning)}.folder-head .local-mark{margin-left:var(--space-6)}
 .badge.added{color:var(--git-added)}.badge.modified{color:var(--git-modified)}.badge.deleted{color:var(--git-deleted)}.badge.renamed{color:var(--git-renamed)}
 .stats{font:12px var(--font-code)}.stat-add{color:var(--git-added)}.stat-del{color:var(--git-deleted)}
 label.viewed{display:inline-flex;align-items:center;gap:var(--space-4);height:22px;box-sizing:border-box;padding:0 var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-sm);font-size:12px;cursor:pointer}
@@ -861,7 +878,8 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .html-preview{display:block;width:100%;border:0}
 .html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
-td.num.pick{cursor:pointer;position:relative}
+td.num.pick{cursor:pointer;position:relative}td.num.has-marks{position:relative}
+.margin-marks{position:absolute;top:calc(.8em - 5px);left:var(--space-2);z-index:2;display:flex;gap:var(--space-2);line-height:0}.margin-mark{width:10px;height:10px;min-width:0;min-height:0;padding:0;border:0;border-radius:var(--radius-pill);background:var(--claude);cursor:pointer}.margin-mark.github{background:var(--github)}.margin-mark.analysis{background:var(--ink-muted)}.margin-mark:hover{box-shadow:0 0 0 2px var(--surface),0 0 0 3px currentColor}.margin-mark:focus-visible{outline:1px solid var(--focus);outline-offset:1px}
 td.num.pick:hover::after,td.num.pick:has(+td.code:hover)::after,td.num.pick:has(+td.num:not(.pick)+td.code:hover)::after{content:'';position:absolute;top:calc(.8em - 8px);right:-13px;z-index:1;width:16px;height:16px;border-radius:var(--radius-sm);background:linear-gradient(var(--on-brand),var(--on-brand)) center/8px 2px no-repeat,linear-gradient(var(--on-brand),var(--on-brand)) center/2px 8px no-repeat,var(--brand)}td.num.pick:hover{color:var(--brand);background:color-mix(in srgb,var(--ink) 10%,transparent)}
 td.drag-sel,td.sel{box-shadow:inset 0 0 0 999px var(--brand-soft)}
 td.sel-start{box-shadow:inset 2px 0 0 var(--brand-line),inset 0 0 0 999px var(--brand-soft)}
@@ -967,6 +985,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="stop-claude" class="icon-button" data-tip="Stop Claude. The comments it was answering wait for Retry." aria-label="Stop Claude" hidden>${codicons.stopCircle}</button><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">Open in terminal</button><button id="retry" class="small">Retry</button></div>
 <p id="error" role="alert"></p>
 <p id="notice" role="status"></p>
+<div id="answers" class="answers" role="status" hidden></div>
 <aside id="peek" hidden aria-label="Definition"><div id="peek-resize" title="Drag to resize. Double-click to reset."></div><div class="peek-head">
 <button id="peek-back" title="Back" aria-label="Back"><svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg></button>
 <button id="peek-forward" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></svg></button>
@@ -1014,7 +1033,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <span class="divider"></span>
 <button id="collapse" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
 <button id="expand" class="icon-button" data-tip="Expand all files" aria-label="Expand all files">${codicons.expandAll}</button>
-<button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button></span></div>
+<button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button><button id="margin-threads" class="icon-button" data-tip="Move collapsed comments into the margin" aria-label="Move collapsed comments into the margin">${codicons.layoutSidebarLeft}</button></span></div>
 <div id="range-note" class="row range-note" hidden></div>
 <div id="files"><p class="muted">Loading changes…</p></div>
 <script id="initial" type="application/json">${JSON.stringify({ state, pdfScript }).replaceAll('<', '\\u003c')}</script>

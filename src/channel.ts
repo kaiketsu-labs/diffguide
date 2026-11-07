@@ -136,6 +136,7 @@ async function main(): Promise<void> {
             text: { type: 'string', description: reviewReplyInstructions, minLength: 1, maxLength: maximumReplyLength },
             status: { type: 'string', enum: ['answered', 'ready'] },
             title: { type: 'string', description: 'On your first reply in a thread: 3 to 6 words naming what the thread is about, like "Null check in parseUser". Later titles are ignored.', minLength: 1, maxLength: maximumTitleLength },
+            github_reply: { type: 'string', description: 'Only when the feedback quotes a GitHub thread: the reply you propose the human posts there, addressed to the GitHub commenters. Short Markdown, without what only the human needs to know. The human edits it before posting.', minLength: 1, maxLength: maximumReplyLength },
           },
           required: ['event_id', 'text', 'status'], additionalProperties: false,
         },
@@ -184,7 +185,7 @@ async function main(): Promise<void> {
       const supported = ['acknowledge_review', 'set_review_working', 'reply_to_review'];
       if (!supported.includes(request.params.name)) return result('Unknown Pair Review tool.', true);
       const isReply = request.params.name === 'reply_to_review';
-      const eventId = eventIdFromArguments(request.params.arguments, isReply ? ['event_id', 'text', 'status', 'title'] : ['event_id']);
+      const eventId = eventIdFromArguments(request.params.arguments, isReply ? ['event_id', 'text', 'status', 'title', 'github_reply'] : ['event_id']);
       let update: AgentUpdate;
       if (isReply) {
         const argsRecord = record(request.params.arguments);
@@ -195,7 +196,14 @@ async function main(): Promise<void> {
         if (argsRecord.title !== undefined && (!isText(argsRecord.title, maximumTitleLength) || argsRecord.title.trim().length === 0)) {
           return result(`Provide a title of 1 to ${maximumTitleLength} characters, or leave it out.`, true);
         }
-        update = { eventId, status: argsRecord.status, text: argsRecord.text, ...(argsRecord.title === undefined ? {} : { title: argsRecord.title }) };
+        const githubReply = argsRecord.github_reply;
+        if (githubReply !== undefined && (!isText(githubReply, maximumReplyLength) || githubReply.trim().length === 0)) {
+          return result('Provide non-empty github_reply text, or leave it out.', true);
+        }
+        update = {
+          eventId, status: argsRecord.status, text: argsRecord.text,
+          ...(argsRecord.title === undefined ? {} : { title: argsRecord.title }), ...(githubReply === undefined ? {} : { githubReply }),
+        };
       } else {
         update = { eventId, status: request.params.name === 'acknowledge_review' ? 'received' : 'working' };
       }

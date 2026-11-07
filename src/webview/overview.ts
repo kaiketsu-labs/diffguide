@@ -1,7 +1,8 @@
 import type { ClaudeStep } from '../claudeRunner.js';
 import type { DefinitionPeek } from '../definitions.js';
-import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
+import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type Analysis, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
+import type { LocalChange } from '../conflicts.js';
 import type { Annotation, CommentKind, GitHubComment, HideReason, MergeMethod, PickerOptions, PullRequestConversation, PullRequestDetails, ReactionContent, ReactionCount, ReviewEvent, TimelineItem } from '../pullRequests.js';
 import { fileTree, type FileFolder } from '../fileTree.js';
 import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLines.js';
@@ -41,6 +42,8 @@ interface Saved {
   readonly hiddenTypes?: readonly string[];
   readonly conversationDraft?: string;
   readonly conversationFolded?: boolean;
+  /** Collapsed threads leave the diff and show as marks beside their last line. */
+  readonly marginThreads?: boolean;
 }
 type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
@@ -83,6 +86,7 @@ const fileKeys = new Map<string, string>();
 let composer = saved.composer;
 let fileComposer = saved.fileComposer;
 let showArchived = saved.showArchived === true;
+let marginThreads = saved.marginThreads === true;
 /** Archive toggles the page shows before the extension's next state confirms them, by thread id. */
 const archiving = new Map<string, boolean>();
 const replies = new Map(Object.entries(saved.replies ?? {}));
@@ -127,6 +131,8 @@ let dismissing: { readonly login: string; text: string } | undefined;
 let reviewersStamp = '';
 const sending = new Set<string>();
 const threadOpen = new Map<string, boolean>();
+/** A thread opened from its margin mark, to take focus once its file is redrawn. */
+let focusThread: string | undefined;
 /** Threads whose earlier messages the user showed. */
 const threadUnfolded = new Set<string>();
 /** Threads longer than this show only their latest `unfoldedMessages` until unfolded. */
@@ -252,7 +258,7 @@ function frameMain(): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -1679,6 +1685,7 @@ function renderBaseMenu(): void {
 
 function render(state: OverviewState): void {
   current = state;
+  queueMicrotask(renderAnswers);
   for (const thread of state.threads) if (archiving.get(thread.id) === (thread.archived === true)) archiving.delete(thread.id);
   $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
   $('title').textContent = state.heading ?? state.title;
@@ -1818,14 +1825,81 @@ function render(state: OverviewState): void {
   analysisStatus.title = analysis.error ?? '';
   analysisStatus.className = analysis.running ? 'chip claude working' : analysis.error ? 'chip bad' : '';
   analysisStatus.hidden = !analysis.running && !analysis.error;
-  const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.result ? null : [analysis.running, analysis.error]]);
+  const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.behind, analysis.result ? analysis.stale && analysis.running : [analysis.running, analysis.error]]);
   if (stamp !== guideStamp) {
     guideStamp = stamp;
     guide = undefined;
     if (view === 'guide') { renderFiles(); return; }
   }
+  const localPaths = Object.keys(state.local ?? {}).sort().join('\0');
+  if (localPaths !== shownLocalPaths) {
+    shownLocalPaths = localPaths;
+    if (folders && view === 'files') { renderFiles(); return; }
+  }
   renderFiles('state');
 }
+
+/** New answers already reported seen, as `thread@time`, so a redraw before the next state does not list them again. */
+const seenAnswers = new Set<string>();
+const answerKey = (thread: { readonly id: string; readonly newAnswer?: string }): string => thread.id + '@' + (thread.newAnswer ?? '');
+/** Where each unseen answer is relative to the screen: above, below, or on it (seen). */
+const answerPlaces = new Map<string, 'above' | 'below'>();
+let answersFolded = false;
+let seenBatch: string[] = [];
+let seenTimer: ReturnType<typeof setTimeout> | undefined;
+const answerWatch = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    const { answer: id, answerKey: key } = (entry.target as HTMLElement).dataset;
+    if (!entry.target.isConnected) { answerWatch.unobserve(entry.target); continue; }
+    if (id === undefined || key === undefined) continue;
+    if (entry.isIntersecting && entry.intersectionRatio > 0.5) {
+      answerWatch.unobserve(entry.target);
+      answerPlaces.delete(id);
+      if (!seenAnswers.has(key)) { seenAnswers.add(key); seenBatch.push(id); }
+    } else answerPlaces.set(id, entry.boundingClientRect.top < 0 ? 'above' : 'below');
+  }
+  if (seenBatch.length) {
+    clearTimeout(seenTimer);
+    seenTimer = setTimeout(() => { post({ action: 'seen-answers', ids: seenBatch }); seenBatch = []; }, 400);
+  }
+  renderAnswers();
+}, { threshold: [0, 0.5] });
+
+/** Report Claude's new answer seen once half of it is on screen. */
+function watchAnswer(item: HTMLElement, thread: { readonly id: string; readonly newAnswer?: string }): void {
+  if (seenAnswers.has(answerKey(thread))) return;
+  item.dataset.answer = thread.id;
+  item.dataset.answerKey = answerKey(thread);
+  answerWatch.observe(item);
+}
+
+/** The floating list of Claude's new answers that are off screen; a row jumps to its thread. */
+function renderAnswers(): void {
+  const box = $('answers');
+  const fresh = (current?.threads ?? []).filter((thread) => thread.newAnswer !== undefined && !seenAnswers.has(answerKey(thread)))
+    .sort((a, b) => (b.newAnswer ?? '').localeCompare(a.newAnswer ?? ''));
+  const away = fresh.filter((thread) => answerPlaces.get(thread.id) !== undefined || !document.querySelector('[data-answer="' + CSS.escape(thread.id) + '"]'));
+  box.hidden = away.length === 0;
+  if (!away.length) { box.replaceChildren(); return; }
+  const head = el('div', 'answers-head');
+  head.append(el('span', '', away.length === 1 ? 'Claude answered' : away.length + ' new Claude answers'), el('span', 'gap'));
+  const fold = button(answersFolded ? 'Show' : 'Hide', () => { answersFolded = !answersFolded; renderAnswers(); }, 'quiet small');
+  head.append(fold);
+  box.replaceChildren(head);
+  if (answersFolded) return;
+  for (const thread of away.slice(0, 5)) {
+    const row = el('button', 'answer');
+    const place = answerPlaces.get(thread.id);
+    row.append(place === 'above' ? icon(codicons.arrowUp) : place === 'below' ? icon(codicons.arrowDown) : el('span'), el('span', 'text', thread.title ?? thread.text), el('span', 'muted', relativeTime(thread.newAnswer ?? '')));
+    row.title = thread.location;
+    row.addEventListener('click', () => { jump({ ...thread, source: 'local' }); });
+    box.append(row);
+  }
+  if (away.length > 5) box.append(el('div', 'answer muted', '+' + (away.length - 5) + ' more in the Claude answers view'));
+}
+
+/** Paths with local work at the last full draw, so folder marks redraw when the set changes. */
+let shownLocalPaths = '';
 
 function code(line: DiffLine, side: '' | 'add' | 'del'): HTMLTableCellElement {
   const cell = el('td', 'code' + (side ? ' ' + side : ''));
@@ -2124,7 +2198,10 @@ function threadBox(thread: Thread): HTMLElement {
   const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : ''));
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
-  box.addEventListener('toggle', () => { if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open); });
+  box.addEventListener('toggle', () => {
+    if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open);
+    if (marginThreads && !box.open && box.parentElement?.closest('details.thread') === null && box.closest('tr.inline') !== null) renderFiles([thread.path]);
+  });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
@@ -2139,6 +2216,7 @@ function threadBox(thread: Thread): HTMLElement {
   thread.messages.forEach((entry, index) => {
     box.append(...startedBy(entry.createdAt).map(threadBox));
     const item = message(entry, thread);
+    if (thread.source === 'local' && thread.newAnswer !== undefined && index === thread.messages.length - 1) watchAnswer(item, thread);
     if (index < folded) {
       item.hidden = !threadUnfolded.has(thread.id);
       foldedItems.push(item);
@@ -2435,6 +2513,35 @@ function selectedText(path: string, start: number, end: number): string | undefi
     lines.push(holder.textContent ?? '');
   }
   return lines.join('\n');
+}
+
+function threadIsOpen(thread: Thread): boolean {
+  return threadOpen.get(thread.id) ?? !thread.resolved;
+}
+
+/** A collapsed thread as a dot in its line's number cell; clicking it opens the thread in the diff. */
+function marginMark(row: HTMLTableRowElement, side: DiffSide, thread: Thread): void {
+  const cell = row.querySelectorAll<HTMLTableCellElement>('td.num')[side === 'new' ? 1 : 0];
+  if (cell === undefined) return;
+  let marks = cell.querySelector<HTMLElement>('.margin-marks');
+  if (marks === null) {
+    marks = el('span', 'margin-marks');
+    cell.classList.add('has-marks');
+    cell.prepend(marks);
+  }
+  const kind = threadKind(thread);
+  const mark = el('button', 'margin-mark ' + kind);
+  const title = (thread.source === 'local' ? thread.title : undefined) ?? thread.text;
+  mark.title = kindLabels[kind] + ': ' + title;
+  mark.setAttribute('aria-label', 'Open comment: ' + title);
+  mark.addEventListener('mousedown', (event) => { event.stopPropagation(); });
+  mark.addEventListener('click', (event) => {
+    event.stopPropagation();
+    threadOpen.set(thread.id, true);
+    focusThread = thread.id;
+    renderFiles([thread.path]);
+  });
+  marks.append(mark);
 }
 
 function inline(content: HTMLElement, width: number): HTMLTableRowElement {
@@ -2772,7 +2879,7 @@ function unmarkRead(ids: readonly string[]): void {
 
 /** What a file's box shows from extension state, so a state update redraws only the files it changed. */
 function fileKey(path: string, threads: readonly Thread[]): string {
-  return JSON.stringify([viewed.has(path), collapsed.get(path) === true, readRanges.filter((marked) => marked.path === path), threads,
+  return JSON.stringify([viewed.has(path), collapsed.get(path) === true, readRanges.filter((marked) => marked.path === path), threads, current?.local?.[path] ?? null,
     composer?.path === path ? [author, current?.details?.pendingComments] : null]);
 }
 
@@ -2802,7 +2909,8 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
       for (const thread of threads) {
         if (placed.has(thread.id) || thread.outdated || thread.side !== side || thread.endLine !== line || !linesFit(side)) continue;
         placed.add(thread.id);
-        node.append(inline(threadBox(thread), widths.length));
+        if (marginThreads && !hidden && !threadIsOpen(thread)) marginMark(row, side, thread);
+        else node.append(inline(threadBox(thread), widths.length));
       }
       if (side === 'new' && !hidden) {
         for (const note of notes) {
@@ -2953,7 +3061,14 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   setTip(folderButton, view === 'guide' ? 'Folders are off in the guide' : 'Group files by folder');
   folderButton.setAttribute('aria-pressed', String(folders));
   folderButton.setAttribute('aria-pressed', String(folders));
+  $('margin-threads').setAttribute('aria-pressed', String(marginThreads));
+  setTip($('margin-threads'), marginThreads ? 'Show collapsed comments in the diff' : 'Move collapsed comments into the margin');
   if (!files) return;
+  if (focusThread !== undefined) {
+    const id = focusThread;
+    focusThread = undefined;
+    requestAnimationFrame(() => { document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
+  }
   if (view === 'guide') { keepView(() => renderGuide(only)); return; }
   const allFiles = files;
   const shownFiles = filteredFiles(allFiles);
@@ -2990,7 +3105,8 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
           const isCollapsed = collapsed.get('folder:' + child.path) === true;
           const head = el('div', 'folder-head');
           head.dataset.folder = child.path;
-          head.append(el('span', 'name', child.name), el('span', 'muted progress'));
+          const holdsLocal = Object.keys(current?.local ?? {}).some((path) => path.startsWith(child.path + '/'));
+          head.append(el('span', 'name', child.name), ...(holdsLocal ? [localMarkOf('unpushed', 'Holds files with work GitHub does not have yet')] : []), el('span', 'muted progress'));
           const { node, rail } = railNode(head, depth, isCollapsed, () => { collapsed.set('folder:' + child.path, !isCollapsed); save(); renderFiles(); });
           put(parent, depth, node);
           if (!isCollapsed) append(rail, child, depth + 1);
@@ -3004,6 +3120,22 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     if (folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
   });
+}
+
+const localMarks: Record<LocalChange, readonly [string, string]> = {
+  unpushed: ['↑', 'Changed in commits not pushed yet'], edited: ['✎', 'Uncommitted edits in the worktree'], both: ['↑✎', 'Unpushed commits and uncommitted edits'],
+};
+
+function localMarkOf(change: LocalChange, tip = localMarks[change][1]): HTMLElement {
+  const mark = el('span', 'local-mark', localMarks[change][0]);
+  mark.title = tip;
+  return mark;
+}
+
+/** A file's mark for worktree work that GitHub does not have, or nothing. */
+function localMark(path: string): HTMLElement[] {
+  const change = current?.local?.[path];
+  return change === undefined ? [] : [localMarkOf(change)];
 }
 
 /** Folders a path sits in, outermost first: every prefix, so compacted folder rows match too. */
@@ -3174,13 +3306,32 @@ function guideIntro(): HTMLElement {
   return card;
 }
 
-function guideSummary(overview: string, stale: boolean): HTMLElement {
+function guideSummary(result: Analysis, groups: readonly GuideGroup[]): HTMLElement {
   const card = el('section', 'card guide-intro');
   card.append(el('h3', '', 'Guide'));
-  if (overview) card.append(el('p', 'text', overview));
-  if (stale) card.append(el('p', 'wait', 'Made for an older commit. Steps whose code changed since then moved to Unclassified. Rebuild the guide to update.'));
+  if (current?.analysis.stale) card.append(staleGuideRow(result, groups));
+  if (result.overview) card.append(el('p', 'text', result.overview));
   card.append(el('p', 'muted', 'Every change is in exactly one step. Viewed on every step marks the whole PR viewed.'));
   return card;
+}
+
+/** Warns that the guide was built for an older head, says what that cost, and offers to rebuild it. */
+function staleGuideRow(result: Analysis, groups: readonly GuideGroup[]): HTMLElement {
+  const behind = current?.analysis.behind;
+  const placed = groups.filter((group) => group.severity !== 'unclassified').reduce((sum, group) => sum + group.steps.length, 0);
+  const lost = result.groups.reduce((sum, group) => sum + group.steps.length, 0) - placed;
+  const unplaced = groups.find((group) => group.severity === 'unclassified')?.steps.length ?? 0;
+  const facts = [
+    'Built for ' + result.head.slice(0, 7) + (behind === undefined ? ', which is no longer in the branch' : ', ' + behind + (behind === 1 ? ' commit' : ' commits') + ' behind'),
+    lost > 0 ? lost + (lost === 1 ? ' step no longer matches' : ' steps no longer match') : undefined,
+    unplaced > 0 ? unplaced + (unplaced === 1 ? ' change is' : ' changes are') + ' in Not placed by the guide' : undefined,
+  ].filter(Boolean).join('. ') + '.';
+  const row = el('div', 'row range-note stale-guide');
+  row.append(icon(codicons.warning), el('span', 'gap wait', facts));
+  const rebuild = button(current?.analysis.running ? 'Rebuilding…' : 'Rebuild guide', () => { $('error').textContent = ''; post({ action: 'analyze' }); }, 'claude small');
+  rebuild.disabled = current?.analysis.running === true;
+  row.append(rebuild);
+  return row;
 }
 
 type ThreadKind = 'github' | 'local' | 'analysis';
@@ -3348,7 +3499,7 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   }));
   const owners = guideOwners(groups, slices);
   const visible = groups.filter((group) => !groupCollapsed(group)).flatMap((group) => group.steps);
-  const keyOf = (step: GuideStep): string => JSON.stringify([stepViewed(step), stepCollapsed(step), readRanges.filter((marked) => marked.path === step.path),
+  const keyOf = (step: GuideStep): string => JSON.stringify([stepViewed(step), stepCollapsed(step), readRanges.filter((marked) => marked.path === step.path), current?.local?.[step.path] ?? null,
     owners.threads.get(step.key) ?? [], owners.notes.get(step.key) ?? null, owners.draft === step.key ? [author, current?.details?.pendingComments] : null]);
   const numbers = new Map(groups.flatMap((group) => group.steps.map((step, index) => [step.key, index + 1] as const)));
   const draw = (step: GuideStep): HTMLElement => {
@@ -3362,7 +3513,7 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
     for (const step of targets) boxes.get(step.key)?.replaceWith(draw(step));
   } else {
     stepKeys.clear();
-    container.replaceChildren(guideSummary(result.overview, current?.analysis.stale === true));
+    container.replaceChildren(guideSummary(result, groups));
     for (const group of groups) {
       const isCollapsed = groupCollapsed(group);
       const { node, rail } = railNode(groupHead(group), 0, isCollapsed, () => { collapsed.set(guideState('group', group.key), !isCollapsed); save(); renderFiles(); });
@@ -3420,7 +3571,7 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   label.append(check, 'Viewed');
   const kind = previewKind(file);
   const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
-  head.append(chevron, name, badge, stats, previewSwitch(file, showPreview), label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
+  head.append(chevron, name, badge, ...localMark(step.path), stats, previewSwitch(file, showPreview), label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
   box.append(head);
   const diff = el('div', 'diff');
   if (step.fileNote) {
@@ -3510,7 +3661,7 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   const commentFile = toolButton(codicons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
   commentFile.classList.add('icon-button');
   commentFile.hidden = !atHead || file.change === 'deleted';
-  head.append(chevron, name, badge, stats, ...chips, comments, mode, label, commentFile, full, open);
+  head.append(chevron, name, badge, ...localMark(file.path), stats, ...chips, comments, mode, label, commentFile, full, open);
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
@@ -3856,6 +4007,10 @@ function onExtensionMessage(data: ExtensionMessage): void {
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
   if (data.revealStep) revealStep(data.revealStep);
   if (data.revealGroup) revealGroup(data.revealGroup);
+  if (data.revealThread) {
+    const thread = allThreads().find((each) => each.id === data.revealThread);
+    if (thread) jump(thread);
+  }
   if (data.reveal && files) {
     collapsed.set(data.reveal, false);
     openFolders(data.reveal);
@@ -4042,6 +4197,7 @@ $('dequeue').addEventListener('click', () => changePullRequest({ action: 'dequeu
 $('merge-cancel').addEventListener('click', closeMergeForm);
 attachMentions($<HTMLTextAreaElement>('review'), $('review-box'));
 $('folders').addEventListener('click', () => { folders = !folders; save(); renderFiles(); });
+$('margin-threads').addEventListener('click', () => { marginThreads = !marginThreads; save(); renderFiles(); });
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
 for (const [id, value] of [['collapse', true], ['expand', false]] as const) {
   $(id).addEventListener('click', () => {

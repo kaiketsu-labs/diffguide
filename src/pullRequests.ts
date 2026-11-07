@@ -10,6 +10,8 @@ export interface PullRequestSummary {
   readonly draft: boolean;
   readonly headBranch: string;
   readonly baseBranch: string;
+  /** The PR's latest commit on GitHub when listed; absent in lists saved before it was read. */
+  readonly headOid?: string;
   /** Strongest verdict among reviewers' latest reviews; absent when nobody reviewed yet. */
   readonly review?: ReviewVerdict;
   /** ISO times; absent in lists saved before they were read. */
@@ -408,7 +410,7 @@ export function pickGitHubRemote(config: string): GitHubRemote | undefined {
 /** Open PRs by the viewer and requesting the viewer's review, keyed by lowercase `owner/name`. */
 type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>;
 
-const searchFields = 'number title url isDraft headRefName baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}} '
+const searchFields = 'number title url isDraft headRefName headRefOid baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}} '
   + 'reviewRequests(first:20){nodes{requestedReviewer{__typename ... on User{login} ... on Team{name} ... on Bot{login} ... on Mannequin{login}}}}';
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
@@ -1071,6 +1073,7 @@ export function parsePullRequestList(value: unknown): readonly PullRequestSummar
       draft: record['isDraft'] === true,
       headBranch: text(record['headRefName']),
       baseBranch: text(record['baseRefName']),
+      ...(typeof record['headRefOid'] === 'string' && /^[a-f\d]{40,64}$/u.test(record['headRefOid']) ? { headOid: record['headRefOid'] } : {}),
       ...(review === undefined ? {} : { review }),
       ...createdAt === undefined ? {} : { createdAt },
       ...updatedAt === undefined ? {} : { updatedAt },

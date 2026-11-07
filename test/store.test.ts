@@ -9,6 +9,7 @@ import type { TestContext } from 'node:test';
 import type { CodeAnchor, ReviewStore } from '../src/contracts.js';
 import { createReviewStore, parseAgentUpdate, ReviewStoreError } from '../src/store.js';
 import { maximumReplyLength, maximumReviewTextLength } from '../src/limits.js';
+import { publishableText } from '../src/pullRequestComments.js';
 
 /** Create isolated storage and register cleanup with the test lifecycle. */
 async function fixture(t: TestContext): Promise<{ store: ReviewStore; file: string; root: string }> {
@@ -269,4 +270,15 @@ test('keeps a whole-file anchor across restarts and reads older anchors without 
   assert.equal(reopened.threads[0]?.anchor.scope, 'file');
   assert.equal(reopened.events[0]?.anchor.scope, 'file');
   assert.equal('scope' in (reopened.threads[1]?.anchor ?? {}), false);
+});
+
+test('keeps the GitHub reply Claude proposes with its answer, across a restart', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const thread = await store.submit(anchor(), 'What do you think of this feedback from GitHub?', 'ask');
+  await store.updateFromAgent(parseAgentUpdate({ eventId: thread.latestEventId, status: 'answered', text: 'They are right; the check is missing.', githubReply: 'Good catch, I will add the check.' }));
+  const reopened = await createReviewStore(file, root);
+  assert.equal(reopened.threads[0]?.messages.at(-1)?.githubReply, 'Good catch, I will add the check.');
+  assert.equal(publishableText(reopened.threads[0]!), 'Good catch, I will add the check.');
+  await reopened.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'Second thought without a reply.' });
+  assert.equal(publishableText(reopened.threads[0]!), 'Second thought without a reply.');
 });
