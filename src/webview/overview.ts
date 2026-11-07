@@ -238,6 +238,7 @@ function frameMain(): void {
       for (const node of document.querySelectorAll('[data-lr-focus]')) node.removeAttribute('data-lr-focus');
       anchors.find((item) => item.key === data.focus)?.node?.setAttribute('data-lr-focus', '');
     }
+    if ('select' in data) for (const node of document.querySelectorAll('[data-lr-sel]')) node.removeAttribute('data-lr-sel');
     if (Array.isArray(data.select)) {
       const [from, to] = data.select as number[];
       for (const node of document.querySelectorAll('[data-lr-lines]')) {
@@ -2190,7 +2191,11 @@ function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButt
   const parent = current?.github?.find((github) => github.id === thread.linkedTo);
   if (thread.linkedTo !== undefined) {
     return button('Reply on GitHub…', () => {
-      if (parent === undefined || parent.resolved) { post({ action: 'publish', id: thread.id }); return; }
+      if (parent === undefined || parent.resolved) {
+        if (parent) threadOpen.set(parent.id, true);
+        post({ action: 'publish', id: thread.id });
+        return;
+      }
       if (!replies.get(parent.id)?.trim()) replies.set(parent.id, thread.draft ?? '');
       focusNext = 'reply:' + parent.id;
       save();
@@ -2956,12 +2961,38 @@ function openFolders(path: string): void {
   for (const folder of folderOf(path)) collapsed.delete('folder:' + folder);
 }
 
-/** Redraw the file list, or `container`, without losing the scroll position or the draft being typed. */
+/** Holds live HTML preview frames while their file box is rebuilt; `moveBefore` keeps a frame's page loaded where `append` would reload it. */
+const frameParking = el('div');
+frameParking.hidden = true;
+document.body.append(frameParking);
+
+function parkFrames(container: HTMLElement): HTMLIFrameElement[] {
+  if (typeof frameParking.moveBefore !== 'function') return [];
+  const frames = [...container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')];
+  for (const frame of frames) frameParking.moveBefore(frame, null);
+  return frames;
+}
+
+/** Put each parked frame in place of the new frame for the same file and source, then drop the frames nothing took back. */
+function restoreFrames(container: HTMLElement, parked: readonly HTMLIFrameElement[]): void {
+  for (const fresh of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) {
+    const live = parked.find((frame) => frame.parentElement === frameParking && frame.dataset.path === fresh.dataset.path && frame.srcdoc === fresh.srcdoc);
+    if (!live || !fresh.parentElement) continue;
+    fresh.parentElement.moveBefore(live, fresh);
+    fresh.remove();
+    frameMessage(live, { lrReady: true });
+  }
+  frameParking.replaceChildren();
+}
+
+/** Redraw the file list, or `container`, without losing the scroll position, the draft being typed or a loaded HTML preview. */
 function keepView(draw: () => void, container = $('files')): void {
   const scroll = window.scrollY;
   const active = document.activeElement;
   const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
+  const frames = parkFrames(container);
   draw();
+  restoreFrames(container, frames);
   if (focus) {
     const area = container.querySelector<HTMLTextAreaElement>('[data-draft="' + CSS.escape(focus.key) + '"]');
     if (area) { area.focus({ preventScroll: true }); area.setSelectionRange(focus.start, focus.end); }
