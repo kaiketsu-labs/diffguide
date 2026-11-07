@@ -36,14 +36,12 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
 };
 
 const brandTokens: Readonly<Record<string, BrandToken>> = {
-  claude: { dark: '#e8896a', light: '#b34f2b' },
-  'claude-soft': { dark: '#e8896a24', light: '#b34f2b1a' },
-  'on-claude': { dark: '#2a130a', light: '#ffffff' },
+  // The coding agent, whichever one runs: its actions, replies and the orb that stands for it.
+  agent: { dark: '#7fc0de', light: '#2f7ea6' },
+  'agent-soft': { dark: '#7fc0de2e', light: '#2f7ea61f' },
+  'on-agent': { dark: '#0b1f2a', light: '#ffffff' },
   github: { dark: '#7fa8f0', light: '#2f5fc4' },
   'github-soft': { dark: '#7fa8f024', light: '#2f5fc41a' },
-  // The DiffGuide orb that stands for Claude while it works and in its avatar; its shading tones derive from this.
-  orb: { dark: '#7fc0de', light: '#2f7ea6' },
-  'orb-soft': { dark: '#7fc0de2e', light: '#2f7ea61f' },
   // GitHub's attention yellow (Primer), so pending review comments look like they do on GitHub.
   pending: { dark: '#d29922', light: '#9a6700' },
   'pending-soft': { dark: '#d2992226', light: '#9a67001a' },
@@ -51,12 +49,15 @@ const brandTokens: Readonly<Record<string, BrandToken>> = {
   'shadow-overlay': { dark: '0 4px 16px rgba(0,0,0,.35)', light: '0 4px 16px rgba(0,0,0,.12)' },
 };
 
-/** Tokens that point at another token, in every theme. You are neutral: your accent is the theme's text color, so only Claude and GitHub carry a hue. */
+/** Tokens that point at another token, in every theme. You are neutral: your accent is the theme's text color, so only the agent and GitHub carry a hue. */
 const aliases: Readonly<Record<string, string>> = {
   brand: 'ink',
   'on-brand': 'surface',
   action: 'brand',
   'on-action': 'on-brand',
+  // The orb's shading tones derive from its color.
+  orb: 'agent',
+  'orb-soft': 'agent-soft',
 };
 
 const fixedTokens: Readonly<Record<string, string>> = {
@@ -71,7 +72,7 @@ const fixedTokens: Readonly<Record<string, string>> = {
 
 /** High-contrast themes carry contrast in their own variables: tints go transparent and lines use the contrast border. */
 const highContrast: Readonly<Record<string, string>> = {
-  'brand-soft': 'transparent', 'claude-soft': 'transparent', 'github-soft': 'transparent', 'pending-soft': 'transparent', 'danger-soft': 'transparent',
+  'brand-soft': 'transparent', 'agent-soft': 'transparent', 'github-soft': 'transparent', 'pending-soft': 'transparent', 'danger-soft': 'transparent',
   line: 'var(--vscode-contrastBorder)', 'line-strong': 'var(--vscode-contrastBorder)', 'shadow-overlay': 'none',
 };
 

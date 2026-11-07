@@ -547,7 +547,7 @@ function renderState(details: PullRequestDetails): void {
   $<HTMLButtonElement>('fix-conflicts').disabled = current?.claude.running === true;
   const fixing = current?.claude.fixingConflicts;
   const note = $('conflict-note');
-  note.className = fixing === undefined ? 'muted' : 'chip claude working';
+  note.className = fixing === undefined ? 'muted' : 'chip agent working';
   const text = fixing ?? 'Claude merges the base branch, resolves the conflicts and pushes.';
   note.replaceChildren(fixing === undefined ? text : el('span', '', text));
   note.title = fixing ?? '';
@@ -1439,7 +1439,7 @@ function renderLinked(state: OverviewState): void {
     if (row.unpushed && pr) {
       const push = button('Push ' + row.unpushed + (row.unpushed === 1 ? ' commit' : ' commits'), () => send('linked-push', row.key), 'primary');
       push.disabled = !pr.canPush || state.claude.running;
-      push.title = !pr.canPush ? 'You cannot push to this PR.' : state.claude.running ? 'Claude is working. Push when it is done.' : 'Push Claude\'s commits to ' + pr.headBranch;
+      push.title = !pr.canPush ? 'You cannot push to this PR.' : state.claude.running ? 'Agent is working. Push when it is done.' : 'Push the agent\'s commits to ' + pr.headBranch;
       actions.append(push);
     } else if (row.unpushed && !pr) {
       const draft = button('Push and open draft PR', () => send('linked-draft', row.key), 'primary');
@@ -1778,11 +1778,11 @@ function render(state: OverviewState): void {
   else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), stop, terminal);
   stop.hidden = !state.claude.running;
   if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; }
-  claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip claude working' : 'chip';
+  claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip agent working' : 'chip';
   $('retry').hidden = !state.claude.retry;
   terminal.className = state.claude.running ? 'small' : 'quiet';
   terminal.textContent = state.claude.running ? 'Stop and open in terminal' : 'Open in terminal';
-  terminal.dataset.tip = state.claude.running ? 'Stops Claude\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s Claude conversation in a terminal';
+  terminal.dataset.tip = state.claude.running ? 'Stops the agent\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s agent conversation in a terminal';
   const unpushed = state.unpushed?.length ?? 0;
   const push = $('push');
   push.hidden = !unpushed || !details?.canEdit;
@@ -1824,7 +1824,7 @@ function render(state: OverviewState): void {
   const analysisStatus = $('analysis-status');
   analysisStatus.textContent = analysis.running ? 'Guide · ' + (analysis.step ?? 'Working') : analysis.error ? 'Guide failed' : '';
   analysisStatus.title = analysis.error ?? '';
-  analysisStatus.className = analysis.running ? 'chip claude working' : analysis.error ? 'chip bad' : '';
+  analysisStatus.className = analysis.running ? 'chip agent working' : analysis.error ? 'chip bad' : '';
   analysisStatus.hidden = !analysis.running && !analysis.error;
   const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.behind, analysis.result ? analysis.stale && analysis.running : [analysis.running, analysis.error]]);
   if (stamp !== guideStamp) {
@@ -2037,7 +2037,7 @@ function composerBox(draft: Composer): HTMLElement {
   const cancelLink = button('Cancel', cancel, 'quiet');
   const needText: HTMLButtonElement[] = [];
   const onDraft = (value: string): void => { draft.text = value; save(); for (const each of needText) each.disabled = sending.has('composer') || !value.trim(); };
-  const area = github ? githubField('composer', draft.text, 'Comment on GitHub', onDraft, submit, cancel) : textarea('composer', draft.text, 'Ask Claude about these lines', onDraft, submit, cancel);
+  const area = github ? githubField('composer', draft.text, 'Comment on GitHub', onDraft, submit, cancel) : textarea('composer', draft.text, 'Ask about these lines', onDraft, submit, cancel);
   const busySending = sending.has('composer');
   const row = el('div', 'row actions composer-actions');
   if (github) {
@@ -2051,9 +2051,9 @@ function composerBox(draft: Composer): HTMLElement {
     row.append(...reviewing ? [el('span', 'hint', 'Your review is in progress, so comments go into it.')] : [], el('span', 'gap'), cancelLink, now, review);
   } else {
     const implement = button('Implement', () => send(true, 'implement'));
-    implement.title = 'Claude changes the code';
-    const ask = button(busySending ? 'Sending…' : 'Ask Claude', submit, 'claude');
-    ask.title = 'Claude answers without editing';
+    implement.title = 'Agent changes the code';
+    const ask = button(busySending ? 'Sending…' : 'Ask', submit, 'agent');
+    ask.title = 'Agent answers without editing';
     needText.push(implement, ask);
     onDraft(draft.text);
     row.append(el('span', 'gap'), cancelLink, implement, ask);
@@ -2268,22 +2268,22 @@ function threadBox(thread: Thread): HTMLElement {
     };
     const needText: HTMLButtonElement[] = [];
     const onReply = (value: string): void => { replies.set(thread.id, value); save(); for (const each of needText) each.disabled = sending.has(key) || !value.trim(); };
-    box.append(github ? githubField(key, reply, 'Reply on GitHub, or tell Claude what to do', onReply, () => submit(), cancel)
-      : textarea(key, reply, 'Reply to Claude', onReply, () => submit(), cancel));
+    box.append(github ? githubField(key, reply, 'Reply on GitHub, or tell the agent what to do', onReply, () => submit(), cancel)
+      : textarea(key, reply, 'Reply', onReply, () => submit(), cancel));
     const busySending = sending.has(key);
-    const primary = button(busySending ? 'Sending…' : !github ? 'Ask Claude' : thread.pending ? 'Add to pending review' : 'Post on GitHub', () => submit(), github ? 'primary' : 'claude');
+    const primary = button(busySending ? 'Sending…' : !github ? 'Ask' : thread.pending ? 'Add to pending review' : 'Post on GitHub', () => submit(), github ? 'primary' : 'agent');
     primary.disabled = busySending;
     actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'));
     if (github) {
-      const ask = button('Ask Claude', () => askClaude('ask'));
-      ask.title = 'Only Claude sees it. Claude answers in a local thread without editing';
+      const ask = button('Ask', () => askClaude('ask'));
+      ask.title = 'Only the agent sees it. Agent answers in a local thread without editing';
       const implement = button('Implement', () => askClaude('implement'));
-      implement.title = 'Only Claude sees it. Claude changes the code';
+      implement.title = 'Only the agent sees it. Agent changes the code';
       for (const each of [ask, implement]) { each.disabled = busySending; actions.append(each); }
     } else {
-      primary.title = 'Claude answers without editing';
+      primary.title = 'Agent answers without editing';
       const implement = button('Implement', () => submit('implement'));
-      implement.title = 'Claude changes the code. Without a note, it implements what the thread discussed';
+      implement.title = 'Agent changes the code. Without a note, it implements what the thread discussed';
       implement.disabled = busySending;
       needText.push(primary);
       onReply(reply);
@@ -2332,7 +2332,7 @@ function stopClaude(): void {
 function stopButton(): HTMLButtonElement {
   const stop = button('', stopClaude, 'icon-button stop-claude');
   stop.append(icon(codicons.stopCircle));
-  setTip(stop, 'Stop Claude. The comments it was answering wait for Retry.');
+  setTip(stop, 'Stop. The comments it was answering wait for Retry.');
   stop.disabled = stoppingClaude;
   return stop;
 }
@@ -3298,7 +3298,7 @@ function guideIntro(): HTMLElement {
   const row = el('div', 'row');
   const start = button(analysis?.running ? 'Stop' : 'Build guide', () => post({ action: analysis?.running ? 'analysis-stop' : 'analyze' }), analysis?.running ? '' : 'primary');
   row.append(start);
-  if (analysis?.running && analysis.progress === undefined) row.append(el('span', 'chip claude working', 'Guide · ' + (analysis.step ?? 'Working')));
+  if (analysis?.running && analysis.progress === undefined) row.append(el('span', 'chip agent working', 'Guide · ' + (analysis.step ?? 'Working')));
   else if (analysis?.running) row.append(el('span', 'muted', 'Building the guide'));
   else if (analysis?.error) row.append(el('span', 'bad', 'Guide failed: ' + analysis.error));
   else row.append(el('span', 'muted', 'Runs Claude read-only on this PR. Large PRs take a few minutes.'));
@@ -3390,7 +3390,7 @@ function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElemen
   const where = el('span', 'where');
   where.append(el('span', 'name', name), line);
   const state = el('span', 'state', working ? '' : status);
-  if (working) state.append(el('span', 'chip claude working', working));
+  if (working) state.append(el('span', 'chip agent working', working));
   item.append(where, text, state);
   if (thread.url) {
     const link = el('a', 'open', '↗');
@@ -3718,11 +3718,11 @@ function fileComposerBox(draft: FileComposer): HTMLElement {
     post({ action: 'file-comment', form: 'file-composer', path: draft.path, text: draft.text, intent });
   };
   const implement = button('Implement', () => send('implement'));
-  implement.title = 'Claude changes the code';
-  const ask = button(busySending ? 'Sending…' : 'Ask Claude', () => send('ask'), 'claude');
-  ask.title = 'Claude answers without editing';
+  implement.title = 'Agent changes the code';
+  const ask = button(busySending ? 'Sending…' : 'Ask', () => send('ask'), 'agent');
+  ask.title = 'Agent answers without editing';
   const onDraft = (value: string): void => { draft.text = value; save(); for (const each of [implement, ask]) each.disabled = sending.has('file-composer') || !value.trim(); };
-  const area = textarea('file-composer', draft.text, 'Ask Claude about this file', onDraft, () => send('ask'), cancel);
+  const area = textarea('file-composer', draft.text, 'Ask about this file', onDraft, () => send('ask'), cancel);
   onDraft(draft.text);
   const row = el('div', 'row actions composer-actions');
   row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), implement, ask);

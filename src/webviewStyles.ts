@@ -4,7 +4,7 @@ import { designTokenStyles } from './designTokens.js';
  * Tokens plus the controls every webview shares: page text, buttons, inputs, key caps and the focus ring.
  * Text fields get a thin inset focus line, not the offset ring; don't override it per field.
  * Give a button `data-tip` for a hover tip; icon-only buttons need one.
- * Buttons are secondary by default; add `primary` (yours, in the theme's text color), `claude` (sends to Claude, clay) or `quiet` (text only).
+ * Buttons are secondary by default; add `primary` (yours, in the theme's text color), `agent` (sends to the agent, slate) or `quiet` (text only).
  */
 export const webviewStyles = `${designTokenStyles}
 body{color:var(--ink);background:var(--surface);font:13px/20px var(--font-ui)}
@@ -14,7 +14,7 @@ a{color:var(--vscode-textLink-foreground,var(--brand));cursor:pointer;text-decor
 button{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-6);box-sizing:border-box;min-height:28px;padding:0 var(--space-12);border:1px solid var(--vscode-button-border,transparent);border-radius:var(--radius-sm);color:var(--on-action-secondary);background:var(--action-secondary);font:inherit;cursor:pointer}
 button:hover{filter:brightness(1.08)}
 button.primary{color:var(--on-action);background:var(--action);font-weight:600}
-button.claude{color:var(--on-claude);background:var(--claude);font-weight:600}
+button.agent{color:var(--on-agent);background:var(--agent);font-weight:600}
 button.quiet{padding:0 var(--space-4);color:var(--ink-muted);background:none;border-color:transparent}
 button.quiet:hover{color:var(--ink);filter:none;text-decoration:underline}
 button.small{min-height:22px;padding:0 var(--space-8);font-size:12px}
@@ -32,7 +32,7 @@ kbd.on-fill{height:16px;border-color:currentColor;color:inherit;opacity:.7}
 .hint{display:inline-flex;align-items:center;gap:var(--space-2);font-size:11px;color:var(--ink-muted)}
 .chip{display:inline-flex;align-items:center;gap:var(--space-6);height:20px;padding:0 var(--space-8);border-radius:var(--radius-pill);font-size:12px;line-height:18px;color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 8%,transparent)}
 .chip::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
-.chip.claude{color:var(--claude);background:var(--claude-soft)}
+.chip.agent{color:var(--agent);background:var(--agent-soft)}
 .chip.warning{color:var(--warning);background:color-mix(in srgb,var(--warning) 14%,transparent)}
 .chip.pending{color:var(--pending);background:var(--pending-soft)}
 .chip.success{color:var(--success);background:color-mix(in srgb,var(--success) 14%,transparent)}

@@ -27,15 +27,15 @@ DiffGuide is a VS Code extension for reviewing code with Claude: native inline c
 
 ## UI
 
-- Webview colors, type sizes, spacing and corners come from `src/designTokens.ts` as CSS custom properties (`--brand`, `--ink`, `--radius-md`). Use only those properties in webview CSS; change a value there, not at the use site. `src/webviewStyles.ts` holds the shared buttons (`primary`, `claude`, `quiet`, `small`), inputs, key caps and chips.
-- Color names who is involved: `brand` is you and stays neutral (the theme's text color), `claude` clay is Claude, `github` slate blue is GitHub. Everything else follows the VS Code theme.
+- Webview colors, type sizes, spacing and corners come from `src/designTokens.ts` as CSS custom properties (`--brand`, `--ink`, `--radius-md`). Use only those properties in webview CSS; change a value there, not at the use site. `src/webviewStyles.ts` holds the shared buttons (`primary`, `agent`, `quiet`, `small`), inputs, key caps and chips.
+- Color names who is involved: `brand` is you and stays neutral (the theme's text color), `agent` slate is the coding agent and its orb, `github` blue is GitHub. Everything else follows the VS Code theme.
 - Page controls use the page's own menus (`.picker`, as on Labels and the Files filter) for choices, not native `<select>` or VS Code quick picks. Text fields keep the shared thin inset focus line from `webviewStyles`.
 - Use our own page widgets wherever a page can host them: confirm in place (`askInline` row, or `askInMenu` under a button with no row), edit text in an inline form, pick from a `.picker` menu, report results in the page notice. A button that opens a form becomes that form's confirm button, as Merge does. Use VS Code modals, input boxes, quick picks and toasts only where no page is open, such as the sidebar, editor commands and setup, and for errors that must reach a closed page.
 - Webview icons are codicon SVGs from `src/codicons.ts`; add new ones there from microsoft/vscode-codicons.
 - Use clear system sans-serif fonts for extension UI and monospace fonts for code. Never use Comic Sans or handwritten novelty fonts.
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.
 - Name controls after existing ones that do the same thing; a checkbox that marks lines reviewed is "Viewed", like the file's.
-- Give each action a distinct weight: one filled button per row (`claude` when it sends to Claude, `primary` otherwise), secondary buttons, text-only Cancel. Don't show hints for standard shortcuts such as ⌘/Ctrl+Enter. Put status text left and buttons right, Cancel first and the filled button last. Align controls on one row height.
+- Give each action a distinct weight: one filled button per row (`agent` when it sends to the agent, `primary` otherwise), secondary buttons, text-only Cancel. Don't show hints for standard shortcuts such as ⌘/Ctrl+Enter. Put status text left and buttons right, Cancel first and the filled button last. Align controls on one row height.
 - Before building a new or rearranged surface, sketch it and confirm terms with the user; "checkbox", "button" and "window" have been misread before.
 - Repository illustrations use a neutral, clean style focused on reviewing code and collaborating with an agent, with concrete code and review examples.
 
