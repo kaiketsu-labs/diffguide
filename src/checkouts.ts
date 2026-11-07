@@ -51,6 +51,11 @@ export class Checkouts implements ReviewSessionSource, vscode.Disposable {
     return [...this.#byStorage.values()].flatMap((checkout) => checkout.sessions.sessions);
   }
 
+  /** Every open PR session in every checkout, with the checkout it belongs to. */
+  get opened(): readonly { readonly checkout: Checkout; readonly session: PullRequestSession }[] {
+    return [...this.#byStorage.values()].flatMap((checkout) => checkout.sessions.opened.map((session) => ({ checkout, session })));
+  }
+
   /** The workspace folder first, then nested repositories by path; worktrees of one repository count once. */
   async list(): Promise<readonly Checkout[]> {
     const nested = (await this.#discover()).filter((root) => isNested(this.workspaceRoot, root)).sort();

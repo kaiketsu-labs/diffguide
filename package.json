@@ -412,6 +412,11 @@
           "icon": "resources/review.svg"
         },
         {
+          "id": "pairReview.answers",
+          "name": "Claude Answers",
+          "icon": "resources/review.svg"
+        },
+        {
           "id": "pairReview.threads",
           "name": "Review",
           "icon": "resources/review.svg"
@@ -428,6 +433,10 @@
       {
         "view": "pairReview.threads",
         "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:pairReview.startClaude)\n[Änderungen reviewen](command:pairReview.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
+      },
+      {
+        "view": "pairReview.answers",
+        "contents": "Claude's latest answers on your PRs show up here, newest first. New ones stay marked until you see them on the review page."
       },
       {
         "view": "pairReview.pullRequests",

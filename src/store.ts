@@ -40,7 +40,7 @@ export class ReviewStoreError extends Error {
 /** Validate an untrusted agent update without allowing human-only operations. */
 export function parseAgentUpdate(value: unknown): AgentUpdate {
   const record = readObject(value, 'agent update');
-  checkKeys(record, ['eventId', 'status', 'text', 'title']);
+  checkKeys(record, ['eventId', 'status', 'text', 'title', 'githubReply']);
   const status = readStatus(record['status']);
   if (status === 'queued') {
     throw new ReviewStoreError('Agents cannot queue review comments.');
@@ -49,6 +49,7 @@ export function parseAgentUpdate(value: unknown): AgentUpdate {
     eventId: readId(record['eventId']), status,
     ...(record['text'] === undefined ? {} : { text: readBoundedText(record['text'], 'Antwort', maximumReplyLength, true) }),
     ...(record['title'] === undefined ? {} : { title: readTitle(record['title']) }),
+    ...(record['githubReply'] === undefined ? {} : { githubReply: readBoundedText(record['githubReply'], 'GitHub reply', maximumReplyLength, true) }),
   });
 }
 
@@ -184,6 +185,7 @@ class FileReviewStore implements ReviewStore {
         ? [...thread.messages, {
           id: randomUUID(), author: 'claude' as const, text: captured.text,
           createdAt: new Date().toISOString(), eventId: event.id,
+          ...(captured.githubReply === undefined ? {} : { githubReply: captured.githubReply }),
         }]
         : thread.messages;
       const status = current && statusRank[captured.status] > statusRank[thread.status]
@@ -437,7 +439,7 @@ function readEvent(value: unknown): ReviewEvent {
 /** Validate a stored human or Claude message. */
 function readMessage(value: unknown): ReviewMessage {
   const record = readObject(value, 'message');
-  checkKeys(record, ['id', 'author', 'text', 'createdAt', 'eventId']);
+  checkKeys(record, ['id', 'author', 'text', 'createdAt', 'eventId', 'githubReply']);
   if (record['author'] !== 'human' && record['author'] !== 'claude') {
     throw new ReviewStoreError('Invalid message author.');
   }
@@ -445,9 +447,11 @@ function readMessage(value: unknown): ReviewMessage {
     id: readId(record['id']), author: record['author'], text: readNonemptyText(record['text'], 'text'),
     createdAt: readTimestamp(record['createdAt']),
   };
-  return record['eventId'] === undefined
-    ? message
-    : { ...message, eventId: readId(record['eventId']) };
+  return {
+    ...message,
+    ...(record['eventId'] === undefined ? {} : { eventId: readId(record['eventId']) }),
+    ...(record['githubReply'] === undefined ? {} : { githubReply: readNonemptyText(record['githubReply'], 'githubReply') }),
+  };
 }
 
 /** Copy and validate line coordinates and workspace-relative code context. */

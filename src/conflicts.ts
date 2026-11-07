@@ -116,6 +116,27 @@ export async function unpushedCommits(worktree: string, pushedHead: string): Pro
   });
 }
 
+/** How a file differs from GitHub in a PR worktree: changed by commits not pushed yet, edited without a commit, or both. */
+export type LocalChange = 'unpushed' | 'edited' | 'both';
+
+/** Files the worktree changed beyond `pushedHead`, and how many commits it is ahead; commits count only when `pushedHead` is in the worktree. */
+export async function localChanges(worktree: string, pushedHead: string | undefined): Promise<{ readonly commits: number; readonly files: ReadonlyMap<string, LocalChange> }> {
+  const known = pushedHead !== undefined && /^[a-f\d]{40,64}$/u.test(pushedHead) && await git(worktree, ['cat-file', '-e', `${pushedHead}^{commit}`]).then(() => true, () => false);
+  const [count, committed, status] = await Promise.all([
+    known ? git(worktree, ['rev-list', '--count', `${pushedHead}..HEAD`]).catch(() => '0') : '0',
+    known ? git(worktree, ['diff', '--name-only', '-z', '--no-renames', pushedHead, 'HEAD']).catch(() => '') : '',
+    git(worktree, ['status', '--porcelain', '-z', '--untracked-files=all', '--no-renames']).catch(() => ''),
+  ]);
+  const commits = Number(count.trim()) || 0;
+  const files = new Map<string, LocalChange>();
+  if (commits > 0) for (const path of committed.split('\0').filter(Boolean)) files.set(path, 'unpushed');
+  for (const entry of status.split('\0').filter(Boolean)) {
+    const path = entry.slice(3);
+    files.set(path, files.has(path) ? 'both' : 'edited');
+  }
+  return { commits, files };
+}
+
 /** A commit Claude made in a PR worktree. */
 export interface WorktreeCommit {
   readonly oid: string;

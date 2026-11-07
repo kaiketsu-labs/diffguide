@@ -26,6 +26,8 @@ export interface ReviewMessage {
   readonly author: 'human' | 'claude';
   readonly text: string;
   readonly createdAt: string;
+  /** Claude's proposed reply for the GitHub thread this local thread discusses, shorter than its answer to the human. */
+  readonly githubReply?: string;
 }
 
 /** Durable review thread, independent of the agent transport. */
@@ -81,6 +83,8 @@ export interface AgentUpdate {
   readonly text?: string;
   /** Kept only when the thread has no title yet. */
   readonly title?: string;
+  /** A reply Claude proposes posting on the GitHub thread; stored with this update's message. */
+  readonly githubReply?: string;
 }
 
 /** Handles used by the native editor and extension lifecycle. */
