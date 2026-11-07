@@ -181,6 +181,19 @@
 - Add the `localReview.mockPullRequests` setting, which fills the Pull Requests view with sample data for testing.
 - Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
 
+## [0.6.0](https://github.com/kaiketsu-labs/pair-review/compare/v0.5.1...v0.6.0) (2026-11-07)
+
+
+### Features
+
+* **pr:** flag outdated guides, suggest github replies and list claude's answers ([#39](https://github.com/kaiketsu-labs/pair-review/issues/39)) ([299fd51](https://github.com/kaiketsu-labs/pair-review/commit/299fd511a7a9bfa0b08bfb8f70124964ed2d2adf))
+* **pr:** link prs in other repositories and give claude their worktrees ([b1d8bae](https://github.com/kaiketsu-labs/pair-review/commit/b1d8baee13e96290745e1a7add1f3720975ae19c))
+
+
+### Bug Fixes
+
+* **pr:** keep the review page current and steady while claude works ([c52fa66](https://github.com/kaiketsu-labs/pair-review/commit/c52fa66a55b274bfac2432090301488c8deeb6c3))
+
 ## [0.5.1](https://github.com/kaiketsu-labs/pair-review/compare/v0.5.0...v0.5.1) (2026-11-06)
 
 
