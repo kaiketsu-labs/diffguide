@@ -60,6 +60,10 @@ function sample(number: number, title: string, author: string, draft: boolean, h
 
 /** Fixed sample data that fills every sidebar section without contacting a code host. */
 export const mockPullRequestProvider: PullRequestProvider = {
+  crossReferences: async () => [],
+  linkedState: async () => undefined,
+  pullRequestForBranch: async () => undefined,
+  createDraft: async () => { throw new Error('Sample pull requests cannot be created.'); },
   readRepository: async () => ({ name: 'mock/sample-repo', url: 'https://github.com/mock/sample-repo' }),
   listMine: async () => [
     sample(101, 'Add pull request sidebar', 'you', false, 'feature/pr-sidebar', 'approved'),

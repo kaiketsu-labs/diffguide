@@ -7,6 +7,7 @@ import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
 import { ClaudeRunner, describeTool, StepLog, type ClaudeRunnerOptions } from '../src/claudeRunner.js';
+import { lockWorktree } from '../src/linkedChanges.js';
 import type { ReviewEvent, ReviewStore } from '../src/contracts.js';
 import { settle } from './fakes/vscode.js';
 
@@ -143,7 +144,7 @@ test('on the author\'s own PR, uses the checkout\'s config and asks Claude to co
 test('lets Claude read the workspace\'s other folders, and runs the finish step with the handled threads', async (t) => {
   const finished: string[][] = [];
   const { store, children } = await runner('reviewer', t, undefined, undefined, {
-    folders: () => ['/worktree', '/repos/other', '/repos/main'],
+    folders: async () => ['/worktree', '/repos/other', '/repos/main'],
     finish: async (threads) => { finished.push([...threads]); },
   });
   store.setPending([event('one')]);
@@ -306,4 +307,28 @@ test('stop ends the running answer without an error and leaves its comments wait
   instance.retry();
   assert.equal(instance.activity.stopped, undefined);
   await until(() => children.length === 2);
+});
+
+test('waits for a busy worktree, shows who holds it, and stops while waiting without starting Claude', async (t) => {
+  const worktree = path.join(await mkdtemp(path.join(tmpdir(), 'pair-review-busy-')), 'pr-3');
+  const releaseOther = await lockWorktree(worktree, 'acme/api#12');
+  let stopping: AbortController | undefined;
+  let release: (() => Promise<void>) | undefined;
+  const { instance, store, children } = await runner('author', t, undefined, undefined, {
+    hold: async () => {
+      stopping = new AbortController();
+      release = await lockWorktree(worktree, 'acme/app#3', { pollMs: 10, signal: stopping.signal, waiting: (holder) => { instance.wait(`Waiting for ${holder}`); } });
+    },
+    stopped: () => { stopping?.abort(); },
+    released: async () => { await release?.(); release = undefined; },
+  });
+  store.setPending([event('one')]);
+  await until(() => instance.activity.step === 'Waiting for acme/api#12');
+  await instance.stop();
+  assert.equal(children.length, 0);
+  assert.equal(instance.activity.running, false);
+  assert.equal(instance.activity.stopped, true);
+  await releaseOther();
+  instance.retry();
+  await until(() => children.length === 1);
 });

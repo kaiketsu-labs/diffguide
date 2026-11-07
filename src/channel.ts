@@ -19,6 +19,9 @@ import { buildReviewPrompt, reviewInstructions, reviewReplyInstructions } from '
 import { maximumReplyLength, maximumTitleLength } from './limits.js';
 import { ownsSession } from './sessionBinding.js';
 
+/** Opening a linked worktree can wait for another Claude run to finish in it. */
+const linkedRepositoryTimeoutMs = 60 * 60 * 1000;
+
 /** Produce a tool result without writing non-protocol output to standard output. */
 function result(text: string, isError = false): CallToolResult {
   return isError ? { content: [{ type: 'text', text }], isError: true }
@@ -138,6 +141,18 @@ async function main(): Promise<void> {
         },
       },
       {
+        name: 'use_linked_repository',
+        description: 'Find the version of another repository in this workspace that goes with this PR. Call it before reading or searching another repository, and before changing code there: the user\'s own checkout of it may be on an unrelated branch. purpose read returns the linked PR\'s worktree or a worktree on the branch this PR pins; with nothing linked, the user\'s checkout and a note saying so. purpose edit returns a worktree where you may edit and commit: the linked PR\'s, or a new branch for this PR. Use the returned path for every read, edit and git command there. Do not push. An edit waits while another Claude run works in that worktree.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            repository: { type: 'string', description: 'owner/name, as in the repository\'s GitHub remote', pattern: '^[\\w.-]+/[\\w.-]+$' },
+            purpose: { type: 'string', enum: ['read', 'edit'] },
+          },
+          required: ['repository', 'purpose'], additionalProperties: false,
+        },
+      },
+      {
         name: 'list_pending_reviews',
         description: 'Inspect current unresolved review events and thread context, including delivery status. Use after a superseded event or uncertain connection result.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -155,6 +170,15 @@ async function main(): Promise<void> {
         }
         const batch = readBatch(await bridge.request('/pending'), descriptor.workspaceRoot);
         return result(JSON.stringify(batch, null, 2));
+      }
+
+      if (request.params.name === 'use_linked_repository') {
+        const argsRecord = record(request.params.arguments ?? {});
+        const repository = argsRecord?.repository;
+        const purpose = argsRecord?.purpose;
+        if (typeof repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/u.test(repository)) return result('Name the repository as owner/name.', true);
+        if (purpose !== 'read' && purpose !== 'edit') return result('Set purpose to read or edit.', true);
+        return result(JSON.stringify(await bridge.request('/linked-repository', { repository, purpose }, linkedRepositoryTimeoutMs)));
       }
 
       const supported = ['acknowledge_review', 'set_review_working', 'reply_to_review'];

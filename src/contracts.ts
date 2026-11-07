@@ -115,6 +115,9 @@ export interface BridgeState {
 }
 
 /** Loopback server lifecycle without a dependency on the VS Code module. */
+/** Finds the worktree of another workspace repository that goes with this PR, for Claude to read or edit; an edit holds its lock for the current run. `repository` is `owner/name`. */
+export type LinkedRepositoryHandler = (repository: string, purpose: 'read' | 'edit') => Promise<{ readonly path: string; readonly branch: string; readonly pullRequest?: number; readonly note?: string }>;
+
 export interface ReviewBridge extends Disposable {
   readonly descriptor: ConnectionDescriptor;
   readonly state: BridgeState;

@@ -2,7 +2,7 @@ import { copyFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: { extension: 'src/extension.ts', channel: 'src/channel.ts', 'hook-waiter': 'src/hookWaiter.ts', 'live-connect': 'src/liveConnect.ts' },
+  entryPoints: { extension: 'src/extension.ts', channel: 'src/channel.ts', 'hook-waiter': 'src/hookWaiter.ts', 'edit-guard': 'src/editGuardHook.ts', 'live-connect': 'src/liveConnect.ts' },
   outdir: 'dist',
   outExtension: { '.js': '.cjs' },
   bundle: true,

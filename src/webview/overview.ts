@@ -1388,6 +1388,77 @@ function openUpdateMenu(): void {
   ], 'update-menu');
 }
 
+/** Shown while the link field is open, so redraws keep it. */
+let linking = false;
+
+/** The Linked changes card: each other repository's PR and its state, or the branch Claude made there, with their actions. */
+function renderLinked(state: OverviewState): void {
+  const rows = state.linked ?? [];
+  const card = $('linked');
+  card.hidden = state.linked === undefined;
+  const stamp = JSON.stringify([rows, linking]);
+  if (card.dataset.stamp === stamp) return;
+  card.dataset.stamp = stamp;
+  const sourceLabels = { mention: 'Mentioned', pin: 'Pinned in the diff', claude: 'Claude worked here', manual: 'Linked by you' } as const;
+  const send = (action: 'linked-open' | 'linked-push' | 'linked-draft' | 'unlink', key: string): void => { post({ action, key }); };
+  $('linked-rows').replaceChildren(...rows.length === 0 ? [el('li', 'muted', 'No PRs in other repositories go with this one.')] : [], ...rows.map((row) => {
+    const item = el('li', 'linked-row');
+    const what = el('div', 'what');
+    const name = el('div', 'name');
+    name.append(el('span', 'repo', row.repository));
+    const pr = row.pullRequest;
+    if (pr) {
+      const link = el('a', '', '#' + pr.number + ' ' + pr.title);
+      link.href = pr.url;
+      name.append(link);
+    } else name.append(el('span', 'title muted', 'No PR'));
+    const facts = el('div', 'facts');
+    const fact = (text: string, tone = ''): void => { facts.append(el('span', tone, text)); };
+    if (pr) {
+      fact(pr.state === 'merged' ? 'Merged' : pr.state === 'closed' ? 'Closed' : pr.draft ? 'Draft' : 'Open', pr.state === 'closed' ? 'bad' : '');
+      if (pr.checks) fact(pr.checks === 'success' ? 'Checks passed' : pr.checks === 'failure' ? 'Checks failed' : 'Checks running', pr.checks === 'success' ? 'ok' : pr.checks === 'failure' ? 'bad' : 'wait');
+      if (pr.review) fact(pr.review === 'approved' ? 'Approved' : pr.review === 'changes' ? 'Changes requested' : 'Review required', pr.review === 'approved' ? 'ok' : pr.review === 'changes' ? 'bad' : '');
+    }
+    if (row.branch && (!pr || pr.headBranch !== row.branch)) fact('Branch ' + row.branch);
+    if (row.unpushed) fact(row.unpushed === 1 ? '1 not pushed' : row.unpushed + ' not pushed', 'wait');
+    if (row.problem) fact(row.problem, 'bad');
+    facts.title = row.sources.map((source) => sourceLabels[source]).join(', ');
+    what.append(name, facts);
+    const actions = el('div', 'row');
+    const unlink = button('Unlink', () => send('unlink', row.key), 'quiet');
+    unlink.title = 'Hide this link until you link it again';
+    actions.append(unlink);
+    if (pr && row.local) actions.append(button('Open review', () => send('linked-open', row.key)));
+    if (row.unpushed && pr) {
+      const push = button('Push ' + row.unpushed + (row.unpushed === 1 ? ' commit' : ' commits'), () => send('linked-push', row.key), 'primary');
+      push.disabled = !pr.canPush || state.claude.running;
+      push.title = !pr.canPush ? 'You cannot push to this PR.' : state.claude.running ? 'Claude is working. Push when it is done.' : 'Push Claude\'s commits to ' + pr.headBranch;
+      actions.append(push);
+    } else if (row.unpushed && !pr) {
+      const draft = button('Push and open draft PR', () => send('linked-draft', row.key), 'primary');
+      draft.disabled = state.claude.running;
+      draft.title = 'Push ' + (row.branch ?? 'the branch') + ' and open a draft PR that mentions this one';
+      actions.append(draft);
+    }
+    item.append(what, actions);
+    return item;
+  }));
+  document.querySelector('.link-form')?.remove();
+  $('link-pr').hidden = linking;
+  if (!linking) return;
+  const form = el('div', 'link-form');
+  const input = el('input');
+  input.type = 'text';
+  input.placeholder = 'https://github.com/owner/repo/pull/12 or owner/repo#12';
+  input.setAttribute('aria-label', 'PR to link');
+  const close = (): void => { linking = false; if (current) renderLinked(current); };
+  const submit = (): void => { if (input.value.trim()) post({ action: 'link', link: input.value.trim() }); };
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); submit(); } else if (event.key === 'Escape') close(); });
+  form.append(input, button('Cancel', close, 'quiet'), button('Link', submit, 'primary'));
+  $('linked-rows').after(form);
+  input.focus();
+}
+
 /** Swap the title for a text field with Cancel and Save. */
 function editTitle(): void {
   const input = el('input');
@@ -1710,6 +1781,7 @@ function render(state: OverviewState): void {
   push.textContent = 'Push ' + unpushed + (unpushed === 1 ? ' commit' : ' commits');
   $('show-unpushed').hidden = !unpushed;
   renderThreadList();
+  renderLinked(state);
   author = !details || details.viewerIsAuthor;
   setBusy(busy);
   for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.hidden = author;
@@ -3818,6 +3890,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
     if (current) renderConversation(current, true);
     renderFiles([allThreads().find((thread) => thread.messages.some((entry) => 'id' in entry && entry.id === id))?.path]);
   }
+  if (data.done === 'link') { linking = false; if (current) renderLinked(current); }
   if (data.done === 'body') { editingBody = false; if (current) render(current); }
   if (data.done === 'file-composer') {
     sending.delete('file-composer');
@@ -4018,6 +4091,7 @@ $('fix-conflicts').addEventListener('click', () => {
   post({ action: 'fix-conflicts' });
 });
 $('edit-title').addEventListener('click', editTitle);
+$('link-pr').addEventListener('click', () => { linking = true; if (current) renderLinked(current); });
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels', 'milestone'] as const) $('pick-' + what).addEventListener('click', () => openPicker(what));
 document.addEventListener('pointerdown', (event) => {
