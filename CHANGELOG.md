@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- When a Claude run ends, the Files tab reloads its changes, so **All changes** includes the commits Claude just made. It used to keep showing the changes from before the run until the next check, which skips while Claude works.
+- An HTML preview keeps its page while Claude works, threads change or you comment. It used to reload with each of these.
+- The stop icon and **Stop and open in terminal** in Claude's step log line up with its first step.
+- Clawd in a message avatar no longer draws over a file's sticky header while you scroll.
+- A Local thread's reply posted with **Reply on GitHub…** or **Publish to GitHub…** shows up in its GitHub thread right away. It used to appear only after the page next reloaded GitHub's threads, such as when you toggled the thread.
 - Stopping Claude ends the whole run, including the tools and MCP servers it started. A `claude` shell function in your shell setup kept Claude running after a stop before.
 - A thread whose Claude run you stopped reads **Stopped** instead of staying on "Claude is working", and **Retry** sends it to Claude again, also when Claude had already picked it up.
 - After you resolve or reopen a GitHub thread, close or reopen the PR, convert it to draft, mark it ready or edit its title, the review page keeps showing your change. GitHub can answer with the old state for a few seconds after a change, and the page used to jump back to it and later forward again. The page checks again until GitHub reports the change, for up to 30 seconds.

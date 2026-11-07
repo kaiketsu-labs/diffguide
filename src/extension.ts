@@ -234,8 +234,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const unpushed = loadedConversation instanceof Error ? [] : await unpushedCommits(folder, loadedConversation.merge.headOid);
         return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }) };
       };
+      const publishedThreads = (): number => opened.session.store.threads.filter((thread) => opened.session.publication?.(thread.id) !== undefined).length;
+      /** Local threads posted on GitHub at the last state change; one more means GitHub has a comment the page has not read yet. */
+      let published = publishedThreads();
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
-        pullRequestSessions.onDidChangeState((changedSession) => { if (changedSession === opened) listener(changedSession); }),
+        pullRequestSessions.onDidChangeState((changedSession) => {
+          if (changedSession !== opened) return;
+          const now = publishedThreads();
+          if (now !== published) void loadThreads();
+          published = now;
+          listener(changedSession);
+        }),
         fileReviews.onDidChange((changed) => { if (changed === `${repository}#${pullRequest.number}`) listener(changed); }),
         detailsChanged.event(listener),
         claudeFinished(opened.runner, changedOnGitHub),
