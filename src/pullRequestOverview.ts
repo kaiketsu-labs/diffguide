@@ -8,6 +8,7 @@ import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
 import type { PickedSelection } from './pullRequestEdits.js';
+import type { LinkedPullRequestState } from './pullRequests.js';
 import { webviewStyles } from './webviewStyles.js';
 import { codicons } from './codicons.js';
 import { codePreviewStyles } from './codePreview.js';
@@ -93,6 +94,24 @@ export interface OverviewState {
   readonly conflictQuestion?: string;
   /** Commits in the worktree that the PR's branch on GitHub does not have yet, oldest first. */
   readonly unpushed?: readonly LocalCommit[];
+  /** PRs and branches in other repositories this PR goes with; undefined until they are read. */
+  readonly linked?: readonly LinkedChange[];
+}
+
+/** One row of the Linked changes card: another repository's PR, or a branch there without one. */
+export interface LinkedChange {
+  /** `owner/name#12`, or `owner/name` without a PR; what Unlink and the row's actions name. */
+  readonly key: string;
+  readonly repository: string;
+  readonly sources: readonly ('mention' | 'pin' | 'claude' | 'manual')[];
+  readonly pullRequest?: LinkedPullRequestState;
+  /** The branch Claude's worktree is on, when there is one. */
+  readonly branch?: string;
+  readonly unpushed: number;
+  /** The repository has a clone in this workspace, so its PR can open on its own review page. */
+  readonly local: boolean;
+  /** Why the row's state is missing, such as a failed read. */
+  readonly problem?: string;
 }
 
 /** Claude's guided-review analysis: whether it runs, and the last result. */
@@ -276,6 +295,16 @@ export interface OverviewActions {
   refresh(): void;
   /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
   pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string }>;
+  /** Open a linked PR's own review page. */
+  openLinked(key: string): Promise<void>;
+  /** Push Claude's commits in a linked worktree to its branch on GitHub. */
+  pushLinked(key: string): Promise<void>;
+  /** Push a linked branch without a PR and open a draft PR for it; returns the PR's link. */
+  draftLinked(key: string): Promise<string>;
+  /** Link a PR named by a GitHub link or `owner/name#12`. */
+  link(link: string): Promise<void>;
+  /** Hide a linked row until it is linked again. */
+  unlink(key: string): Promise<void>;
   analyze(): Promise<void>;
   stopAnalysis(): void;
 }
@@ -291,6 +320,8 @@ export type PageMessage =
   | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor'; readonly path: string }
+  | { readonly action: 'linked-open' | 'linked-push' | 'linked-draft' | 'unlink'; readonly key: string }
+  | { readonly action: 'link'; readonly link: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
   | { readonly action: 'file-comment'; readonly form: string; readonly path: string; readonly text: string; readonly intent: CommentIntent }
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
@@ -470,7 +501,7 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, view, extension, message, option,
-        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -570,7 +601,17 @@ export async function showPullRequestOverview(
         else if (action === 'picker-options') {
           try { post({ pickerOptions: await actions.pickerOptions() }); } catch (error: unknown) { post({ pickerError: error instanceof Error ? error.message : String(error) }); }
         }
-        else if (action === 'terminal') await actions.openTerminal();
+        else if ((action === 'linked-open' || action === 'linked-push' || action === 'linked-draft' || action === 'unlink') && typeof key === 'string' && state.linked?.some((row) => row.key === key)) {
+          if (action === 'linked-open') await actions.openLinked(key);
+          else if (action === 'linked-push') await actions.pushLinked(key);
+          else if (action === 'unlink') await actions.unlink(key);
+          else post({ notice: { text: 'Opened a draft PR.', url: await actions.draftLinked(key) } });
+          redraw();
+        } else if (action === 'link' && typeof link === 'string' && link.length <= 500) {
+          await actions.link(link);
+          post({ done: 'link' });
+          redraw();
+        } else if (action === 'terminal') await actions.openTerminal();
         else if (action === 'push') await actions.push();
         else if (action === 'retry') actions.retry();
         else if (action === 'stop-claude') await actions.stopClaude();
@@ -704,6 +745,10 @@ h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;col
 @media (max-width:760px){.layout{grid-template-columns:minmax(0,1fr)}}
 .main-col{display:grid;gap:var(--space-16);min-width:0}
 .card{padding:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md)}
+#linked-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-8)}.linked-row{display:flex;align-items:center;gap:var(--space-12)}.linked-row+.linked-row{padding-top:var(--space-8);border-top:1px solid var(--line)}
+.linked-row .what{flex:1;min-width:0}.linked-row .name{display:flex;gap:var(--space-8);align-items:baseline;min-width:0}.linked-row .repo{font-family:var(--font-code);font-size:12px;color:var(--ink-muted)}.linked-row .name a,.linked-row .name .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linked-row .facts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-8);font-size:12px;color:var(--ink-muted)}
+.link-form{display:flex;gap:var(--space-8);align-items:center;margin-top:var(--space-8)}.link-form input{flex:1;height:26px;padding:0 var(--space-8);font-size:12px}
 .rail{border:1px solid var(--line);border-radius:var(--radius-md)}.rail section{padding:var(--space-12)}.rail section+section{border-top:1px solid var(--line)}
 .seg{display:inline-flex;gap:var(--space-2);padding:var(--space-2);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--ink) 7%,transparent)}
 .seg button{min-height:22px;height:22px;padding:0 var(--space-8);border:0;border-radius:3px;color:var(--ink-muted);background:none;font-size:12px}
@@ -930,6 +975,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <button id="peek-close" title="Close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div><div id="peek-code"></div></aside>
 <div class="layout">
 <div class="main-col">
+<section class="card" id="linked" hidden><div class="section-head"><h3>Linked changes</h3><button id="link-pr" class="small">Link a PR…</button></div><ul id="linked-rows"></ul></section>
 <section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div><div id="description-reactions"></div></section>
 <section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
 <section class="card" id="conversation"><button id="fold-conversation" class="section-fold" aria-expanded="true" aria-controls="timeline">${codicons.chevronDown}<h3>Conversation</h3><span id="conversation-count" class="count"></span></button><div id="timeline"></div><div id="conversation-form"></div></section>

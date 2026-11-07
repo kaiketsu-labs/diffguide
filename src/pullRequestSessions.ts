@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
@@ -14,7 +15,16 @@ import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
 import { createReviewStore } from './store.js';
-import { createReviewData, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath } from './worktrees.js';
+import { addWorked, crossReferences, ensureBranchWorktree, isWorktreeIdle, linkedBranchName, linkedWorktreePath, lockWorktree, readStoredLinks, writeStoredLinks } from './linkedChanges.js';
+import { findLinked } from './linkedController.js';
+import { createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath } from './worktrees.js';
+
+/** Another workspace repository Claude may change for a PR: where its worktrees live and how to reach its PRs. */
+export interface WorkspaceRepository {
+  readonly root: string;
+  readonly storageRoot: string;
+  readonly connect: () => Promise<PullRequestProvider>;
+}
 
 /** A PR's review: its comments, the bridge Claude replies through, and the background Claude that answers them. */
 export interface PullRequestSession {
@@ -27,6 +37,9 @@ export interface PullRequestSession {
   readonly output: vscode.OutputChannel;
   /** Commits Claude made while answering a local thread, oldest first. */
   readonly commits: (threadId: string) => readonly WorktreeCommit[];
+  /** Where this PR keeps manual links, unlinks and the repositories Claude worked in. */
+  readonly dataPath: string;
+  readonly worktree: string;
 }
 
 /** Review sessions for the PR worktrees of one checkout, opened on demand and restored on startup. */
@@ -49,6 +62,8 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     private readonly connect: () => Promise<PullRequestProvider>,
     /** Replaces how Claude is found and started, for tests. */
     private readonly claude: Partial<Pick<ClaudeRunnerOptions, 'resolve' | 'spawn'>> = {},
+    /** Other repositories of the workspace by `owner/name`, which Claude reaches only through Pair Review worktrees. */
+    private readonly repositories: () => Promise<ReadonlyMap<string, WorkspaceRepository>> = async () => new Map(),
   ) {}
 
   get sessions(): readonly ReviewSession[] {
@@ -137,7 +152,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     if (metadata === undefined) throw new Error(`#${number} has no worktree.`);
     const dataPath = await createReviewData(worktree);
     const store = await createReviewStore(join(dataPath, 'review.json'), worktree);
-    const bridge = await createReviewBridge(store, join(dataPath, 'selected-session.json'));
+    const bridge = await createReviewBridge(store, join(dataPath, 'selected-session.json'), (name, purpose) => linkedRepository(name, purpose));
     try {
       await prepareConnection(this.context, bridge, dataPath);
     } catch (error: unknown) {
@@ -169,13 +184,85 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     };
     /** The worktree before Claude's current run, to find its commits or undo its throwaway changes. */
     let before: Awaited<ReturnType<typeof worktreeSnapshot>> | undefined;
+    const owner = `${repository}#${number}`;
+    /** Locks this run holds: its own worktree, and linked worktrees Claude opened; released when the run ends. */
+    const held = new Map<string, () => Promise<void>>();
+    let stopping: AbortController | undefined;
+    const hold = async (folder: string): Promise<void> => {
+      if (held.has(folder)) return;
+      held.set(folder, await lockWorktree(folder, owner, {
+        ...(stopping === undefined ? {} : { signal: stopping.signal }),
+        waiting: (holder) => { runner.wait(`Waiting for ${holder}`); },
+      }));
+    };
+    const releaseAll = async (): Promise<void> => {
+      const locks = [...held.values()];
+      held.clear();
+      await Promise.all(locks.map((unlock) => unlock().catch(() => undefined)));
+    };
+    /** Open a worktree of another workspace repository for Claude: the linked PR's, or this PR's own branch there. */
+    /** GitHub mentions of this PR change only on GitHub, so one read per session is enough. */
+    let mentions: Promise<readonly { readonly repository: string; readonly number: number }[]> | undefined;
+    /**
+     * The worktree of another workspace repository that goes with this PR. Reads get the linked PR's worktree, a worktree on a pinned branch,
+     * or the user's own checkout when nothing links; edits get the linked PR's worktree or this PR's own branch there, and hold its lock.
+     */
+    const linkedRepository = async (name: string, purpose: 'read' | 'edit'): Promise<{ path: string; branch: string; pullRequest?: number; note?: string }> => {
+      if (name.toLowerCase() === repository.toLowerCase()) throw new Error(`${name} is this PR's own repository; work in ${worktree}.`);
+      const other = (await this.repositories()).get(name.toLowerCase());
+      if (other === undefined) throw new Error(`${name} is not a repository in this workspace. Open a clone of it in the workspace folder first.`);
+      if (purpose === 'edit' && metadata.role === 'reviewer') throw new Error('This is someone else\'s PR, so Claude only proposes changes. Show the change for that repository as a ```diff block instead.');
+      const provider = await other.connect();
+      mentions ??= this.connect().then((own) => own.crossReferences(number)).then((nodes) => crossReferences(nodes, repository), () => []);
+      const base = async (): Promise<string> => await readPullRequestBase(worktree, metadata.pullRequest.baseBranch) ?? 'HEAD';
+      const row = [...(await findLinked({ repository, folder: worktree, dataPath, base, mentions })).values()].find((each) => each.repository.toLowerCase() === name.toLowerCase());
+      const ownBranch = linkedBranchName(metadata.pullRequest.headBranch);
+      const linked = row?.number !== undefined ? await provider.pullRequest(row.number)
+        : await provider.pullRequestForBranch(row?.branch ?? ownBranch) ?? (row?.branch === undefined ? undefined : await provider.pullRequestForBranch(ownBranch));
+      const usable = linked !== undefined && (await provider.linkedState(linked.number).catch(() => undefined))?.state === 'open' ? linked : undefined;
+      let result: { path: string; branch: string; pullRequest?: number; note?: string };
+      if (usable !== undefined) {
+        const path = await ensureWorktree(other.root, other.storageRoot, provider, name, usable, metadata.role);
+        if (purpose === 'edit') await hold(path);
+        if (await isWorktreeIdle(path, held.has(path)) && !await catchUpWithPullRequest(path, usable.number)) log(`Could not bring ${name}#${usable.number}'s worktree to its latest commit.`);
+        result = { path, branch: usable.headBranch, pullRequest: usable.number };
+      } else if (purpose === 'read' && row?.branch !== undefined) {
+        const path = linkedWorktreePath(other.storageRoot, name, { repository, number });
+        result = { path, branch: await ensureBranchWorktree(other.root, path, row.branch, 'read') };
+      } else if (purpose === 'read') {
+        const branch = (await git(other.root, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim() || 'unknown';
+        const existing = linkedWorktreePath(other.storageRoot, name, { repository, number });
+        if (await stat(existing).then(() => true, () => false)) result = { path: existing, branch: (await git(existing, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim() };
+        else result = { path: other.root, branch, note: `Nothing links ${name} to this PR, so this is the user's own checkout on ${branch}, which may not match what this PR needs. Read only; never edit or run git commands that change it.` };
+      } else {
+        const path = linkedWorktreePath(other.storageRoot, name, { repository, number });
+        result = { path, branch: await ensureBranchWorktree(other.root, path, ownBranch) };
+      }
+      if (purpose === 'edit') {
+        await hold(result.path);
+        await writeStoredLinks(dataPath, addWorked(await readStoredLinks(dataPath), name));
+      }
+      log(`Gave Claude ${name} to ${purpose} at ${result.path} (${result.branch})`);
+      return result;
+    };
     const runner = new ClaudeRunner({
       store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('comments'),
-      folders: () => [...new Set([this.sourceRoot, ...(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)])],
+      folders: async () => [...new Set([this.sourceRoot, ...[...(await this.repositories()).values()].map((other) => other.root)])],
+      readOnly: async () => ({
+        folders: [...new Set([this.sourceRoot, ...[...(await this.repositories()).values()].map((other) => other.root)])],
+        guard: join(this.context.extensionPath, 'dist', 'edit-guard.cjs'),
+        node: await resolveExecutable(configuration.get<string>('nodePath', 'node'), worktree),
+      }),
+      hold: async () => {
+        stopping = new AbortController();
+        await hold(worktree);
+      },
       prepare: async () => {
         if (!await catchUpWithPullRequest(worktree, number)) log('Could not reach GitHub for the PR\'s latest commit; Claude works on the worktree as it is.');
         before = await worktreeSnapshot(worktree);
       },
+      stopped: () => { stopping?.abort(); },
+      released: releaseAll,
       finish: async (threads) => {
         const start = before;
         before = undefined;
@@ -280,7 +367,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       linkedGitHubThread: (threadId) => links.get(threadId)?.id,
     };
-    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [] };
+    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree };
     return result;
   }
 }

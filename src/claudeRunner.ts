@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import type { ReviewEvent, ReviewStore } from './contracts.js';
 import { buildReviewBatchPrompt } from './eventPrompt.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
-import { stopProcess } from './shell.js';
+import { quotePosix, stopProcess } from './shell.js';
 import type { PullRequestRole } from './worktrees.js';
 
 /** What a PR's background Claude is doing right now. */
@@ -74,8 +74,16 @@ export interface ClaudeRunnerOptions {
   readonly prepare?: () => Promise<void>;
   /** Runs after Claude answers comments, with the threads it handled, such as recording its commits; a failure is the run's error. */
   readonly finish?: (threads: ReadonlySet<string>) => Promise<void>;
-  /** Folders outside the worktree Claude may read and search, such as the workspace's other repositories. */
-  readonly folders?: () => readonly string[];
+  /** Folders outside the worktree Claude may use, such as the workspace's other repositories. */
+  readonly folders?: () => Promise<readonly string[]>;
+  /** Folders among `folders` Claude may read but not edit, except inside their Pair Review worktrees; `guard` is the edit guard script. */
+  readonly readOnly?: () => Promise<{ readonly folders: readonly string[]; readonly guard: string; readonly node: string }>;
+  /** Runs before every run and task, such as taking the worktree's lock; a failure stops the run with its message. */
+  readonly hold?: () => Promise<void>;
+  /** Called when the user stops a run, before Claude itself stops, so a wait for a lock ends too. */
+  readonly stopped?: () => void;
+  /** Runs after every run, whatever its outcome, such as releasing the worktree locks it held. */
+  readonly released?: () => Promise<void>;
 }
 
 /** How to start this PR's Claude conversation interactively, such as in a terminal. */
@@ -125,10 +133,12 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, task: task.label, threads: new Set(), skipped: 0, error: undefined, stopped: undefined });
     let error: string | undefined;
     try {
+      await this.options.hold?.();
       error = await this.#spawn({ prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, mode: this.options.role === 'author' ? 'auto' : 'acceptEdits' });
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
+    await this.options.released?.();
     const stopped = this.#stopping ? true : undefined;
     if (stopped) error = 'Stopped.';
     if (error !== undefined) this.options.log(`Failed: ${error}`);
@@ -144,7 +154,7 @@ export class ClaudeRunner implements vscode.Disposable {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const { sessionId, resume } = await this.#session();
     if (!resume) await writePrivateJson(this.#sessionPath, { sessionId });
-    return this.#command(executable, shell, [...this.#flags(mcpPath, [], 'auto'), ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId])]);
+    return this.#command(executable, shell, [...await this.#flags(mcpPath, [], 'auto'), ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId])]);
   }
 
   /** Send comments Claude did not pick up again, and those of a stopped run it did not answer, and clear the last error. */
@@ -164,10 +174,16 @@ export class ClaudeRunner implements vscode.Disposable {
     return events.filter((event) => latest.has(event.id));
   }
 
+  /** Show that the run waits, such as for another Claude run to leave a worktree. */
+  wait(step: string): void {
+    if (this.#activity.running && this.#activity.step !== step) this.#set({ ...this.#activity, step });
+  }
+
   /** Stop the current run, if any, and resolve once it ended; its comments wait for a retry. */
   async stop(): Promise<void> {
     if (!this.#activity.running) return;
     this.#stopping = true;
+    this.options.stopped?.();
     if (this.#child !== undefined) stopProcess(this.#child);
     await new Promise<void>((resolve) => {
       const watch = this.onDidChange(() => { if (!this.#activity.running) { watch.dispose(); resolve(); } });
@@ -208,6 +224,7 @@ export class ClaudeRunner implements vscode.Disposable {
     this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, threads, skipped: 0, error: undefined, stopped: undefined });
     let error: string | undefined;
     try {
+      await this.options.hold?.();
       await this.options.prepare?.();
       const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
       error = await this.#spawn({
@@ -218,6 +235,7 @@ export class ClaudeRunner implements vscode.Disposable {
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
+    await this.options.released?.();
     const stopped = this.#stopping ? true : undefined;
     if (stopped) {
       this.options.log('Stopped.');
@@ -242,14 +260,26 @@ export class ClaudeRunner implements vscode.Disposable {
   }
 
   /** Flags every run of this PR's conversation shares: Pair Review's tools, the extra folders, and on someone else's PR no checkout config. */
-  #flags(mcpPath: string, allowedTools: readonly string[], mode: 'auto' | 'acceptEdits'): string[] {
-    const folders = (this.options.folders?.() ?? []).filter((folder) => folder !== this.options.cwd);
+  async #flags(mcpPath: string, allowedTools: readonly string[], mode: 'auto' | 'acceptEdits'): Promise<string[]> {
+    const folders = (await this.options.folders?.() ?? []).filter((folder) => folder !== this.options.cwd);
+    const guarded = await this.options.readOnly?.();
     return [
       '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...allowedTools,
       ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
       '--permission-mode', mode,
       ...(folders.length === 0 ? [] : ['--add-dir', ...folders]),
+      ...(guarded === undefined || guarded.folders.length === 0 ? [] : ['--settings', await this.#guardSettings(guarded)]),
     ];
+  }
+
+  /** A settings file with a PreToolUse hook that keeps Claude's edits out of read-only folders. */
+  async #guardSettings({ folders, guard, node }: { readonly folders: readonly string[]; readonly guard: string; readonly node: string }): Promise<string> {
+    const foldersPath = join(this.options.dataPath, 'read-only-folders.json');
+    const settingsPath = join(this.options.dataPath, 'edit-guard.json');
+    await writePrivateJson(foldersPath, folders);
+    const command = [node, guard, foldersPath].map(quotePosix).join(' ');
+    await writePrivateJson(settingsPath, { hooks: { PreToolUse: [{ matcher: 'Edit|MultiEdit|Write|NotebookEdit', hooks: [{ type: 'command', command }] }] } });
+    return settingsPath;
   }
 
   /** Start Claude directly, or through the login shell so the user's own `claude` setup applies. On someone else's PR, Git hooks stay off, since the PR's author controls the checkout. */
@@ -268,7 +298,7 @@ export class ClaudeRunner implements vscode.Disposable {
     if (this.#disposed || this.#stopping) return 'Stopped.';
     const resume = resumed ? sessionId : undefined;
     const args = [
-      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...this.#flags(mcpPath, run.allowedTools, run.mode),
+      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...await this.#flags(mcpPath, run.allowedTools, run.mode),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
     this.#reply = undefined;
@@ -352,6 +382,7 @@ const reviewTools: Record<string, string> = {
   set_review_working: 'Working on it',
   reply_to_review: 'Writing the reply',
   list_pending_reviews: 'Checking open comments',
+  use_linked_repository: 'Opening a linked repository',
 };
 
 /** A tool call as a transcript verb and target, plus a short phrase for status lines, such as "Reading src/app.ts". */

@@ -305,6 +305,28 @@ export interface PullRequestProvider {
   version(number: number, known?: PullRequestVersion): Promise<PullRequestVersion>;
   /** The repository's most recent PR update, which moves when any PR is opened, changed or closed; returns `known` itself when nothing changed. */
   listVersion(known?: ListVersion): Promise<ListVersion>;
+  /** PRs in other repositories that this PR mentions or that mention it, as `CrossReferencedEvent` nodes with `source` and `target`. */
+  crossReferences(number: number): Promise<readonly unknown[]>;
+  /** A PR's state for the Linked changes card: open, merged or closed, draft, checks, review decision and pushed head. */
+  linkedState(number: number): Promise<LinkedPullRequestState | undefined>;
+  /** An open PR whose head is `branch`, if any. */
+  pullRequestForBranch(branch: string): Promise<PullRequestSummary | undefined>;
+  /** Open a draft PR from `branch` into the default branch; returns its number and link. */
+  createDraft(branch: string, title: string, body: string): Promise<{ readonly number: number; readonly url: string }>;
+}
+
+/** What the Linked changes card shows for another repository's PR. */
+export interface LinkedPullRequestState {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly state: 'open' | 'merged' | 'closed';
+  readonly draft: boolean;
+  readonly headBranch: string;
+  readonly headOid: string;
+  readonly checks?: 'success' | 'failure' | 'pending';
+  readonly review?: 'approved' | 'changes' | 'required';
+  readonly canPush: boolean;
 }
 
 export interface PullRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string }
@@ -753,6 +775,35 @@ export class GitHubApiProvider implements PullRequestProvider {
     if (!Number.isSafeInteger(number) || number <= 0) return undefined;
     const repository = object((await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pr:pullRequest(number:${number}){${searchFields}}}}`, {}))['repository']);
     return repository['pr'] === null || repository['pr'] === undefined ? undefined : parsePullRequestList([searchNode(repository['pr'])])[0];
+  }
+
+  async crossReferences(number: number): Promise<readonly unknown[]> {
+    const side = '... on PullRequest{number repository{nameWithOwner}}';
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+      timelineItems(first:100,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{${side}} target{${side}}}}}}}}`, { number });
+    return list(object(object(object(object(data['repository'])['pullRequest'])['timelineItems']))['nodes']);
+  }
+
+  async linkedState(number: number): Promise<LinkedPullRequestState | undefined> {
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+      number title url state isDraft headRefName headRefOid reviewDecision viewerCanUpdate commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}`, { number });
+    const pr = object(object(data['repository'])['pullRequest']);
+    if (typeof pr['number'] !== 'number') return undefined;
+    return parseLinkedState(pr);
+  }
+
+  async pullRequestForBranch(branch: string): Promise<PullRequestSummary | undefined> {
+    const data = await this.#graphql(`query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){pullRequests(first:1,states:OPEN,headRefName:$branch){nodes{${searchFields}}}}}`, { branch });
+    const nodes = list(object(object(data['repository'])['pullRequests'])['nodes']);
+    return nodes.length === 0 ? undefined : parsePullRequestList(nodes.map(searchNode))[0];
+  }
+
+  async createDraft(branch: string, title: string, body: string): Promise<{ readonly number: number; readonly url: string }> {
+    const repository = object((await this.#graphql('query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id defaultBranchRef{name}}}', {}))['repository']);
+    const created = object(object((await this.#graphql('mutation($repo:ID!,$base:String!,$head:String!,$title:String!,$body:String!){createPullRequest(input:{repositoryId:$repo,baseRefName:$base,headRefName:$head,title:$title,body:$body,draft:true}){pullRequest{number url}}}',
+      { repo: text(repository['id']), base: text(object(repository['defaultBranchRef'])['name']), head: branch, title, body }))['createPullRequest'])['pullRequest']);
+    if (!Number.isSafeInteger(created['number'])) throw new Error('GitHub did not open the draft PR.');
+    return { number: created['number'] as number, url: httpsUrl(created['url']) };
   }
 
   async conversation(number: number): Promise<PullRequestConversation> {
@@ -1378,6 +1429,20 @@ function parseLabels(connection: unknown): readonly Label[] {
     if (typeof name !== 'string' || typeof color !== 'string' || !/^[0-9a-f]{6}$/iu.test(color)) return [];
     return [typeof description === 'string' && description.trim() ? { name, color, description: description.trim() } : { name, color }];
   });
+}
+
+/** A linked PR's state from a `pullRequest` node. */
+export function parseLinkedState(pr: Record<string, unknown>): LinkedPullRequestState {
+  const rollup = object(object(object(list(object(pr['commits'])['nodes'])[0])['commit'])['statusCheckRollup'])['state'];
+  const checks = rollup === 'SUCCESS' ? 'success' : rollup === 'FAILURE' || rollup === 'ERROR' ? 'failure' : rollup === 'PENDING' || rollup === 'EXPECTED' ? 'pending' : undefined;
+  const decision = pr['reviewDecision'];
+  const review = decision === 'APPROVED' ? 'approved' : decision === 'CHANGES_REQUESTED' ? 'changes' : decision === 'REVIEW_REQUIRED' ? 'required' : undefined;
+  return {
+    number: pr['number'] as number, title: text(pr['title']), url: httpsUrl(pr['url']),
+    state: pr['state'] === 'MERGED' ? 'merged' : pr['state'] === 'CLOSED' ? 'closed' : 'open', draft: pr['isDraft'] === true,
+    headBranch: text(pr['headRefName']), headOid: text(pr['headRefOid']), canPush: pr['viewerCanUpdate'] === true,
+    ...(checks === undefined ? {} : { checks }), ...(review === undefined ? {} : { review }),
+  };
 }
 
 /** Users, teams and labels for the reviewer, assignee and label pickers; a repository owned by a user has no teams. */

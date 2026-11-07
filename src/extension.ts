@@ -23,11 +23,12 @@ import { htmlPreview } from './htmlPreview.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
 import { saveSelection } from './pullRequestEdits.js';
-import { buildOverviewState, showPullRequestOverview, type AnalysisView, type AppliedSuggestion, type DiffSelection, type FilesView, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
+import { buildOverviewState, showPullRequestOverview, type AnalysisView, type AppliedSuggestion, type DiffSelection, type FilesView, type LinkedChange, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread } from './pullRequests.js';
 import { githubPageActions } from './pullRequestPageActions.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
-import { PullRequestSessions, type PullRequestSession } from './pullRequestSessions.js';
+import { linkedChanges } from './linkedController.js';
+import { PullRequestSessions, type WorkspaceRepository, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
 import { getHeadRevision, readGitBase, readGitBaseBytes } from './git.js';
@@ -64,11 +65,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
   const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('pairReview').get('mockPullRequests', false);
+  /** Every repository of the workspace by lowercase `owner/name`; Claude reaches the others only through their Pair Review worktrees. */
+  const workspaceRepositories = async (): Promise<ReadonlyMap<string, WorkspaceRepository>> => {
+    const found = new Map<string, WorkspaceRepository>();
+    for (const checkout of await checkouts.list()) {
+      const name = await checkout.connect().then((provider) => provider.readRepository()).then(({ name: full }) => full, () => undefined);
+      if (name !== undefined && !found.has(name.toLowerCase())) found.set(name.toLowerCase(), checkout);
+    }
+    return found;
+  };
   const checkouts = new Checkouts(root, context.globalStorageUri.fsPath, {
     discover: async () => mockPullRequests() ? [] : await nestedRepositoryRoots(root),
     create: (checkoutRoot, storageRoot) => {
       const connect = async (): Promise<PullRequestProvider> => mockPullRequests() ? mockPullRequestProvider : await GitHubApiProvider.connect(checkoutRoot);
-      return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect), fileReviews: new FileReviews(storageRoot) };
+      return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect, {}, workspaceRepositories), fileReviews: new FileReviews(storageRoot) };
     },
     onRestoreError: (error) => {
       void vscode.window.showErrorMessage(`Pair Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
@@ -232,11 +242,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
         const threads = state.threads.map((thread) => { const done = applied.get(thread.id); return done === undefined ? thread : { ...thread, applied: done }; });
         const unpushed = loadedConversation instanceof Error ? [] : await unpushedCommits(folder, loadedConversation.merge.headOid);
-        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }) };
+        const linkedNow = await readLinked();
+        return { ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }), linked: linkedNow };
       };
       const publishedThreads = (): number => opened.session.store.threads.filter((thread) => opened.session.publication?.(thread.id) !== undefined).length;
       /** Local threads posted on GitHub at the last state change; one more means GitHub has a comment the page has not read yet. */
       let published = publishedThreads();
+      const linked = linkedChanges({
+        repository, pullRequest, provider, folder, base: readBase, dataPath: opened.dataPath, repositories: workspaceRepositories,
+        openPage: async (name, number) => {
+          const other = (await workspaceRepositories()).get(name.toLowerCase());
+          const target = other === undefined ? undefined : (await checkouts.list()).find((each) => each.storageRoot === other.storageRoot);
+          if (target === undefined) throw new Error(`No clone of ${name} in this workspace.`);
+          const otherProvider = await target.connect();
+          const summary = await otherProvider.pullRequest(number);
+          if (summary === undefined) throw new Error(`${name} has no PR #${number}.`);
+          const mine = (await otherProvider.listMine()).some((each) => each.number === number);
+          await showOverview(target, otherProvider, name, summary, mine ? 'author' : 'reviewer');
+        },
+      });
+      /** The card's rows from the last read; reading them takes several GitHub requests, so redraws reuse them until the next reload. */
+      let linkedRows: Promise<readonly LinkedChange[]> | undefined;
+      const readLinked = (): Promise<readonly LinkedChange[]> => {
+        linkedRows ??= linked.read().catch(() => []);
+        return linkedRows;
+      };
+      const changedLinks = (): void => { linkedRows = undefined; detailsChanged.fire(); };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => {
           if (changedSession !== opened) return;
@@ -247,7 +278,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         fileReviews.onDidChange((changed) => { if (changed === `${repository}#${pullRequest.number}`) listener(changed); }),
         detailsChanged.event(listener),
-        claudeFinished(opened.runner, changedOnGitHub),
+        claudeFinished(opened.runner, () => { linkedRows = undefined; changedOnGitHub(); }),
       );
       await showPullRequestOverview(`${repository}#${pullRequest.number}`, read, changed, {
         readFiles,
@@ -492,7 +523,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await removeWorktree(checkout.root, storageRoot, repository, pullRequest.number);
           void vscode.commands.executeCommand('pairReview.refreshPullRequests');
         },
-        refresh: () => { void loadDetails(); void loadThreads(); void loadConversation(); },
+        refresh: () => { linkedRows = undefined; void loadDetails(); void loadThreads(); void loadConversation(); },
+        openLinked: (key) => linked.open(key),
+        pushLinked: async (key) => { await linked.push(key); changedLinks(); },
+        draftLinked: async (key) => { const url = await linked.draft(key); changedLinks(); return url; },
+        link: async (link) => { await linked.link(link); changedLinks(); },
+        unlink: async (key) => { await linked.unlink(key); changedLinks(); },
         pollGitHub: async () => {
           const previous = version;
           version = await provider.version(pullRequest.number, previous);

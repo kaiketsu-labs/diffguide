@@ -7,6 +7,7 @@ import type {
   CodeAnchor,
   ConnectionDescriptor,
   Disposable,
+  LinkedRepositoryHandler,
   ReviewBridge,
   ReviewEvent,
   ReviewMessage,
@@ -36,8 +37,8 @@ interface PendingPoll {
 }
 
 /** Start an authenticated, workspace-scoped review bridge on a random loopback port. */
-export async function createReviewBridge(store: ReviewStore, sessionBindingPath?: string): Promise<ReviewBridge> {
-  const bridge = new PairReviewBridge(store, sessionBindingPath);
+export async function createReviewBridge(store: ReviewStore, sessionBindingPath?: string, linkedRepository?: LinkedRepositoryHandler): Promise<ReviewBridge> {
+  const bridge = new PairReviewBridge(store, sessionBindingPath, linkedRepository);
   try {
     await bridge.listen();
     return bridge;
@@ -61,7 +62,7 @@ class PairReviewBridge implements ReviewBridge {
   #deliveryTimer: ReturnType<typeof setTimeout> | undefined;
   #disposed = false;
 
-  constructor(store: ReviewStore, private readonly sessionBindingPath?: string) {
+  constructor(store: ReviewStore, private readonly sessionBindingPath?: string, private readonly linkedRepository?: LinkedRepositoryHandler) {
     this.#store = store;
     this.#server = createServer({ maxHeaderSize: 16 * 1024 }, (request, response) => {
       void this.#handle(request, response).catch((error: unknown) => {
@@ -223,6 +224,24 @@ class PairReviewBridge implements ReviewBridge {
       }
       const thread = await this.#store.updateFromAgent(parseAgentUpdate(parsed));
       respond(response, 200, { thread: projectThread(thread) });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/linked-repository' && this.linkedRepository !== undefined) {
+      const body = await readBody(request);
+      let repository: unknown;
+      let purpose: unknown;
+      try {
+        ({ repository, purpose } = JSON.parse(body.toString('utf8')) as { repository?: unknown; purpose?: unknown });
+      } catch {
+        throw new ReviewStoreError('The linked repository request must contain valid JSON.');
+      }
+      if (typeof repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/u.test(repository)) throw new ReviewStoreError('Name the repository as owner/name.');
+      if (purpose !== 'read' && purpose !== 'edit') throw new ReviewStoreError('Say whether Claude reads or edits the repository.');
+      try {
+        respond(response, 200, await this.linkedRepository(repository, purpose));
+      } catch (error: unknown) {
+        respond(response, 422, { error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
     request.resume();

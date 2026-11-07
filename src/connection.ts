@@ -227,14 +227,14 @@ export class BridgeClient {
   }
 
   /** Make one request; mutations are never blindly retried after an ambiguous response. */
-  async request(path: string, update?: AgentUpdate): Promise<unknown> {
+  async request(path: string, update?: AgentUpdate | { readonly repository: string; readonly purpose: 'read' | 'edit' }, timeoutMs = requestTimeoutMs): Promise<unknown> {
     const endpoint = new URL(path, this.descriptor.url);
     if (endpoint.origin !== this.descriptor.url) {
       throw new Error('A review request cannot leave the authenticated local bridge.');
     }
     const controller = new AbortController();
     const abort = (): void => controller.abort();
-    const timer = setTimeout(abort, requestTimeoutMs);
+    const timer = setTimeout(abort, timeoutMs);
     this.signal.addEventListener('abort', abort, { once: true });
     if (this.signal.aborted) controller.abort();
     try {
