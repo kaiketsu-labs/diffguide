@@ -17,6 +17,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`Pair Review edit guard: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(`DiffGuide edit guard: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(2);
 });

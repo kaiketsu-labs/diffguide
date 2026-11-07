@@ -6,7 +6,7 @@ Klicke zuerst in das **Kommentar- oder Antwortfeld**. Tippe bei Bedarf `/a` für
 
 Beende das Diktat, prüfe den erkannten Text und wähle **Senden**. Diktierte Wörter bleiben bis dahin ein Entwurf und werden wie getippter Text behandelt. Das Diktat löst keine automatische Veröffentlichung oder Codeänderung aus.
 
-Welcher Kurzbefehl gilt, steht unter **Systemeinstellungen → Tastatur → Diktat**. Zweimal `Fn` ist eine mögliche Einstellung, aber nicht auf jedem Mac der aktuelle Kurzbefehl. Falls Diktat ausgeschaltet ist, musst du es dort aktivieren. Pair Review ändert diese Systemeinstellungen nicht und startet keine Mikrofonaufnahme.
+Welcher Kurzbefehl gilt, steht unter **Systemeinstellungen → Tastatur → Diktat**. Zweimal `Fn` ist eine mögliche Einstellung, aber nicht auf jedem Mac der aktuelle Kurzbefehl. Falls Diktat ausgeschaltet ist, musst du es dort aktivieren. DiffGuide ändert diese Systemeinstellungen nicht und startet keine Mikrofonaufnahme.
 
 Ob die Erkennung auf dem Gerät stattfindet oder eine Internetverbindung benötigt, hängt von deiner macOS-Konfiguration und Sprache ab. Den Verarbeitungsort zeigt macOS im Bereich Diktat. [Apple: Nachrichten und Dokumente auf dem Mac diktieren](https://support.apple.com/de-de/guide/mac-help/mh40584/mac)
 

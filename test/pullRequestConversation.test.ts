@@ -101,7 +101,7 @@ test('takes GitHub suggestions only from current threads with exactly one sugges
 });
 
 test('reads one commit\'s changes, hides whitespace changes and marks generated files', async (t) => {
-  const repo = mkdtempSync(join(tmpdir(), 'pair-review-range-'));
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-range-'));
   t.after(() => { rmSync(repo, { recursive: true, force: true }); });
   const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
   git('init', '--quiet');

@@ -65,8 +65,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (event.affectsConfiguration('editor.tokenColorCustomizations') || event.affectsConfiguration('workbench.colorTheme')) loadHighlighter();
     }),
   );
-  const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('pairReview').get('mockPullRequests', false);
-  /** Every repository of the workspace by lowercase `owner/name`; Claude reaches the others only through their Pair Review worktrees. */
+  const mockPullRequests = (): boolean => vscode.workspace.getConfiguration('diffGuide').get('mockPullRequests', false);
+  /** Every repository of the workspace by lowercase `owner/name`; Claude reaches the others only through their DiffGuide worktrees. */
   const workspaceRepositories = async (): Promise<ReadonlyMap<string, WorkspaceRepository>> => {
     const found = new Map<string, WorkspaceRepository>();
     for (const checkout of await checkouts.list()) {
@@ -82,14 +82,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect, {}, workspaceRepositories), fileReviews: new FileReviews(storageRoot) };
     },
     onRestoreError: (error) => {
-      void vscode.window.showErrorMessage(`Pair Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(`DiffGuide could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
     },
   });
   context.subscriptions.push(checkouts, registerPullRequestDiffs(async (repository, number) => (await checkouts.locate(repository, number))?.storageRoot));
   const seenAnswers = new SeenAnswers(context.workspaceState);
   const allAnswers = (): ClaudeAnswer[] => latestAnswers(checkouts.opened.map(({ session }) => ({ key: session.session.key, number: session.metadata.pullRequest.number, threads: session.session.store.threads })));
   const answersTree = new ClaudeAnswersTree(allAnswers, seenAnswers);
-  const answersView = vscode.window.createTreeView('pairReview.answers', { treeDataProvider: answersTree });
+  const answersView = vscode.window.createTreeView('diffGuide.answers', { treeDataProvider: answersTree });
   const showAnswerCount = (): void => {
     const fresh = allAnswers().filter((answer) => seenAnswers.isNew(answer)).length;
     answersView.badge = fresh === 0 ? undefined : { value: fresh, tooltip: `${fresh} new ${fresh === 1 ? 'answer' : 'answers'} from Claude` };
@@ -196,7 +196,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const changedOnGitHub = (): void => {
         void loadDetails();
         void loadConversation();
-        void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+        void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
       };
       const loadDetails = sharedPerTurn((): Promise<PullRequestDetails | Error> => {
         details = provider.details(pullRequest.number).catch(asError);
@@ -435,7 +435,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         retry: () => { opened.runner.retry(); },
         stopClaude: () => opened.runner.stop(),
-        revealThread: async (id) => { await vscode.commands.executeCommand('pairReview.revealThread', id); },
+        revealThread: async (id) => { await vscode.commands.executeCommand('diffGuide.revealThread', id); },
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
@@ -508,7 +508,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const { branchDeletable } = await currentDetails();
           try {
             await provider.merge(pullRequest.number, method, message);
-            await vscode.commands.executeCommand('pairReview.markPullRequestMerged', `${repository}#${pullRequest.number}`);
+            await vscode.commands.executeCommand('diffGuide.markPullRequestMerged', `${repository}#${pullRequest.number}`);
             if (deleteBranch && branchDeletable) await provider.deleteBranch(pullRequest.headBranch);
           } finally {
             changedOnGitHub();
@@ -547,7 +547,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         removeWorktree: async () => {
           await pullRequestSessions.close(repository, pullRequest.number);
           await removeWorktree(checkout.root, storageRoot, repository, pullRequest.number);
-          void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+          void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
         },
         refresh: () => { linkedRows = undefined; void loadDetails(); void loadThreads(); void loadConversation(); },
         openLinked: (key) => linked.open(key),
@@ -645,7 +645,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
     };
     const cleanUp = async (manual: boolean): Promise<void> => {
-      const days = vscode.workspace.getConfiguration('pairReview').get<number>('worktreeCleanupDays', 14);
+      const days = vscode.workspace.getConfiguration('diffGuide').get<number>('worktreeCleanupDays', 14);
       const results = await Promise.all((await checkouts.list()).map((checkout) => cleanUpWorktrees({
         root: checkout.root, storageRoot: checkout.storageRoot, connect: checkout.connect, remove: worktreesOf(checkout).remove,
       }, days)));
@@ -653,7 +653,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const kept = results.flatMap((result) => result.kept);
       if (removed.length > 0) {
         void vscode.window.showInformationMessage(`Removed worktrees of merged, closed or unused PRs: ${removed.join(', ')}`);
-        void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+        void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
       }
       if (!manual) return;
       if (kept.length > 0) void vscode.window.showInformationMessage(`Kept ${kept.join(', ')}: uncommitted changes or unpushed commits.`);
@@ -672,8 +672,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.globalState,
         context.workspaceState,
       ),
-      watchGitHubSessions(() => { void vscode.commands.executeCommand('pairReview.refreshPullRequests'); }),
-      vscode.commands.registerCommand('pairReview.openAnswer', async (pullRequest: unknown, threadId: unknown) => {
+      watchGitHubSessions(() => { void vscode.commands.executeCommand('diffGuide.refreshPullRequests'); }),
+      vscode.commands.registerCommand('diffGuide.openAnswer', async (pullRequest: unknown, threadId: unknown) => {
         const found = checkouts.opened.find(({ session }) => session.session.key === pullRequest);
         if (found === undefined || typeof threadId !== 'string') return;
         const { checkout, session } = found;
@@ -684,24 +684,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
         }
       }),
-      vscode.commands.registerCommand('pairReview.cleanUpWorktrees', async () => {
+      vscode.commands.registerCommand('diffGuide.cleanUpWorktrees', async () => {
         try {
           await cleanUp(true);
         } catch (error: unknown) {
           void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
         }
       }),
-      vscode.commands.registerCommand('pairReview.signInToGitHub', async (provider: unknown) => {
+      vscode.commands.registerCommand('diffGuide.signInToGitHub', async (provider: unknown) => {
         try {
           await signInToGitHub(provider === 'github' || provider === 'github-enterprise' ? provider : undefined);
-          await vscode.commands.executeCommand('pairReview.refreshPullRequests');
+          await vscode.commands.executeCommand('diffGuide.refreshPullRequests');
         } catch (error: unknown) {
           void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
         }
       }),
       reportClaudeFailures(checkouts),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('pairReview.mockPullRequests') || event.affectsConfiguration('github-enterprise.uri')) void vscode.commands.executeCommand('pairReview.refreshPullRequests');
+        if (event.affectsConfiguration('diffGuide.mockPullRequests') || event.affectsConfiguration('github-enterprise.uri')) void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
       }),
     );
     await createReviewController(store, context, getHeadRevision, checkouts);
@@ -709,17 +709,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(registerPrExport(context, store));
     const bridge = await createReviewBridge(store, join(storage.fsPath, 'selected-session.json'));
     activeBridge = bridge;
-    context.subscriptions.push(bridge, registerClaudeLauncher(context, bridge, storage.fsPath), vscode.commands.registerCommand('pairReview.showFocusedClaude', () => {
+    context.subscriptions.push(bridge, registerClaudeLauncher(context, bridge, storage.fsPath), vscode.commands.registerCommand('diffGuide.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
       if (focused !== undefined) showClaude(focused);
     }));
     void checkouts.list().catch((error: unknown) => {
-      void vscode.window.showErrorMessage(`Pair Review could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(`DiffGuide could not restore pull request reviews: ${error instanceof Error ? error.message : String(error)}`);
     });
     await prepareConnection(context, bridge, storage.fsPath);
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
-    status.command = 'pairReview.startClaude';
+    status.command = 'diffGuide.startClaude';
     const updateStatus = (): void => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
@@ -727,11 +727,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const current = claudeStatus(focused.runner.activity);
         status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
         status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
-        status.command = 'pairReview.showFocusedClaude';
+        status.command = 'diffGuide.showFocusedClaude';
         status.show();
         return;
       }
-      status.command = 'pairReview.startClaude';
+      status.command = 'diffGuide.startClaude';
       const waiting = store.pendingEvents.length;
       const ready = bridge.state.deliveryReady === true;
       const label = !bridge.state.connected ? '$(debug-disconnect) Review · Verbinden'
@@ -750,7 +750,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     updateStatus();
   } catch (error: unknown) {
     activeBridge?.dispose();
-    await vscode.window.showErrorMessage(`Pair Review konnte nicht starten: ${error instanceof Error ? error.message : String(error)}`);
+    await vscode.window.showErrorMessage(`DiffGuide konnte nicht starten: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

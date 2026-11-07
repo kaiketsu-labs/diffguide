@@ -40,15 +40,15 @@ type Node =
 type FileNode = { readonly kind: 'file'; readonly parent: PullRequestNode; readonly file: PullRequestFile; readonly inTree: boolean };
 type FolderNode = { readonly kind: 'folder'; readonly parent: PullRequestNode; readonly folder: FileFolder<PullRequestFile> };
 
-const fileViewKey = 'pairReview.fileView';
-const groupByKey = 'pairReview.groupBy';
-const hiddenKey = 'pairReview.hiddenRepositories';
-const authorKey = 'pairReview.authorFilter';
-const childViewKey = 'pairReview.pullRequestChildren';
-const snapshotKey = 'pairReview.pullRequestSnapshot';
-const pinnedKey = 'pairReview.pinnedPullRequests';
-const awaitingReviewKey = 'pairReview.awaitingReviewOnly';
-const pinMime = 'application/vnd.code.tree.pairreview.pullrequests';
+const fileViewKey = 'diffGuide.fileView';
+const groupByKey = 'diffGuide.groupBy';
+const hiddenKey = 'diffGuide.hiddenRepositories';
+const authorKey = 'diffGuide.authorFilter';
+const childViewKey = 'diffGuide.pullRequestChildren';
+const snapshotKey = 'diffGuide.pullRequestSnapshot';
+const pinnedKey = 'diffGuide.pinnedPullRequests';
+const awaitingReviewKey = 'diffGuide.awaitingReviewOnly';
+const pinMime = 'application/vnd.code.tree.diffguide.pullrequests';
 
 /** A PR the user pinned, with its last known summary so it stays listed after it leaves the role searches, such as once reviewed. */
 interface Pin { readonly repository: string; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary }
@@ -60,8 +60,8 @@ function pinKey(pin: Pin): string {
 /** A repository's PR lists from the last load, shown at once while fresh ones load. */
 type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>>;
 
-const fileScheme = 'pair-review-pr-file';
-const pullRequestScheme = 'pair-review-pr';
+const fileScheme = 'diffguide-pr-file';
+const pullRequestScheme = 'diffguide-pr';
 
 /** Source Control letters and colors for each kind of change. */
 const changeDecorations: Record<PullRequestFile['change'], { readonly badge: string; readonly color: string; readonly tooltip: string }> = {
@@ -598,7 +598,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const groups = guide.groups.map((group): Node => ({ kind: 'guideGroup', parent: node, group }));
         const first = guide.groups[0];
         return guide.stale && first !== undefined
-          ? [{ kind: 'message', text: 'Guide is outdated. Rebuild it on the review page', icon: 'warning', command: { command: 'pairReview.showGuideGroup', title: 'Show guide', arguments: [node, first.key] } }, ...groups]
+          ? [{ kind: 'message', text: 'Guide is outdated. Rebuild it on the review page', icon: 'warning', command: { command: 'diffGuide.showGuideGroup', title: 'Show guide', arguments: [node, first.key] } }, ...groups]
           : groups;
       }
       try {
@@ -642,7 +642,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
           : String(this.#sectionOf(listing, role).length);
         item.description = [owner, counts].filter(Boolean).join(' · ');
         item.tooltip = listing.folder;
-        item.contextValue = 'pairReview.repository';
+        item.contextValue = 'diffGuide.repository';
         return item;
       }
       case 'section': {
@@ -696,8 +696,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
           [pr.createdAt === undefined ? undefined : `Opened ${new Date(pr.createdAt).toLocaleString()}`, pr.updatedAt === undefined ? undefined : `updated ${ago(pr.updatedAt)}`].filter(Boolean).join(', ') || undefined,
         ].filter(Boolean).join('\n');
         item.iconPath = merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review, awaitingReview);
-        item.contextValue = `pairReview.pullRequest${checkedOut ? '.checkedOut' : ''}${node.pinned === true ? '.pinned' : ''}`;
-        item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node] };
+        item.contextValue = `diffGuide.pullRequest${checkedOut ? '.checkedOut' : ''}${node.pinned === true ? '.pinned' : ''}`;
+        item.command = { command: 'diffGuide.openPullRequest', title: 'Open changes', arguments: [node] };
         return item;
       }
       case 'file': {
@@ -714,7 +714,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
           const reviewed = await this.#reviewedOf(node.parent).catch(() => new Set<string>());
           item.checkboxState = reviewed.has(file.path) ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
         }
-        item.command = { command: 'pairReview.openPullRequest', title: 'Open changes', arguments: [node.parent, file.path] };
+        item.command = { command: 'diffGuide.openPullRequest', title: 'Open changes', arguments: [node.parent, file.path] };
         return item;
       }
       case 'folder': {
@@ -728,8 +728,8 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const item = new vscode.TreeItem(`${look.label} · ${group.title}`, look.folded ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
         item.iconPath = new vscode.ThemeIcon(look.icon, new vscode.ThemeColor(look.color));
         item.description = `${group.steps.filter((step) => step.viewed).length}/${group.steps.length}`;
-        item.contextValue = group.steps.every((step) => step.viewed) ? 'pairReview.guideGroup.viewed' : 'pairReview.guideGroup';
-        item.command = { command: 'pairReview.showGuideGroup', title: 'Show section', arguments: [node.parent, group.key] };
+        item.contextValue = group.steps.every((step) => step.viewed) ? 'diffGuide.guideGroup.viewed' : 'diffGuide.guideGroup';
+        item.command = { command: 'diffGuide.showGuideGroup', title: 'Show section', arguments: [node.parent, group.key] };
         return item;
       }
       case 'guideStep': {
@@ -739,7 +739,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         item.description = step.title === undefined ? path.posix.dirname(step.path).replace(/^\.$/u, '') : name;
         item.iconPath = step.viewed ? new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('testing.iconPassed')) : new vscode.ThemeIcon('circle-large-outline');
         item.tooltip = new vscode.MarkdownString().appendText(`${step.path}${step.viewed ? ' · Viewed' : ''}${step.note === undefined ? '' : `\n\n${step.note}`}`);
-        item.command = { command: 'pairReview.showGuideStep', title: 'Show step', arguments: [parent, step.key] };
+        item.command = { command: 'diffGuide.showGuideStep', title: 'Show step', arguments: [parent, step.key] };
         return item;
       }
       case 'message': {
@@ -856,11 +856,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     }
     const failed = listings.flatMap((listing): Node[] => listing.kind === 'failed'
       ? [{ kind: 'message', text: shown.length === 1 ? listing.message : `${listing.folder}: ${listing.message}`, ...listing.signIn === undefined
-        ? { icon: 'warning' } : { icon: 'account', command: { command: 'pairReview.signInToGitHub', title: 'Sign in to GitHub', arguments: [listing.signIn] } } }]
+        ? { icon: 'warning' } : { icon: 'account', command: { command: 'diffGuide.signInToGitHub', title: 'Sign in to GitHub', arguments: [listing.signIn] } } }]
       : []);
     const ready = listings.filter((listing): listing is Ready => listing.kind === 'ready');
     const signIn = ready.length === 0 ? listings.find((listing) => listing.kind === 'failed' && listing.signIn !== undefined) : undefined;
-    void vscode.commands.executeCommand('setContext', 'pairReview.gitHubSignIn', signIn?.kind === 'failed' ? signIn.signIn : undefined);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.gitHubSignIn', signIn?.kind === 'failed' ? signIn.signIn : undefined);
     if (signIn !== undefined) return [];
     if (ready.length === 0) return failed;
     const pinnedRows = this.#pinnedRows(ready);
@@ -945,17 +945,17 @@ export function registerPullRequestView(
   const tree = new PullRequestTree(checkouts, settings, workspace,
     (text) => { view.description = text ?? ''; }, (message) => { view.message = message ?? ''; });
   const showMode = (): void => {
-    void vscode.commands.executeCommand('setContext', 'pairReview.filesAsTree', tree.asTree);
-    void vscode.commands.executeCommand('setContext', 'pairReview.groupByRole', tree.byRole);
-    void vscode.commands.executeCommand('setContext', 'pairReview.authorFiltered', tree.author !== undefined);
-    void vscode.commands.executeCommand('setContext', 'pairReview.treeShowsGuide', tree.showsGuide);
-    void vscode.commands.executeCommand('setContext', 'pairReview.awaitingReviewOnly', tree.awaitingReviewOnly);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.filesAsTree', tree.asTree);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.groupByRole', tree.byRole);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.authorFiltered', tree.author !== undefined);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.treeShowsGuide', tree.showsGuide);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.awaitingReviewOnly', tree.awaitingReviewOnly);
   };
   showMode();
   const report = (error: unknown): void => {
     void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
   };
-  const legend = vscode.window.createTreeView('pairReview.legend', { treeDataProvider: legendProvider });
+  const legend = vscode.window.createTreeView('diffGuide.legend', { treeDataProvider: legendProvider });
   const dragAndDropController: vscode.TreeDragAndDropController<Node> = {
     dragMimeTypes: [pinMime],
     dropMimeTypes: [pinMime],
@@ -971,7 +971,7 @@ export function registerPullRequestView(
       else if (target?.kind === 'pullRequest' && target.pinned === true) await tree.pin(rows, target);
     },
   };
-  const view = vscode.window.createTreeView('pairReview.pullRequests', { treeDataProvider: tree, manageCheckboxStateManually: true, dragAndDropController });
+  const view = vscode.window.createTreeView('diffGuide.pullRequests', { treeDataProvider: tree, manageCheckboxStateManually: true, dragAndDropController });
   const sync = pollWhileFocused(60_000, () => view.visible, () => tree.pollGitHub());
   return vscode.Disposable.from(
     view,
@@ -987,37 +987,37 @@ export function registerPullRequestView(
       for (const [node] of event.items) tree.redraw(node.kind === 'file' ? pullRequestKey(node.parent) : undefined);
     }),
     onDidChangeStatus((pullRequest) => { tree.redraw(pullRequest); }),
-    vscode.commands.registerCommand('pairReview.refreshPullRequests', () => { tree.refresh(); }),
+    vscode.commands.registerCommand('diffGuide.refreshPullRequests', () => { tree.refresh(); }),
     sync,
     view.onDidChangeVisibility(({ visible }) => { if (visible) sync.now(); }),
-    vscode.commands.registerCommand('pairReview.searchPullRequests', async () => {
+    vscode.commands.registerCommand('diffGuide.searchPullRequests', async () => {
       try {
         await tree.search();
       } catch (error: unknown) {
         report(error);
       }
     }),
-    vscode.commands.registerCommand('pairReview.pinPullRequest', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.pinPullRequest', async (node: unknown) => {
       if (isPullRequestNode(node)) await tree.pin([node]);
     }),
-    vscode.commands.registerCommand('pairReview.unpinPullRequest', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.unpinPullRequest', async (node: unknown) => {
       if (isPullRequestNode(node)) await tree.unpin(pullRequestKey(node));
     }),
-    vscode.commands.registerCommand('pairReview.markPullRequestMerged', (key: unknown) => {
+    vscode.commands.registerCommand('diffGuide.markPullRequestMerged', (key: unknown) => {
       if (typeof key === 'string') tree.markMerged(key);
     }),
-    vscode.commands.registerCommand('pairReview.viewFilesAsTree', async () => { await tree.setAsTree(true); showMode(); }),
-    vscode.commands.registerCommand('pairReview.viewFilesAsList', async () => { await tree.setAsTree(false); showMode(); }),
-    vscode.commands.registerCommand('pairReview.groupByRole', async () => { await tree.setByRole(true); showMode(); }),
-    vscode.commands.registerCommand('pairReview.groupByRepository', async () => { await tree.setByRole(false); showMode(); }),
-    vscode.commands.registerCommand('pairReview.chooseRepositories', async () => { await tree.chooseRepositories(); }),
-    vscode.commands.registerCommand('pairReview.filterByAuthor', async () => { await tree.chooseAuthor(); showMode(); }),
-    vscode.commands.registerCommand('pairReview.filterByAuthorActive', async () => { await tree.chooseAuthor(); showMode(); }),
-    vscode.commands.registerCommand('pairReview.showAwaitingReviewOnly', async () => { await tree.setAwaitingReviewOnly(true); showMode(); }),
-    vscode.commands.registerCommand('pairReview.showAllMine', async () => { await tree.setAwaitingReviewOnly(false); showMode(); }),
-    vscode.commands.registerCommand('pairReview.openPullRequestLink', async () => {
+    vscode.commands.registerCommand('diffGuide.viewFilesAsTree', async () => { await tree.setAsTree(true); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.viewFilesAsList', async () => { await tree.setAsTree(false); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.groupByRole', async () => { await tree.setByRole(true); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.groupByRepository', async () => { await tree.setByRole(false); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.chooseRepositories', async () => { await tree.chooseRepositories(); }),
+    vscode.commands.registerCommand('diffGuide.filterByAuthor', async () => { await tree.chooseAuthor(); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.filterByAuthorActive', async () => { await tree.chooseAuthor(); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.showAwaitingReviewOnly', async () => { await tree.setAwaitingReviewOnly(true); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.showAllMine', async () => { await tree.setAwaitingReviewOnly(false); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.openPullRequestLink', async () => {
       const link = await vscode.window.showInputBox({
-        title: 'Open PR in Pair Review', prompt: 'GitHub PR link, or owner/repo#57', placeHolder: 'https://github.com/owner/repo/pull/57',
+        title: 'Open PR in DiffGuide', prompt: 'GitHub PR link, or owner/repo#57', placeHolder: 'https://github.com/owner/repo/pull/57',
         validateInput: (value) => !value.trim() || parsePullRequestLink(value) !== undefined ? undefined : 'Paste a GitHub PR link, such as https://github.com/owner/repo/pull/57',
       });
       if (link === undefined || !link.trim()) return;
@@ -1027,18 +1027,18 @@ export function registerPullRequestView(
         report(error);
       }
     }),
-    vscode.commands.registerCommand('pairReview.copyPullRequestLink', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.copyPullRequestLink', async (node: unknown) => {
       if (isPullRequestNode(node)) await vscode.env.clipboard.writeText(node.pullRequest.url);
     }),
-    vscode.commands.registerCommand('pairReview.showGuideInTree', async () => { await tree.setShowsGuide(true); showMode(); }),
-    vscode.commands.registerCommand('pairReview.showFilesInTree', async () => { await tree.setShowsGuide(false); showMode(); }),
-    vscode.commands.registerCommand('pairReview.hideRepository', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.showGuideInTree', async () => { await tree.setShowsGuide(true); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.showFilesInTree', async () => { await tree.setShowsGuide(false); showMode(); }),
+    vscode.commands.registerCommand('diffGuide.hideRepository', async (node: unknown) => {
       if (isRepositoryNode(node)) await tree.hide(node);
     }),
-    vscode.commands.registerCommand('pairReview.openPullRequestInBrowser', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.openPullRequestInBrowser', async (node: unknown) => {
       if (isPullRequestNode(node)) await vscode.env.openExternal(vscode.Uri.parse(node.pullRequest.url));
     }),
-    vscode.commands.registerCommand('pairReview.openPullRequest', async (node: unknown, revealPath: unknown) => {
+    vscode.commands.registerCommand('diffGuide.openPullRequest', async (node: unknown, revealPath: unknown) => {
       if (!isPullRequestNode(node)) return;
       const reveal = typeof revealPath === 'string' ? revealPath : undefined;
       try {
@@ -1051,7 +1051,7 @@ export function registerPullRequestView(
       }
       tree.redraw(pullRequestKey(node));
     }),
-    vscode.commands.registerCommand('pairReview.showPullRequestClaude', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.showPullRequestClaude', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
       try {
         await node.listing.worktrees.showClaude(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role);
@@ -1060,7 +1060,7 @@ export function registerPullRequestView(
       }
       tree.redraw(pullRequestKey(node));
     }),
-    vscode.commands.registerCommand('pairReview.showPullRequestOverview', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.showPullRequestOverview', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
       try {
         await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role);
@@ -1069,7 +1069,7 @@ export function registerPullRequestView(
       }
       tree.redraw(pullRequestKey(node));
     }),
-    vscode.commands.registerCommand('pairReview.showGuideStep', async (node: unknown, step: unknown) => {
+    vscode.commands.registerCommand('diffGuide.showGuideStep', async (node: unknown, step: unknown) => {
       if (!isPullRequestNode(node) || typeof step !== 'string') return;
       try {
         await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, { step });
@@ -1077,7 +1077,7 @@ export function registerPullRequestView(
         report(error);
       }
     }),
-    vscode.commands.registerCommand('pairReview.showGuideGroup', async (node: unknown, group: unknown) => {
+    vscode.commands.registerCommand('diffGuide.showGuideGroup', async (node: unknown, group: unknown) => {
       if (!isPullRequestNode(node) || typeof group !== 'string') return;
       try {
         await node.listing.worktrees.showOverview(node.listing.provider, node.listing.repository.name, node.pullRequest, node.role, { group });
@@ -1085,7 +1085,7 @@ export function registerPullRequestView(
         report(error);
       }
     }),
-    vscode.commands.registerCommand('pairReview.markGuideGroupRead', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.markGuideGroupRead', async (node: unknown) => {
       if (!isGuideGroupNode(node)) return;
       const { parent, group } = node;
       try {
@@ -1094,7 +1094,7 @@ export function registerPullRequestView(
         report(error);
       }
     }),
-    vscode.commands.registerCommand('pairReview.removePullRequestWorktree', async (node: unknown) => {
+    vscode.commands.registerCommand('diffGuide.removePullRequestWorktree', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
       const confirm = 'Remove worktree';
       const answer = await vscode.window.showWarningMessage(

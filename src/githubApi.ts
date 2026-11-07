@@ -106,7 +106,7 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${await token(endpoints, interactive)}`,
-      'User-Agent': 'pair-review',
+      'User-Agent': 'diffguide',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -141,7 +141,7 @@ export async function githubPoll(endpoints: GitHubEndpoints, url: string, known?
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${await token(endpoints, false)}`,
-      'User-Agent': 'pair-review',
+      'User-Agent': 'diffguide',
       ...(known === undefined ? {} : { 'If-None-Match': known.etag }),
     },
     redirect: 'error',

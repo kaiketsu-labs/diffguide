@@ -53,7 +53,7 @@ function fakeStore(): ReviewStore & { setPending(events: ReviewEvent[]): void } 
 }
 
 async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string, prepare?: () => Promise<void>, extra: Partial<ClaudeRunnerOptions> = {}) {
-  const dataPath = await mkdtemp(path.join(tmpdir(), 'pair-review-runner-'));
+  const dataPath = await mkdtemp(path.join(tmpdir(), 'diffguide-runner-'));
   t.after(async () => { await rm(dataPath, { recursive: true, force: true }); });
   const store = fakeStore();
   const children: FakeChild[] = [];
@@ -184,7 +184,7 @@ test('runs a task in the PR conversation with its own tools, and keeps Git hooks
     assert.ok(child !== undefined);
     assert.equal(child.args[1], 'Merge the base.');
     assert.equal(instance.activity.task, 'fixing merge conflicts');
-    assert.deepEqual(child.args.slice(child.args.indexOf('--allowedTools') + 1, child.args.indexOf('--allowedTools') + 3), ['mcp__pair-review', 'Bash(git merge *)']);
+    assert.deepEqual(child.args.slice(child.args.indexOf('--allowedTools') + 1, child.args.indexOf('--allowedTools') + 3), ['mcp__diffguide', 'Bash(git merge *)']);
     assert.equal(child.args[child.args.indexOf('--permission-mode') + 1], role === 'author' ? 'auto' : 'acceptEdits');
     assert.ok(!child.args.includes('--disallowedTools'));
     assert.equal(child.args.includes('--setting-sources'), role === 'reviewer');
@@ -261,7 +261,7 @@ test('remembers the conversation only after a successful run', async (t) => {
 test('describes tool calls in plain words and keeps paths short', () => {
   assert.equal(describeTool('Grep', { pattern: 'foo' }, '/w'), 'Searching for "foo"');
   assert.equal(describeTool('Bash', { command: 'git log', description: 'Show history' }, '/w'), 'Running Show history');
-  assert.equal(describeTool('mcp__pair-review__reply_to_review', {}, '/w'), 'Writing the reply');
+  assert.equal(describeTool('mcp__diffguide__reply_to_review', {}, '/w'), 'Writing the reply');
   assert.equal(describeTool('Read', { file_path: '/elsewhere/x.ts' }, '/w'), 'Reading /elsewhere/x.ts');
   assert.equal(describeTool('Weird\ntool', {}, '/w'), 'Using Weird tool');
 });
@@ -310,7 +310,7 @@ test('stop ends the running answer without an error and leaves its comments wait
 });
 
 test('waits for a busy worktree, shows who holds it, and stops while waiting without starting Claude', async (t) => {
-  const worktree = path.join(await mkdtemp(path.join(tmpdir(), 'pair-review-busy-')), 'pr-3');
+  const worktree = path.join(await mkdtemp(path.join(tmpdir(), 'diffguide-busy-')), 'pr-3');
   const releaseOther = await lockWorktree(worktree, 'acme/api#12');
   let stopping: AbortController | undefined;
   let release: (() => Promise<void>) | undefined;

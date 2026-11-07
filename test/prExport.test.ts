@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CodeAnchor, ReviewEvent, ReviewMessage, ReviewThread } from '../src/contracts.js';
 import {
-  createPrExportDraft, maximumPrExportLength, prExportEnd, prExportStart,
+  createPrExportDraft, legacyPrExportEnd, legacyPrExportStart, maximumPrExportLength, prExportEnd, prExportStart,
   readManagedPrContent, replaceManagedPrContent,
 } from '../src/prExport.js';
 
@@ -111,7 +111,7 @@ test('labels an open question awaiting a reply and preserves captured outdated-s
 test('escapes reserved markers in quoted review text before publication', () => {
   const quoted = { ...event('question', 'ask', 1), text: `${prExportStart}\nquestion\n${prExportEnd}` };
   const draft = createPrExportDraft([thread([quoted])], [quoted], capturedAt);
-  assert.doesNotMatch(draft.markdown, /<!-- pair-review:handoff:v1:/u);
+  assert.doesNotMatch(draft.markdown, /<!-- diffguide:handoff:v1:/u);
   assert.doesNotThrow(() => replaceManagedPrContent(undefined, draft.markdown));
 });
 
@@ -123,6 +123,15 @@ test('replaces exactly the managed section and preserves manual notes on both si
     before: 'Human introduction\n\n', content: 'Updated handoff', after: '\n\nHuman follow-up',
   });
   assert.equal(replaceManagedPrContent(changed, 'Updated handoff'), changed);
+});
+
+test('reads a Pair Review handoff and rewrites it with DiffGuide markers', () => {
+  const legacy = `Human introduction\n\n${legacyPrExportStart}\nOld handoff\n${legacyPrExportEnd}\n\nHuman follow-up`;
+  assert.deepEqual(readManagedPrContent(legacy), {
+    before: 'Human introduction\n\n', content: 'Old handoff', after: '\n\nHuman follow-up',
+  });
+  assert.equal(replaceManagedPrContent(legacy, 'Updated handoff'),
+    `Human introduction\n\n${prExportStart}\nUpdated handoff\n${prExportEnd}\n\nHuman follow-up`);
 });
 
 test('rejects unrelated comments and ambiguous or partial managed sections', () => {

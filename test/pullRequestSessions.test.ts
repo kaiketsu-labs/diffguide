@@ -38,7 +38,7 @@ async function until(check: () => boolean): Promise<void> {
 /** Run a fixture Git command without user configuration or hooks. */
 async function git(root: string, args: readonly string[]): Promise<void> {
   await executeFile('git', [
-    '-C', root, '-c', 'user.name=Pair Review Test', '-c', 'user.email=pair-review@example.invalid',
+    '-C', root, '-c', 'user.name=DiffGuide Test', '-c', 'user.email=diffguide@example.invalid',
     '-c', 'commit.gpgSign=false', '-c', `core.hooksPath=${path.join(root, 'no-hooks')}`, ...args,
   ], { encoding: 'utf8', timeout: 10_000 });
 }
@@ -78,7 +78,7 @@ const connect = async (): Promise<PullRequestProvider> => provider;
 
 /** Source clone with a PR worktree for `feature`, plus a separate local review store. */
 async function fixture(): Promise<{ source: string; storage: string; worktree: string; context: vscode.ExtensionContext }> {
-  const scratch = await mkdtemp(path.join(tmpdir(), 'pair-review-sessions-'));
+  const scratch = await mkdtemp(path.join(tmpdir(), 'diffguide-sessions-'));
   cleanup.push(async () => { await rm(scratch, { recursive: true, force: true }); });
   const origin = path.join(scratch, 'origin');
   const source = path.join(scratch, 'source');
@@ -101,7 +101,7 @@ async function fixture(): Promise<{ source: string; storage: string; worktree: s
 
 test('stores a comment on a PR file in that PR\'s own review, anchored to the PR base', async () => {
   const { source, storage, worktree, context } = await fixture();
-  const local = await createReviewStore(path.join(storage, 'pair-review.json'), source);
+  const local = await createReviewStore(path.join(storage, 'diffguide.json'), source);
   const started: string[] = [];
   const sessions = new PullRequestSessions(context, storage, source, connect, {
     resolve: async () => ({ executable: '/bin/claude', mcpPath: '/data/mcp.json' }),
@@ -124,10 +124,10 @@ test('stores a comment on a PR file in that PR\'s own review, anchored to the PR
   window.activeTextEditor = editor;
   assert.equal(sessions.forUri(uri)?.session, opened.session);
 
-  await commands.executeCommand('pairReview.addComment');
+  await commands.executeCommand('diffGuide.addComment');
   const draft = comments.controllers[0]?.threads.at(-1);
   assert.ok(draft !== undefined);
-  await commands.executeCommand('pairReview.submitInline', { thread: draft, text: '/a Why is this exported?' });
+  await commands.executeCommand('diffGuide.submitInline', { thread: draft, text: '/a Why is this exported?' });
   await opened.session.store.flush();
   await settle();
 
@@ -142,7 +142,7 @@ test('stores a comment on a PR file in that PR\'s own review, anchored to the PR
   assert.deepEqual(started, [worktree]);
 
   assert.ok(thread !== undefined);
-  await commands.executeCommand('pairReview.publishThread', thread.id);
+  await commands.executeCommand('diffGuide.publishThread', thread.id);
   const panel = window.panels.at(-1);
   assert.ok(panel?.webview.html.includes('Why is this exported?'));
   panel?.receive({ body: 'Why is this exported?', pending: true });

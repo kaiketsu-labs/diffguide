@@ -1,0 +1,490 @@
+<title>DiffGuide orb character</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: mixer on top (big preview + feature toggles + every picked animation), then presets, then a real-size lineup. */
+:root {
+  --bg: #F3F5F7;
+  --surface: #FFFFFF;
+  --ink: #1B2430;
+  --ink-muted: #5B6775;
+  --line: #D9DEE4;
+  --accent: #2F7EA6;
+  --font-ui: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  /* VS Code mocks use fixed colors on purpose: they stand for the real workbench in each theme */
+  --vd-bg: #1F1F1F; --vd-side: #181818; --vd-fg: #CCCCCC; --vd-dim: #8B8B8B;
+  --vl-bg: #FFFFFF; --vl-side: #F8F8F8; --vl-fg: #2B2B2B; --vl-dim: #6E7377;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161B; --surface: #1A2027; --ink: #E3E8EE; --ink-muted: #95A1AE; --line: #2C343E; --accent: #7FC0DE; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #12161B; --surface: #1A2027; --ink: #E3E8EE; --ink-muted: #95A1AE; --line: #2C343E; --accent: #7FC0DE; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 32px 112px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 40px; }
+section { display: grid; gap: 16px; }
+.intro { display: grid; gap: 8px; }
+h1 { font-size: 24px; line-height: 1.25; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 17px; line-height: 1.3; font-weight: 600; margin: 0; text-wrap: balance; }
+.lede { color: var(--ink-muted); margin: 0; max-width: 72ch; }
+.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+button { font: inherit; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.seg { font-size: 13px; padding: 4px 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; cursor: pointer; }
+.seg[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.seg.small { font-size: 12px; padding: 2px 10px; }
+
+.mixer { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 20px; }
+.big { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+.pane { border-radius: 8px; display: grid; place-items: center; padding-block: 10px; }
+.pane.dark { background: var(--vd-bg); }
+.pane.light { background: var(--vl-bg); border: 1px solid var(--line); }
+.knobs { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.knob { display: grid; gap: 6px; }
+canvas { display: block; }
+.strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.strip figure { margin: 0; display: grid; gap: 4px; justify-items: center; background: var(--vd-bg); border-radius: 6px; padding: 6px 4px; }
+.strip figcaption { font-size: 11px; color: var(--vd-dim); text-align: center; line-height: 1.3; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; align-content: start; }
+.card.short { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.head { display: flex; align-items: center; gap: 8px; }
+.id { font-family: var(--font-code); font-size: 12px; color: var(--ink-muted); }
+.name { font-weight: 600; flex: 1; min-width: 0; }
+.btn { font-size: 12px; border: 1px solid var(--line); background: transparent; color: var(--ink-muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
+.btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.idea { color: var(--ink-muted); margin: 0; font-size: 13px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.real { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-radius: 6px; background: var(--vd-bg); color: var(--vd-fg); font-family: -apple-system, "Segoe UI", sans-serif; }
+.real.light { background: var(--vl-bg); color: var(--vl-fg); border: 1px solid var(--line); }
+.real .lbl { color: var(--vd-dim); margin-left: auto; font-family: var(--font-code); font-size: 10px; }
+.steptxt { font: 12px/18px var(--font-code); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.threads { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.th { border-radius: 8px; padding: 4px 12px 12px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; min-width: 0; }
+.th.dark { background: var(--vd-bg); color: var(--vd-fg); --t-dim: var(--vd-dim); --t-line: #3a3d41; --t-orb: #7FC0DE; }
+.th.light { background: var(--vl-bg); color: var(--vl-fg); border: 1px solid var(--line); --t-dim: var(--vl-dim); --t-line: #e3e5e8; --t-orb: #2F7EA6; }
+.tmsg { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; margin-top: 8px; }
+.tmsg + .tmsg { padding-top: 8px; border-top: 1px solid var(--t-line); }
+.tmsg p { margin: 0; }
+.who { font-size: 12px; color: var(--t-dim); }
+.who b { color: inherit; font-weight: 600; }
+.th.dark .who b { color: var(--vd-fg); }
+.th.light .who b { color: var(--vl-fg); }
+.th .av.you { background: color-mix(in srgb, currentColor 14%, transparent); font: 600 9px/1 -apple-system, sans-serif; }
+.th .av.orb { background: color-mix(in srgb, var(--t-orb) 18%, transparent); }
+.log { margin: 8px 0 0 28px; display: grid; gap: 2px; font: 12px/18px var(--font-code); min-width: 0; }
+.log .step { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 6px; align-items: center; }
+.log .step > :first-child { justify-self: center; }
+.log .done { color: var(--t-dim); }
+.log .time { color: var(--t-dim); }
+.log span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tnote { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--ink-muted); }
+.av { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, #7FC0DE 16%, transparent); }
+.real.light .av { background: color-mix(in srgb, #2F7EA6 12%, transparent); }
+
+.lineup { display: grid; gap: 8px; }
+.lineup .row { display: flex; flex-wrap: wrap; gap: 14px 18px; padding: 12px; border-radius: 8px; align-items: end; }
+.lineup .row.dark { background: var(--vd-bg); color: var(--vd-dim); }
+.lineup .row.light { background: var(--vl-bg); color: var(--vl-dim); border: 1px solid var(--line); }
+.lineup figure { margin: 0; display: grid; justify-items: center; gap: 4px; }
+.lineup figcaption { font-family: var(--font-code); font-size: 10px; }
+
+.tray { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding-block: 10px calc(10px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; z-index: 5; }
+.tray p { margin: 0; color: var(--ink-muted); min-width: 0; flex: 1; }
+.tray strong { color: var(--ink); font-weight: 500; }
+.copy { font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 0; background: var(--accent); color: var(--surface); cursor: pointer; }
+@media (max-width: 900px) { .mixer { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 420px) { .pair, .big { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>DiffGuide orb character</h1>
+    <p class="lede">The chosen character is inner light with glow, motes and a ground shadow; the mixer opens on it. This sheet is the reference for changing the orb later. Your orb at 12 px in pixel style, with depth added in layers: shading, a highlight, shine in the eyes, a face, a wisp tail, a glow and a shadow on the ground. Start from a preset or switch features in the mixer. The mixer runs every animation you picked.</p>
+  </header>
+
+  <section aria-labelledby="h-mixer">
+    <h2 id="h-mixer">Mixer</h2>
+    <div class="mixer">
+      <div class="big">
+        <div class="pane dark"><canvas id="big-dark" aria-label="Orb on a dark editor"></canvas></div>
+        <div class="pane light"><canvas id="big-light" aria-label="Orb on a light editor"></canvas></div>
+      </div>
+      <div class="knobs">
+        <div class="knob"><span class="label">Body</span><div class="group" id="shading"></div></div>
+        <div class="knob"><span class="label">Features</span><div class="group" id="features"></div></div>
+        <div class="knob"><span class="label">Animation in the large preview and presets</span><div class="group" id="anim-pick"></div></div>
+      </div>
+      <div class="threads">
+        <div class="th dark" id="thread-dark"></div>
+        <div class="th light" id="thread-light"></div>
+        <p class="tnote">Real size, laid out like a Local thread on the review page. The step log row runs the animation picked above. Clawd's slot is 18 px wide; moving animations need about 30 px, so the step text shifts right by 12 px.</p>
+      </div>
+    </div>
+    <span class="label">Every picked animation with these settings</span>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <section aria-labelledby="h-presets">
+    <h2 id="h-presets">Presets</h2>
+    <p class="lede">Twelve starting points. <b>Load in mixer</b> copies a preset's features into the mixer so you can adjust it.</p>
+    <div class="grid" id="presets"></div>
+  </section>
+
+  <section aria-labelledby="h-lineup">
+    <h2 id="h-lineup">Real-size lineup</h2>
+    <p class="lede">Every preset at the size it will have in a thread's step log, in VS Code dark and light. Detail that disappears here only shows on the review page's larger moments, such as the reply hop.</p>
+    <div class="lineup"><div class="row dark" id="line-dark"></div><div class="row light" id="line-light"></div></div>
+  </section>
+</div>
+
+<div class="tray">
+  <p id="summary"></p>
+  <button class="copy" id="copy">Copy picks</button>
+</div>
+
+<script>
+const W = 30, H = 20, X = 15, Y = 10, R = 6;
+const TAU = Math.PI * 2;
+const frac = v => v - Math.floor(v);
+const lerp = (a, b, k) => a + (b - a) * k;
+const ease = k => k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const phase = (t, P) => frac(t / P);
+const blinking = (p, at) => p >= at && p < at + .035;
+const sign = (v, d = .3) => v > d ? 1 : v < -d ? -1 : 0;
+
+// Motion: the same timings as the orb studio, for the animations you picked ------------------------------
+const base = (r, extra) => ({ x: X, y: Y, sq: 1, alpha: 1, eyes: 'open', look: [0, 0], sparks: [], trail: [], rings: [], glyphs: [], lines: [], behind: [], front: [], ...extra });
+function sleeping(t, r, P = 3200) {
+  const p = phase(t, P), b = Math.sin(TAU * p);
+  const glyphs = [0, 1, 2].map(k => { const q = frac(p + k / 3); return { ch: q > .5 ? 'Z' : 'z', x: lerp(X + r * .5, X + r + 6, q), y: lerp(Y - r * .4, 0, q), a: q < .15 ? q / .15 : 1 - (q - .15) / .85 }; });
+  return base(r, { y: Y + 1 + b * .4, sq: 1 - (b + 1) * .03, alpha: .78 + .11 * (b + 1), eyes: 'closed', glyphs });
+}
+function floating(t, r, P = 2600) { const p = phase(t, P); return base(r, { y: Y + Math.sin(TAU * p) * 1.5, eyes: blinking(p, .85) ? 'closed' : 'open' }); }
+function withTrail(fn, t, r, n = 3, dt = 70) {
+  const f = fn(t, r);
+  f.trail = Array.from({ length: n }, (_, i) => { const g = fn(t - (i + 1) * dt, r); return { x: g.x, y: g.y, r: r * (.62 - i * .14), a: .38 - i * .1 }; })
+    .filter(s => Math.hypot(s.x - f.x, s.y - f.y) > .6);
+  return f;
+}
+const anims = [
+  { id: 'attentive', name: 'Attentive', fits: 'Avatar at rest', frame: (t, r) => {
+    const p = phase(t, 4800), c = { x: X + Math.cos(TAU * p) * 11, y: Y + Math.sin(2 * TAU * p) * 6 }, x = X + Math.sin(TAU * p) * .8;
+    return base(r, { x, look: [sign(c.x - x, 3), sign(c.y - Y, 2)], sparks: [{ x: c.x, y: c.y, a: .5 }], eyes: blinking(p, .55) ? 'closed' : 'open' }); } },
+  { id: 'drift', name: 'Drift', fits: 'Working (alt)', frame: (t, r) => withTrail((tt, rr) => {
+    const p = phase(tt, 3000), xl = rr + 2, xr = W - rr - 2;
+    if (p < .4) return base(rr, { x: lerp(xl, xr, ease(p / .4)), y: Y + Math.sin(p * 20) * .4, look: [1, 0] });
+    if (p < .5) return base(rr, { x: xr, look: [p < .45 ? 1 : -1, 0] });
+    if (p < .9) return base(rr, { x: lerp(xr, xl, ease((p - .5) / .4)), y: Y + Math.sin(p * 20) * .4, look: [-1, 0] });
+    return base(rr, { x: xl, look: [p < .95 ? -1 : 1, 0] }); }, t, r) },
+  { id: 'think', name: 'Thinking', fits: 'Claude is working', frame: (t, r) => {
+    const p = phase(t, 1900);
+    const sparks = [0, 1, 2].map(k => { const a = TAU * p + k * TAU / 3; return { x: X + Math.cos(a) * (r + 3.5), y: Y + Math.sin(a) * (r * .5 + 1.5), a: .55 + .45 * Math.sin(a) }; });
+    return base(r, { y: Y + Math.sin(TAU * p) * .5, look: [1, -1], sparks }); } },
+  { id: 'orbit', name: 'Orbit', fits: 'Working (alt)', frame: (t, r) => {
+    const a = TAU * phase(t, 1800), moon = { x: X + Math.cos(a) * (r + 4.5), y: Y + Math.sin(a) * 2.2, r: 1.4, a: 1 };
+    const f = base(r, { look: [sign(Math.cos(a), .4), 0] }); (Math.sin(a) < 0 ? f.behind : f.front).push(moon); return f; } },
+  { id: 'search', name: 'Searching', fits: 'Step: Search', frame: (t, r) => {
+    const loop = (tt, rr) => { const pp = phase(tt, 3400); return base(rr, { x: X + Math.sin(TAU * pp) * (X - rr - 2), y: Y + Math.sin(2 * TAU * pp) * 1.5 }); };
+    const p = phase(t, 3400);
+    return Object.assign(withTrail(loop, t, r, 2, 90), { look: [sign(Math.cos(TAU * p)), sign(Math.cos(2 * TAU * p), .6)] }); } },
+  { id: 'write', name: 'Writing', fits: 'Step: Edit file', frame: (t, r) => {
+    const p = phase(t, 3200), row = H - 2, x = lerp(r + 1, W - r - 1, p), hop = Math.abs(Math.sin(p * Math.PI * 9));
+    const lines = []; for (let c = 1; c < x - r * .4; c++) if (c % 6 !== 5) lines.push({ x: c, y: row, w: 1, a: p > .92 ? (1 - p) / .08 * .7 : .7 });
+    return base(r, { x, y: row - r - 1.2 - hop * 2, sq: 1 - (1 - hop) * .08, look: [1, 1], lines }); } },
+  { id: 'wake', name: 'Wake up', fits: 'Picked up', frame: (t, r) => {
+    const p = phase(t, 3800);
+    if (p < .4) return sleeping(p * 3800, r);
+    if (p < .52) { const k = (p - .4) / .12;
+      const sparks = Array.from({ length: 8 }, (_, i) => ({ x: X + Math.cos(i * TAU / 8) * (r + 1 + k * 4), y: Y - 2 + Math.sin(i * TAU / 8) * (r + 1 + k * 3), a: 1 - k }));
+      return base(r, { y: Y + 1 - Math.sin(Math.PI * k) * 3.5, eyes: 'wide', sparks }); }
+    return floating((p - .52) * 3800, r); } },
+  { id: 'nod', name: 'Nod', fits: 'Comment received', frame: (t, r) => {
+    const p = phase(t, 2200), k = p < .4 ? Math.abs(Math.sin(p / .4 * TAU)) : 0;
+    return base(r, { y: Y + k * 1.4, sq: 1 - k * .07, look: [0, k > .3 ? 1 : 0], eyes: blinking(p, .8) ? 'closed' : 'open' }); } },
+  { id: 'doze', name: 'Doze off', fits: 'Idle, then waiting', frame: (t, r) => {
+    const P = 6400, p = phase(t, P);
+    if (p < .35) return base(r, { y: Y + Math.sin(TAU * p * 3) * .8, look: [p < .17 ? -1 : 1, 0] });
+    if (p < .58) { const k = (p - .35) / .23; return base(r, { y: Y + k * 1.2 + Math.max(0, Math.sin(k * TAU * 2)) * .8, eyes: Math.sin(k * TAU * 2) > .2 ? 'closed' : 'open' }); }
+    return sleeping((p - .58) * P, r); } },
+  { id: 'sleep', name: 'Sleep', fits: 'Waiting for feedback', frame: (t, r) => sleeping(t, r) },
+  { id: 'hop', name: 'Step hop', fits: 'Guide: next step', frame: (t, r) => {
+    const p = phase(t, 3200), spots = [X - 9, X, X + 9, X], s = Math.floor(p * 4), q = frac(p * 4);
+    const from = clamp(spots[s], r + 1, W - r - 1), to = clamp(spots[(s + 1) % 4], r + 1, W - r - 1), ground = H - r - 2;
+    const lines = [X - 9, X, X + 9].map(x => ({ x: Math.round(clamp(x, r + 1, W - r - 1)) - 2, y: H - 1, w: 4, a: .3 }));
+    if (q < .2) return base(r, { x: from, y: ground + .5, sq: .82, look: [sign(to - from), 0], lines });
+    if (q < .8) { const k = (q - .2) / .6; return base(r, { x: lerp(from, to, ease(k)), y: ground - Math.sin(Math.PI * k) * Math.min(4, ground - r), sq: 1.06, look: [sign(to - from), 0], lines }); }
+    return base(r, { x: to, y: ground + (q < .88 ? .5 : 0), sq: q < .88 ? .85 : 1, lines }); } },
+  { id: 'lead', name: 'Lead the way', fits: 'Guide: walkthrough', frame: (t, r) => {
+    const p = phase(t, 4600), xl = r + 2, xm = X, xr = W - r - 2;
+    let x = xl, look = [1, 0], alpha = 1, eyes = 'open';
+    if (p < .25) x = lerp(xl, xm, ease(p / .25));
+    else if (p < .45) { x = xm; look = [-1, 0]; eyes = blinking(p, .38) ? 'closed' : 'open'; }
+    else if (p < .7) x = lerp(xm, xr, ease((p - .45) / .25));
+    else if (p < .88) { x = xr; look = [-1, 0]; }
+    else { x = xr; alpha = 1 - (p - .88) / .12; }
+    const sparks = []; for (let c = xl; c < x - r - 1; c += 3) sparks.push({ x: c, y: Y + r + 2, a: .45 * alpha });
+    return base(r, { x, y: Y + Math.sin(p * 30) * .3, look, alpha, eyes, sparks }); } },
+  { id: 'peek', name: 'Peek', fits: 'New answer below', frame: (t, r) => {
+    const p = phase(t, 4200), shown = H - r * .55, hidden = H + r + 1;
+    let y = hidden, look = [0, 0];
+    if (p < .15) y = lerp(hidden, shown, ease(p / .15));
+    else if (p < .65) { y = shown; look = [p < .4 ? -1 : 1, 0]; }
+    else if (p < .78) y = lerp(shown, hidden, ease((p - .65) / .13));
+    return base(r, { y, look, eyes: blinking(p, .5) ? 'closed' : 'open' }); } },
+  { id: 'puzzled', name: 'Puzzled', fits: 'Failed, needs you', frame: (t, r) => {
+    const p = phase(t, 2800), shake = p < .22 ? Math.sin(p * 90) * .9 : 0;
+    return base(r, { x: X - 2 + shake, look: [1, -1], glyphs: [{ ch: '?', x: X + r + 1, y: Y - r, a: p < .22 ? p / .22 : 1 }] }); } },
+  { id: 'flyin', name: 'Fly into the reply', fits: 'Reply arrives', frame: (t, r) => withTrail((tt, rr) => {
+    const p = phase(tt, 2800), from = [rr + 1.5, H - rr - 1.5], to = [W - rr - 1.5, rr + 1.5];
+    if (p < .08) return base(rr, { x: from[0], y: from[1], alpha: p / .08 });
+    if (p < .6) { const k = ease((p - .08) / .52); return base(rr, { x: lerp(from[0], to[0], k), y: Math.max(rr + .5, lerp(from[1], to[1], k) - Math.sin(Math.PI * k) * 1.5), look: [1, -1] }); }
+    if (p < .68) return base(rr, { x: to[0], y: to[1] + .4, sq: .86 });
+    return base(rr, { x: to[0], y: to[1], eyes: blinking(p, .85) ? 'closed' : 'open' }); }, t, r, 4, 55) },
+];
+
+// Look: depth features -----------------------------------------------------------------------------------
+const FEATURES = [
+  ['outline', 'Outline'], ['glint', 'Highlight'], ['shine', 'Eye shine'], ['cheeks', 'Cheeks'], ['mouth', 'Mouth'],
+  ['visor', 'Face plate'], ['tail', 'Wisp tail'], ['glow', 'Glow'], ['aura', 'Motes'], ['ground', 'Ground shadow'],
+];
+const SHADING = [['flat', 'Flat'], ['bands', 'Shaded sphere'], ['core', 'Inner light'], ['night', 'Night spirit']];
+const presets = [
+  { id: 'P1', name: 'Flat', idea: 'The orb from the last sheet, for comparison.', f: { shading: 'flat' } },
+  { id: 'P2', name: 'Shaded sphere', idea: 'Light from the top left, three tones, a highlight and shine in the eyes.', f: { shading: 'bands', glint: 1, shine: 1 } },
+  { id: 'P3', name: 'Classic pixel art', idea: 'A dark outline around the shading. Reads clearly on any background.', f: { shading: 'bands', outline: 1, glint: 1, shine: 1 } },
+  { id: 'P4', name: 'Inner light', idea: 'Glows from its center like a lantern, with a soft halo.', f: { shading: 'core', shine: 1, glow: 1 } },
+  { id: 'P5', name: 'Night spirit', idea: 'A dark body lit from behind, with glowing eyes. The most mysterious.', f: { shading: 'night', glow: 1 } },
+  { id: 'P6', name: 'Wisp', idea: 'A tail that trails behind as it moves and hangs down when it rests.', f: { shading: 'bands', glint: 1, shine: 1, tail: 1, glow: 1 } },
+  { id: 'P7', name: 'Friendly', idea: 'Cheeks and a small mouth that changes with its mood.', f: { shading: 'bands', glint: 1, shine: 1, cheeks: 1, mouth: 1 } },
+  { id: 'P8', name: 'Face plate', idea: 'A lighter face where the eyes sit, like a mask or a visor.', f: { shading: 'bands', visor: 1, shine: 1 } },
+  { id: 'P9', name: 'Hovering', idea: 'A shadow on the ground that shrinks as it rises, so you feel the height.', f: { shading: 'bands', glint: 1, shine: 1, ground: 1 } },
+  { id: 'P10', name: 'Firefly', idea: 'Inner light with motes drifting around it.', f: { shading: 'core', shine: 1, glow: 1, aura: 1 } },
+  { id: 'P11', name: 'Companion', idea: 'Outline, cheeks, mouth, tail and ground shadow together.', f: { shading: 'bands', outline: 1, glint: 1, shine: 1, cheeks: 1, mouth: 1, tail: 1, ground: 1 } },
+  { id: 'P12', name: 'Spirit', idea: 'Inner light, a tail and motes. The most magical, least like a mascot.', f: { shading: 'core', shine: 1, tail: 1, aura: 1, glow: 1 } },
+];
+
+// Color: tones derived from the theme's orb color ----------------------------------------------------------
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const mix = (a, b, k) => { const A = hex(a), B = hex(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * k).toString(16).padStart(2, '0')).join(''); };
+function tones(baseColor, dark) {
+  return {
+    base: baseColor, hi: mix(baseColor, '#ffffff', .38), core: mix(baseColor, '#ffffff', .72), glint: '#ffffff',
+    shade: mix(baseColor, '#000000', .24), deep: mix(baseColor, '#08131C', .66), night: mix(baseColor, '#0B1822', .6),
+    nightRim: mix(baseColor, '#ffffff', .2), cheek: mix(baseColor, '#F390A4', .62),
+    spark: dark ? mix(baseColor, '#ffffff', .3) : baseColor, ground: dark ? '#000000' : mix(baseColor, '#08131C', .5), groundA: dark ? .55 : .22,
+  };
+}
+const THEMES = { dark: tones('#7FC0DE', true), light: tones('#2F7EA6', false) };
+
+const GLYPHS = { z: ['##.', '.#.', '.##'], Z: ['####', '..#.', '.#..', '####'], '?': ['###', '..#', '.##', '...', '.#.'] };
+const key = (i, j) => i + ',' + j;
+function put(map, i, j, c, a = 1) { map.set(key(i, j), { i, j, c, a }); }
+function disc(map, cx, cy, rr, c, a) {
+  for (let i = Math.floor(cx - rr - 1); i <= cx + rr + 1; i++) for (let j = Math.floor(cy - rr - 1); j <= cy + rr + 1; j++)
+    if ((i + .5 - cx) ** 2 + (j + .5 - cy) ** 2 <= rr * rr) put(map, i, j, c, a);
+}
+
+/** Every cell of one frame, split into what sits behind the body, the body with its face, and what passes in front. */
+function compose(anim, t, feat, T) {
+  const r = R, f = anim.frame(t, r);
+  const rx = r * (1 + (1 - f.sq) * .6), ry = r * f.sq;
+  const cx = Math.round(f.x), cy = Math.round(f.y + (r - ry));
+  const inside = (i, j) => ((i + .5 - cx) / rx) ** 2 + ((j + .5 - cy) / ry) ** 2 <= 1;
+  const under = new Map(), body = new Map(), front = new Map();
+
+  if (feat.ground) {
+    const lift = (H - 1) - (cy + ry);
+    if (lift > -.5) {
+      const hw = clamp(r * (1.05 - lift * .07), 2, r + 1), a = T.groundA * (.55 + .45 * (1 - clamp(lift / 8, 0, 1)));
+      for (let i = Math.floor(cx - hw - 1); i <= cx + hw; i++) if (Math.abs(i + .5 - cx) <= hw) put(under, i, H - 1, T.ground, Math.abs(i + .5 - cx) <= hw - 2 ? a : a * .6);
+    }
+  }
+  if (feat.glow) {
+    for (let i = cx - r - 4; i <= cx + r + 4; i++) for (let j = cy - r - 4; j <= cy + r + 4; j++) {
+      const e = Math.sqrt(((i + .5 - cx) / rx) ** 2 + ((j + .5 - cy) / ry) ** 2) * r;
+      if (e > r && e <= r + 1.3) put(under, i, j, T.base, (.22 + .06 * Math.sin(t / 400)) * f.alpha);
+      else if (e > r + 1.3 && e <= r + 2.6) put(under, i, j, T.base, .08 * f.alpha);
+    }
+  }
+  for (const b of f.behind) disc(under, b.x, b.y, b.r, T.shade, 1);
+  for (const l of f.lines) for (let c = 0; c < Math.round(l.w); c++) put(under, Math.round(l.x) + c, Math.round(l.y), T.base, l.a * .8);
+  for (const ring of f.rings) for (let i = Math.floor(ring.x - ring.r - 1); i <= ring.x + ring.r + 1; i++) for (let j = Math.floor(ring.y - ring.r - 1); j <= ring.y + ring.r + 1; j++)
+    if (Math.abs(Math.hypot(i + .5 - ring.x, j + .5 - ring.y) - ring.r) < .5) put(under, i, j, T.base, ring.a);
+  if (!feat.tail) for (const s of f.trail) disc(under, s.x, s.y, s.r, T.base, s.a);
+  if (feat.tail) {
+    const prev = anim.frame(t - 90, r), vx = f.x - prev.x, vy = f.y - prev.y, speed = Math.hypot(vx, vy);
+    const idle = [-.3 + Math.sin(t / 700) * .25, 1], il = Math.hypot(...idle);
+    const k = clamp(speed / .7, 0, 1);
+    let dx = lerp(idle[0] / il, speed ? -vx / speed : 0, k), dy = lerp(idle[1] / il, speed ? -vy / speed : 0, k);
+    const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+    const segs = [[T.shade, 1, .7], [T.base, .9, .55], [T.base, .62, .42], [T.hi, .35, .28]];
+    segs.forEach(([c, a, size], n) => {
+      const off = r * .5 + (n + 1) * 1.8, wob = Math.sin(t / 160 + n * 1.3) * .5 * (n + 1) / 2;
+      disc(under, cx + dx * off - dy * wob, cy + dy * off + dx * wob, r * size, c, a * f.alpha);
+    });
+  }
+  for (const s of f.sparks) put(under, Math.round(s.x), Math.round(s.y), T.spark, clamp(s.a, 0, 1));
+  for (const g of f.glyphs) (GLYPHS[g.ch] ?? []).forEach((row, j) => [...row].forEach((ch, i) => { if (ch === '#') put(under, Math.round(g.x) + i, Math.round(g.y) + j, T.spark, clamp(g.a, 0, 1)); }));
+  if (feat.aura) for (let n = 0; n < 3; n++) {
+    const a = t / 900 + n * 2.1;
+    put(under, Math.round(cx + Math.cos(a) * (r + 3.4)), Math.round(cy + Math.sin(a) * (r * .55 + 1.6)), T.spark, .35 + .45 * (.5 + .5 * Math.sin(t / 260 + n * 2)));
+  }
+
+  const pulse = Math.sin(t / 520) * .05;
+  for (let i = cx - Math.ceil(rx) - 1; i <= cx + Math.ceil(rx) + 1; i++) for (let j = cy - Math.ceil(ry) - 1; j <= cy + Math.ceil(ry) + 1; j++) {
+    if (!inside(i, j)) continue;
+    const nx = (i + .5 - cx) / rx, ny = (j + .5 - cy) / ry, dist = Math.hypot(nx, ny), nz = Math.sqrt(Math.max(0, 1 - dist * dist));
+    const lit = -.45 * nx - .55 * ny + .7 * nz;
+    let c = T.base;
+    if (feat.shading === 'bands') c = lit > .8 ? T.hi : lit > .3 ? T.base : T.shade;
+    else if (feat.shading === 'core') c = dist < .36 + pulse ? T.core : dist < .66 + pulse ? T.hi : dist < .9 ? T.base : T.shade;
+    else if (feat.shading === 'night') c = dist > .7 && (nx * .55 + ny * .6) > .2 ? T.nightRim : dist > .78 && lit > .55 ? T.shade : T.night;
+    if (feat.outline && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => !inside(i + a, j + b))) c = T.deep;
+    put(body, i, j, c);
+  }
+  const has = (i, j) => body.has(key(i, j));
+  const edge = (i, j) => feat.outline && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => !inside(i + a, j + b));
+  if (feat.glint) {
+    const gi = cx - Math.round(rx * .5), gj = cy - Math.round(ry * .55);
+    if (has(gi, gj) && !edge(gi, gj)) put(body, gi, gj, T.glint);
+    if (has(gi + 1, gj) && !edge(gi + 1, gj)) put(body, gi + 1, gj, T.hi);
+    if (has(gi, gj + 1) && !edge(gi, gj + 1)) put(body, gi, gj + 1, T.hi);
+  }
+  const lx = clamp(f.look[0], -1, 1), ly = clamp(f.look[1], -1, 1);
+  const ey = cy - 2 + ly;
+  if (feat.visor) for (const cell of body.values()) {
+    if (((cell.i + .5 - cx - lx * .5) / 4.4) ** 2 + ((cell.j + .5 - (ey + 1.2)) / 2.4) ** 2 <= 1 && !edge(cell.i, cell.j)) cell.c = feat.shading === 'night' ? T.shade : T.core;
+  }
+  const eyeColor = feat.shading === 'night' ? T.core : T.deep;
+  const hole = feat.shading === 'flat';
+  const eye = (i, j, c = eyeColor) => { if (!has(i, j)) return; hole ? body.delete(key(i, j)) : put(body, i, j, c); };
+  for (const [side, ex] of [[0, cx - 3 + lx], [1, cx + 1 + lx]]) {
+    if (f.eyes === 'closed') { eye(ex, ey + 1); eye(ex + 1, ey + 1); }
+    else if (f.eyes === 'happy') { const m = side ? ex + 1 : ex; eye(m - (side ? 0 : 1), ey + 1); eye(m + (side ? 1 : 0), ey); eye(m + (side ? 2 : 1), ey + 1); }
+    else {
+      const top = f.eyes === 'wide' ? ey - 1 : ey;
+      for (let j = top; j <= ey + 1; j++) { eye(ex, j); eye(ex + 1, j); }
+      if (feat.shine && !hole && feat.shading !== 'night') eye(ex, top, T.glint);
+    }
+  }
+  if (feat.cheeks) for (const i of [cx - 5, cx - 4, cx + 3, cx + 4]) if (has(i, cy) && !edge(i, cy)) put(body, i, cy, T.cheek);
+  if (feat.mouth) {
+    const m = feat.shading === 'night' ? T.core : T.deep, mj = cy + 1 + ly;
+    if (f.eyes === 'happy') { eye(cx - 2 + lx, mj, m); eye(cx - 1 + lx, mj + 1, m); eye(cx + lx, mj + 1, m); eye(cx + 1 + lx, mj, m); }
+    else if (f.eyes === 'wide') { eye(cx - 1 + lx, mj, m); eye(cx + lx, mj, m); eye(cx - 1 + lx, mj + 1, m); eye(cx + lx, mj + 1, m); }
+    else if (f.eyes === 'closed') { eye(cx - 1 + lx, mj + 1, T.shade); eye(cx + lx, mj + 1, T.shade); }
+    else { eye(cx - 1 + lx, mj + 1, m); eye(cx + lx, mj + 1, m); }
+  }
+  for (const m of f.front) { disc(front, m.x, m.y, m.r, T.hi, 1); put(front, Math.round(m.x - .5), Math.round(m.y - .5), T.glint, 1); }
+  for (const k of body.keys()) under.delete(k);
+  return { under, body, front, alpha: f.alpha };
+}
+
+function paint(ctx, frame, scale, offset = [0, 0]) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.setTransform(scale, 0, 0, scale, -offset[0] * scale, -offset[1] * scale);
+  for (const [layer, a] of [[frame.under, 1], [frame.body, frame.alpha], [frame.front, 1]])
+    for (const cell of layer.values()) { ctx.globalAlpha = clamp(cell.a * a, 0, 1); ctx.fillStyle = cell.c; ctx.fillRect(cell.i, cell.j, 1, 1); }
+  ctx.globalAlpha = 1;
+}
+
+// State and page -------------------------------------------------------------------------------------------
+const store = {
+  get(k, fallback) { try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+/** The chosen character. The mixer starts here, so later changes can be compared against it. */
+const chosen = { shading: 'core', glow: 1, aura: 1, ground: 1 };
+const state = Object.assign({ feat: { ...chosen }, anim: 'drift', short: [] }, store.get('orb-character', {}));
+const save = () => store.set('orb-character', state);
+const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+const canvasHtml = (attrs, cssW, cssH) => `<canvas ${attrs} width="${cssW * dpr}" height="${cssH * dpr}" style="width:${cssW}px;height:${cssH}px" aria-hidden="true"></canvas>`;
+const animCanvas = (src, animId, theme, scale) => canvasHtml(`data-src="${src}" data-anim="${animId}" data-theme="${theme}" data-scale="${scale}"`, W * scale, H * scale);
+const avatarCanvas = (src, theme) => canvasHtml(`data-src="${src}" data-avatar="1" data-theme="${theme}"`, 16, 16);
+const featsOf = src => src === 'mix' ? state.feat : presets.find(p => p.id === src).f;
+const describe = f => [SHADING.find(s => s[0] === (f.shading ?? 'flat'))[1], ...FEATURES.filter(([k]) => f[k]).map(([, n]) => n)].join(', ');
+
+function setup() {
+  const big = document.getElementById('big-dark'), bigL = document.getElementById('big-light');
+  for (const c of [big, bigL]) { c.width = W * 7 * dpr; c.height = H * 7 * dpr; c.style.width = W * 7 + 'px'; c.style.height = H * 7 + 'px'; c.dataset.src = 'mix'; c.dataset.scale = 7; c.dataset.anim = 'current'; }
+  big.dataset.theme = 'dark'; bigL.dataset.theme = 'light';
+  for (const theme of ['dark', 'light']) document.getElementById('thread-' + theme).innerHTML = `
+    <div class="tmsg"><span class="av you">FS</span><div><div class="who"><b>You</b> · 3 min ago</div><p>Why does this keep retrying after the token expired?</p></div></div>
+    <div class="tmsg"><span class="av orb">${avatarCanvas('mix', theme)}</span><div><div class="who"><b>Claude</b> · 2 min ago</div><p>A 401 never ends the loop, so it retries with a dead token. I'd stop on 401 and ask you to sign in again.</p></div></div>
+    <div class="tmsg"><span class="av you">FS</span><div><div class="who"><b>You</b> · now</div><p>Do that, and keep retrying on 5xx.</p></div></div>
+    <div class="log">
+      <div class="step done"><span>✓</span><span><b>Read</b>(src/upload.ts)</span><span></span></div>
+      <div class="step"><span>${animCanvas('mix', 'current', theme, 1)}</span><span><b>Update</b>(src/retry.ts)</span><span class="time">0:12</span></div>
+    </div>`;
+  document.getElementById('strip').innerHTML = anims.map(a => `<figure>${animCanvas('mix', a.id, 'dark', 3)}<figcaption>${a.name}<br>${a.fits}</figcaption></figure>`).join('');
+  document.getElementById('line-dark').innerHTML = presets.map(p => `<figure>${animCanvas(p.id, 'current', 'dark', 1)}<figcaption>${p.id}</figcaption></figure>`).join('');
+  document.getElementById('line-light').innerHTML = presets.map(p => `<figure>${animCanvas(p.id, 'current', 'light', 1)}<figcaption>${p.id}</figcaption></figure>`).join('');
+}
+function render() {
+  document.getElementById('shading').innerHTML = SHADING.map(([k, n]) => `<button class="seg" data-shading="${k}" aria-pressed="${(state.feat.shading ?? 'flat') === k}">${n}</button>`).join('');
+  document.getElementById('features').innerHTML = FEATURES.map(([k, n]) => `<button class="seg" data-feat="${k}" aria-pressed="${!!state.feat[k]}">${n}</button>`).join('');
+  document.getElementById('anim-pick').innerHTML = anims.map(a => `<button class="seg small" data-anim-pick="${a.id}" aria-pressed="${state.anim === a.id}">${a.name}</button>`).join('');
+  document.getElementById('presets').innerHTML = presets.map(p => `
+    <article class="card${state.short.includes(p.id) ? ' short' : ''}">
+      <div class="head"><span class="id">${p.id}</span><span class="name">${p.name}</span>
+        <button class="btn" data-load="${p.id}">Load in mixer</button>
+        <button class="btn" data-short="${p.id}" aria-pressed="${state.short.includes(p.id)}">${state.short.includes(p.id) ? 'Shortlisted' : 'Shortlist'}</button></div>
+      <p class="idea">${p.idea}</p>
+      <div class="pair"><div class="pane dark">${animCanvas(p.id, 'current', 'dark', 4)}</div><div class="pane light">${animCanvas(p.id, 'current', 'light', 4)}</div></div>
+      <div class="real"><span class="av">${avatarCanvas(p.id, 'dark')}</span>${animCanvas(p.id, 'current', 'dark', 1)}<span class="steptxt"><b>Update</b>(retry.ts)</span><span class="lbl">real size</span></div>
+      <div class="real light"><span class="av">${avatarCanvas(p.id, 'light')}</span>${animCanvas(p.id, 'current', 'light', 1)}<span class="steptxt"><b>Update</b>(retry.ts)</span><span class="lbl">real size</span></div>
+    </article>`).join('');
+  collect();
+  const a = anims.find(x => x.id === state.anim);
+  document.getElementById('summary').innerHTML = `Mixer: <strong>${describe(state.feat)}</strong>. Showing <strong>${a.name}</strong>. Shortlisted: ${state.short.join(', ') || 'none'}.`;
+}
+let live = [];
+function collect() {
+  live = [...document.querySelectorAll('canvas[data-src]')].map(el => ({ el, ctx: el.getContext('2d') }));
+  for (const { el, ctx } of live) if (el.dataset.avatar) {
+    const still = { frame: (t, r) => base(r, {}) };
+    paint(ctx, compose(still, 0, featsOf(el.dataset.src), THEMES[el.dataset.theme]), dpr, [X - 8, Y - 8]);
+  }
+  live = live.filter(c => !c.el.dataset.avatar);
+}
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+function tick(now) {
+  const t = reduced.matches ? 1200 : now;
+  const current = anims.find(a => a.id === state.anim);
+  for (const { el, ctx } of live) {
+    const anim = el.dataset.anim === 'current' ? current : anims.find(a => a.id === el.dataset.anim);
+    paint(ctx, compose(anim, t, featsOf(el.dataset.src), THEMES[el.dataset.theme]), +el.dataset.scale * dpr);
+  }
+  requestAnimationFrame(tick);
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.shading) state.feat.shading = b.dataset.shading;
+  else if (b.dataset.feat) state.feat[b.dataset.feat] = state.feat[b.dataset.feat] ? 0 : 1;
+  else if (b.dataset.animPick) state.anim = b.dataset.animPick;
+  else if (b.dataset.load) { state.feat = { ...presets.find(p => p.id === b.dataset.load).f }; document.getElementById('h-mixer').scrollIntoView({ behavior: reduced.matches ? 'auto' : 'smooth' }); }
+  else if (b.dataset.short) { const at = state.short.indexOf(b.dataset.short); at < 0 ? state.short.push(b.dataset.short) : state.short.splice(at, 1); }
+  else return;
+  save(); render();
+});
+const pickText = () => `DiffGuide orb character picks
+Mixer: ${describe(state.feat)}.
+Shortlisted presets: ${state.short.map(id => `${id} ${presets.find(p => p.id === id).name}`).join(', ') || 'none'}.`;
+document.getElementById('copy').addEventListener('click', e => {
+  const button = e.currentTarget, text = pickText();
+  navigator.clipboard.writeText(text).then(() => { button.textContent = 'Copied'; },
+    () => { document.getElementById('summary').textContent = text; button.textContent = 'Copy the text above'; });
+  setTimeout(() => { button.textContent = 'Copy picks'; }, 2000);
+});
+setup();
+render();
+requestAnimationFrame(tick);
+</script>

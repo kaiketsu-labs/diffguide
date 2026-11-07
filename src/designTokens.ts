@@ -1,5 +1,5 @@
 /**
- * Pair Review's design tokens: the one place to change colors, type, spacing and corners in every webview.
+ * DiffGuide's design tokens: the one place to change colors, type, spacing and corners in every webview.
  * Each token becomes a CSS custom property of the same name (`brand` → `--brand`). Webview CSS uses only these properties.
  * The design system documents what each token is for.
  */
@@ -7,7 +7,7 @@
 /** A token that follows the user's VS Code theme. The hex values are fallbacks for when VS Code does not set the variable. */
 interface ThemeToken { readonly vscode: string; readonly dark: string; readonly light: string }
 
-/** A token Pair Review owns, per theme. */
+/** A token DiffGuide owns, per theme. */
 interface BrandToken { readonly dark: string; readonly light: string }
 
 const themeTokens: Readonly<Record<string, ThemeToken>> = {
@@ -31,8 +31,8 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
   'git-deleted': { vscode: 'gitDecoration-deletedResourceForeground', dark: '#c74e39', light: '#ad0707' },
   'git-renamed': { vscode: 'gitDecoration-renamedResourceForeground', dark: '#73c991', light: '#007100' },
   // Our own color contributions in package.json, so users can override them; keep their defaults in sync.
-  'brand-soft': { vscode: 'pairReview-selectionBackground', dark: '#ffffff1a', light: '#0000000f' },
-  'brand-line': { vscode: 'pairReview-selectionBorder', dark: '#ffffff66', light: '#00000059' },
+  'brand-soft': { vscode: 'diffGuide-selectionBackground', dark: '#ffffff1a', light: '#0000000f' },
+  'brand-line': { vscode: 'diffGuide-selectionBorder', dark: '#ffffff66', light: '#00000059' },
 };
 
 const brandTokens: Readonly<Record<string, BrandToken>> = {

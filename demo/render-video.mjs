@@ -9,10 +9,10 @@ const run = arguments_ => new Promise((resolve,reject)=>{
   const child=spawn(executable,commandArguments,{cwd,stdio:'inherit'});
   child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(new Error(`Playwright CLI exited ${code}`)));
 });
-await run(['-s=pair-review-demo','reload']);
+await run(['-s=diffguide-demo','reload']);
 for(const start of [0,225,450,675,900,1125]) {
   console.log(`Rendering frames ${start}–${Math.min(start+224,1349)} / 1349`);
-  await run(['-s=pair-review-demo','goto',`http://127.0.0.1:4177/?start=${start}`]);
-  await run(['-s=pair-review-demo','run-code','--filename=render-frames.js']);
+  await run(['-s=diffguide-demo','goto',`http://127.0.0.1:4177/?start=${start}`]);
+  await run(['-s=diffguide-demo','run-code','--filename=render-frames.js']);
 }
 console.log('Rendered all 1350 frames at 30fps.');

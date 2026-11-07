@@ -9,7 +9,7 @@ import { requireNodeRuntime } from '../src/executables.js';
 
 /** Exercise real child-process failures using local executables without a Claude session. */
 async function runtime(t: TestContext, source: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'pair-review-runtime-'));
+  const root = await mkdtemp(join(tmpdir(), 'diffguide-runtime-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const executable = join(root, 'node fixture');
   await writeFile(executable, `#!${process.execPath}\n${source}\n`, { mode: 0o700 });

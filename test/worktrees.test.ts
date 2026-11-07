@@ -19,7 +19,7 @@ const executeFile = promisify(execFile);
 /** Run a fixture Git command without user configuration or hooks. */
 async function git(root: string, args: readonly string[]): Promise<void> {
   await executeFile('git', [
-    '-C', root, '-c', 'user.name=Pair Review Test', '-c', 'user.email=pair-review@example.invalid',
+    '-C', root, '-c', 'user.name=DiffGuide Test', '-c', 'user.email=diffguide@example.invalid',
     '-c', 'commit.gpgSign=false', '-c', `core.hooksPath=${path.join(root, 'no-hooks')}`, ...args,
   ], { encoding: 'utf8', timeout: 10_000 });
 }
@@ -31,7 +31,7 @@ const pullRequest: PullRequestSummary = {
 
 /** Source clone whose origin has `main` plus a `feature` branch that diverged from it. */
 async function fixture(t: { after(callback: () => Promise<void>): void }): Promise<{ source: string; storage: string }> {
-  const scratch = await mkdtemp(path.join(tmpdir(), 'pair-review-worktree-'));
+  const scratch = await mkdtemp(path.join(tmpdir(), 'diffguide-worktree-'));
   t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
   const origin = path.join(scratch, 'origin');
   const source = path.join(scratch, 'source');
@@ -109,12 +109,12 @@ test('creates a PR worktree once, reviews it against the merge base and removes 
 test('keeps PR worktrees under the checkout\'s .claude/worktrees, hidden from Git without touching .gitignore', async (t) => {
   const { source } = await fixture(t);
   const storage = await repositoryStorage(source);
-  assert.equal(storage, path.join(await realpath(source), '.claude', 'worktrees', 'pair-review'));
+  assert.equal(storage, path.join(await realpath(source), '.claude', 'worktrees', 'diffguide'));
 
   await ensureWorktree(source, storage, { ...provider([]), checkout: detached }, 'acme/app', pullRequest, 'author');
   await ensureWorktree(source, storage, { ...provider([]), checkout: detached }, 'acme/app', { ...pullRequest, number: 6 }, 'author');
   const exclude = await readFile(path.join(source, '.git', 'info', 'exclude'), 'utf8');
-  assert.equal(exclude.split('\n').filter((line) => line === '/.claude/worktrees/pair-review/').length, 1);
+  assert.equal(exclude.split('\n').filter((line) => line === '/.claude/worktrees/diffguide/').length, 1);
   const { stdout } = await executeFile('git', ['-C', source, 'status', '--porcelain'], { encoding: 'utf8' });
   assert.equal(stdout, '');
 });
@@ -138,6 +138,24 @@ test('moves worktrees out of the Git folder with their changes and comments', as
   await assert.rejects(stat(path.join(reviewDataPath(moved), 'claude-session.json')));
   await assert.rejects(stat(old));
   assert.deepEqual(await migrateWorktrees(source, storage), []);
+});
+
+test('moves worktrees out of the Pair Review folder with their changes and large comment stores', async (t) => {
+  const { source } = await fixture(t);
+  const storage = await repositoryStorage(source);
+  assert.ok(storage !== undefined);
+  const legacy = path.join(path.dirname(storage), 'pair-review');
+  const old = await ensureWorktree(source, legacy, provider([]), 'acme/app', pullRequest, 'author');
+  await writeFile(path.join(old, 'feature.ts'), 'export const feature = 2;\n');
+  await mkdir(reviewDataPath(old), { recursive: true });
+  await writeFile(path.join(reviewDataPath(old), 'review.json'), JSON.stringify({ version: 1, workspaceRoot: old, threads: [], events: [], padding: 'x'.repeat(100_000) }));
+
+  assert.deepEqual(await migrateWorktrees(source, storage), []);
+  const moved = worktreePath(storage, 'acme/app', 5);
+  assert.equal((await readWorktree(storage, moved))?.pullRequest.number, 5);
+  assert.equal(await readFile(path.join(moved, 'feature.ts'), 'utf8'), 'export const feature = 2;\n');
+  assert.equal(JSON.parse(await readFile(path.join(reviewDataPath(moved), 'review.json'), 'utf8')).workspaceRoot, moved);
+  await assert.rejects(stat(old));
 });
 
 test('cleans up worktrees of finished or unused PRs, but never one holding work', async (t) => {
@@ -195,7 +213,7 @@ test('serves both sides of a PR file from the worktree under short addresses', a
   assert.equal(added.modifiedUri.authority, 'pr-5');
   assert.equal(added.modifiedUri.path, '/feature.ts');
 
-  const files = workspace.fileSystems.get('pair-review-pr') as unknown as {
+  const files = workspace.fileSystems.get('diffguide-pr') as unknown as {
     readFile(uri: Uri): Promise<Uint8Array>;
     writeFile(uri: Uri, content: Uint8Array, options: object): Promise<void>;
   } | undefined;

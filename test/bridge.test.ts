@@ -14,7 +14,7 @@ import { maximumConversationMessages, maximumReviewTextLength } from '../src/lim
 
 /** Start a real loopback bridge over isolated durable storage for each test. */
 async function fixture(t: TestContext): Promise<{ store: ReviewStore; bridge: ReviewBridge; headers: Record<string, string> }> {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-bridge-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-bridge-'));
   const store = await createReviewStore(path.join(root, 'review.json'), root);
   const bridge = await createReviewBridge(store);
   t.after(async () => {
@@ -90,7 +90,7 @@ test('MCP tools and older clients cannot claim that automatic delivery is ready'
   const thread = await store.submit(anchor(), 'Wait for an actual receiver.', 'ask');
   for (const role of [undefined, 'tools', 'unknown']) {
     const response = await fetch(`${bridge.descriptor.url}/pending`, {
-      headers: { ...headers, ...(role === undefined ? {} : { 'X-Pair-Review-Client': role }) },
+      headers: { ...headers, ...(role === undefined ? {} : { 'X-DiffGuide-Client': role }) },
     });
     assert.equal(response.status, 200);
     await response.json();
@@ -98,7 +98,7 @@ test('MCP tools and older clients cannot claim that automatic delivery is ready'
     assert.equal(bridge.state.deliveryReady, false);
   }
   const response = await fetch(`${bridge.descriptor.url}/pending`, {
-    headers: { ...headers, 'X-Pair-Review-Client': 'watcher' },
+    headers: { ...headers, 'X-DiffGuide-Client': 'watcher' },
   });
   await response.json();
   assert.equal(bridge.state.deliveryReady, true);
@@ -110,14 +110,14 @@ test('delivery readiness expires independently while MCP tool heartbeats keep th
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { bridge, headers } = await fixture(t);
   const watcher = await fetch(`${bridge.descriptor.url}/pending`, {
-    headers: { ...headers, 'X-Pair-Review-Client': 'watcher' },
+    headers: { ...headers, 'X-DiffGuide-Client': 'watcher' },
   });
   await watcher.json();
   assert.equal(bridge.state.deliveryReady, true);
 
   t.mock.timers.tick(30_000);
   const tools = await fetch(`${bridge.descriptor.url}/health`, {
-    headers: { ...headers, 'X-Pair-Review-Client': 'tools' },
+    headers: { ...headers, 'X-DiffGuide-Client': 'tools' },
   });
   await tools.json();
   t.mock.timers.tick(15_001);
@@ -125,7 +125,7 @@ test('delivery readiness expires independently while MCP tool heartbeats keep th
   assert.equal(bridge.state.deliveryReady, false);
 
   const recovered = await fetch(`${bridge.descriptor.url}/pending`, {
-    headers: { ...headers, 'X-Pair-Review-Client': 'channel' },
+    headers: { ...headers, 'X-DiffGuide-Client': 'channel' },
   });
   await recovered.json();
   assert.equal(bridge.state.connected, true);
@@ -283,7 +283,7 @@ test('sends only discussions for the returned events and preserves message event
 });
 
 test('projects legacy oversized text without changing its stored original or blocking replies', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-legacy-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-legacy-'));
   const file = path.join(root, 'review.json');
   const original = await createReviewStore(file, root);
   const submitted = await original.submit(anchor(), 'Legacy feedback.', 'ask');
@@ -304,8 +304,8 @@ test('projects legacy oversized text without changing its stored original or blo
   const payload: unknown = await pending.json();
   const batch = readBatch(payload, root);
   assert.equal(batch.events[0]?.anchor.selectedText.length, maximumReviewTextLength);
-  assert.match(batch.events[0]?.anchor.selectedText ?? '', /Pair Review: text truncated/u);
-  assert.match(batch.events[0]?.text ?? '', /Pair Review: text truncated/u);
+  assert.match(batch.events[0]?.anchor.selectedText ?? '', /DiffGuide: text truncated/u);
+  assert.match(batch.events[0]?.text ?? '', /DiffGuide: text truncated/u);
   const reply = await fetch(`${bridge.descriptor.url}/update`, {
     method: 'POST', headers,
     body: JSON.stringify({ eventId: submitted.latestEventId, status: 'answered', text: 'The result.' }),

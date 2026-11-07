@@ -1,6 +1,6 @@
 # Project instructions
 
-Pair Review is a VS Code extension for reviewing code with Claude: native inline comments on local changes, and a PR review page for GitHub pull requests. Keep the native VS Code workflow simple and preserve existing behavior.
+DiffGuide is a VS Code extension for reviewing code with Claude: native inline comments on local changes, and a PR review page for GitHub pull requests. Keep the native VS Code workflow simple and preserve existing behavior.
 
 ## Code map
 
@@ -68,7 +68,7 @@ Pair Review is a VS Code extension for reviewing code with Claude: native inline
 
 ## Verification
 
-- The user tries changes in the installed extension, not the debug host. Reloading the window loads nothing new until you run `npm run package` and `code --install-extension pair-review-<version>.vsix --force`. An install also swaps `dist/overview.js` under open windows, so pages opened before a reload pair old HTML with the new script and break; after every install, tell the user to reload all windows.
+- The user tries changes in the installed extension, not the debug host. Reloading the window loads nothing new until you run `npm run package` and `code --install-extension diffguide-<version>.vsix --force`. An install also swaps `dist/overview.js` under open windows, so pages opened before a reload pair old HTML with the new script and break; after every install, tell the user to reload all windows.
 - Before handing over a webview change, render the page in headless Chromium with the user's theme colors (VS Code theme keys as `--vscode-*` variables) and look at a screenshot of the exact build you install. Default colors hide border and contrast problems; the screenshot also catches script errors.
 - Measure latency claims on a large sample diff, before and after, instead of estimating.
 - Verify user-facing flows with end-to-end clicks in VS Code and controlled agent simulation, including the actual failure scenario.

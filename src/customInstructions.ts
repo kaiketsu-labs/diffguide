@@ -16,7 +16,7 @@ export interface InstructionSources {
   readonly home?: string;
 }
 
-const folder = join('.claude', 'pair-review');
+const folder = join('.claude', 'diffguide');
 
 /**
  * The user's instructions for a run, from the most general file to the most specific:
@@ -38,17 +38,17 @@ export async function readCustomInstructions(kind: InstructionKind, sources: Ins
   const { cwd, revision } = sources.repository;
   const repositoryFile = revision === undefined
     ? fromFile(join(cwd, folder, name))
-    : git(cwd, ['show', `${revision}:.claude/pair-review/${name}`]).then(
+    : git(cwd, ['show', `${revision}:.claude/diffguide/${name}`]).then(
       (text) => ({ path: `${folder}/${name} at ${revision.slice(0, 12)}`, text }),
       () => ({ path: '', text: undefined }),
     );
   const slugs = new Set([projectRoot, await realpath(projectRoot).catch(() => projectRoot)].map((path) => path.replace(/[^a-zA-Z0-9]/gu, '-')));
 
   const found = await Promise.all([
-    fromFile(join(configRoot, 'pair-review', name)),
+    fromFile(join(configRoot, 'diffguide', name)),
     ...parents.map(fromFile),
     repositoryFile,
-    ...[...slugs].map((slug) => fromFile(join(configRoot, 'projects', slug, 'pair-review', name))),
+    ...[...slugs].map((slug) => fromFile(join(configRoot, 'projects', slug, 'diffguide', name))),
   ]);
   const sections = found.flatMap(({ path, text }) => (text?.trim() ? [`--- ${path}\n${text.trim()}`] : []));
   if (sections.length === 0) return '';

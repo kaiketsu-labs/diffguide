@@ -22,12 +22,12 @@ async function layout(): Promise<{ home: string; config: string; project: string
 test('instructions join from the most general file to the most specific', async () => {
   const { home, config, project } = await layout();
   const slug = project.replace(/[^a-zA-Z0-9]/gu, '-');
-  await put(join(config, 'pair-review', 'guide.md'), 'global');
-  await put(join(home, 'work', '.claude', 'pair-review', 'guide.md'), 'parent');
-  await put(join(project, '.claude', 'pair-review', 'guide.md'), 'repository');
-  await put(join(config, 'projects', slug, 'pair-review', 'guide.md'), 'personal project');
-  await put(join(home, '.claude', 'pair-review', 'guide.md'), 'home folder is not a parent layer');
-  await put(join(project, '.claude', 'pair-review', 'comments.md'), 'other kind');
+  await put(join(config, 'diffguide', 'guide.md'), 'global');
+  await put(join(home, 'work', '.claude', 'diffguide', 'guide.md'), 'parent');
+  await put(join(project, '.claude', 'diffguide', 'guide.md'), 'repository');
+  await put(join(config, 'projects', slug, 'diffguide', 'guide.md'), 'personal project');
+  await put(join(home, '.claude', 'diffguide', 'guide.md'), 'home folder is not a parent layer');
+  await put(join(project, '.claude', 'diffguide', 'comments.md'), 'other kind');
 
   const text = await readCustomInstructions('guide', { projectRoot: project, repository: { cwd: project }, configRoot: config, home });
   const order = ['global', 'parent', 'repository', 'personal project'].map((value) => text.indexOf(`\n${value}`));
@@ -45,11 +45,11 @@ test('a revision reads the repository file from that commit, not from the checko
   const { home, config, project } = await layout();
   const run = (...args: string[]): string => execFileSync('git', ['-C', project, ...args], { encoding: 'utf8' }).trim();
   run('init', '-q');
-  await put(join(project, '.claude', 'pair-review', 'comments.md'), 'from base');
+  await put(join(project, '.claude', 'diffguide', 'comments.md'), 'from base');
   run('add', '.');
   run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'base');
   const base = run('rev-parse', 'HEAD');
-  await put(join(project, '.claude', 'pair-review', 'comments.md'), 'from the pull request');
+  await put(join(project, '.claude', 'diffguide', 'comments.md'), 'from the pull request');
 
   const sources = { projectRoot: project, configRoot: config, home };
   const trusted = await readCustomInstructions('comments', { ...sources, repository: { cwd: project, revision: base } });

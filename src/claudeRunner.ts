@@ -54,7 +54,7 @@ export interface ClaudeTask {
   /** What the log calls the run, such as "fixing merge conflicts". */
   readonly label: string;
   readonly prompt: string;
-  /** Tools Claude may use without asking, beyond Pair Review's own. */
+  /** Tools Claude may use without asking, beyond DiffGuide's own. */
   readonly allowedTools: readonly string[];
 }
 
@@ -76,7 +76,7 @@ export interface ClaudeRunnerOptions {
   readonly finish?: (threads: ReadonlySet<string>) => Promise<void>;
   /** Folders outside the worktree Claude may use, such as the workspace's other repositories. */
   readonly folders?: () => Promise<readonly string[]>;
-  /** Folders among `folders` Claude may read but not edit, except inside their Pair Review worktrees; `guard` is the edit guard script. */
+  /** Folders among `folders` Claude may read but not edit, except inside their DiffGuide worktrees; `guard` is the edit guard script. */
   readonly readOnly?: () => Promise<{ readonly folders: readonly string[]; readonly guard: string; readonly node: string }>;
   /** Runs before every run and task, such as taking the worktree's lock; a failure stops the run with its message. */
   readonly hold?: () => Promise<void>;
@@ -94,7 +94,7 @@ export interface ClaudeLaunch {
   readonly env: Readonly<Record<string, string>>;
 }
 
-const reviewerNote = 'This is someone else\'s pull request. You may read other repositories, run commands and make throwaway edits or commits to test an idea, but Pair Review discards them after this run. For implement requests, reply with the proposed change instead of committing it.';
+const reviewerNote = 'This is someone else\'s pull request. You may read other repositories, run commands and make throwaway edits or commits to test an idea, but DiffGuide discards them after this run. For implement requests, reply with the proposed change instead of committing it.';
 const authorNote = 'When you change files, commit the change with a short message saying what it does. Do not push; the human reviews your commits and pushes them.';
 /** How to propose code in a reply, so the review page can show, apply and publish it as on GitHub. */
 const suggestionNote = 'To propose new code for the commented lines without editing files, put the complete replacement lines in a fenced block whose language is `suggestion`, as on GitHub. It replaces exactly the commented lines, so include every line that stays. Use suggestion blocks only for a change that stays within the commented lines; show a change that touches other lines or files as a ```diff block per file instead. To offer alternatives, write up to three suggestion blocks, each after a short line naming the option, such as "Option 1: read the limit from config." The human picks one to apply or publish.';
@@ -259,12 +259,12 @@ export class ClaudeRunner implements vscode.Disposable {
     return { sessionId: resume ?? randomUUID(), resume: resume !== undefined };
   }
 
-  /** Flags every run of this PR's conversation shares: Pair Review's tools, the extra folders, and on someone else's PR no checkout config. */
+  /** Flags every run of this PR's conversation shares: DiffGuide's tools, the extra folders, and on someone else's PR no checkout config. */
   async #flags(mcpPath: string, allowedTools: readonly string[], mode: 'auto' | 'acceptEdits'): Promise<string[]> {
     const folders = (await this.options.folders?.() ?? []).filter((folder) => folder !== this.options.cwd);
     const guarded = await this.options.readOnly?.();
     return [
-      '--mcp-config', mcpPath, '--allowedTools', 'mcp__pair-review', ...allowedTools,
+      '--mcp-config', mcpPath, '--allowedTools', 'mcp__diffguide', ...allowedTools,
       ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
       '--permission-mode', mode,
       ...(folders.length === 0 ? [] : ['--add-dir', ...folders]),
@@ -401,7 +401,7 @@ export function toolStep(name: string, input: unknown, cwd: string): ToolStep {
     const inside = relative(cwd, value);
     return clean(inside === '' || inside.startsWith('..') ? value : inside);
   };
-  const review = name.startsWith('mcp__pair-review__') ? reviewTools[name.slice('mcp__pair-review__'.length)] : undefined;
+  const review = name.startsWith('mcp__diffguide__') ? reviewTools[name.slice('mcp__diffguide__'.length)] : undefined;
   if (review !== undefined) return { verb: review, label: review };
   switch (name) {
     case 'Read': return { verb: 'Read', target: file('file_path'), label: `Reading ${file('file_path')}` };

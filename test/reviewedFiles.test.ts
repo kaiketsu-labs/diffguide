@@ -9,7 +9,7 @@ import { FileReviews, markRangeRead, readReadRanges, readReviewedFiles, setFileR
 import { worktreePath } from '../src/worktrees.js';
 
 test('keeps a file reviewed until its content changes, and clears it on untick', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-reviewed-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-reviewed-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-3');
   await mkdir(path.join(worktree, 'src'), { recursive: true });
@@ -29,7 +29,7 @@ test('keeps a file reviewed until its content changes, and clears it on untick',
 });
 
 test('notices a same-size edit that keeps the old modification time', async (t) => {
-  const worktree = await mkdtemp(path.join(tmpdir(), 'pair-review-reviewed-'));
+  const worktree = await mkdtemp(path.join(tmpdir(), 'diffguide-reviewed-'));
   t.after(async () => { await rm(worktree, { recursive: true, force: true }); });
   const file = path.join(worktree, 'a.ts');
   await writeFile(file, 'one');
@@ -43,7 +43,7 @@ test('notices a same-size edit that keeps the old modification time', async (t) 
 });
 
 test('merges local ticks with the code host\'s Viewed flags and sends ticks to it', async (t) => {
-  const storage = await mkdtemp(path.join(tmpdir(), 'pair-review-reviews-'));
+  const storage = await mkdtemp(path.join(tmpdir(), 'diffguide-reviews-'));
   t.after(async () => { await rm(storage, { recursive: true, force: true }); });
   const worktree = worktreePath(storage, 'acme/app', 3);
   await mkdir(worktree, { recursive: true });
@@ -69,7 +69,7 @@ test('merges local ticks with the code host\'s Viewed flags and sends ticks to i
 });
 
 test('keeps read ranges on their code as lines shift, drops them once that code changes, and keeps file ticks', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-read-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-read-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-4');
   await mkdir(worktree, { recursive: true });
@@ -94,7 +94,7 @@ test('keeps read ranges on their code as lines shift, drops them once that code 
 });
 
 test('keeps every tick and read mark when they are written at the same time', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-concurrent-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-concurrent-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-5');
   await mkdir(worktree, { recursive: true });
@@ -109,7 +109,7 @@ test('keeps every tick and read mark when they are written at the same time', as
 });
 
 test('keeps every read mark once the marks outgrow a small metadata file', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-many-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-many-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-6');
   await mkdir(worktree, { recursive: true });
@@ -121,7 +121,7 @@ test('keeps every read mark once the marks outgrow a small metadata file', async
 });
 
 test('refuses to write over marks it cannot read', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pair-review-unreadable-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-unreadable-'));
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const worktree = path.join(root, 'pr-7');
   await mkdir(`${worktree}.review`, { recursive: true });

@@ -31,8 +31,8 @@ function register(storage = new FakeMemento()): FakeMemento {
 }
 
 /** Exercise the command's real completion boundary, including backup and settings writes. */
-async function enhance(): Promise<void> { await commands.executeCommand('pairReview.enhanceContrast'); }
-async function reset(): Promise<void> { await commands.executeCommand('pairReview.resetContrast'); }
+async function enhance(): Promise<void> { await commands.executeCommand('diffGuide.enhanceContrast'); }
+async function reset(): Promise<void> { await commands.executeCommand('diffGuide.resetContrast'); }
 
 test('registering appearance commands changes no settings or extension state', () => {
   const storage = register();
@@ -164,7 +164,7 @@ for (const scenario of ['direct reset', 'reapply', 'failed reapply'] as const) {
     const original = { '[Dark Modern]': { 'peekViewResult.background': '#121212', 'contrastBorder': '#556677' } };
     workspace.configurationWorkspaceValues.set(setting, { '[Dark Modern]': { ...legacy, contrastBorder: '#556677' } });
     const storage = register();
-    await storage.update('pairReview.appearance.v1', {
+    await storage.update('diffGuide.appearance.v1', {
       version: 1, rootAbsent: false, themes: {
         '[Dark Modern]': { existed: true, colors: Object.fromEntries(Object.entries(legacy).map(([token, applied]) => [token, {
           applied, ...(token === 'peekViewResult.background' ? { previous: '#121212' } : {}),

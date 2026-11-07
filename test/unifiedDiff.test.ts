@@ -74,7 +74,7 @@ test('colors a hunk that starts inside a docstring from the whole file', () => {
 });
 
 test('reads both versions of a PR file to color hunks from the whole file', async () => {
-  const repo = mkdtempSync(join(tmpdir(), 'pair-review-diff-'));
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-diff-'));
   try {
     const run = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
     run('init', '-q');

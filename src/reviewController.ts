@@ -12,9 +12,9 @@ import { SubmissionGate } from './submissionGate.js';
 import { resolvedVisibilityKey, ReviewVisibility } from './reviewVisibility.js';
 import { anchorDocumentUri, type ReviewSession, type ReviewSessionSource, type SessionLocation } from './reviewSession.js';
 
-const controllerId = 'pairReview';
-const baseScheme = 'pair-review-base';
-const contextScheme = 'pair-review-context';
+const controllerId = 'diffGuide';
+const baseScheme = 'diffguide-base';
+const contextScheme = 'diffguide-context';
 const intentLabels: Record<ReviewIntent, string> = {
   ask: 'Frage',
   implement: 'Umsetzung',
@@ -146,7 +146,7 @@ function mapOffset(offset: number, change: vscode.TextDocumentContentChangeEvent
 
 /** Thread context value; PR threads also say whether they can be posted or are already on the code host. */
 function threadContext(session: ReviewSession, thread: ReviewThread): string {
-  const base = thread.resolved ? 'pairReview.resolved' : 'pairReview.open';
+  const base = thread.resolved ? 'diffGuide.resolved' : 'diffGuide.open';
   if (session.publish === undefined) return base;
   return `${base}.${session.publication?.(thread.id) === undefined ? 'publishable' : 'published'}`;
 }
@@ -171,7 +171,7 @@ class ReviewItem extends vscode.TreeItem {
     this.description = `${sessionLabel ? `${sessionLabel} · ` : ''}${intentLabels[thread.intent]} · ${status}`;
     this.contextValue = threadContext(session, thread);
     this.iconPath = new vscode.ThemeIcon(thread.resolved ? 'pass' : thread.outdated ? 'warning' : thread.status === 'working' || activity !== undefined ? 'sync~spin' : 'comment-discussion');
-    this.command = { command: 'pairReview.revealThread', title: 'Zum Kommentar springen', arguments: [thread.id] };
+    this.command = { command: 'diffGuide.revealThread', title: 'Zum Kommentar springen', arguments: [thread.id] };
     this.tooltip = new vscode.MarkdownString()
       .appendText(`${thread.anchor.path}:${thread.anchor.startLine}\n${intentLabels[thread.intent]} · ${status}\n\n${firstMessage}`);
   }
@@ -250,7 +250,7 @@ export async function createReviewController(
   const visibility = new ReviewVisibility(context.workspaceState);
   await vscode.commands.executeCommand('setContext', resolvedVisibilityKey, visibility.showResolved);
   const tree = new ReviewTree(sessions, visibility);
-  const view = vscode.window.createTreeView('pairReview.threads', { treeDataProvider: tree, showCollapseAll: false });
+  const view = vscode.window.createTreeView('diffGuide.threads', { treeDataProvider: tree, showCollapseAll: false });
   const disposables: vscode.Disposable[] = [controller, tree, view];
   const codeNavigation = await createCodeNavigation({
     get threads() { return sessions().flatMap((session) => session.store.threads); },
@@ -268,11 +268,11 @@ export async function createReviewController(
   let selectionTimer: ReturnType<typeof setTimeout> | undefined;
   const selectionDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
-    backgroundColor: new vscode.ThemeColor('pairReview.selectionBackground'),
+    backgroundColor: new vscode.ThemeColor('diffGuide.selectionBackground'),
     borderStyle: 'solid',
     borderWidth: '0 0 0 2px',
-    borderColor: new vscode.ThemeColor('pairReview.selectionBorder'),
-    overviewRulerColor: new vscode.ThemeColor('pairReview.selectionBorder'),
+    borderColor: new vscode.ThemeColor('diffGuide.selectionBorder'),
+    overviewRulerColor: new vscode.ThemeColor('diffGuide.selectionBorder'),
     overviewRulerLane: vscode.OverviewRulerLane.Center,
     rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
   });
@@ -419,7 +419,7 @@ export async function createReviewController(
       renderedComments.set(native, { messages: thread.messages, comments });
     }
     const owner = findThread(thread.id)?.session;
-    const contextValue = owner === undefined ? (thread.resolved ? 'pairReview.resolved' : 'pairReview.open') : threadContext(owner, thread);
+    const contextValue = owner === undefined ? (thread.resolved ? 'diffGuide.resolved' : 'diffGuide.open') : threadContext(owner, thread);
     const state = thread.resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
     const canReply = thread.resolved ? false : authors.human;
     if (native.contextValue !== contextValue) native.contextValue = contextValue;
@@ -731,7 +731,7 @@ export async function createReviewController(
       ? [] : [new vscode.Range(0, 0, document.lineCount - 1, 0)],
   };
   const register = (id: string, callback: (argument: unknown) => Promise<void>): void => {
-    disposables.push(vscode.commands.registerCommand(`pairReview.${id}`, (argument: unknown) => callback(argument).catch(reportError)));
+    disposables.push(vscode.commands.registerCommand(`diffGuide.${id}`, (argument: unknown) => callback(argument).catch(reportError)));
   };
   register('addComment', async () => {
     cancelSelectionCapture();
@@ -747,7 +747,7 @@ export async function createReviewController(
     const anchor = request?.anchor ?? await captureAnchor(owner.session, editor.document.uri, range);
     if (disposed || generation !== selectionGeneration) return;
     const draft = controller.createCommentThread(editor.document.uri, range, []);
-    draft.contextValue = 'pairReview.draft';
+    draft.contextValue = 'diffGuide.draft';
     draft.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     draft.canReply = authors.human;
     draft.label = 'Neuer Kommentar';
@@ -769,7 +769,7 @@ export async function createReviewController(
     if (disposed || generation !== selectionGeneration) return;
     await composer.open(request);
   });
-  disposables.push(vscode.commands.registerCommand('pairReview.submitInline', (argument: unknown) => {
+  disposables.push(vscode.commands.registerCommand('diffGuide.submitInline', (argument: unknown) => {
     const reply = normalizeInlineReply(argument);
     if (reply === undefined) {
       const error = new Error('Dieser Kommentar kann nicht abgesendet werden. Dein Text bleibt erhalten.');

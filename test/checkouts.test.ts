@@ -30,7 +30,7 @@ function fixture(roots: readonly string[], storage: Record<string, string>) {
 
 test('lists the workspace folder first, then its nested repositories once each', async (t) => {
   const { checkouts, restored } = fixture(
-    ['/work/service-a', '/elsewhere/repo', '/work/service-b', '/work/.git/pair-review/worktrees/acme__service-b/pr-1', '/work/service-b/.claude/worktrees/pair-review/acme__service-b/pr-2', '/work/service-b/.worktrees/fix', '/work/plain'],
+    ['/work/service-a', '/elsewhere/repo', '/work/service-b', '/work/.git/pair-review/worktrees/acme__service-b/pr-1', '/work/service-b/.claude/worktrees/diffguide/acme__service-b/pr-2', '/work/service-b/.worktrees/fix', '/work/plain'],
     { '/work/service-a': '/work/service-a/.git/pair-review', '/work/service-b': '/work/service-b/.git/pair-review', '/work/service-b/.worktrees/fix': '/work/service-b/.git/pair-review' },
   );
   t.after(() => { checkouts.dispose(); });
@@ -47,7 +47,7 @@ test('lists the workspace folder first, then its nested repositories once each',
 });
 
 test('finds repositories one folder deep, including dot folders and worktree files, and skips ignored folders', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'pair-review-scan-'));
+  const root = await mkdtemp(join(tmpdir(), 'diffguide-scan-'));
   for (const folder of ['.git', 'api/.git', '.github-organization/.git', 'node_modules/lib/.git', 'docs', 'deep/inner/.git']) await mkdir(join(root, folder), { recursive: true });
   await mkdir(join(root, 'linked'));
   await writeFile(join(root, 'linked', '.git'), 'gitdir: ../.git/worktrees/linked');
@@ -55,7 +55,7 @@ test('finds repositories one folder deep, including dot folders and worktree fil
 });
 
 test('finds a PR\'s checkout without rescanning the folder, and rescans once for a repository it has not seen', async (t) => {
-  const storage = await mkdtemp(join(tmpdir(), 'pair-review-locate-'));
+  const storage = await mkdtemp(join(tmpdir(), 'diffguide-locate-'));
   t.after(async () => { await rm(storage, { recursive: true, force: true }); });
   const addWorktree = async (storageRoot: string, number: number): Promise<void> => {
     const folder = worktreePath(storageRoot, 'acme/app', number);

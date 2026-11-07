@@ -2,7 +2,7 @@ import {readFile,writeFile,copyFile,readdir,unlink} from 'node:fs/promises';
 
 /** Inspect H.264 chroma/depth and MP4 streaming layout; retain encoded QA keyframes. */
 const output=new URL('./output/playwright/',import.meta.url);
-const data=await readFile(new URL('../docs/media/pair-review-demo.mp4',import.meta.url));
+const data=await readFile(new URL('../docs/media/diffguide-demo.mp4',import.meta.url));
 const avc=data.indexOf(Buffer.from('avcC'))+4;
 if(avc<4)throw new Error('H.264 configuration missing');
 const profile=data[avc+1];const nalSize=data.readUInt16BE(avc+6);

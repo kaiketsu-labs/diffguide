@@ -18,4 +18,4 @@ for(const [index,time] of moments.entries()) {
  layers.push({input:Buffer.from(`<svg width="${width}" height="${label}"><rect width="100%" height="100%" fill="#111925"/><text x="16" y="24" font-size="18" font-family="sans-serif" fill="#bdd2e3">${(time/1000).toFixed(2)} seconds</text></svg>`),left,top:top+height});
 }
 await sharp({create:{width:columns*width,height:rows*(height+label),channels:3,background:'#111925'}}).composite(layers).jpeg({quality:88}).toFile('demo/output/playwright/contact-sheet.jpg');
-await sharp(await framePath(26000)).jpeg({quality:94}).toFile('docs/media/pair-review-poster.jpg');
+await sharp(await framePath(26000)).jpeg({quality:94}).toFile('docs/media/diffguide-poster.jpg');

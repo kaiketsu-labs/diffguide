@@ -41,7 +41,7 @@ interface SavedDraft extends ComposerSubmission {
   readonly updatedAt: number;
 }
 
-const storageKey = 'pairReview.composerDrafts.v1';
+const storageKey = 'diffGuide.composerDrafts.v1';
 
 /** Accept persisted and webview data only after narrowing its actual shape. */
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -294,7 +294,7 @@ export function createComposer(
     pendingSelection = undefined;
     targetChanged.fire(draft);
     if (panel === undefined) {
-      panel = vscode.window.createWebviewPanel('pairReview.composer', 'Review-Kommentar', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false }, {
+      panel = vscode.window.createWebviewPanel('diffGuide.composer', 'Review-Kommentar', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false }, {
         enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [],
       });
       ready = false;
