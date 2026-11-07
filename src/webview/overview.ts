@@ -11,6 +11,7 @@ import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
 import { codicons } from '../codicons.js';
 import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
 import type * as PdfJs from 'pdfjs-dist';
+import { orbCanvas, stepMotion } from './orb.js';
 
 declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; getState(): unknown; setState(state: Saved): void };
 
@@ -273,13 +274,13 @@ const elapsed = (since: number): string => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
-/** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, Clawd and the run's time on the current one. */
+/** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb and the run's time on the current one. */
 function stepLog(steps: readonly ClaudeStep[], startedAt?: number): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
     const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
-    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : el('span', 'clawd'));
+    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orbCanvas('step', stepMotion(step.verb)));
     const title = el('span', 'step-call');
     title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
     row.append(title);
@@ -2107,9 +2108,9 @@ setInterval(() => { for (const node of document.querySelectorAll<HTMLTimeElement
 
 function avatar(entry: Message, author: string): HTMLElement {
   if (!('avatarUrl' in entry) && entry.author === 'claude') {
-    const node = el('span', 'avatar clawd-avatar');
+    const node = el('span', 'avatar orb-avatar');
     node.title = author;
-    node.append(el('span', 'clawd-pose'));
+    node.append(orbCanvas('avatar'));
     return node;
   }
   const url = 'avatarUrl' in entry ? entry.avatarUrl : current?.details?.viewerAvatarUrl ?? '';
@@ -3920,36 +3921,36 @@ function changedFiles(next: readonly FileDiff[], shownAs: string): string[] | un
   return next.filter((file, index) => JSON.stringify(file) !== JSON.stringify(shown[index])).map((file) => file.path);
 }
 
-/** A thread's live log on screen before a redraw, so Clawd can hop from it into Claude's new reply. */
-interface LiveLog { readonly threadId: string; readonly messages: number; readonly log: HTMLElement; readonly at: DOMRect; readonly clawd: DOMRect }
+/** A thread's live log on screen before a redraw, so the orb can fly from it into Claude's new reply. */
+interface LiveLog { readonly threadId: string; readonly messages: number; readonly log: HTMLElement; readonly at: DOMRect; readonly orb: DOMRect }
 
 function liveLogs(): LiveLog[] {
   return [...document.querySelectorAll<HTMLElement>('.claude-live[data-thread]')].flatMap((log) => {
-    const clawd = log.querySelector('.clawd');
+    const orb = log.querySelector('.orb');
     const thread = current?.threads.find((candidate) => candidate.id === log.dataset.thread);
-    return clawd && thread ? [{ threadId: thread.id, messages: thread.messages.length, log, at: log.getBoundingClientRect(), clawd: clawd.getBoundingClientRect() }] : [];
+    return orb && thread ? [{ threadId: thread.id, messages: thread.messages.length, log, at: log.getBoundingClientRect(), orb: orb.getBoundingClientRect() }] : [];
   });
 }
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Once Claude's reply replaces its live log, the old log fades where it was and Clawd hops from it up into the reply's avatar. */
+/** Once Claude's reply replaces its live log, the old log fades where it was and the orb flies from it up into the reply's avatar. */
 async function hopIntoAvatar(live: LiveLog): Promise<void> {
   const thread = current?.threads.find((candidate) => candidate.id === live.threadId);
   const box = document.getElementById('thread-' + live.threadId);
   if (reducedMotion.matches || !thread || !box || box.querySelector('.claude-live') || thread.messages.length <= live.messages || thread.messages.at(-1)?.author !== 'claude') return;
-  const avatar = [...box.querySelectorAll<HTMLElement>('.clawd-avatar')].at(-1);
-  const pose = avatar?.querySelector<HTMLElement>('.clawd-pose');
+  const avatar = [...box.querySelectorAll<HTMLElement>('.orb-avatar')].at(-1);
+  const pose = avatar?.querySelector<HTMLElement>('.orb');
   const text = avatar?.nextElementSibling;
   if (!avatar || !pose || !(text instanceof HTMLElement)) return;
   Object.assign(live.log.style, { position: 'fixed', left: live.at.left + 'px', top: live.at.top + 'px', width: live.at.width + 'px', margin: '0', pointerEvents: 'none' });
-  live.log.querySelector<HTMLElement>('.clawd')?.style.setProperty('visibility', 'hidden');
+  live.log.querySelector<HTMLElement>('.orb')?.style.setProperty('visibility', 'hidden');
   document.body.append(live.log);
   live.log.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: 'forwards' }).finished.then(() => { live.log.remove(); }, () => { live.log.remove(); });
-  // The avatar's own Clawd makes the hop: it starts offset onto the log row, feet to feet, and ends at offset zero, its resting place.
+  // The avatar's own orb makes the flight: it starts offset onto the log row's orb, center to center, and ends at offset zero, its resting place.
   const to = pose.getBoundingClientRect();
-  const dx = Math.round(live.clawd.left + live.clawd.width / 2 - (to.left + to.width / 2)), dy = Math.round(live.clawd.bottom - to.bottom);
+  const dx = Math.round(live.orb.left + live.orb.width / 2 - (to.left + to.width / 2)), dy = Math.round(live.orb.top + live.orb.height / 2 - (to.top + to.height / 2));
   const height = text.offsetHeight, from = Math.max(0, Math.round(live.at.bottom - text.getBoundingClientRect().top));
   Object.assign(text.style, { overflow: 'clip', boxSizing: 'border-box' });
   text.animate([{ height: from + 'px' }, { height: height + 'px' }], { duration: 260, easing: 'cubic-bezier(.2, .8, .2, 1)' }).finished
@@ -3957,18 +3958,14 @@ async function hopIntoAvatar(live: LiveLog): Promise<void> {
   text.animate([{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 180, easing: 'ease-out', fill: 'backwards' });
   avatar.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 180, delay: 300, easing: 'ease-out', fill: 'backwards', pseudoElement: '::before' });
   pose.style.transform = `translate(${dx}px, ${dy}px)`;
-  pose.dataset.pose = 'crouch';
-  await wait(60);
-  pose.dataset.pose = 'air';
-  const steps = 6, jump = 6;
-  const flight = pose.animate(Array.from({ length: steps + 1 }, (_, step) => {
-    const done = step / steps, left = 1 - done;
-    return { transform: step === steps ? 'translate(0px, 0px)' : `translate(${Math.round(dx * left)}px, ${Math.round(dy * left - jump * 4 * done * left)}px)` };
-  }), { duration: 240 });
+  const flight = pose.animate(Array.from({ length: 13 }, (_, step) => {
+    const done = step / 12, left = 1 - done, eased = done < .5 ? 2 * done * done : 1 - (-2 * done + 2) ** 2 / 2;
+    return { transform: `translate(${Math.round(dx * (1 - eased))}px, ${Math.round(dy * (1 - eased) - 6 * Math.sin(Math.PI * done) * left)}px)` };
+  }), { duration: 320 });
   pose.style.transform = '';
   await flight.finished.catch(() => undefined);
   pose.dataset.pose = 'crouch';
-  await wait(60);
+  await wait(80);
   delete pose.dataset.pose;
 }
 
@@ -4089,10 +4086,10 @@ $('stop-claude').addEventListener('click', stopClaude);
 $('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
   'Remove the worktree for ' + (current?.number === undefined ? 'this PR' : '#' + current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
   'Remove worktree', () => post({ action: 'remove-worktree' })));
-// Re-rendered Clawds join the page clock instead of restarting their animation.
+// Re-rendered working chips join the page clock instead of restarting their animation.
 document.addEventListener('animationstart', (event) => {
-  if (event.animationName !== 'clawd' || !(event.target instanceof Element)) return;
-  for (const animation of event.target.getAnimations({ subtree: true })) if (animation instanceof CSSAnimation && animation.animationName === 'clawd') animation.startTime = 0;
+  if (event.animationName !== 'orb' || !(event.target instanceof Element)) return;
+  for (const animation of event.target.getAnimations({ subtree: true })) if (animation instanceof CSSAnimation && animation.animationName === 'orb') animation.startTime = 0;
 });
 setInterval(() => {
   for (const time of document.querySelectorAll<HTMLElement>('[data-since]')) time.textContent = elapsed(Number(time.dataset.since));

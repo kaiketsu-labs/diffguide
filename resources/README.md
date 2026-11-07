@@ -5,7 +5,7 @@ The mark is the DiffGuide orb over a pair of diff lines: a + line and a − line
 - `icon.svg`: editable vector source on a paper tile, 256 × 256.
 - `icon.png`: 256 × 256 RGBA PNG used by the extension manifest and Marketplace listing.
 - `review.svg`: 24 × 24 one-color sidebar icon: a solid pixel orb with eye holes over 1 px + and − lines, drawn on whole pixels so it stays crisp in the activity bar.
-- `reviewer.svg`, `clawd-avatar.svg`: avatars for you and Claude in native comments. Clawd stays until the orb replaces it.
+- `reviewer.svg`, `orb-avatar.svg`: avatars for you and Claude in native comments. `orb-avatar.svg` is the orb at rest on a slate-tinted circle.
 
 Palette: paper tile `#FFFFFF` to `#E3E9EF`, slate `#2F7EA6` with tints for the orb's inner light, grey `#9AA7B3` for the removed line.
 
