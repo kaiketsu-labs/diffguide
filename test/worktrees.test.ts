@@ -140,7 +140,7 @@ test('moves worktrees out of the Git folder with their changes and comments', as
   assert.deepEqual(await migrateWorktrees(source, storage), []);
 });
 
-test('moves worktrees out of the Pair Review folder with their changes and comments', async (t) => {
+test('moves worktrees out of the Pair Review folder with their changes and large comment stores', async (t) => {
   const { source } = await fixture(t);
   const storage = await repositoryStorage(source);
   assert.ok(storage !== undefined);
@@ -148,7 +148,7 @@ test('moves worktrees out of the Pair Review folder with their changes and comme
   const old = await ensureWorktree(source, legacy, provider([]), 'acme/app', pullRequest, 'author');
   await writeFile(path.join(old, 'feature.ts'), 'export const feature = 2;\n');
   await mkdir(reviewDataPath(old), { recursive: true });
-  await writeFile(path.join(reviewDataPath(old), 'review.json'), JSON.stringify({ version: 1, workspaceRoot: old, threads: [], events: [] }));
+  await writeFile(path.join(reviewDataPath(old), 'review.json'), JSON.stringify({ version: 1, workspaceRoot: old, threads: [], events: [], padding: 'x'.repeat(100_000) }));
 
   assert.deepEqual(await migrateWorktrees(source, storage), []);
   const moved = worktreePath(storage, 'acme/app', 5);

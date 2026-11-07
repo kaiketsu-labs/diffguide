@@ -201,7 +201,7 @@ async function moveWorktree(sourceRoot: string, folder: string, target: string):
   await rename(data, reviewDataPath(target));
   await rm(join(reviewDataPath(target), 'claude-session.json'), { force: true });
   const storeFile = join(reviewDataPath(target), 'review.json');
-  const store = await readPrivateJson(storeFile).catch(() => undefined);
+  const store = await readFile(storeFile, 'utf8').then((text) => JSON.parse(text) as unknown, () => undefined);
   if (typeof store === 'object' && store !== null) await writePrivateJson(storeFile, { ...store, workspaceRoot: target });
 }
 
