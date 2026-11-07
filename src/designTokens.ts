@@ -41,6 +41,9 @@ const brandTokens: Readonly<Record<string, BrandToken>> = {
   'on-claude': { dark: '#2a130a', light: '#ffffff' },
   github: { dark: '#7fa8f0', light: '#2f5fc4' },
   'github-soft': { dark: '#7fa8f024', light: '#2f5fc41a' },
+  // The DiffGuide orb that stands for Claude while it works and in its avatar; its shading tones derive from this.
+  orb: { dark: '#7fc0de', light: '#2f7ea6' },
+  'orb-soft': { dark: '#7fc0de2e', light: '#2f7ea61f' },
   // GitHub's attention yellow (Primer), so pending review comments look like they do on GitHub.
   pending: { dark: '#d29922', light: '#9a6700' },
   'pending-soft': { dark: '#d2992226', light: '#9a67001a' },
