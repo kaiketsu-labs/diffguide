@@ -79,16 +79,13 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
   return {
     opened, checkedOut, reviewed,
     exists: async (_repository, number) => checkedOut.has(number),
-    open: async (_provider, repository, pullRequest, role, revealPath) => { opened.push(`${repository}#${pullRequest.number}:${role}${revealPath === undefined ? '' : `@${revealPath}`}`); checkedOut.add(pullRequest.number); },
+    open: async (_provider, repository, pullRequest, role) => { opened.push(`${repository}#${pullRequest.number}:${role}`); checkedOut.add(pullRequest.number); },
     remove: async (_repository, number) => { checkedOut.delete(number); },
     showClaude: async () => undefined,
     claudeStatus: () => undefined,
     reviewedFiles: async (_provider, _repository, _number, paths) => new Set(paths.filter((file) => reviewed.has(file))),
-    setReviewed: async (_provider, _repository, _number, file, done) => { if (done) reviewed.add(file); else reviewed.delete(file); },
     showOverview: async () => undefined,
-    guide: async () => undefined,
     localChanges: async () => ({ commits: 0, files: new Map() }),
-    markGuideGroupRead: async () => undefined,
     forget: () => undefined,
   };
 }
@@ -210,7 +207,6 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   };
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
-  await settings.update('diffGuide.fileView', 'list');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -230,6 +226,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.equal(decoratePullRequest(pr?.item), undefined);
 
   assert.equal(pr?.item.contextValue, 'diffGuide.pullRequest');
+  assert.equal(pr?.item.collapsibleState, 0);
 
   const command = pr?.item.command as vscode.Command;
   await commands.executeCommand(command.command, ...(command.arguments ?? []));
@@ -254,25 +251,10 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
 
   assert.equal(reopened?.item.description, '#7 · octo · Draft · Worktree · 0/2 reviewed');
 
-  const files = await level(tree, pr?.node);
-  assert.deepEqual(files.map(({ item }) => [item.label, item.description, item.checkboxState]), [['sidebar.ts', 'src', 0], ['README.md', '', 0]]);
-  const decorate = (index: number) => window.fileDecorations.at(-1)?.provideFileDecoration(files[index]?.item.resourceUri as vscode.Uri, undefined as never) as { badge?: string } | undefined;
-  assert.deepEqual([decorate(0)?.badge, decorate(1)?.badge], ['M', 'A']);
-  window.trees.at(-1)?.checkboxes.fire({ items: [[files[1]?.node, 1]] });
-  await settle();
-  assert.deepEqual([...worktrees.reviewed], ['README.md']);
-  const [progressed] = await level(tree, repository?.node);
+  worktrees.reviewed.add('README.md');
+  await commands.executeCommand('diffGuide.refreshPullRequests');
+  const [progressed] = await level(tree, (await level(tree, (await level(tree))[0]?.node))[0]?.node);
   assert.equal(progressed?.item.description, '#7 · octo · Draft · Worktree · 1/2 reviewed');
-  assert.equal((await level(tree, pr?.node))[1]?.item.checkboxState, 1);
-  const fileCommand = files[0]?.item.command as vscode.Command;
-  await commands.executeCommand(fileCommand.command, ...(fileCommand.arguments ?? []));
-  assert.deepEqual(worktrees.opened, ['acme/app#7:reviewer', 'acme/app#7:reviewer@src/sidebar.ts']);
-
-  await commands.executeCommand('diffGuide.viewFilesAsTree');
-  const tree2 = await level(tree, pr?.node);
-  assert.deepEqual(tree2.map(({ item }) => [item.label, item.description]), [['src', undefined], ['README.md', '']]);
-  assert.deepEqual((await level(tree, tree2[0]?.node)).map(({ item }) => [item.label, item.description]), [['sidebar.ts', '']]);
-  assert.equal(settings.get('diffGuide.fileView'), 'tree');
 
   await commands.executeCommand('diffGuide.markPullRequestMerged', 'acme/app#7');
   const [merged] = await level(tree, repository?.node);
@@ -388,9 +370,8 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   };
   const firstPr = await pullRequestIn(0);
   const secondPr = await pullRequestIn(1);
-  assert.deepEqual((await level(tree, firstPr?.node)).map(({ item }) => item.label), ['service-a.ts']);
-  assert.deepEqual((await level(tree, secondPr?.node)).map(({ item }) => item.label), ['service-b.ts']);
-  assert.deepEqual(listed, ['acme/service-a', 'acme/service-b']);
+  assert.deepEqual([await level(tree, firstPr?.node), await level(tree, secondPr?.node)], [[], []]);
+  assert.deepEqual(listed, []);
 
   const command = secondPr?.item.command as vscode.Command;
   await commands.executeCommand(command.command, ...(command.arguments ?? []));
@@ -478,7 +459,7 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   assert.deepEqual(rows.map(({ item }) => item.id), ['pullRequest:author:app:8']);
 });
 
-test('reads a PR\'s reviewed files once for its row and file rows, and redraws only that PR when its status changes', async (t) => {
+test('reads a PR\'s reviewed files once for its row, and redraws only that PR when its status changes', async (t) => {
   window.trees.length = 0;
   const provider = {
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
@@ -494,7 +475,6 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   const status = new EventEmitter<string | undefined>();
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
-  await settings.update('diffGuide.fileView', 'list');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], status.event, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -505,7 +485,7 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
   assert.equal(pr?.item.description, '#7 · octo · Draft · Worktree · 0/2 reviewed');
-  assert.deepEqual((await level(tree, pr?.node)).map(({ item }) => item.checkboxState), [0, 0]);
+  assert.deepEqual(await level(tree, pr?.node), []);
   assert.equal(reads, 1);
 
   worktrees.reviewed.add('a.ts');
@@ -518,7 +498,7 @@ test('reads a PR\'s reviewed files once for its row and file rows, and redraws o
   assert.deepEqual(redrawn, [[pr?.node], undefined]);
 });
 
-test('lists a checked-out PR\'s files or its guide steps, opens the review page at a step or section, and marks a section read', async (t) => {
+test('shows unpushed commits and uncommitted edits on a checked-out PR row', async (t) => {
   window.trees.length = 0;
   const provider = {
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
@@ -528,18 +508,9 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
   } as unknown as PullRequestProvider;
   const worktrees = recordingWorktrees();
   worktrees.checkedOut.add(7);
-  const shown: unknown[] = [];
-  worktrees.showOverview = async (_provider, _repository, _pullRequest, _role, at) => { shown.push(at); };
-  const marked: string[] = [];
-  worktrees.markGuideGroupRead = async (_provider, _repository, _pullRequest, group) => { marked.push(group); };
   worktrees.localChanges = async () => ({ commits: 2, files: new Map([['src/a.ts', 'both' as const]]) });
-  worktrees.guide = async () => ({ stale: true, groups: [
-    { key: 'g0', severity: 'critical', title: 'Auth', steps: [{ key: 'g0.0', path: 'src/a.ts', title: 'Check tokens', note: 'Rejects expired tokens.', viewed: true }, { key: 'g0.1', path: 'src/b.ts', viewed: false }] },
-    { key: 'g1', severity: 'trivial', title: 'Format', steps: [{ key: 'g1.0', path: 'README.md', viewed: false }] },
-  ] });
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
-  await settings.update('diffGuide.fileView', 'list');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
@@ -547,36 +518,8 @@ test('lists a checked-out PR\'s files or its guide steps, opens the review page 
   const [repository] = await level(tree);
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
-  const [fileRow] = await level(tree, pr?.node);
-  assert.equal(fileRow?.item.label, 'a.ts');
   assert.match(String(pr?.item.description), / · ↑2 · ✎1/u);
-  const local = window.fileDecorations.map((each) => each.provideFileDecoration(fileRow?.item.resourceUri as vscode.Uri, undefined as never) as { badge?: string } | undefined);
-  assert.deepEqual(local.map((each) => each?.badge), ['↑✎', 'A']);
-  await commands.executeCommand('diffGuide.showGuideInTree');
-  const [outdated, ...groups] = await level(tree, pr?.node);
-  assert.equal(outdated?.item.label, 'Guide is outdated. Rebuild it on the review page');
-  assert.deepEqual(groups.map(({ item }) => [item.label, item.description, item.collapsibleState]), [['Critical · Auth', '1/2', 2], ['Trivial · Format', '0/1', 1]]);
-  const steps = await level(tree, groups[0]?.node);
-  assert.deepEqual(steps.map(({ item }) => [item.label, item.description, (item.iconPath as vscode.ThemeIcon).id]), [['1. Check tokens', 'a.ts', 'pass-filled'], ['2. b.ts', 'src', 'circle-large-outline']]);
-  const command = steps[0]?.item.command;
-  await commands.executeCommand(command?.command ?? '', ...command?.arguments ?? []);
-  assert.deepEqual(shown, [{ step: 'g0.0' }]);
-  const open = groups[0]?.item.command;
-  await commands.executeCommand(open?.command ?? '', ...open?.arguments ?? []);
-  assert.deepEqual(shown, [{ step: 'g0.0' }, { group: 'g0' }]);
-  assert.deepEqual(groups.map(({ item }) => item.contextValue), ['diffGuide.guideGroup', 'diffGuide.guideGroup']);
-  await commands.executeCommand('diffGuide.markGuideGroupRead', groups[1]?.node);
-  assert.deepEqual(marked, ['g1']);
-
-  worktrees.checkedOut.delete(7);
-  view.dispose();
-  const unchecked = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
-  t.after(() => { unchecked.dispose(); });
-  const fresh = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
-  const [freshRepository] = await level(fresh);
-  const [freshSection] = await level(fresh, freshRepository?.node);
-  const [freshPr] = await level(fresh, freshSection?.node);
-  assert.deepEqual((await level(fresh, freshPr?.node)).map(({ item }) => item.label), ['a.ts']);
+  assert.deepEqual(await level(tree, pr?.node), []);
 });
 
 test('filters PRs by author and shows their size and dates', async (t) => {

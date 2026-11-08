@@ -289,30 +289,6 @@
         "icon": "$(filter-filled)"
       },
       {
-        "command": "diffGuide.showGuideInTree",
-        "title": "Show guide steps under PRs",
-        "category": "DiffGuide",
-        "icon": "$(map)"
-      },
-      {
-        "command": "diffGuide.showFilesInTree",
-        "title": "Show files under PRs",
-        "category": "DiffGuide",
-        "icon": "$(files)"
-      },
-      {
-        "command": "diffGuide.viewFilesAsTree",
-        "title": "View as tree",
-        "category": "DiffGuide",
-        "icon": "$(list-tree)"
-      },
-      {
-        "command": "diffGuide.viewFilesAsList",
-        "title": "View as list",
-        "category": "DiffGuide",
-        "icon": "$(list-flat)"
-      },
-      {
         "command": "diffGuide.groupByRole",
         "title": "Group by role",
         "category": "DiffGuide"
@@ -345,12 +321,6 @@
         "title": "Open review page",
         "category": "DiffGuide",
         "icon": "$(diff-multiple)"
-      },
-      {
-        "command": "diffGuide.markGuideGroupRead",
-        "title": "Mark section read",
-        "category": "DiffGuide",
-        "icon": "$(check-all)"
       },
       {
         "command": "diffGuide.pinPullRequest",
@@ -493,26 +463,6 @@
           "group": "navigation@0"
         },
         {
-          "command": "diffGuide.showGuideInTree",
-          "when": "view == diffGuide.pullRequests && !diffGuide.treeShowsGuide",
-          "group": "navigation@3"
-        },
-        {
-          "command": "diffGuide.showFilesInTree",
-          "when": "view == diffGuide.pullRequests && diffGuide.treeShowsGuide",
-          "group": "navigation@3"
-        },
-        {
-          "command": "diffGuide.viewFilesAsTree",
-          "when": "view == diffGuide.pullRequests && !diffGuide.filesAsTree",
-          "group": "navigation@2"
-        },
-        {
-          "command": "diffGuide.viewFilesAsList",
-          "when": "view == diffGuide.pullRequests && diffGuide.filesAsTree",
-          "group": "navigation@2"
-        },
-        {
           "command": "diffGuide.chooseRepositories",
           "when": "view == diffGuide.pullRequests",
           "group": "1_repositories@1"
@@ -597,11 +547,6 @@
         {
           "command": "diffGuide.unpinPullRequest",
           "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest.*\\.pinned$/",
-          "group": "inline@0"
-        },
-        {
-          "command": "diffGuide.markGuideGroupRead",
-          "when": "view == diffGuide.pullRequests && viewItem == diffGuide.guideGroup",
           "group": "inline@0"
         },
         {
@@ -708,10 +653,6 @@
         },
         {
           "command": "diffGuide.unpinPullRequest",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.markGuideGroupRead",
           "when": "false"
         },
         {

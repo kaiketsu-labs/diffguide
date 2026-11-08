@@ -350,7 +350,6 @@ export type PageMessage =
   | (DefinitionTarget & { readonly action: 'definition'; readonly line: number; readonly column: number })
   | (DefinitionTarget & { readonly action: 'probe'; readonly id: string; readonly line: number; readonly column: number })
   | { readonly action: 'open-definition'; readonly peek: string }
-  | { readonly action: 'view'; readonly view: 'files' | 'guide' }
   | { readonly action: 'find-extension'; readonly extension: string }
   | { readonly action: 'review'; readonly event: ReviewEvent; readonly body: string }
   | { readonly action: 'merge' | 'auto-merge'; readonly method: MergeMethod; readonly headline?: string; readonly body?: string; readonly deleteBranch?: boolean }
@@ -511,7 +510,7 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, view, extension, message, option,
+      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, extension, message, option,
         range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
@@ -563,9 +562,7 @@ export async function showPullRequestOverview(
           const found = await actions.hasDefinition(typeof peek === 'string' ? { peek } : { path: path as string }, line, column as number).catch(() => false);
           post({ probe: { id, found } });
         } else if (action === 'open-definition' && typeof peek === 'string') await actions.openDefinition(peek);
-        else if (action === 'view' && (view === 'files' || view === 'guide')) {
-          await vscode.commands.executeCommand(view === 'guide' ? 'diffGuide.showGuideInTree' : 'diffGuide.showFilesInTree');
-        } else if ((action === 'apply-suggestion' || action === 'publish-suggestion') && typeof id === 'string' && state.threads.some((thread) => thread.id === id)
+        else if ((action === 'apply-suggestion' || action === 'publish-suggestion') && typeof id === 'string' && state.threads.some((thread) => thread.id === id)
           && Number.isSafeInteger(message) && (message as number) >= 0 && Number.isSafeInteger(option) && (option as number) >= 0) {
           await (action === 'apply-suggestion' ? actions.applySuggestion : actions.publishSuggestion)(id, message as number, option as number);
           if (action === 'apply-suggestion') sendFiles();
@@ -761,7 +758,7 @@ h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;col
 .linked-row .what{flex:1;min-width:0}.linked-row .name{display:flex;gap:var(--space-8);align-items:baseline;min-width:0}.linked-row .repo{font-family:var(--font-code);font-size:12px;color:var(--ink-muted)}.linked-row .name a,.linked-row .name .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .linked-row .facts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-8);font-size:12px;color:var(--ink-muted)}
 .link-form{display:flex;gap:var(--space-8);align-items:center;margin-top:var(--space-8)}.link-form input{flex:1;height:26px;padding:0 var(--space-8);font-size:12px}
-.rail{border:1px solid var(--line);border-radius:var(--radius-md)}.rail section{padding:var(--space-12)}.rail section+section{border-top:1px solid var(--line)}
+.rail{border:1px solid var(--line);border-radius:var(--radius-md)}.rail section{padding:var(--space-12)}.rail p.muted,.rail span.muted,#review-note{font-size:12px;line-height:16px}.rail section+section{border-top:1px solid var(--line)}
 .seg{display:inline-flex;gap:var(--space-2);padding:var(--space-2);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--ink) 7%,transparent)}
 .seg button{min-height:22px;height:22px;padding:0 var(--space-8);border:0;border-radius:3px;color:var(--ink-muted);background:none;font-size:12px}
 .seg button:hover{color:var(--ink);filter:none}
@@ -796,9 +793,10 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .answers .answer .text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.answers .answer .muted{white-space:nowrap}.answers .answer svg{width:14px;height:14px;fill:var(--ink-muted)}
 #notice{position:fixed;left:var(--space-24);bottom:var(--space-16);z-index:5;display:flex;align-items:center;gap:var(--space-12);max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-lg);color:var(--ink);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}#notice:empty{display:none}
 #error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
-#files-bar{position:sticky;top:0;z-index:2;margin-top:var(--space-24);padding:var(--space-8) 0;background:var(--surface)}
+#files-bar{position:sticky;top:0;z-index:2;margin-top:var(--space-16);padding:var(--space-8) 0;background:var(--surface);border-bottom:1px solid var(--line)}
+#files-bar.on-overview .view-head>:not(.tabs),#files-bar.on-overview .toolbar>:not(#bar-review){display:none}.bar-review{gap:var(--space-6)}.pending-chip{padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;color:var(--pending);background:var(--pending-soft)}
 #files-bar h2 .muted{font-weight:400}
-.view-head{gap:var(--space-12)}.tabs{display:flex;gap:var(--space-4)}
+.view-head{gap:var(--space-12)}@media (max-width:1100px){#files-title{display:none}}.tabs{display:flex;gap:var(--space-4)}
 .tabs button{display:inline-flex;align-items:center;gap:var(--space-6);min-height:28px;padding:0 var(--space-8);border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--ink-muted);background:none;font-size:14px;font-weight:600}
 .tabs button:hover{color:var(--ink);filter:none}.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
 .tabs svg{width:16px;height:16px;fill:currentColor}
@@ -806,6 +804,16 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .tabs .count.working{min-width:0;padding:0}
 ${orbLoaderStyles()}
 .off-view{display:none}
+.files-layout{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:var(--space-16);align-items:start}.files-layout>#files{min-width:0}.files-layout.no-nav{grid-template-columns:minmax(0,1fr)}.files-layout.no-nav>#file-nav{display:none}
+#file-nav{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12));max-height:calc(100vh - var(--bar-height,46px) - var(--space-24));overflow:auto;margin-top:var(--space-12);padding:var(--space-4) 0;border:1px solid var(--line);border-radius:var(--radius-md);font-size:12px}
+.nav-head{display:flex;align-items:center;justify-content:flex-start;gap:var(--space-6);width:100%;min-height:26px;height:26px;padding:0 var(--space-8);border:0;border-radius:0;background:none;color:var(--ink);font-size:12px;font-weight:600;text-align:left}.nav-head:hover{filter:none}.nav-head .muted{font-weight:400}.nav-head .chevron{display:none}
+.nav-list{list-style:none;margin:0;padding:0}.nav-list li{padding:0}.nav-list li+li{border-top:0}.nav-list .nav-folder{display:flex;align-items:center;gap:var(--space-4);min-height:22px;padding:0 var(--space-8) 0 calc(var(--space-8) + var(--depth,0) * 12px);color:var(--ink-muted);font-family:var(--font-code);font-size:12px;cursor:pointer;user-select:none}.nav-folder .chevron{width:12px;height:12px;-webkit-mask-size:12px;mask-size:12px}
+.nav-file{display:flex;align-items:center;justify-content:flex-start;gap:var(--space-6);width:100%;min-height:22px;height:22px;padding:0 var(--space-8) 0 calc(var(--space-8) + var(--depth,0) * 12px + 16px);border:0;border-radius:0;background:none;color:var(--ink);font-size:12px;text-align:left}.nav-file:hover{filter:none;background:var(--brand-soft)}.nav-file[aria-current=true]{background:var(--brand-soft);box-shadow:inset 2px 0 0 var(--brand-line)}
+.nav-file .nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-code)}.nav-file.done .nav-name{color:var(--ink-muted)}.nav-file .badge{flex:none}
+.nav-section{display:flex;align-items:center;justify-content:flex-start;gap:var(--space-6);width:100%;min-height:24px;height:24px;margin-top:var(--space-4);padding:0 var(--space-8);border:0;border-radius:0;background:none;color:var(--ink);font-size:12px;font-weight:600;text-align:left}.nav-section:hover{filter:none;background:var(--brand-soft)}.nav-sev{flex:none;width:8px;height:8px;border-radius:var(--radius-pill);background:var(--sev)}.nav-section .nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-progress{flex:none;font-weight:400;color:var(--ink-muted);font-variant-numeric:tabular-nums}
+.nav-step{padding-left:calc(var(--space-8) + 14px)}.nav-step .nav-name{font-family:var(--font-ui)}.nav-number{flex:none;min-width:14px;color:var(--ink-muted);font-variant-numeric:tabular-nums;text-align:right}
+.nav-count{flex:none;min-width:16px;padding:0 var(--space-4);border-radius:var(--radius-pill);font-size:10px;line-height:16px;text-align:center;color:var(--ink-muted);background:var(--action-secondary)}.nav-done{flex:none;width:12px;height:12px;fill:var(--success)}.nav-done svg{width:12px;height:12px}
+@media (max-width:1000px){.files-layout{grid-template-columns:minmax(0,1fr)}#file-nav{position:static;max-height:none}#file-nav .nav-head .chevron{display:inline-block}#file-nav.folded .nav-list{display:none}}
 .file{margin-top:var(--space-12);border:1px solid var(--line-strong);border-top:0;border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + 10px)}
 .file-head{position:sticky;top:var(--bar-height,46px);z-index:1;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);margin:0 -1px;padding:var(--space-6) var(--space-12);background:var(--surface-raised);border:1px solid var(--line-strong);border-bottom-color:var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
 .file.collapsed{border:0}.file.collapsed .file-head{margin:0;border-bottom-color:var(--line-strong);border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
@@ -942,7 +950,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .card-thread .name,.card-thread .text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card-thread .where{display:flex;min-width:0;font-family:var(--font-code);color:var(--ink-muted)}.card-thread .state{color:var(--ink-muted)}
 .card-thread code{font-family:var(--font-code);font-size:.92em}
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
-.filter-box{position:relative}#file-filter{width:150px;height:24px;padding:0 var(--space-24) 0 var(--space-8);font-size:12px}#filter-clear{position:absolute;top:2px;right:2px;width:20px;height:20px;min-height:20px}#filter-clear svg{width:14px;height:14px}
+.filter-box{position:relative}#file-filter{width:120px;height:24px;padding:0 var(--space-24) 0 var(--space-8);font-size:12px}#filter-clear{position:absolute;top:2px;right:2px;width:20px;height:20px;min-height:20px}#filter-clear svg{width:14px;height:14px}
 .toolbar{flex-wrap:wrap;justify-content:flex-end}#files-bar .toolbar{gap:var(--space-8)}#files-bar .toolbar .divider{margin:0 var(--space-2)}.menu-anchor{position:relative;display:inline-flex}.toolbar-menu{top:calc(100% + var(--space-4));left:auto;right:0;width:max-content;min-width:180px;max-width:420px}.toolbar-menu .picker-row .text{display:flex;gap:var(--space-8);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar-menu .picker-row .text .muted{margin-left:auto}.toolbar-menu code{font-family:var(--font-code);color:var(--ink-muted)}.base-menu .picker-row .text{display:block}.base-menu{left:0;right:auto;width:300px;max-width:none}.base-menu .picker-list{gap:var(--space-2)}.base-menu input[type=text]{position:sticky;top:0;z-index:1;flex:none;width:100%;height:26px;margin-bottom:var(--space-4);padding:0 var(--space-8);font-size:12px}.menu-foot{display:flex;justify-content:flex-end;padding-top:var(--space-4);border-top:1px solid var(--line)}
 .range-menu{left:0;right:auto;width:min(680px,90vw);max-width:none}.range-menu .picker-list{display:grid;grid-template-columns:16px max-content minmax(0,1fr) repeat(6,max-content);column-gap:var(--space-8)}.range-menu .range-row{display:grid;grid-column:1/-1;grid-template-columns:subgrid}.range-row:not(.commit)>.text{grid-column:2/8}.range-row:not(.commit)>.muted{grid-column:8/-1;text-align:right}.range-row .num{text-align:right;font-variant-numeric:tabular-nums}.range-row .ok.num,.range-row .bad.num{font-family:var(--font-code);font-size:11px}.range-row .when{text-align:right}.menu-hint{grid-column:1/-1}.range-row{width:100%;justify-content:flex-start;min-height:28px;padding:0 var(--space-6);border:0;color:var(--ink);background:none;font:inherit;font-size:12px;text-align:left}.range-row:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}.range-row[aria-checked=true] .check{visibility:visible}.range-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-row .ref{display:inline-flex;align-items:center;flex:none}.range-row .when{flex:none;color:var(--ink-muted)}.range-row .muted{flex:none}.menu-hint{margin-top:var(--space-4);padding:var(--space-6) var(--space-6) var(--space-2);border-top:1px solid var(--line);font-size:11px}
 .range-button{gap:var(--space-6);min-height:26px;height:26px;max-width:340px;padding:0 var(--space-4) 0 var(--space-8);border:1px solid var(--line);color:var(--ink);background:none;font-size:12px}.range-button:hover{filter:none;background:color-mix(in srgb,var(--ink) 6%,transparent)}.range-button[aria-expanded=true]{border-color:var(--line-strong);background:color-mix(in srgb,var(--ink) 6%,transparent)}.range-button>svg{color:var(--ink-muted)}.range-button .ref{display:inline-flex;align-items:center;height:18px;min-height:18px}.range-button .range-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-button.on{color:var(--brand);background:var(--brand-soft)}
@@ -992,31 +1000,8 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <span id="peek-title" class="where"></span>
 <button id="peek-open" title="Open in editor"><svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 10v3.5H2.5V4H6"/></svg>Open in editor</button>
 <button id="peek-close" title="Close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div><div id="peek-code"></div></aside>
-<div class="layout">
-<div class="main-col">
-<section class="card" id="linked" hidden><div class="section-head"><h3>Linked changes</h3><button id="link-pr" class="small">Link a PR…</button></div><ul id="linked-rows"></ul></section>
-<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div><div id="description-reactions"></div></section>
-<section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
-<section class="card" id="conversation"><button id="fold-conversation" class="section-fold" aria-expanded="true" aria-controls="timeline">${codicons.chevronDown}<h3>Conversation</h3><span id="conversation-count" class="count"></span></button><div id="timeline"></div><div id="conversation-form"></div></section>
-</div>
-<aside class="rail">
-<section><div class="section-head"><h3>Reviewers</h3><button id="pick-reviewers" class="icon-button" data-pr-action data-tip="Request reviewers" aria-label="Request reviewers" hidden>${codicons.gear}</button></div><ul id="reviewers"></ul></section>
-<section><div class="section-head"><h3>Assignees</h3><button id="pick-assignees" class="icon-button" data-pr-action data-tip="Edit assignees" aria-label="Edit assignees" hidden>${codicons.gear}</button></div><ul id="assignees"></ul></section>
-<section><div class="section-head"><h3>Labels</h3><button id="pick-labels" class="icon-button" data-pr-action data-tip="Edit labels" aria-label="Edit labels" hidden>${codicons.gear}</button></div><div id="labels" class="labels"></div></section>
-<section><div class="section-head"><h3>Milestone</h3><button id="pick-milestone" class="icon-button" data-pr-action data-tip="Set milestone" aria-label="Set milestone" hidden>${codicons.gear}</button></div><div id="milestone"></div></section>
-<section id="development" hidden><h3>Development</h3><ul id="linked-issues"></ul></section>
-<section><h3>Checks</h3><div id="awaiting" class="row awaiting" hidden><span class="wait gap" id="awaiting-note"></span><span class="menu-anchor"><button id="approve-runs" class="small" data-pr-action aria-haspopup="true" aria-expanded="false">Approve and run</button></span></div><ul id="checks"></ul></section>
-<section id="review-box"><h3>Finish your review</h3>
-<div class="row pending-row"><p class="muted gap" id="pending-note"></p><span class="menu-anchor"><button id="discard-review" class="quiet small" data-pr-action aria-haspopup="true" aria-expanded="false" hidden>Discard</button></span></div>
-<textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
-<div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
-<section id="merge-box"><h3 id="merge-title">Merge</h3><ul id="merge-status" class="merge-status"></ul><div class="row" id="update-row" hidden><span class="muted gap">The branch is behind the base branch.</span><span class="menu-anchor"><button id="update-branch" class="small" data-pr-action aria-haspopup="true" aria-expanded="false">Update branch</button></span></div><div id="merge-form" hidden><input id="merge-headline" type="text" aria-label="Commit title"><textarea id="merge-body" aria-label="Commit message"></textarea></div>
-<div class="row" id="merge-row"><span class="menu-anchor"><button id="method" class="range-button" aria-label="Merge method" aria-haspopup="true" aria-expanded="false"><span class="range-text" id="method-text"></span>${codicons.chevronDown}</button></span><label class="merge-delete" id="merge-delete-label" hidden><input type="checkbox" id="merge-delete">Delete branch</label><span class="gap"></span><button id="merge-cancel" class="quiet" hidden>Cancel</button><button id="merge">Merge</button><button id="auto-merge" class="quiet" data-pr-action hidden>Enable auto-merge</button></div>
-<div class="row" id="auto-row" hidden><span id="auto-note" class="muted gap"></span><button id="auto-merge-off" class="small" data-pr-action>Disable auto-merge</button></div>
-<div class="row" id="queue-row" hidden><span id="queue-note" class="muted gap"></span><button id="dequeue" class="small" data-pr-action>Remove from queue</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
-</aside>
-</div>
 <div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
+<button id="view-overview" role="tab">Overview</button>
 <button id="view-files" role="tab">Files<span id="files-count" class="count"></span></button>
 <button id="view-guide" role="tab">${codicons.map}Guide<span id="guide-count" class="count" hidden></span></button></span>
 <span class="menu-anchor"><button id="range" class="range-button" aria-label="Changes from" aria-haspopup="true" aria-expanded="false">${codicons.gitCommit}<span class="range-text">All changes</span>${codicons.chevronDown}</button></span>
@@ -1027,15 +1012,39 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <button id="show-unpushed" class="small" data-tip="Show the commits you would push" hidden>Show changes</button><button id="push" class="primary small" data-tip="Commits in this worktree that GitHub does not have yet" hidden></button>
 <span id="filter-box" class="filter-box"><input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files"><button id="filter-clear" class="icon-button" aria-label="Clear filter" hidden>${codicons.close}</button></span>
 <span class="menu-anchor"><button id="filter-menu" class="icon-button" data-tip="Filter files" aria-label="Filter files" aria-haspopup="true" aria-expanded="false">${codicons.filter}</button></span>
-<button id="whitespace" class="icon-button" data-tip="Hide whitespace changes" aria-label="Hide whitespace changes">${codicons.whitespace}</button>
 <span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${codicons.listFlat}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${codicons.splitHorizontal}</button></span>
-<button id="folders" class="icon-button" data-tip="Group files by folder" aria-label="Group files by folder">${codicons.listTree}</button>
-<span class="divider"></span>
-<button id="collapse" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
-<button id="expand" class="icon-button" data-tip="Expand all files" aria-label="Expand all files">${codicons.expandAll}</button>
-<button id="toggle-comments" class="icon-button" data-tip="Collapse all comments" aria-label="Collapse all comments">${codicons.comment}</button><button id="margin-threads" class="icon-button" data-tip="Move collapsed comments into the margin" aria-label="Move collapsed comments into the margin">${codicons.layoutSidebarLeft}</button></span></div>
+<button id="fold-all" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${codicons.collapseAll}</button>
+<span class="menu-anchor"><button id="view-menu" class="range-button" aria-haspopup="true" aria-expanded="false"><span class="range-text">View</span>${codicons.chevronDown}</button></span>
+<span id="bar-review" class="row bar-review" hidden><span id="bar-pending" class="pending-chip" hidden></span><button id="finish-review" class="primary small">Finish review</button></span></span></div>
+<div class="layout" id="panel-overview" role="tabpanel" aria-labelledby="view-overview">
+<div class="main-col">
+<section class="card" id="linked" hidden><div class="section-head"><h3>Linked changes</h3><button id="link-pr" class="small">Link a PR…</button></div><ul id="linked-rows"></ul></section>
+<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${codicons.edit}</button></div><div id="body"></div><div id="description-reactions"></div></section>
+<section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
+<section class="card" id="conversation"><button id="fold-conversation" class="section-fold" aria-expanded="true" aria-controls="timeline">${codicons.chevronDown}<h3>Conversation</h3><span id="conversation-count" class="count"></span></button><div id="timeline"></div><div id="conversation-form"></div></section>
+</div>
+<aside class="rail">
+<section id="review-box"><h3>Finish your review</h3>
+<div class="row pending-row"><p class="muted gap" id="pending-note"></p><span class="menu-anchor"><button id="discard-review" class="quiet small" data-pr-action aria-haspopup="true" aria-expanded="false" hidden>Discard</button></span></div>
+<textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
+<div class="row actions review-actions"><span class="muted" id="review-note"></span><button data-event="comment">Comment</button><button data-event="requestChanges" data-reviewer>Request changes</button><button class="primary" data-event="approve" data-reviewer>Approve</button></div></section>
+<section id="merge-box"><h3 id="merge-title">Merge</h3><ul id="merge-status" class="merge-status"></ul><div class="row" id="update-row" hidden><span class="muted gap">The branch is behind the base branch.</span><span class="menu-anchor"><button id="update-branch" class="small" data-pr-action aria-haspopup="true" aria-expanded="false">Update branch</button></span></div><div id="merge-form" hidden><input id="merge-headline" type="text" aria-label="Commit title"><textarea id="merge-body" aria-label="Commit message"></textarea></div>
+<div class="row" id="merge-row"><span class="menu-anchor"><button id="method" class="range-button" aria-label="Merge method" aria-haspopup="true" aria-expanded="false"><span class="range-text" id="method-text"></span>${codicons.chevronDown}</button></span><label class="merge-delete" id="merge-delete-label" hidden><input type="checkbox" id="merge-delete">Delete branch</label><span class="gap"></span><button id="merge-cancel" class="quiet" hidden>Cancel</button><button id="merge">Merge</button><button id="auto-merge" class="quiet" data-pr-action hidden>Enable auto-merge</button></div>
+<div class="row" id="auto-row" hidden><span id="auto-note" class="muted gap"></span><button id="auto-merge-off" class="small" data-pr-action>Disable auto-merge</button></div>
+<div class="row" id="queue-row" hidden><span id="queue-note" class="muted gap"></span><button id="dequeue" class="small" data-pr-action>Remove from queue</button></div><p id="mergeable" class="muted"></p><div class="row" id="conflict-row" hidden><span id="conflict-note"></span><button id="fix-conflicts" class="claude">Fix conflicts</button></div><div id="conflict-ask" class="thread analysis" hidden><div class="strip">Claude needs your input</div><div id="conflict-reply" class="msg-text"></div><textarea id="conflict-answer" aria-label="Your answer" placeholder="Your answer, such as 4 attempts and a 200 ms first delay"></textarea><div class="row composer-actions"><span class="gap"></span><button id="conflict-cancel" class="quiet">Cancel</button><button id="conflict-send" class="claude">Fix conflicts</button></div></div><div class="row state-actions" id="state-actions"></div></section>
+<section><div class="section-head"><h3>Reviewers</h3><button id="pick-reviewers" class="icon-button" data-pr-action data-tip="Request reviewers" aria-label="Request reviewers" hidden>${codicons.gear}</button></div><ul id="reviewers"></ul></section>
+<section><div class="section-head"><h3>Assignees</h3><button id="pick-assignees" class="icon-button" data-pr-action data-tip="Edit assignees" aria-label="Edit assignees" hidden>${codicons.gear}</button></div><ul id="assignees"></ul></section>
+<section><div class="section-head"><h3>Labels</h3><button id="pick-labels" class="icon-button" data-pr-action data-tip="Edit labels" aria-label="Edit labels" hidden>${codicons.gear}</button></div><div id="labels" class="labels"></div></section>
+<section><div class="section-head"><h3>Milestone</h3><button id="pick-milestone" class="icon-button" data-pr-action data-tip="Set milestone" aria-label="Set milestone" hidden>${codicons.gear}</button></div><div id="milestone"></div></section>
+<section id="development" hidden><h3>Development</h3><ul id="linked-issues"></ul></section>
+<section><h3>Checks</h3><div id="awaiting" class="row awaiting" hidden><span class="wait gap" id="awaiting-note"></span><span class="menu-anchor"><button id="approve-runs" class="small" data-pr-action aria-haspopup="true" aria-expanded="false">Approve and run</button></span></div><ul id="checks"></ul></section>
+
+</aside>
+</div>
+<div id="panel-files" role="tabpanel">
 <div id="range-note" class="row range-note" hidden></div>
-<div id="files"><p class="muted">Loading changes…</p></div>
+<div class="files-layout"><nav id="file-nav" aria-label="Changed files"></nav><div id="files"><p class="muted">Loading changes…</p></div></div>
+</div>
 <script id="initial" type="application/json">${JSON.stringify({ state, pdfScript }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
 </body></html>`;

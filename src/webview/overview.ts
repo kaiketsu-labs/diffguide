@@ -17,7 +17,7 @@ declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; 
 
 type Layout = 'unified' | 'split';
 /** What the file list shows: every file, the PR's commits, or Claude's guide in reading order. */
-type View = 'files' | 'guide';
+type View = 'overview' | 'files' | 'guide';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
 /** A new comment on a whole file, written above its diff. */
@@ -65,7 +65,7 @@ const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: 
 const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
 let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
-let view: View = saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : 'files';
+let view: View = saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : saved.view === 'files' ? 'files' : 'overview';
 let peekWidth = saved.peekWidth;
 let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
@@ -1156,7 +1156,6 @@ function renderRangeControls(): void {
   range.title = label;
   range.querySelector('.range-text')?.replaceChildren(...diffRange.kind === 'commits' && diffRange.from === diffRange.to ? [hashChip(diffRange.from), ' ' + label.slice(8)] : [label]);
   range.classList.toggle('on', diffRange.kind !== 'all');
-  $('whitespace').setAttribute('aria-pressed', String(whitespace));
   const note = $('range-note');
   note.hidden = diffRange.kind === 'all';
   if (!note.hidden) {
@@ -1300,6 +1299,24 @@ function openFilterMenu(): void {
   const foot = el('div', 'menu-foot');
   foot.append(reset);
   openToolbarMenu('filter-menu', [...rows, foot]);
+}
+
+/** Whether every file, or every guide step, is collapsed, so the fold button expands them. */
+function allFolded(): boolean {
+  const keys = view === 'guide' ? (guide ?? []).flatMap((group) => group.steps.map((step) => guideState('step', step.key))) : (files ?? []).map((file) => file.path);
+  return keys.length > 0 && keys.every((key) => collapsed.get(key) === true);
+}
+
+/** Display settings you set once: whitespace, folders and where comments show. */
+function openViewMenu(): void {
+  const commentsOpen = document.querySelector('details.thread[open]') !== null;
+  const rows = [
+    ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); })] : [],
+    ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); })] : [],
+    menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }),
+    menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }),
+  ];
+  openToolbarMenu('view-menu', rows);
 }
 
 function clearFilters(): void {
@@ -1808,6 +1825,9 @@ function render(state: OverviewState): void {
     badge.textContent = label;
   }
   $('review-box').hidden = !details?.open;
+  $('bar-review').hidden = !details?.open;
+  $('bar-pending').hidden = pendingCount === undefined;
+  $('bar-pending').textContent = pendingCount + ' pending';
   $('merge-box').hidden = !details;
   if (details) {
     renderState(details);
@@ -2559,7 +2579,7 @@ function jump(thread: Thread): void {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
   }
-  if (view === 'guide' && !document.getElementById('thread-' + thread.id)) { setView('files'); }
+  if (view === 'overview' || (view === 'guide' && !document.getElementById('thread-' + thread.id))) setView('files');
   if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
     collapsed.set(thread.path, false);
     openFolders(thread.path);
@@ -3054,17 +3074,14 @@ function setTip(button: HTMLElement, tip: string): void {
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
-  for (const name of ['files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
+  for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
+  $('panel-overview').hidden = view !== 'overview';
+  $('panel-files').hidden = view === 'overview';
+  $('files-bar').classList.toggle('on-overview', view === 'overview');
   showGuideTab();
   renderRangeControls();
-  const folderButton = $('folders');
-  folderButton.toggleAttribute('disabled', view === 'guide');
-  setTip(folderButton, view === 'guide' ? 'Folders are off in the guide' : 'Group files by folder');
-  folderButton.setAttribute('aria-pressed', String(folders));
-  folderButton.setAttribute('aria-pressed', String(folders));
-  $('margin-threads').setAttribute('aria-pressed', String(marginThreads));
-  setTip($('margin-threads'), marginThreads ? 'Show collapsed comments in the diff' : 'Move collapsed comments into the margin');
-  if (!files) return;
+  setTip($('fold-all'), allFolded() ? 'Expand all files' : 'Collapse all files');
+  if (!files || view === 'overview') return;
   if (focusThread !== undefined) {
     const id = focusThread;
     focusThread = undefined;
@@ -3082,6 +3099,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   }
   $('files-title').textContent = (shownFiles.length < allFiles.length ? shownFiles.length + ' of ' + allFiles.length + ' files · ' : '') + shownFiles.filter((file) => viewed.has(file.path)).length + '/' + shownFiles.length + ' viewed';
   const tree = fileTree(shownFiles);
+  renderFileNav(tree, shownFiles, threadsByFile);
   const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
   const threadsOf = (path: string): Thread[] => threadsByFile.get(path) ?? [];
@@ -3121,6 +3139,92 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     if (folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
   });
+}
+
+/** Folders folded in the file navigator, apart from the file list's own folders. */
+const navCollapsed = new Set<string>();
+/** Whether the navigator is folded to its heading in a narrow window. */
+let navFolded = true;
+
+/** The file navigator beside the diffs: change letter, name, open comments and a Viewed tick per file. */
+function renderFileNav(tree: FileFolder<FileDiff>, shown: readonly FileDiff[], threadsByFile: ReadonlyMap<string, readonly Thread[]>): void {
+  const nav = $('file-nav');
+  nav.classList.toggle('folded', navFolded);
+  const head = el('button', 'nav-head');
+  head.setAttribute('aria-expanded', String(!navFolded));
+  head.append(chevronMark(navFolded), shown.length + (shown.length === 1 ? ' file' : ' files'), el('span', 'muted', shown.filter((file) => viewed.has(file.path)).length + ' viewed'));
+  head.addEventListener('click', () => { navFolded = !navFolded; renderFileNav(tree, shown, threadsByFile); });
+  const list = el('ul', 'nav-list');
+  const add = (folder: FileFolder<FileDiff>, depth: number): void => {
+    for (const child of folder.folders) {
+      const isCollapsed = navCollapsed.has(child.path);
+      const row = el('li', 'nav-folder');
+      row.style.setProperty('--depth', String(depth));
+      row.title = child.path;
+      row.append(chevronMark(isCollapsed), child.name);
+      row.addEventListener('click', () => {
+        if (isCollapsed) navCollapsed.delete(child.path);
+        else navCollapsed.add(child.path);
+        renderFileNav(tree, shown, threadsByFile);
+      });
+      list.append(row);
+      if (!isCollapsed) add(child, depth + 1);
+    }
+    for (const file of folder.files) list.append(navFile(file, depth, threadsByFile.get(file.path) ?? []));
+  };
+  add(tree, 0);
+  nav.replaceChildren(head, list);
+  markCurrentNavFile();
+}
+
+function navFile(file: FileDiff, depth: number, threads: readonly Thread[]): HTMLElement {
+  const item = el('li');
+  const row = el('button', 'nav-file' + (viewed.has(file.path) ? ' done' : ''));
+  row.style.setProperty('--depth', String(depth));
+  row.dataset.navPath = file.path;
+  row.title = file.path;
+  const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
+  row.append(badge, el('span', 'nav-name', file.path.split('/').at(-1) ?? file.path));
+  const open = threads.filter((thread) => !thread.resolved).length;
+  if (open) {
+    const count = el('span', 'nav-count', String(open));
+    count.title = open + (open === 1 ? ' open comment' : ' open comments');
+    row.append(count);
+  }
+  const done = el('span', 'nav-done');
+  if (viewed.has(file.path)) {
+    done.title = 'Viewed';
+    done.append(icon(codicons.check));
+  }
+  row.append(done);
+  row.addEventListener('click', () => showFile(file.path));
+  item.append(row);
+  return item;
+}
+
+/** Scroll the file list to a file, opening its box and folders first when they are closed. */
+function showFile(path: string): void {
+  const box = (): HTMLElement | null => $('files').querySelector<HTMLElement>('.file[data-path="' + CSS.escape(path) + '"]');
+  const present = box();
+  if (!present || collapsed.get(path) === true) {
+    collapsed.set(path, false);
+    openFolders(path);
+    save();
+    renderFiles(present ? [path] : undefined);
+  }
+  box()?.scrollIntoView({ block: 'start' });
+}
+
+/** Highlight the navigator row of the file or guide step at the top of the view. */
+function markCurrentNavFile(): void {
+  const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 24;
+  const guided = view === 'guide';
+  let top: string | undefined;
+  for (const box of $('files').querySelectorAll<HTMLElement>(guided ? '.step-wrap[data-key]' : '.file[data-path]')) {
+    if (box.getBoundingClientRect().top > line) break;
+    top = guided ? box.dataset.key : box.dataset.path;
+  }
+  for (const row of $('file-nav').querySelectorAll<HTMLElement>('.nav-file')) row.setAttribute('aria-current', String((guided ? row.dataset.navStep : row.dataset.navPath) === top));
 }
 
 const localMarks: Record<LocalChange, readonly [string, string]> = {
@@ -3488,6 +3592,7 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const result = current?.analysis.result;
   if (!files || !result) {
     $('files-title').textContent = '';
+    $('files').parentElement?.classList.add('no-nav');
     container.replaceChildren(guideIntro());
     return;
   }
@@ -3523,6 +3628,44 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
     }
   }
   updateGuideProgress(groups);
+  renderGuideNav(groups);
+}
+
+/** The guide's sections and numbered steps beside the steps, each with its Viewed state; a click scrolls to it. */
+function renderGuideNav(groups: readonly GuideGroup[]): void {
+  $('files').parentElement?.classList.remove('no-nav');
+  const nav = $('file-nav');
+  nav.classList.toggle('folded', navFolded);
+  const steps = groups.flatMap((group) => group.steps);
+  const head = el('button', 'nav-head');
+  head.setAttribute('aria-expanded', String(!navFolded));
+  head.append(chevronMark(navFolded), steps.length + (steps.length === 1 ? ' step' : ' steps'), el('span', 'muted', steps.filter(stepViewed).length + ' viewed'));
+  head.addEventListener('click', () => { navFolded = !navFolded; renderGuideNav(groups); });
+  const list = el('ul', 'nav-list');
+  for (const group of groups) {
+    const row = el('button', 'nav-section sev-' + group.severity);
+    row.title = severityLabels[group.severity] + ': ' + group.title;
+    row.append(el('span', 'nav-sev'), el('span', 'nav-name', group.title), el('span', 'nav-progress', group.steps.filter(stepViewed).length + '/' + group.steps.length));
+    row.addEventListener('click', () => revealGroup(group.key));
+    const item = el('li');
+    item.append(row);
+    list.append(item);
+    group.steps.forEach((step, index) => {
+      const done = stepViewed(step);
+      const stepRow = el('button', 'nav-file nav-step' + (done ? ' done' : ''));
+      stepRow.dataset.navStep = step.key;
+      stepRow.title = step.path + (step.note === undefined ? '' : '\n\n' + step.note);
+      const mark = el('span', 'nav-done');
+      if (done) mark.append(icon(codicons.check));
+      stepRow.append(el('span', 'nav-number', String(index + 1)), el('span', 'nav-name', step.title ?? step.path.split('/').at(-1) ?? step.path), mark);
+      stepRow.addEventListener('click', () => revealStep(step.key));
+      const stepItem = el('li');
+      stepItem.append(stepRow);
+      list.append(stepItem);
+    });
+  }
+  nav.replaceChildren(head, list);
+  markCurrentNavFile();
 }
 
 function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, threads: readonly Thread[], note: Thread | undefined, hasDraft: boolean): HTMLElement {
@@ -3845,14 +3988,24 @@ function renderPeek(): void {
   if (first) codeBox.scrollTop = Math.max(0, first.getBoundingClientRect().top - codeBox.getBoundingClientRect().top - 3 * first.offsetHeight);
 }
 
-/** Switch between the file list and the guide; the sidebar follows. */
+/** Switch tabs, keeping the tab bar where it is when the page is scrolled past the header. */
 function setView(next: View): void {
   view = next;
   closeToolbarMenu();
   if (next === 'guide' && (diffRange.kind !== 'all' || whitespace)) requestFiles({ kind: 'all' }, false);
   save();
   renderFiles();
-  post({ action: 'view', view: next });
+  const bar = $('files-bar');
+  const panelTop = (next === 'overview' ? $('panel-overview') : $('panel-files')).getBoundingClientRect().top + window.scrollY - bar.offsetHeight;
+  if (window.scrollY > panelTop) window.scrollTo(0, panelTop);
+}
+
+/** Open the Overview tab at the review box with its summary focused. */
+function finishReview(): void {
+  if (view !== 'overview') setView('overview');
+  const box = $('review-box');
+  box.scrollIntoView({ block: 'nearest' });
+  $<HTMLTextAreaElement>('review').focus({ preventScroll: true });
 }
 
 /** The Guide tab's count: steps once a guide exists, a pulse while Claude builds it. Build guide shows only in the guide. */
@@ -3865,7 +4018,7 @@ function showGuideTab(): void {
   count.hidden = !analysis?.running && steps === undefined;
   $('files-count').textContent = files ? String(files.length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
-  for (const id of ['range', 'whitespace', 'filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
+  for (const id of ['range', 'filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
 }
 
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
@@ -4009,6 +4162,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
     if (thread) jump(thread);
   }
   if (data.reveal && files) {
+    view = 'files';
     collapsed.set(data.reveal, false);
     openFolders(data.reveal);
     save();
@@ -4158,9 +4312,9 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
-for (const name of ['files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
+for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
+$('finish-review').addEventListener('click', finishReview);
 $('range').addEventListener('click', openRangeMenu);
-$('whitespace').addEventListener('click', () => requestFiles(diffRange, !whitespace));
 $<HTMLInputElement>('file-filter').value = fileFilter;
 $('file-filter').addEventListener('input', () => { fileFilter = $<HTMLInputElement>('file-filter').value; applyFilters(); });
 $('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Escape') { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; applyFilters(); $('file-filter').blur(); } });
@@ -4193,36 +4347,24 @@ $('auto-merge-off').addEventListener('click', () => changePullRequest({ action: 
 $('dequeue').addEventListener('click', () => changePullRequest({ action: 'dequeue' }));
 $('merge-cancel').addEventListener('click', closeMergeForm);
 attachMentions($<HTMLTextAreaElement>('review'), $('review-box'));
-$('folders').addEventListener('click', () => { folders = !folders; save(); renderFiles(); });
-$('margin-threads').addEventListener('click', () => { marginThreads = !marginThreads; save(); renderFiles(); });
+$('view-menu').addEventListener('click', openViewMenu);
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
-for (const [id, value] of [['collapse', true], ['expand', false]] as const) {
-  $(id).addEventListener('click', () => {
-    if (view === 'guide') {
-      for (const group of guide ?? []) {
-        if (!value) collapsed.set(guideState('group', group.key), false);
-        for (const step of group.steps) collapsed.set(guideState('step', step.key), value);
-      }
-    } else {
-      for (const file of files ?? []) {
-        collapsed.set(file.path, value);
-        if (!value) openFolders(file.path);
-      }
+$('fold-all').addEventListener('click', () => {
+  const value = !allFolded();
+  if (view === 'guide') {
+    for (const group of guide ?? []) {
+      if (!value) collapsed.set(guideState('group', group.key), false);
+      for (const step of group.steps) collapsed.set(guideState('step', step.key), value);
     }
-    save();
-    renderFiles();
-  });
-}
-$('toggle-comments').addEventListener('click', () => {
-  const open = !document.querySelector('details.thread[open]');
-  for (const thread of allThreads()) threadOpen.set(thread.id, open);
+  } else {
+    for (const file of files ?? []) {
+      collapsed.set(file.path, value);
+      if (!value) openFolders(file.path);
+    }
+  }
+  save();
   renderFiles();
-  showCommentsTip();
 });
-$('toggle-comments').addEventListener('pointerenter', showCommentsTip);
-function showCommentsTip(): void {
-  setTip($('toggle-comments'), document.querySelector('details.thread[open]') ? 'Collapse all comments' : 'Expand all comments');
-}
 for (const review of reviewButtons) {
   review.addEventListener('click', () => {
     $('error').textContent = '';
@@ -4265,6 +4407,11 @@ window.addEventListener('message', (event: MessageEvent) => {
   else onExtensionMessage(event.data as ExtensionMessage);
 });
 render(initial.state);
+let navFrame = 0;
+window.addEventListener('scroll', () => {
+  if (navFrame || view === 'overview') return;
+  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(); });
+}, { passive: true });
 new ResizeObserver(([entry]) => {
   if (entry) document.body.style.setProperty('--bar-height', (entry.target as HTMLElement).offsetHeight + 'px');
 }).observe($('files-bar'));

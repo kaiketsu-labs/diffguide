@@ -7,10 +7,10 @@ import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
 import type { CodeAnchor } from '../src/contracts.js';
-import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, guideOutline, parseClaudeAnalysis, readStoredAnalysis } from '../src/prAnalysis.js';
+import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis } from '../src/prAnalysis.js';
 import { PullRequestAnalysis, type AnalysisOptions } from '../src/prAnalysisRunner.js';
 import { createReviewStore } from '../src/store.js';
-import { parsePlainDiff, parseUnifiedDiff } from '../src/unifiedDiff.js';
+import { parseUnifiedDiff } from '../src/unifiedDiff.js';
 import { settle } from './fakes/vscode.js';
 
 const diff = [
@@ -202,20 +202,5 @@ test('summarizes a file whose diff is too large to show in full', () => {
   const prompt = analysisPrompt(files, changeBlocks(files), '#1 Lock');
   assert.match(prompt, /\[b1\] new lines 2-3001, 3000 changed\n\+  "package-0"/u);
   assert.ok(prompt.length < 5000);
-});
-
-test('lists the same steps from an uncolored diff and marks a step viewed once its lines are read', () => {
-  const tricky = diff.replace('+const b = 3;', '+const b = a < 3 && "x" !== \'y\';');
-  const colored = parseUnifiedDiff(tricky);
-  const plain = parsePlainDiff(tricky);
-  assert.deepEqual(changeBlocks(plain).map((block) => block.signature), changeBlocks(colored).map((block) => block.signature));
-  const analysis = parseClaudeAnalysis({ overview: '', files: [], groups: [{ severity: 'routine', title: 'All', steps: [{ blocks: ['b1'], title: 'Change b', note: 'B.' }] }] },
-    changeBlocks(colored), 'head1', '2026-11-03T00:00:00.000Z');
-  const read = [{ path: 'src/a.ts', side: 'new' as const, startLine: 2, endLine: 2 }];
-  const outline = guideOutline(buildGuide(analysis, plain), plain, read, new Set(['logo.png']));
-  assert.deepEqual(outline.map((group) => group.steps.map((step) => [step.key, step.title, step.viewed])), [
-    [['g0.0', 'Change b', true]],
-    [['u:src/a.ts', undefined, false], ['u:src/b.ts', undefined, false], ['u:logo.png', undefined, true]],
-  ]);
 });
 

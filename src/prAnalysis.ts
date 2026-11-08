@@ -315,18 +315,3 @@ export function groupReadMarks(group: GuideGroup, files: readonly FileDiff[], ra
   }
   return { read, viewed: [...done].filter((path) => !viewed.has(path)) };
 }
-
-/** A guide step as the sidebar lists it. */
-export interface OutlineStep { readonly key: string; readonly path: string; readonly title?: string; readonly note?: string; readonly viewed: boolean }
-export interface OutlineGroup { readonly key: string; readonly severity: GuideGroup['severity']; readonly title: string; readonly steps: readonly OutlineStep[] }
-
-/** The guide's groups and steps with each step's viewed state, without the diff. */
-export function guideOutline(groups: readonly GuideGroup[], files: readonly FileDiff[], ranges: readonly MarkedRange[], viewed: ReadonlySet<string>): OutlineGroup[] {
-  return groups.map(({ key, severity, title, steps }) => ({
-    key, severity, title,
-    steps: steps.map((step) => ({
-      key: step.key, path: step.path, ...(step.title === undefined ? {} : { title: step.title }), ...(step.note === undefined ? {} : { note: step.note }),
-      viewed: stepViewed(step, files.find((file) => file.path === step.path), ranges, viewed.has(step.path)),
-    })),
-  }));
-}

@@ -126,17 +126,6 @@ function readBlobs(worktree: string, revision: string, paths: readonly string[])
   });
 }
 
-/** The PR's changes without syntax colors, for counting and matching lines where nothing is shown. */
-export async function readPlainPullRequestDiff(worktree: string, base: string): Promise<readonly FileDiff[]> {
-  return parsePlainDiff(await diffOutput(worktree, base));
-}
-
-export function parsePlainDiff(output: string): readonly FileDiff[] {
-  return parseRawDiff(output).map((file) => highlightFile(file, (lines) => lines.map(escapeHtml)));
-}
-
-const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-
 /** Parse `git diff` output; lines are highlighted per side so tokens spanning lines stay correct, from the whole file when its sources are given by path. */
 export function parseUnifiedDiff(output: string, sources: ReadonlyMap<string, FileSources> = new Map()): readonly FileDiff[] {
   return parseRawDiff(output).map((file) => highlightFile(file, highlightLines, sources.get(file.path)));
