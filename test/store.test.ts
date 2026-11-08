@@ -190,11 +190,11 @@ test('failed persistence leaves the live snapshot untouched and later writes rec
 test('rejects oversized new feedback and code before committing any work', async (t) => {
   const { store, file } = await fixture(t);
   const oversized = 'x'.repeat(maximumReviewTextLength + 1);
-  assert.throws(() => store.submit(anchor(), oversized, 'ask'), /Kommentar ist zu groß/u);
+  assert.throws(() => store.submit(anchor(), oversized, 'ask'), /Comment is too long/u);
   for (const field of ['selectedText', 'contextBefore', 'contextAfter'] as const) {
-    await assert.rejects(store.submit({ ...anchor(), [field]: oversized }, 'Explain this.', 'ask'), /ist zu groß/u);
+    await assert.rejects(store.submit({ ...anchor(), [field]: oversized }, 'Explain this.', 'ask'), /is too long/u);
   }
-  assert.throws(() => store.submit(anchor(), 'Bad\0feedback', 'ask'), /Nullzeichen/u);
+  assert.throws(() => store.submit(anchor(), 'Bad\0feedback', 'ask'), /null character/u);
   assert.equal(store.events.length, 0);
   await assert.rejects(readFile(file), (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT');
   const text = 'x'.repeat(maximumReviewTextLength);
@@ -208,7 +208,7 @@ test('uses the MCP reply limit for direct bridge updates too', async (t) => {
   const thread = await store.submit(anchor(), 'Explain this.', 'ask');
   assert.throws(() => store.updateFromAgent({
     eventId: thread.latestEventId, status: 'answered', text: 'x'.repeat(maximumReplyLength + 1),
-  }), /Antwort ist zu groß/u);
+  }), /Reply is too long/u);
   assert.equal(store.events[0]?.acknowledged, false);
   await store.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'x'.repeat(maximumReplyLength) });
   assert.equal(store.threads[0]?.messages.at(-1)?.text.length, maximumReplyLength);

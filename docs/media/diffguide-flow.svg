@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1260" viewBox="0 0 1440 1260" role="img" aria-labelledby="title description">
-  <title id="title">DiffGuide: Code Review im Dialog mit deinem Agenten</title>
-  <desc id="description">Ein klarer Kreislauf: Änderungen im lokalen Code ansehen, Feedback direkt an einer Zeile mit /a, /i oder /r senden, mit dem Agenten klären oder ändern, anschließend die Antwort und Änderung prüfen. Rückfragen bleiben im selben Thread. Nur der Mensch markiert ihn als erledigt. Eine separate optionale Aktion überträgt Zusammenfassungen und offene Fragen nach einer Vorschau in den bestehenden GitHub-PR. Die gezeigten Code- und Kommentarausschnitte sind nachgestellt.</desc>
+  <title id="title">DiffGuide: code review in conversation with your agent</title>
+  <desc id="description">A clear cycle: inspect changes in local code, send feedback on a line with /a, /i or /r, discuss or change it with the agent, then check the answer and the change. Follow-ups stay in the same thread. Only the human marks it done. A separate optional action carries summaries and open questions into the existing GitHub PR after a preview. The code and comment snippets shown are staged.</desc>
   <defs>
     <style>
       text{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-synthesis:none}
@@ -29,10 +29,10 @@
   <rect width="1440" height="1260" fill="#f7f8f6"/>
   <path d="M64 64h28" stroke="#23766b" stroke-width="3" stroke-linecap="round"/>
   <text x="108" y="71" class="micro muted" letter-spacing="2">DIFFGUIDE</text>
-  <text x="1376" y="71" text-anchor="end" class="micro muted">MENSCH + AGENT · GEMEINSAM AM CODE</text>
-  <text x="64" y="158" class="heading ink">Code Review.</text>
-  <text x="64" y="224" class="heading teal">Im Dialog mit deinem Agenten.</text>
-  <text x="64" y="272" class="body muted">Änderungen verstehen. Fragen klären. Gemeinsam verbessern.</text>
+  <text x="1376" y="71" text-anchor="end" class="micro muted">HUMAN + AGENT · TOGETHER ON THE CODE</text>
+  <text x="64" y="158" class="heading ink">Code review.</text>
+  <text x="64" y="224" class="heading teal">In conversation with your agent.</text>
+  <text x="64" y="272" class="body muted">Understand changes. Settle questions. Improve together.</text>
 
   <path d="M688 465h64" class="arrow" marker-end="url(#arrow)"/>
   <path d="M1076 615v58" class="arrow" marker-end="url(#arrow)"/>
@@ -41,10 +41,10 @@
 
   <rect x="64" y="338" width="600" height="256" rx="13" class="card"/>
   <use href="#diff" x="93" y="367" width="34" height="34" class="icon" color="#23766b"/>
-  <text x="146" y="378" class="micro muted" letter-spacing="1.3">DU REVIEWST</text>
-  <text x="146" y="413" class="card-title ink">Änderungen ansehen</text>
+  <text x="146" y="378" class="micro muted" letter-spacing="1.3">YOU REVIEW</text>
+  <text x="146" y="413" class="card-title ink">Inspect changes</text>
   <rect x="92" y="438" width="544" height="128" rx="7" class="fragment"/>
-  <text x="108" y="465" class="micro muted">retry.js · lokale Änderungen</text>
+  <text x="108" y="465" class="micro muted">retry.js · local changes</text>
   <text x="109" y="499" class="code"><tspan fill="#8a9594">7</tspan>   <tspan class="keyword">return await</tspan> <tspan class="function">operation</tspan>();</text>
   <text x="109" y="526" class="code"><tspan fill="#8a9594">8</tspan> } <tspan class="keyword">catch</tspan> (error) {</text>
   <rect x="100" y="536" width="528" height="25" rx="3" fill="#e3f0e8"/>
@@ -52,50 +52,50 @@
 
   <rect x="776" y="338" width="600" height="256" rx="13" class="card"/>
   <use href="#comment" x="805" y="367" width="34" height="34" class="icon" color="#23766b"/>
-  <text x="858" y="378" class="micro muted" letter-spacing="1.3">DU GIBST KONTEXT</text>
-  <text x="858" y="413" class="card-title ink">Feedback direkt am Code</text>
+  <text x="858" y="378" class="micro muted" letter-spacing="1.3">YOU GIVE CONTEXT</text>
+  <text x="858" y="413" class="card-title ink">Feedback on the code</text>
   <rect x="804" y="438" width="544" height="128" rx="7" class="fragment"/>
-  <text x="820" y="465" class="micro muted">retry.js:9 · Neuer Kommentar</text>
-  <text x="820" y="503" class="body ink"><tspan class="teal" font-weight="500">/i</tspan> Nutze exponentielles Backoff.</text>
-  <text x="820" y="545" class="micro muted">/a fragen · /i ändern · /r zusammenfassen</text>
+  <text x="820" y="465" class="micro muted">retry.js:9 · New comment</text>
+  <text x="820" y="503" class="body ink"><tspan class="teal" font-weight="500">/i</tspan> Use exponential backoff.</text>
+  <text x="820" y="545" class="micro muted">/a ask · /i change · /r summarize</text>
   <rect x="1255" y="521" width="77" height="31" rx="5" fill="#23766b"/>
-  <text x="1293" y="542" text-anchor="middle" font-size="16" fill="#fff">Senden</text>
+  <text x="1293" y="542" text-anchor="middle" font-size="16" fill="#fff">Send</text>
 
   <rect x="776" y="711" width="600" height="256" rx="13" class="card"/>
   <use href="#dialog" x="805" y="740" width="34" height="34" class="icon" color="#23766b"/>
-  <text x="858" y="751" class="micro muted" letter-spacing="1.3">IHR ARBEITET ZUSAMMEN</text>
-  <text x="858" y="786" class="card-title ink">Klären oder ändern</text>
+  <text x="858" y="751" class="micro muted" letter-spacing="1.3">YOU WORK TOGETHER</text>
+  <text x="858" y="786" class="card-title ink">Discuss or change</text>
   <rect x="804" y="811" width="544" height="128" rx="7" class="fragment"/>
-  <text x="820" y="838" class="micro muted">Agent · Antwort im selben Thread</text>
-  <text x="820" y="874" class="body ink">Backoff ergänzt: 1 s → 2 s.</text>
+  <text x="820" y="838" class="micro muted">Agent · reply in the same thread</text>
+  <text x="820" y="874" class="body ink">Added backoff: 1 s → 2 s.</text>
   <rect x="819" y="890" width="514" height="33" rx="4" fill="#eef2f0"/>
   <text x="830" y="912" class="code"><tspan class="keyword">await</tspan> <tspan class="function">delay</tspan>(<tspan class="number">1000</tspan> * <tspan class="number">2</tspan> ** (attempt - <tspan class="number">1</tspan>));</text>
 
   <rect x="64" y="711" width="600" height="256" rx="13" class="card"/>
   <use href="#check" x="93" y="740" width="34" height="34" class="icon" color="#23766b"/>
-  <text x="146" y="751" class="micro muted" letter-spacing="1.3">DU ENTSCHEIDEST</text>
-  <text x="146" y="786" class="card-title ink">Prüfen &amp; abschließen</text>
+  <text x="146" y="751" class="micro muted" letter-spacing="1.3">YOU DECIDE</text>
+  <text x="146" y="786" class="card-title ink">Check &amp; finish</text>
   <rect x="92" y="811" width="544" height="128" rx="7" class="fragment"/>
-  <text x="108" y="838" class="micro muted">Änderung und Antwort zusammen prüfen</text>
-  <text x="108" y="873" font-size="21" fill="#2b6f8e">Im Editor öffnen ↗</text>
+  <text x="108" y="838" class="micro muted">Check the change and answer together</text>
+  <text x="108" y="873" font-size="21" fill="#2b6f8e">Open in editor ↗</text>
   <rect x="108" y="891" width="147" height="31" rx="5" fill="#fff" stroke="#d6dfda"/>
-  <text x="181" y="912" text-anchor="middle" font-size="16" class="ink">Weiterfragen</text>
+  <text x="181" y="912" text-anchor="middle" font-size="16" class="ink">Follow up</text>
   <rect x="481" y="891" width="139" height="31" rx="5" fill="#23766b"/>
   <path d="m496 906 4 4 7-8" class="icon" color="#fff"/>
-  <text x="562" y="912" text-anchor="middle" font-size="16" fill="#fff">Erledigen</text>
+  <text x="562" y="912" text-anchor="middle" font-size="16" fill="#fff">Resolve</text>
 
-  <text x="720" y="1031" text-anchor="middle" font-size="23" class="muted">Eine Unterhaltung am Code — bis die Änderung passt.</text>
+  <text x="720" y="1031" text-anchor="middle" font-size="23" class="muted">One conversation on the code, until the change is right.</text>
   <path d="M64 1090h1312" stroke="#dce3df"/>
-  <text x="64" y="1140" class="ink" font-size="24">Bei Bedarf: in den GitHub-PR übernehmen</text>
-  <text x="64" y="1176" class="muted" font-size="19">Zusammenfassungen + offene Fragen</text>
+  <text x="64" y="1140" class="ink" font-size="24">When needed: carry it into the GitHub PR</text>
+  <text x="64" y="1176" class="muted" font-size="19">Summaries + open questions</text>
   <use href="#branch" x="670" y="1143" width="25" height="25" class="icon" color="#737d80"/>
-  <text x="708" y="1164" class="small ink">Auswählen</text>
+  <text x="708" y="1164" class="small ink">Select</text>
   <path d="M830 1154h36" class="arrow" marker-end="url(#arrow)"/>
   <use href="#eye" x="895" y="1143" width="25" height="25" class="icon" color="#737d80"/>
-  <text x="933" y="1164" class="small ink">Vorschau</text>
+  <text x="933" y="1164" class="small ink">Preview</text>
   <path d="M1040 1154h36" class="arrow" marker-end="url(#arrow)"/>
   <use href="#send" x="1105" y="1143" width="25" height="25" class="icon" color="#23766b"/>
-  <text x="1143" y="1164" class="small teal">Veröffentlichen</text>
-  <text x="64" y="1230" font-size="16" fill="#8a9390">Nachgestellte UI-Ausschnitte · Beispiel mit Claude Code · Feedback wird nach dem Senden automatisch zugestellt</text>
+  <text x="1143" y="1164" class="small teal">Publish</text>
+  <text x="64" y="1230" font-size="16" fill="#8a9390">Staged UI snippets · example with Claude Code · feedback is delivered automatically after sending</text>
   <text x="1376" y="1230" text-anchor="end" font-size="16" fill="#8a9390">DIFFGUIDE</text>
 </svg>

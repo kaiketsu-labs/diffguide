@@ -1,3 +1,4 @@
+import type { FileIcons } from './fileIcons.js';
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import { pollWhileFocused } from './autoSync.js';
@@ -6,6 +7,7 @@ import { orbLoaderStyles } from './orbLoader.js';
 import type { ClaudeProgress } from './claudeRunner.js';
 import type { ReviewIntent, ReviewThread } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
+import type { Publication } from './pullRequestComments.js';
 import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
 import type { PickedSelection } from './pullRequestEdits.js';
 import type { LinkedPullRequestState } from './pullRequests.js';
@@ -21,9 +23,16 @@ import type { Analysis } from './prAnalysis.js';
 import { conflictFixLabel, type LocalChange, type LocalCommit } from './conflicts.js';
 import { publishableText } from './pullRequestComments.js';
 import type { MediaPreview } from './media.js';
+import type { ClaudeConversation } from './claudeSessions.js';
+import type { ClaudeChoice } from './setup.js';
+import { isSessionId } from './sessionBinding.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
+  /** Set on the local review page: the workspace's own uncommitted changes, without GitHub. */
+  readonly localMode?: true;
+  /** On a local review page: your open PR from this branch, which the page can turn into. */
+  readonly branchPullRequest?: { readonly number: number; readonly title: string };
   /** `#number title`, for the editor tab; the page shows `heading` beside a copyable number. */
   readonly title: string;
   readonly number?: number;
@@ -41,7 +50,11 @@ export interface OverviewState {
   /** Line ranges marked read, collapsed in the diff. */
   readonly read: readonly ReadRange[];
   /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
-  readonly claude: { readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string; readonly progress?: ClaudeProgress };
+  readonly claude: {
+    readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string; readonly progress?: ClaudeProgress;
+    /** The connected conversation's link, on pages whose comments go to a conversation you connect: whether it receives comments, and whether its review terminal is open. */
+    readonly link?: { readonly delivering: boolean; readonly terminal: boolean };
+  };
   readonly threads: readonly {
     readonly id: string;
     readonly location: string;
@@ -174,7 +187,14 @@ export interface GitHubMessageView {
 export type DiffRange = { readonly kind: 'all' } | { readonly kind: 'since' } | { readonly kind: 'commits'; readonly from: string; readonly to: string };
 export interface DiffSelection { readonly range: DiffRange; readonly whitespace: boolean }
 /** The files of a selection; `atHead` when the new side is the PR's latest version, so comments and context lines match it. */
-export interface FilesView { readonly files: readonly FileDiff[]; readonly selection: DiffSelection; readonly atHead: boolean }
+export interface FilesView {
+  readonly files: readonly FileDiff[];
+  readonly selection: DiffSelection;
+  readonly atHead: boolean;
+  readonly icons?: FileIcons;
+  /** Every file in the checkout, for the page's All files list. */
+  readonly repositoryFiles?: readonly string[];
+}
 /** A GitHub suggestion picked for committing: the thread and its comment. */
 /** A suggestion option written from a local thread: pushed, committed after unpushed commits, or only applied to the worktree. */
 export interface AppliedSuggestion { readonly message: number; readonly option: number; readonly done: 'pushed' | 'committed' | 'applied' }
@@ -235,6 +255,16 @@ export interface OverviewActions {
   markRead(range: LineRange, fileDone: boolean): Promise<void>;
   unmarkRead(ids: readonly string[]): Promise<void>;
   openInEditor(path: string): Promise<void>;
+  /** Show a repository file on the page, whole when it has no changes. */
+  openFile?(path: string): Promise<void>;
+  /** Stop showing unchanged files that were opened on the page. */
+  closeFiles?(paths: readonly string[]): Promise<void>;
+  /** Turn a local review page into the review page of its branch's PR, in the same tab. */
+  openPullRequest?(): Promise<void>;
+  /** Recent conversations of the page's folder, to resume one; only where you connect Claude yourself. */
+  claudeConversations?(): Promise<readonly ClaudeConversation[]>;
+  /** Connect Claude as the page's Claude menu chose; returns a notice for the page. */
+  connectClaude?(choice: ClaudeChoice): Promise<string | undefined>;
   /** Open the PR's Claude conversation in a VS Code terminal. */
   openTerminal(): Promise<void>;
   /** Push the worktree's commits to the PR's branch. */
@@ -325,9 +355,10 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' | 'open-pr' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
-  | { readonly action: 'context' | 'preview' | 'media' | 'editor'; readonly path: string }
+  | { readonly action: 'context' | 'preview' | 'media' | 'editor' | 'open-file'; readonly path: string }
+  | { readonly action: 'close-files'; readonly paths: readonly string[] }
   | { readonly action: 'linked-open' | 'linked-push' | 'linked-draft' | 'unlink'; readonly key: string }
   | { readonly action: 'link'; readonly link: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
@@ -371,7 +402,9 @@ export type PageMessage =
   | { readonly action: 'commit-suggestions'; readonly picked: readonly PickedSuggestion[] }
   | { readonly action: 'fix-conflicts'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
-  | { readonly action: 'picker-options' }
+  | { readonly action: 'picker-options' | 'claude-conversations' }
+  | ({ readonly action: 'connect-claude' } & ClaudeChoice)
+  | { readonly action: 'copy-connect'; readonly command: 'reload' | 'connect' }
   | ({ readonly action: 'pick'; readonly what: PickTarget } & PickedSelection)
   | { readonly action: 'draft'; readonly draft: boolean };
 
@@ -379,6 +412,10 @@ export type PageMessage =
 export interface ExtensionMessage {
   readonly state?: OverviewState;
   readonly files?: readonly FileDiff[];
+  /** Theme icons for the page's files and the repository's. */
+  readonly icons?: FileIcons;
+  /** Every file in the checkout, for the All files list. */
+  readonly repositoryFiles?: readonly string[];
   /** The selection `files` shows, and whether its new side is the PR's latest version. */
   readonly selection?: DiffSelection;
   readonly atHead?: boolean;
@@ -411,6 +448,10 @@ export interface ExtensionMessage {
   readonly pickerError?: string;
   readonly branches?: readonly string[];
   readonly branchesError?: string;
+  readonly conversations?: readonly ClaudeConversation[];
+  readonly conversationsError?: string;
+  /** A running Claude can now connect itself with `/diffguide:connect`. */
+  readonly runningReady?: true;
 }
 
 const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comment'];
@@ -430,6 +471,15 @@ const commentKinds: readonly unknown[] = ['issue', 'review', 'reviewComment'] sa
 const isOid = (value: unknown): value is string => typeof value === 'string' && /^[a-f\d]{40,64}$/u.test(value);
 const isOptionalText = (value: unknown): value is string | undefined => value === undefined || (typeof value === 'string' && value.length <= maximumReviewLength);
 
+/** A Claude menu choice the page sent; a resumed conversation must be a session ID. */
+function parseClaudeChoice(value: unknown): ClaudeChoice | undefined {
+  const { how, session } = value as Record<string, unknown>;
+  if (how === 'show' || how === 'new' || how === 'running' || how === 'copy') return { how };
+  if (how !== 'resume') return undefined;
+  if (session === undefined) return { how };
+  return isSessionId(session) ? { how, session } : undefined;
+}
+
 /** A range the page asked for, checked against the PR's own commits. */
 function parseRange(value: unknown, commits: readonly string[]): DiffRange | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
@@ -437,43 +487,62 @@ function parseRange(value: unknown, commits: readonly string[]): DiffRange | und
   if (kind === 'all' || kind === 'since') return { kind };
   return kind === 'commits' && isOid(from) && isOid(to) && commits.includes(from) && commits.includes(to) ? { kind, from, to } : undefined;
 }
-const panels = new Map<string, vscode.WebviewPanel>();
+/** Open review pages by key; `sendFiles` reads the files again and then shows `reveal`. */
+const panels = new Map<string, { readonly panel: vscode.WebviewPanel; readonly sendFiles: (reveal?: OverviewReveal) => void; readonly detach: () => vscode.WebviewPanel }>();
 
 const isLine = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '' && value.length <= maximumReviewLength;
 
-/** Where the review page scrolls when it opens: a file, or a step of the guided review. */
-export type OverviewReveal = { readonly path: string } | { readonly step: string } | { readonly group: string } | { readonly thread: string };
+/** Where the review page scrolls when it opens: a file, a step of the guided review or a thread. `reload` reads the files first, for a file the page may not show yet. */
+export type OverviewReveal = { readonly path: string; readonly reload?: true } | { readonly step: string } | { readonly group: string } | { readonly thread: string };
 
 const revealMessage = (reveal: OverviewReveal | undefined): ExtensionMessage => reveal === undefined ? {}
   : 'path' in reveal ? { reveal: reveal.path } : 'step' in reveal ? { revealStep: reveal.step } : 'thread' in reveal ? { revealThread: reveal.thread } : { revealGroup: reveal.group };
 
-/** Show a PR's review page, reusing it when already open, and redraw it whenever `onDidChange` fires. */
+/** Whether a review page is open. */
+export function isPageOpen(key: string): boolean {
+  return panels.has(key);
+}
+
+/** Show a review page if it is open; a reveal with `reload` reads the files again first, since the file may not be on the page yet. */
+export function revealOpenPage(key: string, reveal?: OverviewReveal): boolean {
+  const page = panels.get(key);
+  if (page === undefined) return false;
+  page.panel.reveal();
+  if (reveal !== undefined && 'path' in reveal && reveal.reload === true) page.sendFiles(reveal);
+  else if (reveal !== undefined) void page.panel.webview.postMessage(revealMessage(reveal)).then(undefined, () => undefined);
+  return true;
+}
+
+/**
+ * Show a review page, reusing it when already open, and redraw it whenever `onDidChange` fires.
+ * `onDidChangeFiles` reads the files again, for a page whose files change without a commit.
+ */
 export async function showPullRequestOverview(
   key: string, read: () => Promise<OverviewState>, onDidChange: vscode.Event<unknown>, actions: OverviewActions, extensionUri: vscode.Uri, revealAt?: OverviewReveal,
+  onDidChangeFiles?: vscode.Event<unknown>,
+  /** An open page whose tab this page takes over, such as the local review of the checkout a PR is open on. */
+  adopt?: string,
 ): Promise<void> {
-  const existing = panels.get(key);
-  if (existing !== undefined) {
-    existing.reveal();
-    if (revealAt !== undefined) void existing.webview.postMessage(revealMessage(revealAt)).then(undefined, () => undefined);
-    return;
-  }
+  if (revealOpenPage(key, revealAt)) return;
   let reveal = revealAt;
   let state = await read();
-  const panel = vscode.window.createWebviewPanel('diffGuide.pullRequestOverview', state.title, vscode.ViewColumn.Active,
+  const adopted = adopt === undefined ? undefined : panels.get(adopt)?.detach();
+  if (adopted !== undefined) adopted.title = state.title;
+  const panel = adopted ?? vscode.window.createWebviewPanel('diffGuide.pullRequestOverview', state.title, vscode.ViewColumn.Active,
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
-  panels.set(key, panel);
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
   panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (select?: DiffSelection): void => {
-    void actions.readFiles(select).then(({ files, selection, atHead }) => {
-      post({ files, selection, atHead, ...revealMessage(reveal) });
+    void actions.readFiles(select).then(({ files, selection, atHead, icons, repositoryFiles }) => {
+      post({ files, selection, atHead, ...icons === undefined ? {} : { icons }, ...repositoryFiles === undefined ? {} : { repositoryFiles }, ...revealMessage(reveal) });
       reveal = undefined;
     }, (error: unknown) => {
       post({ filesError: error instanceof Error ? error.message : String(error) });
     });
   };
+  panels.set(key, { panel, sendFiles: (next) => { reveal = next; sendFiles(); }, detach: () => { release(); disposed.dispose(); return panel; } });
   const conversation = (): PullRequestConversation | undefined => state.conversation;
   /** A comment on this page the viewer may change in the way `may` names, found in the conversation or a GitHub thread. */
   const findComment = (id: unknown, may: 'canEdit' | 'canDelete' | 'canHide' | 'canReact'): boolean => typeof id === 'string'
@@ -510,8 +579,8 @@ export async function showPullRequestOverview(
     onDidChange(redraw),
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
-      const { action, id, ids, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, extension, message, option,
-        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link } = value as Record<string, unknown>;
+      const { action, id, ids, paths, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, extension, message, option,
+        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -619,7 +688,23 @@ export async function showPullRequestOverview(
           await actions.link(link);
           post({ done: 'link' });
           redraw();
-        } else if (action === 'terminal') await actions.openTerminal();
+        }
+        else if (action === 'claude-conversations' && actions.claudeConversations !== undefined) {
+          try { post({ conversations: await actions.claudeConversations() }); } catch (error: unknown) { post({ conversationsError: error instanceof Error ? error.message : String(error) }); }
+        }
+        else if (action === 'connect-claude' && actions.connectClaude !== undefined) {
+          const choice = parseClaudeChoice(value);
+          if (choice !== undefined) {
+            const notice = await actions.connectClaude(choice);
+            if (choice.how === 'running') post({ runningReady: true });
+            if (notice !== undefined) post({ notice: { text: notice } });
+          }
+        }
+        else if (action === 'copy-connect' && (command === 'reload' || command === 'connect')) {
+          await vscode.env.clipboard.writeText(command === 'reload' ? '/reload-plugins --force' : '/diffguide:connect');
+        }
+        else if (action === 'open-pr' && actions.openPullRequest !== undefined) await actions.openPullRequest();
+        else if (action === 'terminal') await actions.openTerminal();
         else if (action === 'push') await actions.push();
         else if (action === 'retry') actions.retry();
         else if (action === 'stop-claude') await actions.stopClaude();
@@ -637,6 +722,11 @@ export async function showPullRequestOverview(
         else if (action === 'seen-answers' && isNameList(ids)) await actions.seeAnswers(ids.filter((each) => state.threads.some((thread) => thread.id === each)));
         else if (action === 'unread' && Array.isArray(ids) && ids.length <= 1000 && ids.every((item) => typeof item === 'string')) await marking(actions.unmarkRead(ids as string[]));
         else if (action === 'editor' && typeof path === 'string') await actions.openInEditor(path);
+        else if (action === 'open-file' && typeof path === 'string' && actions.openFile !== undefined) await actions.openFile(path);
+        else if (action === 'close-files' && isNameList(paths) && actions.closeFiles !== undefined) {
+          await actions.closeFiles(paths);
+          sendFiles();
+        }
         else if (action === 'github' && typeof id === 'string') {
           const url = [...state.threads, ...state.github ?? []].find((thread) => thread.id === id)?.url;
           if (url !== undefined) await vscode.env.openExternal(vscode.Uri.parse(url));
@@ -722,12 +812,14 @@ export async function showPullRequestOverview(
     shownProblem = problem;
   });
   subscriptions.push(sync, panel.onDidChangeViewState(({ webviewPanel }) => { if (webviewPanel.visible) sync.now(); }));
+  if (onDidChangeFiles !== undefined) subscriptions.push(onDidChangeFiles(() => { sendFiles(); }));
   sync.now();
-  panel.onDidDispose(() => {
+  const release = (): void => {
     if (timer !== undefined) clearTimeout(timer);
     for (const subscription of subscriptions) subscription.dispose();
     panels.delete(key);
-  });
+  };
+  const disposed = panel.onDidDispose(release);
 }
 
 /** The review page: PR overview on top, every changed file below. `script` (src/webview/overview.ts) draws it from state and file messages. */
@@ -737,13 +829,13 @@ export function overviewHtml(state: OverviewState, script: string, pdfScript?: s
   // Inline styles are allowed because an HTML preview frame inherits this policy; its sandbox still blocks scripts.
   return `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; font-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <title>Review</title>
 <style nonce="${nonce}">
 ${webviewStyles}
 ${codePreviewStyles()}
 body{margin:0;padding:var(--space-24) var(--space-24) 48px}
-[hidden]{display:none!important}
+[hidden],body.local .pr-only{display:none!important}
 h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}
@@ -752,6 +844,7 @@ h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;col
 .status{margin-top:var(--space-12);font-size:12px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-16);margin-top:var(--space-16);align-items:start}
 @media (max-width:760px){.layout{grid-template-columns:minmax(0,1fr)}}
+body.local .layout{grid-template-columns:minmax(0,1fr)}
 .main-col{display:grid;gap:var(--space-16);min-width:0}
 .card{padding:var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md)}
 #linked-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-8)}.linked-row{display:flex;align-items:center;gap:var(--space-12)}.linked-row+.linked-row{padding-top:var(--space-8);border-top:1px solid var(--line)}
@@ -793,30 +886,35 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .answers .answer .text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.answers .answer .muted{white-space:nowrap}.answers .answer svg{width:14px;height:14px;color:var(--ink-muted)}
 #notice{position:fixed;left:var(--space-24);bottom:var(--space-16);z-index:5;display:flex;align-items:center;gap:var(--space-12);max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-lg);color:var(--ink);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}#notice:empty{display:none}
 #error{position:fixed;left:var(--space-24);right:var(--space-24);bottom:var(--space-16);z-index:5;max-width:520px;margin:0;padding:var(--space-8) var(--space-12);border:1px solid var(--danger);border-radius:var(--radius-lg);color:var(--ink);background:linear-gradient(var(--danger-soft),var(--danger-soft)),var(--surface-raised);box-shadow:var(--shadow-overlay);white-space:pre-wrap;cursor:pointer}#error:empty{display:none}
-#files-bar{position:sticky;top:0;z-index:3;margin-top:var(--space-16);padding:var(--space-8) 0;background:var(--surface);border-bottom:1px solid var(--line)}
-#files-bar.on-overview .view-head>:not(.tabs),#files-bar.on-overview .toolbar>:not(#bar-review){display:none}.bar-review{gap:var(--space-6)}.pending-chip{padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;color:var(--pending);background:var(--pending-soft)}
+#files-bar{position:sticky;top:0;z-index:3;margin-top:var(--space-16);padding:var(--space-8) 0;background:var(--surface);border-bottom:1px solid var(--line)}#files-bar::after{content:'';position:absolute;left:0;right:0;top:calc(100% + 1px);height:var(--space-12);background:var(--surface);pointer-events:none}
+#files-bar.on-overview .view-head>:not(.tabs):not(#nav-toggle),#files-bar.on-overview .toolbar>:not(#bar-review){display:none}#files-bar.on-overview #nav-toggle{visibility:hidden}.bar-review{gap:var(--space-6)}.pending-chip{padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;color:var(--pending);background:var(--pending-soft)}
 #files-bar h2 .muted{font-weight:400}
-.view-head{gap:var(--space-12)}.tabs{display:flex;gap:var(--space-4)}
+#files-bar .view-head{flex:1 1 0;flex-wrap:nowrap;min-width:min(320px,100%)}#files-bar .toolbar{flex:0 1 auto}#files-title{flex:none;white-space:nowrap}
+.view-head{gap:var(--space-12);min-width:0;max-width:100%}.tabs{display:flex;gap:var(--space-4);min-width:0;max-width:100%}
 .tabs button{display:inline-flex;align-items:center;gap:var(--space-6);min-height:28px;padding:0 var(--space-8);border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--ink-muted);background:none;font-size:14px;font-weight:600}
 .tabs button:hover{color:var(--ink);filter:none}.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
 .tabs svg{width:16px;height:16px;fill:currentColor}
+.tabs>*{flex:none;white-space:nowrap}.file-icon{display:inline-block;width:16px;font-size:14px;font-weight:400;line-height:1;text-align:center}img.file-icon{height:16px}.file-head .file-icon{flex:none}
 .tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty:not(.working){display:none}
 .tabs .count.working{min-width:0;padding:0}
 ${orbLoaderStyles()}
 .off-view{display:none}
-.files-layout{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:var(--space-16);align-items:start}.files-layout>#files{min-width:0}.files-layout.no-nav{grid-template-columns:minmax(0,1fr)}.files-layout.no-nav>#file-nav{display:none}
-#file-nav{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12));max-height:calc(100vh - var(--bar-height,46px) - var(--space-24));overflow:auto;margin-top:var(--space-12);padding:var(--space-4) 0;border:1px solid var(--line);border-radius:var(--radius-md);font-size:12px}
+.files-layout{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:var(--space-16);align-items:start}.files-layout>#files{min-width:0}.files-layout.no-nav,.files-layout.list-hidden{grid-template-columns:minmax(0,1fr)}.files-layout.no-nav>#nav-col,.files-layout.list-hidden>#nav-col{display:none}
+#nav-col{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12));display:flex;flex-direction:column;gap:var(--space-8);max-height:calc(100vh - var(--bar-height,46px) - var(--space-12) - 48px);margin-top:var(--space-12);min-width:0}.nav-tools{display:flex;align-items:center;gap:var(--space-4);flex:none}.nav-tools .filter-box{flex:1;min-width:0}.nav-tools #file-filter{width:100%;height:26px}.nav-tools #filter-clear{top:3px}.nav-tools .toolbar-menu{right:auto;left:0}#nav-toggle{position:relative}#nav-toggle::after{right:auto;left:0}#nav-toggle.filtered::before{content:'';position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:var(--radius-pill);background:var(--git-modified)}#file-nav{min-height:0;overflow:auto;padding:var(--space-4) 0;border:1px solid var(--line);border-radius:var(--radius-md);font-size:12px}
 .nav-head{display:flex;align-items:center;justify-content:flex-start;gap:var(--space-6);width:100%;min-height:26px;height:26px;padding:0 var(--space-8);border:0;border-radius:0;background:none;color:var(--ink);font-size:12px;font-weight:600;text-align:left}.nav-head:hover{filter:none}.nav-head .muted{font-weight:400}.nav-head .chevron{display:none}
 .nav-list{list-style:none;margin:0;padding:0}.nav-list li{padding:0}.nav-list li+li{border-top:0}.nav-list .nav-folder{display:flex;align-items:center;gap:var(--space-4);min-height:22px;padding:0 var(--space-8) 0 calc(var(--space-8) + var(--depth,0) * 12px);color:var(--ink-muted);font-family:var(--font-code);font-size:12px;cursor:pointer;user-select:none}.nav-folder .chevron{width:12px;height:12px;-webkit-mask-size:12px;mask-size:12px}
 .nav-file{display:flex;align-items:center;justify-content:flex-start;gap:var(--space-6);width:100%;min-height:22px;height:22px;padding:0 var(--space-8) 0 calc(var(--space-8) + var(--depth,0) * 12px);border:0;border-radius:0;background:none;color:var(--ink);font-size:12px;text-align:left}.nav-file:hover{filter:none;background:var(--brand-soft)}.nav-file[aria-current=true]{background:var(--brand-soft);box-shadow:inset 2px 0 0 var(--brand-line)}
-.nav-file .nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-code)}.nav-file.done .nav-name{color:var(--ink-muted)}.nav-file .badge{flex:none}
+.nav-file .nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-code)}.nav-file.done .nav-name,.nav-file.unchanged .nav-name{color:var(--ink-muted)}.nav-file .badge{flex:none;width:12px;font:600 11px var(--font-code);text-align:center}.nav-file .file-icon{flex:none;width:14px;font-size:13px}.nav-file img.file-icon{height:14px}
+.nav-folder .nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-dot{flex:none;width:6px;height:6px;margin-right:var(--space-4);border-radius:var(--radius-pill);background:var(--git-modified)}
+.nav-list .nav-group{display:flex;align-items:center;gap:var(--space-6);min-height:24px;margin-top:var(--space-4);padding:var(--space-4) var(--space-8) 0;border-top:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:600}.nav-list .nav-group .muted{font-weight:400}.nav-list .nav-group:first-child{margin-top:0;border-top:0}.nav-list .nav-sep{margin:var(--space-4) 0;padding:0;border-top:1px solid var(--line)}.nav-close-all{margin-left:auto}
+.nav-list li.closable{position:relative}.nav-list li.closable .nav-file{padding-right:calc(var(--space-8) + 18px)}.nav-close{position:absolute;top:2px;right:var(--space-4);width:18px;height:18px;min-height:18px;padding:0;visibility:hidden}.nav-close svg{width:12px;height:12px}.nav-list li.closable:hover .nav-close,.nav-close:focus-visible{visibility:visible}
 .nav-section{display:flex;align-items:center;justify-content:flex-start;gap:var(--space-6);width:100%;min-height:24px;height:24px;margin-top:var(--space-4);padding:0 var(--space-8);border:0;border-radius:0;background:none;color:var(--ink);font-size:12px;font-weight:600;text-align:left}.nav-section:hover{filter:none;background:var(--brand-soft)}.nav-section .chevron{width:12px;height:12px;-webkit-mask-size:12px;mask-size:12px;margin-left:calc(-1 * var(--space-4))}.nav-sev{flex:none;width:8px;height:8px;border-radius:var(--radius-pill);background:var(--sev)}.nav-section .nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-progress{flex:none;font-weight:400;color:var(--ink-muted);font-variant-numeric:tabular-nums}
 .nav-step{padding-left:calc(var(--space-8) + 26px)}.nav-step .nav-name{font-family:var(--font-ui)}.nav-number{flex:none;min-width:14px;color:var(--ink-muted);font-variant-numeric:tabular-nums;text-align:right}
 .nav-count{flex:none;min-width:16px;padding:0 var(--space-4);border-radius:var(--radius-pill);font-size:10px;line-height:16px;text-align:center;color:var(--ink-muted);background:var(--action-secondary)}.nav-done{flex:none;width:12px;height:12px;color:var(--success)}.nav-done svg{width:12px;height:12px}
-@media (max-width:1000px){.files-layout{grid-template-columns:minmax(0,1fr)}#file-nav{position:static;max-height:none}#file-nav .nav-head .chevron{display:inline-block}#file-nav.folded .nav-list{display:none}}
-.file{margin-top:var(--space-12);border:1px solid var(--line-strong);border-top:0;border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + 10px)}
-.file-head{position:sticky;top:var(--bar-height,46px);z-index:2;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);margin:0 -1px;padding:var(--space-6) var(--space-12);background:var(--surface-raised);border:1px solid var(--line-strong);border-bottom-color:var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
-.file.collapsed{border:0}.file.collapsed .file-head{margin:0;border-bottom-color:var(--line-strong);border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
+@media (max-width:1000px){.files-layout{grid-template-columns:minmax(0,1fr)}#nav-col{position:static;max-height:none}#file-nav .nav-head .chevron{display:inline-block}#file-nav.folded .nav-list{display:none}}
+.file{margin-top:var(--space-12);border:1px solid var(--line-strong);border-top:0;border-radius:var(--radius-md);scroll-margin-top:calc(var(--bar-height,46px) + var(--space-12) + 10px)}
+.file-head{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12));z-index:2;box-shadow:0 -12px 0 var(--surface);display:flex;align-items:center;gap:var(--space-8);margin:0 -1px;padding:var(--space-6) var(--space-12);background:var(--surface-raised);border:1px solid var(--line-strong);border-bottom-color:var(--line);border-radius:var(--radius-md) var(--radius-md) 0 0}
+.file>.diff{border-radius:0 0 calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px);overflow:clip}.file.ending{border-color:transparent}.file.ending>.file-head{border-bottom-color:var(--line-strong);border-radius:var(--radius-md)}.file.collapsed{border:0}.file.collapsed .file-head{margin:0;border-bottom-color:var(--line-strong);border-radius:var(--radius-md)}.file.collapsed .diff{display:none}
 .file-head .name{font-family:var(--font-code);font-size:12px;overflow-wrap:anywhere;flex:1;cursor:pointer}
 .chevron{display:inline-block;flex-shrink:0;width:16px;height:16px;vertical-align:-3px;color:var(--ink-muted);background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.146 5.854l4.5 4.5a.5.5 0 0 0 .707 0l4.5-4.5a.5.5 0 0 0-.707-.707L8 9.293 3.854 5.147a.5.5 0 0 0-.708.707z'/%3E%3C/svg%3E") center/16px no-repeat;transition:transform .1s}.chevron{cursor:pointer}.chevron.closed{transform:rotate(-90deg)}.badge{width:14px;font:700 11px var(--font-code);text-align:center}
 .local-mark{flex:none;font:600 11px var(--font-code);color:var(--warning)}.folder-head .local-mark{margin-left:var(--space-6)}
@@ -896,7 +994,7 @@ tr.inline>td{padding:var(--space-6) 10px var(--space-8)}
 .thread .thread{max-width:none;margin-top:var(--space-8)}.thread .thread>summary.strip{position:static}.strip .title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ink)}
 .thread>summary,.thread>.strip{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;margin:0 calc(-1 * var(--space-12));padding:var(--space-4) var(--space-12);font-size:12px;line-height:18px;background:var(--tint);border-bottom:1px solid var(--line-strong)}
 .thread:not([open])>summary{border-bottom:0}
-.thread>summary.strip{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 36px);z-index:1;background:linear-gradient(var(--tint),var(--tint)),var(--surface-raised);cursor:pointer;list-style:none}
+.thread>summary.strip{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px + 36px);z-index:1;background:linear-gradient(var(--tint),var(--tint)),var(--surface-raised);cursor:pointer;list-style:none}
 .thread>.unfold{display:block;width:calc(100% + 2 * var(--space-12));margin:0 calc(-1 * var(--space-12));border:0;border-radius:0;font-size:12px}.thread>summary::-webkit-details-marker{display:none}
 details.thread:not([open]){padding-bottom:0}
 .source{display:inline-flex;align-items:center;gap:var(--space-4);font-weight:600;color:var(--accent)}.source svg{width:14px;height:14px;fill:currentColor}
@@ -915,8 +1013,8 @@ details.thread:not([open]){padding-bottom:0}
 .comments{display:inline-flex;align-items:center;gap:var(--space-4);font-size:12px}.comments:empty{display:none}.comments svg{width:14px;height:14px}.head-tools{display:inline-flex;gap:var(--space-2)}.head-tools .icon-button{color:var(--ink-muted)}.head-tools .icon-button:hover{color:var(--ink)}.head-tools svg{width:16px;height:16px}
 .card-thread{--accent:var(--agent)}.card-thread.github{--accent:var(--github)}.card-thread .source{font-size:12px}
 .main-col{grid-template-columns:minmax(0,1fr)}
-.file{scroll-margin-top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 10px)}
-.file-head{top:calc(var(--bar-height,46px) + var(--depth,0) * 32px)}
+.file{scroll-margin-top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px + 10px)}
+.file-head{top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px)}
 .thread.local,.card-thread.local,.thread-group.local{--accent:var(--ink-muted);--tint:color-mix(in srgb,var(--ink) 5%,transparent)}
 .thread.analysis,.card-thread.analysis,.thread-group.analysis{--accent:var(--agent);--tint:var(--agent-soft)}
 .thread.github,.card-thread.github,.thread-group.github{--accent:var(--github);--tint:var(--github-soft)}
@@ -926,7 +1024,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .chip.bad{color:var(--danger);background:var(--danger-soft)}.chip.orb-chip::before{display:none}.chip.orb-chip svg{width:12px;height:12px;color:var(--agent)}
 .guide-intro{margin-top:var(--space-12)}.guide-intro p{margin:var(--space-6) 0}
 .tree-node{margin-top:var(--space-12)}
-.node-head{position:sticky;top:calc(var(--bar-height,46px) + var(--depth,0) * 32px);z-index:2;box-sizing:border-box;height:32px;display:flex;align-items:center;gap:var(--space-8);padding:0 10px;background:var(--surface);cursor:pointer;user-select:none}
+.node-head{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px);z-index:2;box-shadow:0 -12px 0 var(--surface);box-sizing:border-box;height:32px;display:flex;align-items:center;gap:var(--space-8);padding:0 10px;background:var(--surface);cursor:pointer;user-select:none}
 .folder-head .name{flex:1;font-family:var(--font-code);font-size:12px;overflow-wrap:anywhere}.node-head .progress{font-size:12px}
 .fold-rail{--rail:var(--line-strong);position:relative;margin-left:17px}.fold-rail:has(>.fold-line:hover){--rail:var(--focus)}
 .fold-line{position:absolute;left:-5px;top:0;bottom:0;width:12px;cursor:pointer;z-index:1}
@@ -935,7 +1033,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .rail-item:has(>.tree-node)::before,.rail-item>.file::before,.rail-item>.step-wrap>.file::before{content:'';position:absolute;left:0;top:0;width:12px;height:25px;border-left:2px solid var(--rail);border-bottom:2px solid var(--rail);border-bottom-left-radius:var(--radius-lg)}
 .rail-item>.file,.rail-item>.step-wrap>.file{position:relative}.rail-item>.file::before,.rail-item>.step-wrap>.file::before{left:-17px;top:auto;bottom:calc(100% - 21px);height:400px}
 .fold-toggle{display:inline-flex;flex:none;width:16px;height:16px;color:var(--ink-muted)}.node-head:hover .fold-toggle{color:var(--focus)}.fold-toggle svg{width:16px;height:16px}
-.step-wrap{scroll-margin-top:calc(var(--bar-height,46px) + var(--depth,0) * 32px + 10px)}
+.step-wrap{scroll-margin-top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px + 10px)}
 .step-title{font-family:var(--font-ui);font-size:13px;font-weight:600;margin-right:var(--space-8)}.step-path{color:var(--ink-muted)}
 .guide-group{margin-top:var(--space-24)}
 .guide-group .sev{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-8);border-radius:var(--radius-pill);font-size:12px;font-weight:600;color:var(--sev);background:var(--sev-soft)}
@@ -952,6 +1050,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
 .filter-box{position:relative}#file-filter{width:120px;height:24px;padding:0 var(--space-24) 0 var(--space-8);font-size:12px}#filter-clear{position:absolute;top:2px;right:2px;width:20px;height:20px;min-height:20px}#filter-clear svg{width:14px;height:14px}
 .toolbar{flex-wrap:wrap;justify-content:flex-end}#files-bar .toolbar{gap:var(--space-8)}#files-bar .toolbar .divider{margin:0 var(--space-2)}.menu-anchor{position:relative;display:inline-flex}.toolbar-menu{top:calc(100% + var(--space-4));left:auto;right:0;width:max-content;min-width:180px;max-width:420px}.toolbar-menu .picker-row .text{display:flex;gap:var(--space-8);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar-menu .picker-row .text .muted{margin-left:auto}.toolbar-menu code{font-family:var(--font-code);color:var(--ink-muted)}.base-menu .picker-row .text{display:block}.base-menu{left:0;right:auto;width:300px;max-width:none}.base-menu .picker-list{gap:var(--space-2)}.base-menu input[type=text]{position:sticky;top:0;z-index:1;flex:none;width:100%;height:26px;margin-bottom:var(--space-4);padding:0 var(--space-8);font-size:12px}.menu-foot{display:flex;justify-content:flex-end;padding-top:var(--space-4);border-top:1px solid var(--line)}
+.connect-menu{left:0;right:auto;width:max-content;min-width:0;max-width:min(420px,90vw)}.connect-menu .picker-list{gap:var(--space-2)}.connect-row{width:100%;justify-content:flex-start;align-items:flex-start;gap:var(--space-8);min-height:0;padding:var(--space-4) var(--space-8) var(--space-4) var(--space-6);border:0;color:var(--ink);background:none;font:inherit;font-size:12px;font-weight:400;text-align:left}.connect-row:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}.connect-row>svg{flex:none;width:14px;height:14px;margin-top:var(--space-2);color:var(--ink-muted)}.connect-text{display:flex;flex-direction:column;min-width:0}.connect-text .connect-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.connect-text .muted{margin-left:0;font-size:11px;white-space:nowrap}.connect-menu .picker-note{padding:var(--space-4) var(--space-6) 0;font-size:11px}.menu-divider{height:1px;margin:var(--space-2) 0;background:var(--line)}.connect-command{gap:var(--space-8);padding:var(--space-4) var(--space-6)}.connect-command code{font-family:var(--font-code);font-size:12px;color:var(--ink)}
 .range-menu{left:0;right:auto;width:min(680px,90vw);max-width:none}.range-menu .picker-list{display:grid;grid-template-columns:16px max-content minmax(0,1fr) repeat(6,max-content);column-gap:var(--space-8)}.range-menu .range-row{display:grid;grid-column:1/-1;grid-template-columns:subgrid}.range-row:not(.commit)>.text{grid-column:2/8}.range-row:not(.commit)>.muted{grid-column:8/-1;text-align:right}.range-row .num{text-align:right;font-variant-numeric:tabular-nums}.range-row .ok.num,.range-row .bad.num{font-family:var(--font-code);font-size:11px}.range-row .when{text-align:right}.menu-hint{grid-column:1/-1}.range-row{width:100%;justify-content:flex-start;min-height:28px;padding:0 var(--space-6);border:0;color:var(--ink);background:none;font:inherit;font-size:12px;text-align:left}.range-row:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}.range-row[aria-checked=true] .check{visibility:visible}.range-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-row .ref{display:inline-flex;align-items:center;flex:none}.range-row .when{flex:none;color:var(--ink-muted)}.range-row .muted{flex:none}.menu-hint{margin-top:var(--space-4);padding:var(--space-6) var(--space-6) var(--space-2);border-top:1px solid var(--line);font-size:11px}
 .range-button{gap:var(--space-6);min-height:26px;height:26px;max-width:340px;padding:0 var(--space-4) 0 var(--space-8);border:1px solid var(--line);color:var(--ink);background:none;font-size:12px}.range-button:hover{filter:none;background:color-mix(in srgb,var(--ink) 6%,transparent)}.range-button[aria-expanded=true]{border-color:var(--line-strong);background:color-mix(in srgb,var(--ink) 6%,transparent)}.range-button>svg{color:var(--ink-muted)}.range-button .ref{display:inline-flex;align-items:center;height:18px;min-height:18px}.range-button .range-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-button.on{color:var(--brand);background:var(--brand-soft)}
 .range-note{flex-wrap:nowrap;align-items:center;gap:var(--space-12);margin-top:var(--space-12);padding:var(--space-8) var(--space-12);border:1px solid var(--line);border-radius:var(--radius-md);font-size:12px;line-height:20px;background:color-mix(in srgb,var(--ink) 4%,transparent)}.range-note>svg{flex:none;width:16px;height:16px;color:var(--ink-muted)}.range-note .gap{flex:1;min-width:0}.range-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}.range-title{display:flex;align-items:center;gap:var(--space-6);font-weight:600}.range-title .headline{min-width:0;overflow:hidden;text-overflow:ellipsis}.range-title .ok,.range-title .bad,.range-title .wait{flex:none;font-weight:400}.range-title .ref{flex:none;font-weight:400}.range-facts b{color:var(--ink);font-weight:600}.range-note>button{flex:none}
@@ -985,12 +1084,12 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 .annotation-box.failure{--level:var(--danger)}.annotation-box.warning{--level:var(--warning)}.annotation-box.notice{--level:var(--github)}
 .suggest-row{margin-top:var(--space-6);gap:var(--space-6)}.suggest-row button{min-height:22px;padding:0 var(--space-8);font-size:12px}
 
-.byline .icon-button{width:20px;height:20px;min-height:20px}
-</style></head><body>
-<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${icons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button" data-tip="Open on GitHub" aria-label="Open on GitHub">${icons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${icons.refresh}</button><span class="menu-anchor"><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree" aria-haspopup="true" aria-expanded="false">${icons.trash}</button></span></span></div>
+.byline .icon-button{width:20px;height:20px;min-height:20px}.byline .pr-chip{gap:var(--space-4);min-height:22px;height:22px;margin-left:var(--space-4)}.pr-chip svg{width:14px;height:14px}
+</style></head><body${state.localMode ? ' class="local"' : ''}>
+<div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${icons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button pr-only" data-tip="Open on GitHub" aria-label="Open on GitHub">${icons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${icons.refresh}</button><span class="menu-anchor pr-only"><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree" aria-haspopup="true" aria-expanded="false">${icons.trash}</button></span></span></div>
 <div class="row byline"><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
-<div id="facts" class="muted facts"></div>
-<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="stop-claude" class="icon-button" data-tip="Stop. The comments it was answering wait for Retry." aria-label="Stop Claude" hidden>${icons.stop}</button><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">${icons.terminal}Open in terminal</button><button id="retry" class="small">${icons.sync}Retry</button></div>
+<div id="facts" class="muted facts pr-only"></div>
+<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="stop-claude" class="icon-button" data-tip="Stop. The comments it was answering wait for Retry." aria-label="Stop Claude" hidden>${icons.stop}</button><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">${icons.terminal}Open in terminal</button><span class="menu-anchor" hidden><button id="connect" class="range-button" aria-haspopup="true" aria-expanded="false"></button></span><button id="retry" class="small">${icons.sync}Retry</button></div>
 <p id="error" role="alert"></p>
 <p id="notice" role="status"></p>
 <div id="answers" class="answers" role="status" hidden></div>
@@ -1000,30 +1099,28 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <span id="peek-title" class="where"></span>
 <button id="peek-open" title="Open in editor">${icons.openExternal}Open in editor</button>
 <button id="peek-close" title="Close" aria-label="Close">${icons.close}</button></div><div id="peek-code"></div></aside>
-<div id="files-bar" class="row head"><span class="row view-head"><span class="tabs" role="tablist" aria-label="Show">
-<button id="view-overview" role="tab">Overview</button>
+<div id="files-bar" class="row head"><span class="row view-head"><button id="nav-toggle" class="icon-button" aria-controls="nav-col">${icons.fileList}</button><span class="tabs" role="tablist" aria-label="Show">
+<button id="view-overview" role="tab">${icons.overview}Overview</button>
 <button id="view-files" role="tab">${icons.file}Files<span id="files-count" class="count"></span></button>
-<button id="view-guide" role="tab">${icons.agentGuide}Guide<span id="guide-count" class="count" hidden></span></button></span>
-<span class="menu-anchor"><button id="range" class="range-button" aria-label="Changes from" aria-haspopup="true" aria-expanded="false">${icons.commit}<span class="range-text">All changes</span>${icons.chevronDown}</button></span>
+<button id="view-guide" class="pr-only" role="tab">${icons.agentGuide}Guide<span id="guide-count" class="count" hidden></span></button></span>
+<span class="menu-anchor pr-only"><button id="range" class="range-button" aria-label="Changes from" aria-haspopup="true" aria-expanded="false">${icons.commit}<span class="range-text">All changes</span>${icons.chevronDown}</button></span>
 </span><span class="toolbar">
-<span id="analysis-status"></span><button id="analyze" class="small">Build guide</button>
-<span id="analyze-divider" class="divider"></span>
-<button id="commit-batch" class="primary small" data-pr-action hidden></button>
-<button id="show-unpushed" class="small" data-tip="Show the commits you would push" hidden>${icons.show}Show changes</button><button id="push" class="primary small" data-tip="Commits in this worktree that GitHub does not have yet" hidden></button>
-<span id="filter-box" class="filter-box"><input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files"><button id="filter-clear" class="icon-button" aria-label="Clear filter" hidden>${icons.close}</button></span>
-<span class="menu-anchor"><button id="filter-menu" class="icon-button" data-tip="Filter files" aria-label="Filter files" aria-haspopup="true" aria-expanded="false">${icons.filter}</button></span>
+<span id="analysis-status" class="pr-only"></span><button id="analyze" class="small pr-only">Build guide</button>
+<span id="analyze-divider" class="divider pr-only"></span>
+<button id="commit-batch" class="primary small pr-only" data-pr-action hidden></button>
+<button id="show-unpushed" class="small pr-only" data-tip="Show the commits you would push" hidden>${icons.show}Show changes</button><button id="push" class="primary small pr-only" data-tip="Commits in this worktree that GitHub does not have yet" hidden></button>
 <span class="seg icons" role="group" aria-label="Diff layout"><button id="unified" data-tip="Unified diff" aria-label="Unified diff">${icons.unified}</button><button id="split" data-tip="Side-by-side diff" aria-label="Side-by-side diff">${icons.split}</button></span>
 <button id="fold-all" class="icon-button" data-tip="Collapse all files" aria-label="Collapse all files">${icons.collapseAll}</button>
 <span class="menu-anchor"><button id="view-menu" class="range-button" aria-haspopup="true" aria-expanded="false"><span class="range-text">View</span>${icons.chevronDown}</button></span>
-<span id="bar-review" class="row bar-review" hidden><span id="bar-pending" class="pending-chip" hidden></span><button id="finish-review" class="primary small">${icons.check}Finish review</button></span></span></div>
+<span id="bar-review" class="row bar-review pr-only" hidden><span id="bar-pending" class="pending-chip" hidden></span><button id="finish-review" class="primary small">${icons.check}Finish review</button></span></span></div>
 <div class="layout" id="panel-overview" role="tabpanel" aria-labelledby="view-overview">
 <div class="main-col">
-<section class="card" id="linked" hidden><div class="section-head"><h3>Linked changes</h3><button id="link-pr" class="small">${icons.link}Link a PR…</button></div><ul id="linked-rows"></ul></section>
-<section class="card"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${icons.edit}</button></div><div id="body"></div><div id="description-reactions"></div></section>
+<section class="card pr-only" id="linked" hidden><div class="section-head"><h3>Linked changes</h3><button id="link-pr" class="small">${icons.link}Link a PR…</button></div><ul id="linked-rows"></ul></section>
+<section class="card pr-only"><div class="section-head"><h3>Description</h3><button id="edit-body" class="icon-button" data-pr-action data-tip="Edit description" aria-label="Edit description" hidden>${icons.edit}</button></div><div id="body"></div><div id="description-reactions"></div></section>
 <section class="card"><h3 id="threads-title">Threads</h3><ul id="threads"></ul></section>
-<section class="card" id="conversation"><button id="fold-conversation" class="section-fold" aria-expanded="true" aria-controls="timeline">${icons.chevronDown}<h3>Conversation</h3><span id="conversation-count" class="count"></span></button><div id="timeline"></div><div id="conversation-form"></div></section>
+<section class="card pr-only" id="conversation"><button id="fold-conversation" class="section-fold" aria-expanded="true" aria-controls="timeline">${icons.chevronDown}<h3>Conversation</h3><span id="conversation-count" class="count"></span></button><div id="timeline"></div><div id="conversation-form"></div></section>
 </div>
-<aside class="rail">
+<aside class="rail pr-only">
 <section id="review-box"><h3>Finish your review</h3>
 <div class="row pending-row"><span class="gap"><span id="pending-note" class="chip pending" title="Only you see them until you submit." hidden></span></span><span class="menu-anchor"><button id="discard-review" class="quiet small" data-pr-action aria-haspopup="true" aria-expanded="false" hidden>${icons.trash}Discard</button></span></div>
 <textarea id="review" placeholder="Leave a summary (optional for approval)" aria-label="Review summary"></textarea>
@@ -1043,7 +1140,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 </div>
 <div id="panel-files" role="tabpanel">
 <div id="range-note" class="row range-note" hidden></div>
-<div class="files-layout"><nav id="file-nav" aria-label="Changed files"></nav><div id="files"><p class="muted">Loading changes…</p></div></div>
+<div class="files-layout"><div id="nav-col"><div id="nav-tools" class="nav-tools"><span id="filter-box" class="filter-box"><input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files"><button id="filter-clear" class="icon-button" aria-label="Clear filter" hidden>${icons.close}</button></span><span class="menu-anchor"><button id="filter-menu" class="icon-button" data-tip="Filter files" aria-label="Filter files" aria-haspopup="true" aria-expanded="false">${icons.filter}</button></span></div><nav id="file-nav" aria-label="Changed files"></nav></div><div id="files"><p class="muted">Loading changes…</p></div></div>
 </div>
 <script id="initial" type="application/json">${JSON.stringify({ state, pdfScript }).replaceAll('<', '\\u003c')}</script>
 <script nonce="${nonce}" src="${script}"></script>
@@ -1111,47 +1208,70 @@ export function buildOverviewState(
       ...(runner.activity.progress === undefined ? {} : { progress: runner.activity.progress }) },
     analysis,
     threads: session.store.threads.map((thread) => {
+      const activity = session.activity?.(thread.id);
       const publication = session.publication?.(thread.id);
       const linkedTo = session.linkedGitHubThread?.(thread.id);
-      const activity = session.activity?.(thread.id);
-      const last = thread.messages.at(-1);
-      const wholeFile = thread.anchor.scope === 'file';
-      // Claude's reply ends the thread's live log, even while the run is still wrapping up.
-      const replied = last?.author === 'claude' && Date.parse(last.createdAt) >= (runner.activity.progress?.startedAt ?? Infinity);
-      const working = thread.resolved || replied ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
-        : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
-      const status = [
-        thread.resolved ? 'Resolved' : working !== undefined ? undefined : replied ? threadStatus[thread.status] : activity ?? threadStatus[thread.status],
-        publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
-        thread.archived ? 'Archived' : undefined,
-      ].filter(Boolean).join(' · ');
-      return {
-        id: thread.id,
-        location: wholeFile ? thread.anchor.path : `${thread.anchor.path}:${thread.anchor.startLine}`,
-        text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
-        status,
-        ...(working === undefined ? {} : { working }),
-        ...(working !== undefined && runner.activity.threads.has(thread.id) && runner.activity.progress !== undefined ? { progress: runner.activity.progress } : {}),
-        path: thread.anchor.path,
-        side: thread.anchor.side === 'original' ? 'old' : 'new',
-        startLine: thread.anchor.startLine,
-        endLine: thread.anchor.endLine,
-        ...(wholeFile ? { scope: 'file' as const } : {}),
-        resolved: thread.resolved,
-        ...(thread.archived ? { archived: true as const } : {}),
-        ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-        ...(!wholeFile && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
-        messages: thread.messages.map(({ author, text, createdAt }) => {
-          // A suggestion replaces the commented lines, and a whole-file comment has none.
-          const suggestions = wholeFile ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
-          return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
-        }),
-        ...(publication === undefined ? {} : { url: publication.url }),
-        ...(linkedTo === undefined ? {} : { linkedTo }),
-        ...(publication === undefined && !thread.resolved ? { draft: publishableText(thread) } : {}),
-        ...(thread.title === undefined ? {} : { title: thread.title }),
-        ...(opened.commits(thread.id).length === 0 ? {} : { commits: opened.commits(thread.id) }),
-      };
+      const progress = runner.activity.progress;
+      return threadView(thread, {
+        ...(activity === undefined ? {} : { activity }), ...(publication === undefined ? {} : { publication }),
+        ...(linkedTo === undefined ? {} : { linkedTo }), ...(progress === undefined ? {} : { progress }),
+        running: runner.activity.threads.has(thread.id), publishable: true, commits: opened.commits(thread.id),
+      });
     }),
+  };
+}
+
+/** What Claude is doing on a thread, where it was published and the commits Claude made for it, when the session knows. */
+interface ThreadExtras {
+  readonly activity?: string;
+  readonly progress?: ClaudeProgress;
+  /** Whether the current Claude run answers this thread. */
+  readonly running?: boolean;
+  readonly publication?: Publication;
+  readonly linkedTo?: string;
+  /** Whether the thread can be posted on GitHub, so the page offers its text as a draft. */
+  readonly publishable?: boolean;
+  readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
+}
+
+/** One local thread as the review page shows it, its messages rendered from Markdown. */
+export function threadView(thread: ReviewThread, { activity, progress, running = false, publication, linkedTo, publishable = false, commits = [] }: ThreadExtras = {}): OverviewState['threads'][number] {
+  const last = thread.messages.at(-1);
+  const wholeFile = thread.anchor.scope === 'file';
+  // Claude's reply ends the thread's live log, even while the run is still wrapping up.
+  const replied = last?.author === 'claude' && Date.parse(last.createdAt) >= (progress?.startedAt ?? Infinity);
+  const working = thread.resolved || replied ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
+    : activity === undefined && (thread.status === 'queued' || thread.status === 'received' || thread.status === 'working') ? threadStatus[thread.status] : undefined;
+  const status = [
+    thread.resolved ? 'Resolved' : working !== undefined ? undefined : replied ? threadStatus[thread.status] : activity ?? threadStatus[thread.status],
+    publication === undefined ? undefined : publication.pending ? 'On GitHub (pending)' : 'On GitHub',
+    thread.archived ? 'Archived' : undefined,
+  ].filter(Boolean).join(' · ');
+  return {
+    id: thread.id,
+    location: wholeFile ? thread.anchor.path : `${thread.anchor.path}:${thread.anchor.startLine}`,
+    text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
+    status,
+    ...(working === undefined ? {} : { working }),
+    ...(working !== undefined && running && progress !== undefined ? { progress } : {}),
+    path: thread.anchor.path,
+    side: thread.anchor.side === 'original' ? 'old' : 'new',
+    startLine: thread.anchor.startLine,
+    endLine: thread.anchor.endLine,
+    ...(wholeFile ? { scope: 'file' as const } : {}),
+    resolved: thread.resolved,
+    ...(thread.archived ? { archived: true as const } : {}),
+    ...(thread.origin === undefined ? {} : { origin: thread.origin }),
+    ...(!wholeFile && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
+    messages: thread.messages.map(({ author, text, createdAt }) => {
+      // A suggestion replaces the commented lines, and a whole-file comment has none.
+      const suggestions = wholeFile ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
+      return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
+    }),
+    ...(publication === undefined ? {} : { url: publication.url }),
+    ...(linkedTo === undefined ? {} : { linkedTo }),
+    ...(publishable && publication === undefined && !thread.resolved ? { draft: publishableText(thread) } : {}),
+    ...(thread.title === undefined ? {} : { title: thread.title }),
+    ...(commits.length === 0 ? {} : { commits }),
   };
 }

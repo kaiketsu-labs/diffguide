@@ -6,7 +6,7 @@ import { isSessionId, readSessionBinding } from './sessionBinding.js';
 /** Serialize explicit selection changes so a stale launch cannot clear a new owner. */
 async function withSelectionLock(path: string, action: () => Promise<void>): Promise<void> {
   const lockPath = `${path}.lock`;
-  const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('Eine Verbindung wird gerade eingerichtet. Kurz danach erneut versuchen.'); });
+  const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('A connection is being set up. Try again in a moment.'); });
   try { await action(); }
   finally {
     await lock.close();
@@ -23,10 +23,10 @@ async function main(): Promise<void> {
       throw new Error('Invalid DiffGuide launch handoff.');
     }
     const descriptor = await readDescriptor(connectionPath);
-    if (await realpath(process.cwd()) !== await realpath(descriptor.workspaceRoot)) throw new Error('Das ausgewählte Projekt hat sich geändert.');
+    if (await realpath(process.cwd()) !== await realpath(descriptor.workspaceRoot)) throw new Error('The chosen project has changed.');
     await withSelectionLock(bindingPath, async () => {
       const binding = await readSessionBinding(bindingPath, descriptor.workspaceRoot);
-      if (binding !== undefined && binding.sessionId !== expected) throw new Error('Eine andere Unterhaltung ist inzwischen ausgewählt. Den Verbindungsbefehl erneut kopieren.');
+      if (binding !== undefined && binding.sessionId !== expected) throw new Error('Another conversation was chosen in the meantime. Copy the connect command again.');
       if (binding !== undefined) await unlink(bindingPath);
     });
     return;
@@ -38,31 +38,31 @@ async function main(): Promise<void> {
     throw new Error('Claude did not supply a valid session identity.');
   }
   if (process.env['CLAUDE_CODE_SESSION_ID'] !== sessionId) {
-    throw new Error('Diese Claude-Version liefert keine passende Sitzungskennung. Claude aktualisieren, dann erneut verbinden.');
+    throw new Error('This Claude version gives no matching session ID. Update Claude, then connect again.');
   }
   const descriptor = await readDescriptor(connectionPath);
   if (await realpath(process.cwd()) !== await realpath(descriptor.workspaceRoot)) {
-    throw new Error('DiffGuide gehört zu einem anderen Projekt. Im passenden VS-Code-Projekt verbinden.');
+    throw new Error('DiffGuide belongs to another project. Connect from the matching VS Code project.');
   }
   await withSelectionLock(bindingPath, async () => {
     const existing = await readSessionBinding(bindingPath, descriptor.workspaceRoot);
     if (existing?.sessionId === sessionId) {
-      process.stdout.write('DiffGuide ist bereits mit dieser Unterhaltung verbunden.\n');
+      process.stdout.write('DiffGuide is already connected to this conversation.\n');
       return;
     }
     const ticket = record(await readPrivateJson(ticketPath));
     if (ticket?.version !== 1 || ticket.workspaceRoot !== descriptor.workspaceRoot
       || typeof ticket.expiresAt !== 'number' || !Number.isFinite(ticket.expiresAt) || ticket.expiresAt < Date.now()) {
-      throw new Error('In VS Code „Laufende Unterhaltung verbinden“ wählen, dann diesen Befehl erneut ausführen.');
+      throw new Error('Choose "Connect running Claude" in VS Code, then run this command again.');
     }
-    if (existing !== undefined) throw new Error('Eine andere Unterhaltung ist ausgewählt. Zuerst in VS Code die Verbindung wechseln.');
+    if (existing !== undefined) throw new Error('Another conversation is chosen. Switch the connection in VS Code first.');
     await writePrivateJson(bindingPath, { version: 1, workspaceRoot: descriptor.workspaceRoot, sessionId });
     await unlink(ticketPath);
-    process.stdout.write('DiffGuide mit dieser Unterhaltung verbunden. Feedback kommt automatisch; nur der Mensch löst Threads auf.\n');
+    process.stdout.write('DiffGuide is connected to this conversation. Feedback arrives automatically; only the human resolves threads.\n');
   });
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`DiffGuide: ${error instanceof Error ? error.message : 'Verbindung fehlgeschlagen.'}\n`);
+  process.stderr.write(`DiffGuide: ${error instanceof Error ? error.message : 'Connection failed.'}\n`);
   process.exitCode = 1;
 });

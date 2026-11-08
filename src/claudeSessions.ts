@@ -97,7 +97,7 @@ export async function listClaudeConversations(
         }
       }
       if (!belongs) return undefined;
-      return { id: file.id, title: title || automaticTitle || firstPrompt || `Unterhaltung ${file.id.slice(0, 8)}`,
+      return { id: file.id, title: title || automaticTitle || firstPrompt || `Conversation ${file.id.slice(0, 8)}`,
         modifiedAt: file.modifiedAt, branch, running: running.has(file.id) };
     } catch { return undefined; }
   }));

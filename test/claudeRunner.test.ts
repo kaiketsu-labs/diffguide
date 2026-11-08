@@ -332,3 +332,12 @@ test('waits for a busy worktree, shows who holds it, and stops while waiting wit
   instance.retry();
   await until(() => children.length === 1);
 });
+
+test('leaves sent comments to the connected conversation when one answers them', async (t) => {
+  const { instance, store, children } = await runner('author', t, undefined, undefined, { answersElsewhere: true });
+  store.setPending([event('one')]);
+  instance.retry();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(children.length, 0);
+  assert.equal(instance.activity.running, false);
+});

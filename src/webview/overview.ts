@@ -1,4 +1,5 @@
 import type { ClaudeStep } from '../claudeRunner.js';
+import type { ClaudeConversation } from '../claudeSessions.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type Analysis, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
@@ -9,6 +10,7 @@ import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLin
 import type { LineRange } from '../reviewedFiles.js';
 import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
 import { icons } from '../icons.js';
+import type { FileIcon, FileIcons } from '../fileIcons.js';
 import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
 import type * as PdfJs from 'pdfjs-dist';
 import { orbCanvas, stepMotion } from './orb.js';
@@ -45,6 +47,9 @@ interface Saved {
   readonly conversationFolded?: boolean;
   /** Collapsed threads leave the diff and show as marks beside their last line. */
   readonly marginThreads?: boolean;
+  /** The file list shows every repository file, not only the changes. */
+  readonly allFiles?: boolean;
+  readonly listHidden?: boolean;
 }
 type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
@@ -66,6 +71,14 @@ const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
 let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
 let view: View = saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : saved.view === 'files' ? 'files' : 'overview';
+/** Local pages list every repository file by default; PR pages list the changes. */
+let allFiles = saved.allFiles ?? initial.state.localMode === true;
+let listHidden = saved.listHidden === true;
+/** Every file in the repository, for the All files list. */
+let repositoryFiles: readonly string[] = [];
+let fileIcons: FileIcons | undefined;
+/** CSS font families of the icon theme's fonts already added to the page, by font id. */
+const iconFonts = new Map<string, string>();
 let peekWidth = saved.peekWidth;
 let folders = saved.folders === true;
 const collapsed = new Map(Object.entries(saved.collapsed ?? {}));
@@ -165,7 +178,7 @@ const checkStates: ReadonlySet<string> = new Set<CheckState>(['success', 'failur
 const methodLabels: Record<MergeMethod, string> = { squash: 'Squash and merge', merge: 'Create a merge commit', rebase: 'Rebase and merge' };
 const hideReasons: readonly (readonly [HideReason, string])[] = [['OUTDATED', 'Outdated'], ['RESOLVED', 'Resolved'], ['DUPLICATE', 'Duplicate'], ['OFF_TOPIC', 'Off-topic'],
   ['LOW_QUALITY', 'Low quality'], ['SPAM', 'Spam'], ['ABUSE', 'Abuse']];
-const changeLetters: Record<FileDiff['change'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
+const changeLetters: Record<FileDiff['change'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R', unchanged: '' };
 const severityLabels: Record<Severity | 'unclassified', string> = { critical: 'Critical', significant: 'Significant', routine: 'Routine', trivial: 'Trivial', unclassified: 'Unclassified' };
 let guide: GuideGroup[] | undefined;
 let guideStamp = '';
@@ -259,7 +272,7 @@ function frameMain(): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -354,6 +367,14 @@ function stateIcon(shape: StateShape, tone: string, label?: string): HTMLElement
     node.setAttribute('aria-label', label);
   }
   return node;
+}
+
+/** Your open PR from the local page's branch; clicking turns this tab into its review page. */
+function pullRequestChip({ number, title }: NonNullable<OverviewState['branchPullRequest']>): HTMLButtonElement {
+  const chip = button('', () => post({ action: 'open-pr' }), 'small pr-chip');
+  chip.append(icon(icons.github), 'PR #' + number);
+  chip.dataset.tip = 'Review #' + number + ' ' + title + ' in this tab';
+  return chip;
 }
 
 /** A branch name that copies itself, like GitHub's. */
@@ -572,7 +593,8 @@ function renderState(details: PullRequestDetails): void {
   $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
     : !details.open ? (details.merged ? '' : 'Closed without merging.')
     : '';
-  const conflicted = details.open && details.mergeable === 'no' && details.canEdit;
+  // On your own checkout, the agent fixes conflicts in the conversation you connected, so the page has no Fix conflicts button.
+  const conflicted = details.open && details.mergeable === 'no' && details.canEdit && current?.claude.link === undefined;
   const question = conflicted && current?.claude.running !== true ? current?.conflictQuestion : undefined;
   $('conflict-row').hidden = !conflicted || question !== undefined;
   $('conflict-ask').hidden = question === undefined;
@@ -1321,6 +1343,16 @@ function applyFilters(): void {
   renderFiles();
   $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
   $('filter-clear').hidden = fileFilter === '';
+  showListToggle();
+}
+
+/** The file list's collapse icon, with a dot while a hidden list still filters the files. */
+function showListToggle(): void {
+  $('files').parentElement?.classList.toggle('list-hidden', listHidden);
+  const toggle = $('nav-toggle');
+  setTip(toggle, listHidden ? 'Expand file list' : 'Collapse file list');
+  toggle.setAttribute('aria-expanded', String(!listHidden));
+  toggle.classList.toggle('filtered', listHidden && view === 'files' && filtersOn());
 }
 
 function openFilterMenu(): void {
@@ -1349,6 +1381,7 @@ function openViewMenu(): void {
   const rows = [
     ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); }, false, icons.whitespace)] : [],
     ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
+    ...view === 'files' ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], allFiles, (on) => { allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
     menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
     menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }, false, icons.margin),
   ];
@@ -1709,6 +1742,107 @@ function dismissForm(form: { readonly login: string; text: string }): HTMLElemen
   return item;
 }
 
+/** Which part of the Claude menu shows: the choices, conversations to resume, or the steps that connect a running Claude. */
+let connectView: 'choices' | 'resume' | 'preparing' | 'running' = 'choices';
+let conversations: readonly ClaudeConversation[] | string | undefined;
+
+/** The Claude button where you connect a conversation yourself; the terminal button is for a PR's own Claude. */
+function renderConnectButton(link: OverviewState['claude']['link']): void {
+  const connect = $('connect');
+  $('terminal').hidden = link !== undefined;
+  $('remove-worktree').closest('.menu-anchor')?.toggleAttribute('hidden', link !== undefined);
+  connect.parentElement?.toggleAttribute('hidden', link === undefined);
+  if (link === undefined) return;
+  const label = link.terminal ? 'Open in terminal' : link.delivering ? 'Switch conversation' : 'Connect Claude';
+  if (connect.dataset.label !== label) {
+    connect.dataset.label = label;
+    connect.replaceChildren(el('span', 'range-text', label), icon(icons.chevronDown));
+  }
+  if (connectView === 'running' && link.delivering) {
+    connectView = 'choices';
+    if (toolbarMenu?.anchor === 'connect') closeToolbarMenu();
+    showNotice({ text: 'Claude connected.' });
+  } else if (connectView === 'choices') renderConnectMenu();
+}
+
+function openConnectMenu(): void {
+  connectView = 'choices';
+  openToolbarMenu('connect', [], 'connect-menu');
+  renderConnectMenu();
+  toolbarMenu?.node.querySelector<HTMLElement>('button, input')?.focus();
+}
+
+/** A Connect menu row: an icon, the action and a one-line hint under it. */
+function connectRow(svg: string | undefined, label: string, hint: string, pick: () => void): HTMLElement {
+  const row = el('button', 'picker-row connect-row');
+  const text = el('span', 'connect-text');
+  text.append(el('span', 'connect-name', label), ...hint ? [el('span', 'muted', hint)] : []);
+  row.append(...svg === undefined ? [] : [icon(svg)], text);
+  row.addEventListener('click', pick);
+  return row;
+}
+
+function renderConnectMenu(): void {
+  const list = toolbarMenu?.anchor === 'connect' ? toolbarMenu.node.querySelector('.picker-list') : null;
+  if (!list) return;
+  const link = current?.claude.link;
+  const choose = (how: 'show' | 'new' | 'copy' | 'resume', session?: string): void => {
+    closeToolbarMenu();
+    post(session === undefined ? { action: 'connect-claude', how } : { action: 'connect-claude', how: 'resume', session });
+  };
+  const choice = (label: string, note: string, pick: () => void): HTMLElement => connectRow(undefined, label, note, pick);
+  if (connectView === 'choices') {
+    const switching = link?.terminal === true || link?.delivering === true;
+    list.replaceChildren(
+      ...link?.terminal ? [connectRow(icons.terminal, 'Show terminal', 'The terminal of the connected conversation', () => choose('show')), el('div', 'menu-divider'), el('div', 'muted picker-note', 'Switch conversation')] : [],
+      connectRow(icons.terminal, 'New conversation', 'Starts Claude in a VS Code terminal', () => choose('new')),
+      connectRow(icons.earlier, 'Resume a conversation…', "Pick one of this folder's conversations", () => {
+        connectView = 'resume';
+        conversations = undefined;
+        renderConnectMenu();
+        list.querySelector('input')?.focus();
+        post({ action: 'claude-conversations' });
+      }),
+      connectRow(icons.copy, 'Copy command', switching ? 'Start a new conversation in another terminal app' : 'Start Claude in another terminal app', () => choose('copy')),
+      el('div', 'menu-divider'),
+      el('div', 'muted picker-note', 'Claude already running'),
+      connectRow(icons.link, 'Connect running Claude', 'Two commands to run in its terminal', () => {
+        connectView = 'preparing';
+        renderConnectMenu();
+        post({ action: 'connect-claude', how: 'running' });
+      }),
+    );
+  } else if (connectView === 'resume') {
+    let search = list.querySelector<HTMLInputElement>('input[type=text]');
+    if (!search) {
+      search = el('input');
+      search.type = 'text';
+      search.placeholder = 'Filter conversations';
+      search.setAttribute('aria-label', 'Filter conversations');
+      search.addEventListener('input', () => renderConnectMenu());
+    }
+    const query = search.value.trim().toLowerCase();
+    const found = typeof conversations === 'string' || conversations === undefined ? [] : conversations
+      .filter((conversation) => !query || (conversation.title + ' ' + conversation.branch).toLowerCase().includes(query));
+    const rows = found.map((conversation) => choice(conversation.title,
+      [conversation.running ? 'Running' : '', relativeTime(new Date(conversation.modifiedAt).toISOString()), conversation.branch].filter(Boolean).join(' · '),
+      () => choose('resume', conversation.id)));
+    const note = typeof conversations === 'string' ? 'Could not list conversations: ' + conversations : conversations === undefined ? 'Loading…' : found.length ? '' : query ? 'No matches.' : 'No conversations in this folder yet.';
+    list.replaceChildren(search, ...rows, ...note ? [el('div', 'muted picker-note', note)] : [], choice('All conversations in Claude…', '', () => choose('resume')));
+  } else if (connectView === 'preparing') {
+    list.replaceChildren(el('div', 'muted picker-note', 'Preparing Claude…'));
+  } else {
+    const command = (text: string, which: 'reload' | 'connect'): HTMLElement => {
+      const row = el('div', 'row connect-command');
+      const copy = button('Copy', () => { post({ action: 'copy-connect', command: which }); copy.textContent = 'Copied'; }, 'small');
+      row.append(el('code', 'gap', text), copy);
+      return row;
+    };
+    list.replaceChildren(el('p', 'ask-text', 'In the Claude terminal, run:'), command('/reload-plugins --force', 'reload'), command('/diffguide:connect', 'connect'),
+      el('div', 'muted picker-note', 'Waiting for connection…'));
+  }
+}
+
 /** The base branch menu: a filter over the branches the PR could merge into; GitHub's list arrives after it opens. */
 function openBaseMenu(): void {
   if (busy) return;
@@ -1746,11 +1880,12 @@ function render(state: OverviewState): void {
   $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
   $('title').textContent = state.heading ?? state.title;
   const canChangeBase = state.details?.canEdit === true && state.details.open;
-  const byline = JSON.stringify([state.author, state.headBranch, state.baseBranch, canChangeBase]);
+  const byline = JSON.stringify([state.author, state.headBranch, state.baseBranch, canChangeBase, state.branchPullRequest]);
   if ($('byline').dataset.stamp !== byline) {
     $('byline').dataset.stamp = byline;
     if (toolbarMenu?.anchor === 'change-base') closeToolbarMenu();
-    $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
+    if (state.localMode) $('byline').replaceChildren('Uncommitted changes on', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
+    else $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
   }
   $('facts').replaceChildren(...pullRequestFacts(state));
   const { details } = state;
@@ -1838,6 +1973,7 @@ function render(state: OverviewState): void {
   terminal.className = state.claude.running ? 'small' : 'quiet';
   terminal.replaceChildren(icon(icons.terminal), state.claude.running ? 'Stop and open in terminal' : 'Open in terminal');
   terminal.dataset.tip = state.claude.running ? 'Stops the agent\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s agent conversation in a terminal';
+  renderConnectButton(state.claude.link);
   const unpushed = state.unpushed?.length ?? 0;
   const push = $('push');
   push.hidden = !unpushed || !details?.canEdit;
@@ -2045,10 +2181,11 @@ function textarea(key: string, value: string, placeholder: string, onInput: (val
 }
 
 function composerBox(draft: Composer): HTMLElement {
-  const github = draft.target === 'github';
+  const github = draft.target === 'github' && !current?.localMode;
   const box = el('div', 'thread draft' + (github ? ' github' : ''));
   const head = el('div', 'strip');
   const toggle = el('span', 'seg');
+  toggle.hidden = current?.localMode === true;
   toggle.setAttribute('role', 'group');
   toggle.setAttribute('aria-label', 'Who sees this comment');
   for (const [value, label] of [['claude', 'Local'], ['github', 'On GitHub']] as const) {
@@ -2369,7 +2506,7 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(publishBox(thread, draft));
     return box;
   }
-  actions.append(el('span', 'gap'), ...thread.url ? [] : [thread.source === 'local' ? toGitHubButton(thread) : titled(iconButton(icons.github, 'Publish', () => post({ action: 'publish', id: thread.id }), 'quiet'), 'Publish to GitHub')]);
+  actions.append(el('span', 'gap'), ...thread.url || current?.localMode ? [] : [thread.source === 'local' ? toGitHubButton(thread) : titled(iconButton(icons.github, 'Publish', () => post({ action: 'publish', id: thread.id }), 'quiet'), 'Publish to GitHub')]);
   if (thread.source === 'local') {
     const archive = iconButton(icons.archive, 'Archive', () => setArchived(thread, true), 'quiet');
     archive.title = 'Hide this thread. Show archived threads in the filter menu brings it back';
@@ -2553,13 +2690,14 @@ function suggestionCard(thread: Extract<Thread, { source: 'local' }>, index: num
   publish.title = 'Adds it to your pending review as a GitHub suggestion the author can commit.';
   const canPush = current?.details?.canEdit === true;
   const apply = button(canPush ? 'Commit suggestion' : 'Apply', () => post({ action: 'apply-suggestion', ...where }), 'primary');
-  apply.title = !canPush ? 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.'
+  apply.title = current?.localMode ? 'Changes the file. Nothing is committed.' : !canPush ? 'Changes the file in the PR worktree. Nothing is committed, since you cannot push to this PR.'
     : current?.unpushed?.length ? 'Commits the change after the unpushed commits. Push them together.' : 'Commits the change to the PR branch and pushes it.';
+  publish.hidden = current?.localMode === true;
   const done = thread.applied?.message === index ? thread.applied : undefined;
   if (done === undefined) actions.append(el('span', 'gap'), publish, apply);
   else if (done.done === 'pushed') actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed and pushed.'));
   else if (done.done === 'committed') actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' committed, not pushed yet.'));
-  else actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + ' applied to the worktree, not committed.'), button('Discard', () => post({ action: 'discard-suggestion', id: thread.id })), publish);
+  else actions.append(el('span', 'muted gap', 'Option ' + (done.option + 1) + (current?.localMode ? ' applied, not committed.' : ' applied to the worktree, not committed.')), button('Discard', () => post({ action: 'discard-suggestion', id: thread.id })), publish);
   card.append(head, lines, actions);
   return card;
 }
@@ -2957,7 +3095,10 @@ function selectedReadIds(file: FileDiff, selection: LineRange): string[] | undef
 function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined = composer?.path === file.path ? composer : undefined, expandKey = file.path): HTMLTableElement {
   const node = el('table');
   const columns = el('colgroup');
-  const widths = layout === 'split' ? ['num', '', 'num', ''] : ['num', 'num', ''];
+  // An unchanged file has the same lines on both sides, so it shows them once with one line number.
+  const single = file.change === 'unchanged';
+  const split = layout === 'split' && !single;
+  const widths = split ? ['num', '', 'num', ''] : single ? ['num', ''] : ['num', 'num', ''];
   for (const name of widths) columns.append(el('col', name));
   node.append(columns);
   const notes = annotationsOf(file.path);
@@ -2967,7 +3108,7 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
     for (const [side, line] of covers) {
       if (line === undefined) continue;
       if (draft?.side === side && draft.start <= line && line <= draft.end) {
-        const cells = [...row.children].slice(layout === 'split' && side === 'new' ? 2 : 0, layout === 'split' && side === 'old' ? 2 : undefined);
+        const cells = [...row.children].slice(split && side === 'new' ? 2 : 0, split && side === 'old' ? 2 : undefined);
         for (const cell of cells) cell.classList.add('sel');
         cells[0]?.classList.add('sel-start');
       }
@@ -2991,7 +3132,7 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
   };
   const lineRow = (line: DiffLine, hidden = false): void => {
     const row = el('tr', line.kind);
-    row.append(num(line.oldLine, file.path, 'old'), num(line.newLine, file.path, 'new'), code(line, ''));
+    row.append(...single ? [] : [num(line.oldLine, file.path, 'old')], num(line.newLine, file.path, 'new'), code(line, ''));
     add(row, [['old', line.oldLine], ['new', line.newLine]], hidden);
   };
   const pairRow = (left: DiffLine | undefined, right: DiffLine | undefined, hidden = false): void => {
@@ -3007,7 +3148,7 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
     const html = contextLines.get(file.path)?.[newLine - 1];
     if (html === undefined) return;
     const line: DiffLine = { kind: 'context', oldLine: newLine + offset, newLine, html };
-    if (layout === 'split') pairRow(line, line);
+    if (split) pairRow(line, line);
     else lineRow(line);
   };
   const gaps = gapsOf(file);
@@ -3070,21 +3211,22 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
     for (let line = gap.to - bottom + 1; line <= gap.to; line++) contextRow(line, gap.offset);
   };
   const draw = (row: Row, hidden: boolean): void => {
-    if (layout === 'split') pairRow(row[0], row[1], hidden);
+    if (split) pairRow(row[0], row[1], hidden);
     else if (row[0]) lineRow(row[0], hidden);
   };
   const isRead = (row: Row): boolean => row.every((line) => !line || read.has(line));
   file.hunks.forEach((hunk, index) => {
     const gap = gaps[index];
-    if (gap) gapRows(gap, index, hunk.header);
-    else {
+    // An unchanged file is one hunk of every line, so it has no header or gaps to show.
+    if (file.change !== 'unchanged' && gap) gapRows(gap, index, hunk.header);
+    else if (file.change !== 'unchanged') {
       const header = el('tr', 'hunk');
       const cell = el('td', '', hunk.header);
       cell.colSpan = widths.length;
       header.append(cell);
       node.append(header);
     }
-    const rows: Row[] = layout === 'split' ? pairs(hunk) : hunk.lines.map((line) => [line]);
+    const rows: Row[] = split ? pairs(hunk) : hunk.lines.map((line) => [line]);
     for (let at = 0; at < rows.length;) {
       const row = rows[at];
       if (row && !isRead(row)) { draw(row, false); at += 1; continue; }
@@ -3100,7 +3242,7 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
     }
   });
   const last = gaps[file.hunks.length];
-  if (last && file.change !== 'added' && file.change !== 'deleted') gapRows(last, file.hunks.length);
+  if (last && file.change !== 'added' && file.change !== 'deleted' && file.change !== 'unchanged') gapRows(last, file.hunks.length);
   return node;
 }
 
@@ -3133,8 +3275,10 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     requestAnimationFrame(() => { document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
   }
   if (view === 'guide') { keepView(() => renderGuide(only)); return; }
-  const allFiles = files;
-  const shownFiles = filteredFiles(allFiles);
+  const opened = filteredFiles(openedFiles());
+  const changes = files.filter((file) => file.change !== 'unchanged');
+  const shownChanges = filteredFiles(changes);
+  const shownFiles = [...shownChanges, ...opened];
   const container = $('files');
   const threadsByFile = new Map<string, Thread[]>();
   for (const thread of allThreads()) {
@@ -3142,8 +3286,9 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     threadsByFile.set(thread.path, list);
     list.push(thread);
   }
-  const tree = fileTree(shownFiles);
-  renderFileNav(tree, shownFiles, threadsByFile);
+  const tree = fileTree(shownChanges);
+  $('files').parentElement?.classList.remove('no-nav');
+  renderFileNav(shownChanges, opened, threadsByFile);
   const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
   const threadsOf = (path: string): Thread[] => threadsByFile.get(path) ?? [];
@@ -3162,7 +3307,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     } else {
       container.replaceChildren();
       fileKeys.clear();
-      if (!shownFiles.length) container.append(el('p', 'muted', allFiles.length ? 'No files match the filter.' : diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(diffRange) + '.'));
+      if (!shownFiles.length) container.append(el('p', 'muted', changes.length || openedFiles().length ? 'No files match the filter.' : current?.localMode ? 'No uncommitted changes. Pick a file in the Local view to review it.' : diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(diffRange) + '.'));
       const append = (parent: HTMLElement, folder: FileFolder<FileDiff>, depth: number): void => {
         for (const child of folder.folders) {
           const isCollapsed = collapsed.get('folder:' + child.path) === true;
@@ -3178,72 +3323,121 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
       };
       const put = (parent: HTMLElement, depth: number, child: HTMLElement): void => { parent.append(depth === 0 ? child : railItem(child)); };
       if (folders) append(container, tree, 0);
-      else for (const file of shownFiles) container.append(draw(file));
+      else for (const file of shownChanges) container.append(draw(file));
+      for (const file of opened) container.append(draw(file));
     }
     if (folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
   });
 }
 
-/** Folders folded in the file navigator, apart from the file list's own folders. */
-const navCollapsed = new Set<string>();
+/** Folders opened or folded in the file navigator by hand, apart from the file list's own folders. */
+const navFolders = new Map<string, boolean>();
 /** Whether the navigator is folded to its heading in a narrow window. */
 let navFolded = true;
 
-/** The file navigator beside the diffs: change letter, name, open comments and a Viewed tick per file. */
-function renderFileNav(tree: FileFolder<FileDiff>, shown: readonly FileDiff[], threadsByFile: ReadonlyMap<string, readonly Thread[]>): void {
+/** A navigator entry: a file on the page, or with All files on, a repository file the page does not show yet. */
+interface NavEntry { readonly path: string; readonly file?: FileDiff }
+
+/**
+ * The file navigator beside the diffs: icon, name, open comments, Git letter and a Viewed tick per file.
+ * Opened unchanged files lead in their own group; with All files on, the whole repository follows as one tree.
+ */
+function renderFileNav(changes: readonly FileDiff[], opened: readonly FileDiff[], threadsByFile: ReadonlyMap<string, readonly Thread[]>): void {
   const nav = $('file-nav');
   nav.classList.toggle('folded', navFolded);
   const head = el('button', 'nav-head');
   head.setAttribute('aria-expanded', String(!navFolded));
-  const total = files?.length ?? shown.length;
-  head.append(chevronMark(navFolded), (shown.length < total ? shown.length + ' of ' + total : shown.length) + (total === 1 ? ' file' : ' files'), el('span', 'muted', shown.filter((file) => viewed.has(file.path)).length + ' viewed'));
-  head.addEventListener('click', () => { navFolded = !navFolded; renderFileNav(tree, shown, threadsByFile); });
+  const total = (files ?? []).filter((file) => file.change !== 'unchanged').length;
+  const done = changes.filter((file) => viewed.has(file.path)).length;
+  const query = fileFilter.trim().toLowerCase();
+  const entries: NavEntry[] = allFiles ? repositoryEntries().filter((entry) => entry.file ? changes.includes(entry.file) || opened.includes(entry.file)
+    : (!query || entry.path.toLowerCase().includes(query)) && !hiddenTypes.has(fileType(entry.path))) : [];
+  if (allFiles) head.append(chevronMark(navFolded), (changes.length < total ? changes.length + ' of ' + total : total) + ' changed', el('span', 'muted', done + ' viewed · ' + entries.length + (entries.length === 1 ? ' file' : ' files')));
+  else head.append(chevronMark(navFolded), (changes.length < total ? changes.length + ' of ' + total : changes.length) + (total === 1 ? ' file' : ' files'), el('span', 'muted', done + ' viewed'));
+  head.addEventListener('click', () => { navFolded = !navFolded; renderFileNav(changes, opened, threadsByFile); });
   const list = el('ul', 'nav-list');
-  const add = (folder: FileFolder<FileDiff>, depth: number): void => {
+  const redraw = (): void => { renderFileNav(changes, opened, threadsByFile); };
+  const holdsShown = (folder: FileFolder<NavEntry>): boolean => folder.files.some((entry) => entry.file !== undefined) || folder.folders.some(holdsShown);
+  const holdsChange = (folder: FileFolder<NavEntry>): boolean => folder.files.some((entry) => entry.file !== undefined && entry.file.change !== 'unchanged') || folder.folders.some(holdsChange);
+  const add = (folder: FileFolder<NavEntry>, depth: number): void => {
     for (const child of folder.folders) {
-      const isCollapsed = navCollapsed.has(child.path);
+      const isCollapsed = navFolders.get(child.path) ?? (allFiles && !holdsShown(child));
       const row = el('li', 'nav-folder');
       row.style.setProperty('--depth', String(depth));
       row.title = child.path;
-      row.append(chevronMark(isCollapsed), child.name);
-      row.addEventListener('click', () => {
-        if (isCollapsed) navCollapsed.delete(child.path);
-        else navCollapsed.add(child.path);
-        renderFileNav(tree, shown, threadsByFile);
-      });
+      row.append(chevronMark(isCollapsed), el('span', 'nav-name', child.name));
+      if (allFiles && holdsChange(child)) row.append(titled(el('span', 'nav-dot'), 'Holds changed files'));
+      row.addEventListener('click', () => { navFolders.set(child.path, !isCollapsed); redraw(); });
       list.append(row);
       if (!isCollapsed) add(child, depth + 1);
     }
-    for (const file of folder.files) list.append(navFile(file, depth, threadsByFile.get(file.path) ?? []));
+    for (const entry of folder.files) list.append(navFile(entry, depth, threadsByFile.get(entry.path) ?? []));
   };
-  add(tree, 0);
+  if (opened.length) {
+    const group = el('li', 'nav-group');
+    group.append('Opened', el('span', 'muted', String(opened.length)));
+    const closable = opened.filter((file) => !threadsByFile.get(file.path)?.length).map((file) => file.path);
+    if (closable.length) {
+      const closeAll = button('', () => { closeFiles(closable); }, 'quiet small nav-close-all');
+      closeAll.textContent = 'Close all';
+      group.append(closeAll);
+    }
+    list.append(group);
+    for (const file of opened) list.append(navFile({ path: file.path, file }, 0, threadsByFile.get(file.path) ?? [], true));
+    if (changes.length || allFiles) list.append(el('li', 'nav-sep'));
+  }
+  add(allFiles ? fileTree(entries) : fileTree(changes.map((file): NavEntry => ({ path: file.path, file }))), 0);
   nav.replaceChildren(head, list);
   markCurrentNavFile();
 }
 
-function navFile(file: FileDiff, depth: number, threads: readonly Thread[]): HTMLElement {
+/** Every repository file with the page's file for it, plus page files the repository no longer lists, such as deleted ones. */
+function repositoryEntries(): NavEntry[] {
+  const byPath = new Map((files ?? []).map((file) => [file.path, file]));
+  const entries = repositoryFiles.map((path): NavEntry => { const file = byPath.get(path); return file ? { path, file } : { path }; });
+  const listed = new Set(repositoryFiles);
+  for (const file of files ?? []) if (!listed.has(file.path)) entries.push({ path: file.path, file });
+  return entries;
+}
+
+/** One navigator row; `closable` adds × to an opened file that has no comments. */
+function navFile(entry: NavEntry, depth: number, threads: readonly Thread[], closable = false): HTMLElement {
+  const { path, file } = entry;
   const item = el('li');
-  const row = el('button', 'nav-file' + (viewed.has(file.path) ? ' done' : ''));
+  const isViewed = file !== undefined && viewed.has(path);
+  const row = el('button', 'nav-file' + (isViewed ? ' done' : '') + (file === undefined || file.change === 'unchanged' ? ' unchanged' : ''));
   row.style.setProperty('--depth', String(depth));
-  row.dataset.navPath = file.path;
-  row.title = file.path;
-  const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
-  row.append(badge, el('span', 'nav-name', file.path.split('/').at(-1) ?? file.path));
+  row.dataset.navPath = path;
+  row.title = path;
+  const themeIcon = fileIcons?.byPath[path];
+  row.append(themeIcon ? iconNode(themeIcon) : el('span', 'file-icon'), el('span', 'nav-name', path.split('/').at(-1) ?? path));
   const open = threads.filter((thread) => !thread.resolved).length;
   if (open) {
     const count = el('span', 'nav-count', String(open));
     count.title = open + (open === 1 ? ' open comment' : ' open comments');
     row.append(count);
   }
+  if (file && file.change !== 'unchanged') {
+    const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
+    badge.title = file.change;
+    row.append(badge);
+  }
   const done = el('span', 'nav-done');
-  if (viewed.has(file.path)) {
+  if (isViewed) {
     done.title = 'Viewed';
     done.append(icon(icons.check));
   }
   row.append(done);
-  row.addEventListener('click', () => showFile(file.path));
+  row.addEventListener('click', () => { if (file) showFile(path); else post({ action: 'open-file', path }); });
   item.append(row);
+  if (closable && !threads.length) {
+    const close = button('', () => { closeFiles([path]); }, 'icon-button nav-close');
+    close.append(icon(icons.close));
+    setTip(close, 'Close');
+    item.classList.add('closable');
+    item.append(close);
+  }
   return item;
 }
 
@@ -3260,9 +3454,19 @@ function showFile(path: string): void {
   box()?.scrollIntoView({ block: 'start' });
 }
 
+/** Round a pinned file header into a closed card once its file's end reaches it, so no box edge peeks out below. */
+function markEndingFiles(): void {
+  for (const box of $('files').querySelectorAll<HTMLElement>('.file')) {
+    const head = box.querySelector<HTMLElement>(':scope > .file-head');
+    const rect = box.getBoundingClientRect();
+    if (rect.top > window.innerHeight) break;
+    box.classList.toggle('ending', head !== null && rect.top < 0 && rect.bottom - head.getBoundingClientRect().bottom < 2);
+  }
+}
+
 /** Highlight the navigator row of the file or guide step at the top of the view. */
 function markCurrentNavFile(): void {
-  const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 24;
+  const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 36;
   const guided = view === 'guide';
   let top: string | undefined;
   for (const box of $('files').querySelectorAll<HTMLElement>(guided ? '.step-wrap[data-key]' : '.file[data-path]')) {
@@ -3286,6 +3490,38 @@ function localMarkOf(change: LocalChange, tip = localMarks[change][1]): HTMLElem
 function localMark(path: string): HTMLElement[] {
   const change = current?.local?.[path];
   return change === undefined ? [] : [localMarkOf(change)];
+}
+
+/** Take opened unchanged files off the page; files with comments stay. */
+function closeFiles(paths: readonly string[]): void {
+  post({ action: 'close-files', paths });
+}
+
+/** Files outside the changes opened on the page, shown whole after the changes. */
+function openedFiles(): readonly FileDiff[] {
+  return (files ?? []).filter((file) => file.change === 'unchanged');
+}
+
+/** A theme file icon: a glyph of an icon font, added to the page on first use, or an image. */
+function iconNode(icon: FileIcon): HTMLElement {
+  if ('image' in icon) {
+    const image = el('img', 'file-icon');
+    image.src = fileIcons?.images[icon.image] ?? '';
+    image.alt = '';
+    return image;
+  }
+  let family = iconFonts.get(icon.font);
+  const data = fileIcons?.fonts[icon.font];
+  if (family === undefined && data !== undefined) {
+    family = 'file-icons-' + iconFonts.size;
+    iconFonts.set(icon.font, family);
+    document.head.append(el('style', '', '@font-face{font-family:"' + family + '";src:url("' + data + '")}'));
+  }
+  const glyph = el('span', 'file-icon', icon.char);
+  glyph.setAttribute('aria-hidden', 'true');
+  if (family) glyph.style.fontFamily = '"' + family + '"';
+  if (icon.color) glyph.style.color = icon.color;
+  return glyph;
 }
 
 /** Folders a path sits in, outermost first: every prefix, so compacted folder rows match too. */
@@ -3497,7 +3733,7 @@ function renderThreadList(): void {
   $('threads-title').textContent = 'Threads (' + threads.length + ')';
   const list = $('threads');
   list.replaceChildren();
-  if (threads.length === 0) list.append(el('li', 'muted', current?.github || current?.githubError ? 'No comments yet.' : 'No local comments yet. Loading GitHub comments…'));
+  if (threads.length === 0) list.append(el('li', 'muted', current?.localMode || current?.github || current?.githubError ? 'No comments yet.' : 'No local comments yet. Loading GitHub comments…'));
   if (current?.githubError) list.append(el('li', 'bad', 'Could not load GitHub comments: ' + current.githubError));
   for (const kind of threadKinds) {
     const members = threads.filter((thread) => threadKind(thread) === kind && standalone(thread));
@@ -3831,7 +4067,13 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
   badge.title = file.change;
   const stats = el('span', 'stats');
-  stats.append(el('span', 'stat-add', '+' + file.additions), ' ', el('span', 'stat-del', '−' + file.deletions));
+  if (file.saved) {
+    const chip = el('span', 'file-chip', 'Saved code');
+    chip.title = 'This file no longer exists. Showing the code saved with its comments.';
+    stats.append(chip);
+  }
+  else if (file.change === 'unchanged') stats.append(el('span', 'file-chip', 'Not changed'));
+  else stats.append(el('span', 'stat-add', '+' + file.additions), ' ', el('span', 'stat-del', '−' + file.deletions));
   const label = el('label', 'viewed');
   const check = el('input');
   check.type = 'checkbox';
@@ -3843,6 +4085,7 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   });
   label.append(check, 'Viewed');
   const open = toolButton(icons.openExternal, 'Open in editor', () => post({ action: 'editor', path: file.path }));
+  open.hidden = file.saved === true;
   const whole = fullFile(file);
   const full = toolButton(whole ? icons.file : icons.fullFile, whole ? 'Diff only' : 'Full file', () => {
     expanded.set(file.path, whole ? new Map() : new Map(Array.from({ length: file.hunks.length + 1 }, (_, index) => [index, { top: Infinity, bottom: 0 }])));
@@ -3851,7 +4094,7 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   });
   const kind = previewKind(file);
   const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
-  full.hidden = showPreview || file.binary || file.change === 'added' || file.change === 'deleted' || !file.hunks.length || !atHead;
+  full.hidden = showPreview || file.binary || file.change === 'added' || file.change === 'deleted' || file.change === 'unchanged' || !file.hunks.length || !atHead;
   const mode = previewSwitch(file, showPreview);
   const unresolved = threads.filter((thread) => !thread.resolved).length;
   const comments = el('span', 'muted comments');
@@ -3863,7 +4106,10 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   for (const chip of chips) chip.title = file.generated ? 'Generated file. GitHub folds these by default.' : 'Large diff, folded by default.';
   const commentFile = toolButton(icons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
   commentFile.hidden = !atHead || file.change === 'deleted';
-  head.append(chevron, name, badge, ...localMark(file.path), stats, ...chips, comments, mode, headTools(full, commentFile, open), label);
+  const themeIcon = fileIcons?.byPath[file.path];
+  const close = toolButton(icons.close, 'Close', () => { closeFiles([file.path]); });
+  close.hidden = file.change !== 'unchanged' || threads.length > 0;
+  head.append(chevron, ...themeIcon ? [iconNode(themeIcon)] : [], name, badge, ...localMark(file.path), stats, ...chips, comments, mode, headTools(full, commentFile, open), label, headTools(close));
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
@@ -4074,9 +4320,10 @@ function showGuideTab(): void {
   count.className = analysis?.running ? 'count working' : 'count';
   count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
   count.hidden = !analysis?.running && steps === undefined;
-  $('files-count').textContent = files ? String(files.length) : '';
+  $('files-count').textContent = files ? String(files.length - openedFiles().length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
-  for (const id of ['range', 'filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
+  for (const id of ['range', 'nav-tools']) $(id).classList.toggle('off-view', view !== 'files');
+  showListToggle();
 }
 
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
@@ -4186,6 +4433,8 @@ function onExtensionMessage(data: ExtensionMessage): void {
   for (const log of live) void hopIntoAvatar(log);
   const shownAs = JSON.stringify([diffRange, whitespace, atHead]);
   if (data.selection) { diffRange = data.selection.range; whitespace = data.selection.whitespace; atHead = data.atHead !== false; save(); }
+  if (data.icons) fileIcons = data.icons;
+  if (data.repositoryFiles) repositoryFiles = data.repositoryFiles;
   if (data.files) {
     const changed = changedFiles(data.files, shownAs);
     files = data.files;
@@ -4286,6 +4535,9 @@ function onExtensionMessage(data: ExtensionMessage): void {
     renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
   }
   if (data.branches) { baseBranches = data.branches; renderBaseMenu(); }
+  if (data.conversations || data.conversationsError !== undefined) { conversations = data.conversations ?? data.conversationsError; renderConnectMenu(); }
+  if (data.runningReady && connectView === 'preparing') { connectView = 'running'; renderConnectMenu(); }
+  if (data.error !== undefined && connectView === 'preparing' && toolbarMenu?.anchor === 'connect') closeToolbarMenu();
   if (data.branchesError !== undefined) { baseBranches = data.branchesError; renderBaseMenu(); }
   if (data.pickerOptions) { pickerOptions = data.pickerOptions; pickerError = undefined; renderPicker(); }
   if (data.pickerError !== undefined) { pickerError = data.pickerError; renderPicker(); }
@@ -4295,6 +4547,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
 $('show-unpushed').addEventListener('click', showUnpushed);
 for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
 $('stop-claude').addEventListener('click', stopClaude);
+$('connect').addEventListener('click', openConnectMenu);
 $('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
   'Remove the worktree for ' + (current?.number === undefined ? 'this PR' : '#' + current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
   'Remove worktree', () => post({ action: 'remove-worktree' })));
@@ -4379,6 +4632,8 @@ $('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Esc
 $('filter-clear').addEventListener('click', () => { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; applyFilters(); $('file-filter').focus(); });
 $('filter-clear').hidden = fileFilter === '';
 $('filter-menu').addEventListener('click', openFilterMenu);
+$('nav-toggle').addEventListener('click', () => { listHidden = !listHidden; save(); showListToggle(); });
+showListToggle();
 $('fold-conversation').addEventListener('click', () => { conversationFolded = !conversationFolded; save(); if (current) renderConversation(current, true); });
 $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
 document.addEventListener('pointerdown', (event) => {
@@ -4468,7 +4723,7 @@ render(initial.state);
 let navFrame = 0;
 window.addEventListener('scroll', () => {
   if (navFrame || view === 'overview') return;
-  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(); });
+  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(); markEndingFiles(); });
 }, { passive: true });
 new ResizeObserver(([entry]) => {
   if (entry) document.body.style.setProperty('--bar-height', (entry.target as HTMLElement).offsetHeight + 'px');

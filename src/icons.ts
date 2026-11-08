@@ -30,8 +30,10 @@ export const icons = {
 
   unified: line('<path d="M1.5 4h3M3 2.5v3M1.5 12h3M7 4h7.5M7 8h7.5M7 12h7.5"/>'),
   split: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11M3.75 8h2M10.25 8h2M11.25 7v2"/>'),
+  fileList: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11M3.5 5.5h1M3.5 8h1M3.5 10.5h1"/>'),
   collapseAll: line('<path d="M5 2.5h7A1.5 1.5 0 0 1 13.5 4v7"/><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M4.75 9.25h4"/>'),
   expandAll: line('<path d="M5 2.5h7A1.5 1.5 0 0 1 13.5 4v7"/><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M4.75 9.25h4M6.75 7.25v4"/>'),
+  overview: line('<path d="M2 7.5L8 2.25l6 5.25M3.5 6.25v7.25h9V6.25M6.5 13.5v-3.5h3v3.5"/>'),
   file: line('<path d="M4 1.5h5l3.5 3.5v9a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5zM9 1.5V5h3.5M6.25 8.5h3.5M8 6.75v3.5M6.25 12h3.5"/>'),
   fullFile: line('<path d="M4 1.5h5l3.5 3.5v9a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5zM9 1.5V5h3.5M5.75 8h4.5M5.75 10.25h4.5M5.75 12.5h3"/>'),
   commit: line('<circle cx="8" cy="8" r="2.75"/><path d="M1.5 8h3.75M10.75 8h3.75"/>'),

@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
 import { readCustomInstructions, type InstructionKind } from './customInstructions.js';
-import type { CodeAnchor, ReviewBridge } from './contracts.js';
+import type { CodeAnchor, LinkedRepositoryHandler, ReviewBridge, ReviewStore } from './contracts.js';
 import { parsePullRequestFileUri, pullRequestFileUri } from './pullRequestDiff.js';
 import { type CommentPlacement, placeComment, publishableText, readClaudeCommits, readGitHubLinks, readPublications, writeClaudeCommits, writeGitHubLinks, writePublications } from './pullRequestComments.js';
-import type { PullRequestProvider } from './pullRequests.js';
+import type { PullRequestProvider, PullRequestSummary } from './pullRequests.js';
 import { showPublishPanel } from './publishPanel.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from './claudeRunner.js';
@@ -17,7 +17,7 @@ import { prepareConnection } from './setup.js';
 import { createReviewStore } from './store.js';
 import { addWorked, crossReferences, ensureBranchWorktree, isWorktreeIdle, linkedBranchName, linkedWorktreePath, lockWorktree, readStoredLinks, writeStoredLinks } from './linkedChanges.js';
 import { findLinked } from './linkedController.js';
-import { createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath, type PullRequestWorktree } from './worktrees.js';
+import { createDataFolder, createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, readPullRequestBase, readWorktree, worktreePath, type PullRequestWorktree } from './worktrees.js';
 
 /** Another workspace repository Claude may change for a PR: where its worktrees live and how to reach its PRs. */
 export interface WorkspaceRepository {
@@ -42,6 +42,8 @@ export interface PullRequestSession {
   readonly worktree: string;
   /** The PR as it was when its worktree was made, and whose PR it is. */
   readonly metadata: PullRequestWorktree;
+  /** False when the PR is open on a checkout whose own review keeps the bridge, and a connected conversation answers. */
+  readonly ownsBridge: boolean;
 }
 
 /** Review sessions for the PR worktrees of one checkout, opened on demand and restored on startup. */
@@ -55,6 +57,8 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
   readonly #watchers = new Map<string, vscode.Disposable>();
   readonly #open = new Map<string, Promise<PullRequestSession>>();
   readonly #ready = new Map<string, PullRequestSession>();
+  /** Your own PRs opened on checkouts that have their own review, by PR and folder. */
+  readonly #onCheckouts = new Map<string, Promise<PullRequestSession>>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -140,6 +144,8 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
 
   dispose(): void {
     for (const session of this.#ready.values()) release(session);
+    for (const pending of this.#onCheckouts.values()) void pending.then(release, () => undefined);
+    this.#onCheckouts.clear();
     for (const watcher of this.#watchers.values()) watcher.dispose();
     this.#watchers.clear();
     this.#ready.clear();
@@ -153,19 +159,52 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     await Promise.all([...this.#ready.values()].map(({ session }) => session.store.flush()));
   }
 
+  /**
+   * Open your own PR on a checkout that already has a review, such as the folder you work in.
+   * Its comments stay in that review and reach the conversation you connected; the session's own Claude only builds the guide.
+   */
+  async openOnCheckout(repository: string, pullRequest: PullRequestSummary, checkout: { readonly root: string; readonly store: ReviewStore; readonly bridge: ReviewBridge; readonly dataPath: string }): Promise<PullRequestSession> {
+    const id = `${key(repository, pullRequest.number)}@${checkout.root}`;
+    let pending = this.#onCheckouts.get(id);
+    if (pending === undefined) {
+      const dataPath = checkoutDataPath(checkout.dataPath, repository, pullRequest.number);
+      pending = createDataFolder(dataPath).then(() => this.#build(repository, pullRequest.number, checkout.root,
+        { version: 1, repository, role: 'author', pullRequest }, { store: checkout.store, bridge: checkout.bridge, dataPath, ownsBridge: false }));
+      this.#onCheckouts.set(id, pending);
+      const opening = pending;
+      opening.then((session) => {
+        const fire = (): void => { this.#stateChanged.fire(session); };
+        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.analysis.onDidChange(fire)));
+      }, () => { if (this.#onCheckouts.get(id) === opening) this.#onCheckouts.delete(id); });
+    }
+    return pending;
+  }
+
   async #create(repository: string, number: number): Promise<PullRequestSession> {
     const worktree = worktreePath(this.storageRoot, repository, number);
     const metadata = await readWorktree(this.storageRoot, worktree);
     if (metadata === undefined) throw new Error(`#${number} has no worktree.`);
     const dataPath = await createReviewData(worktree);
     const store = await createReviewStore(join(dataPath, 'review.json'), worktree);
-    const bridge = await createReviewBridge(store, join(dataPath, 'selected-session.json'), (name, purpose) => linkedRepository(name, purpose));
-    try {
-      await prepareConnection(this.context, bridge, dataPath);
-    } catch (error: unknown) {
-      bridge.dispose();
-      throw error;
-    }
+    const connect = async (linkedRepository: LinkedRepositoryHandler): Promise<ReviewBridge> => {
+      const bridge = await createReviewBridge(store, join(dataPath, 'selected-session.json'), linkedRepository);
+      try {
+        await prepareConnection(this.context, bridge, dataPath);
+      } catch (error: unknown) {
+        bridge.dispose();
+        throw error;
+      }
+      return bridge;
+    };
+    return this.#build(repository, number, worktree, metadata, { store, bridge: connect, dataPath, ownsBridge: true });
+  }
+
+  /**
+   * A PR session over `worktree`. An owned bridge is made here, so it can hand Claude linked repositories;
+   * with a bridge it does not own, a connected conversation answers and the bridge outlives the session.
+   */
+  async #build(repository: string, number: number, worktree: string, metadata: PullRequestWorktree,
+    { store, dataPath, ownsBridge, ...given }: { readonly store: ReviewStore; readonly bridge: ReviewBridge | ((linkedRepository: LinkedRepositoryHandler) => Promise<ReviewBridge>); readonly dataPath: string; readonly ownsBridge: boolean }): Promise<PullRequestSession> {
     const publications = await readPublications(dataPath);
     const links = await readGitHubLinks(dataPath);
     const commits = await readClaudeCommits(dataPath);
@@ -252,6 +291,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       log(`Gave Claude ${name} to ${purpose} at ${result.path} (${result.branch})`);
       return result;
     };
+    const bridge = typeof given.bridge === 'function' ? await given.bridge(linkedRepository) : given.bridge;
     const runner = new ClaudeRunner({
       store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('comments'),
       folders: async () => [...new Set([this.sourceRoot, ...[...(await this.repositories()).values()].map((other) => other.root)])],
@@ -262,7 +302,8 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       }),
       hold: async () => {
         stopping = new AbortController();
-        await hold(worktree);
+        // A checkout the user works in is not a DiffGuide worktree, so no lock file goes beside it.
+        if (ownsBridge) await hold(worktree);
       },
       prepare: async () => {
         if (!await catchUpWithPullRequest(worktree, number)) log('Could not reach GitHub for the PR\'s latest commit; Claude works on the worktree as it is.');
@@ -285,6 +326,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         await writeClaudeCommits(dataPath, commits);
       },
       ...this.claude,
+      ...ownsBridge ? {} : { answersElsewhere: true },
     });
     const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('guide'), ...this.claude });
     const record = async (threadId: string, url: string, pending: boolean): Promise<void> => {
@@ -374,7 +416,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       linkedGitHubThread: (threadId) => links.get(threadId)?.id,
     };
-    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, metadata };
+    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, metadata, ownsBridge };
     return result;
   }
 }
@@ -384,16 +426,21 @@ function outsideDiff(anchor: CodeAnchor, placement: CommentPlacement): string {
   return anchor.scope === 'file' || placement.lines !== undefined ? '' : `Line ${lineLabel(anchor)}:\n\n`;
 }
 
+/** Where a PR open on a checkout keeps its publications, links and review marks, inside that checkout's review folder. */
+export function checkoutDataPath(reviewFolder: string, repository: string, number: number): string {
+  return join(reviewFolder, 'pull-requests', `${repository.replace('/', '__')}-${number}`);
+}
+
 /** Such as "12" or "12–14". */
 function lineLabel({ startLine, endLine }: CodeAnchor): string {
   return endLine === startLine ? `${startLine}` : `${startLine}–${endLine}`;
 }
 
 /** Stop a PR's Claude and its connection. */
-function release({ runner, analysis, bridge, output }: PullRequestSession): void {
+function release({ runner, analysis, bridge, output, ownsBridge }: PullRequestSession): void {
   runner.dispose();
   analysis.dispose();
-  bridge.dispose();
+  if (ownsBridge) bridge.dispose();
   output.dispose();
 }
 

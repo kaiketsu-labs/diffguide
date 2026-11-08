@@ -163,7 +163,7 @@ async function main(): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     try {
-      if (!await selected()) return result('Diese Unterhaltung ist nicht mit DiffGuide verbunden. In der gewünschten Unterhaltung /diffguide:connect ausführen. Ältere Claude-Versionen benötigen ein Update.', true);
+      if (!await selected()) return result('This conversation is not connected to DiffGuide. Run /diffguide:connect in the conversation you want. Older Claude versions need an update.', true);
       if (request.params.name === 'list_pending_reviews') {
         const argsRecord = record(request.params.arguments ?? {});
         if (argsRecord === undefined || Object.keys(argsRecord).length !== 0) {

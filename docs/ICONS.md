@@ -19,7 +19,7 @@ The GitHub mark is the one exception: it is GitHub's logo, kept as GitHub draws 
 
 1. Sketch it in `.diffguide-sketches/` (ignored by git): an HTML page with two to four options next to the icons it sits beside, in both themes, at 16 px and zoomed on a pixel grid. Confirm the pick with the user before writing code.
 2. Add it to `icons` in `src/icons.ts`, with `line(...)` and the shared parts (`ring`, `bubble`, `tray`) where they fit.
-3. Use it in a webview: `icons.<name>` in page HTML (`pullRequestOverview.ts`, `composer.ts`) or `icon(icons.<name>)` in the page script (`webview/overview.ts`). Size it with CSS width and height; 16 px for buttons and tabs, 14 px in dense rows.
+3. Use it in a webview: `icons.<name>` in page HTML (`pullRequestOverview.ts`) or `icon(icons.<name>)` in the page script (`webview/overview.ts`). Size it with CSS width and height; 16 px for buttons and tabs, 14 px in dense rows.
 
 ## Native VS Code surfaces
 

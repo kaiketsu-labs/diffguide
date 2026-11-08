@@ -51,19 +51,19 @@ async function bind(f: Awaited<ReturnType<typeof fixture>>, session = firstSessi
 test('explicit live connect binds one session privately, consumes the ticket and is idempotent', async t => {
   const f = await fixture(t);
   const result = await bind(f);
-  assert.match(result.stdout, /mit dieser Unterhaltung verbunden/u);
+  assert.match(result.stdout, /connected to this conversation/u);
   assert.equal((await readSessionBinding(f.bindingPath, f.root))?.sessionId, firstSession);
   assert.equal((await stat(f.bindingPath)).mode & 0o777, 0o600);
   assert.equal((await readdir(f.root)).includes('connect-ticket.json'), false);
-  assert.match((await bind(f)).stdout, /bereits/u);
+  assert.match((await bind(f)).stdout, /already connected/u);
   await writePrivateJson(f.ticketPath, { version: 1, workspaceRoot: f.root, expiresAt: Date.now() + 60_000 });
-  await assert.rejects(bind(f, otherSession), /andere Unterhaltung/u);
+  await assert.rejects(bind(f, otherSession), /Another conversation/u);
   assert.equal((await readSessionBinding(f.bindingPath, f.root))?.sessionId, firstSession);
 });
 
 test('live connect rejects missing identity, an expired ticket and another working directory', async t => {
   const f = await fixture(t);
-  await assert.rejects(bind(f, firstSession, ''), /keine passende Sitzungskennung/u);
+  await assert.rejects(bind(f, firstSession, ''), /no matching session ID/u);
   await writePrivateJson(f.ticketPath, { version: 1, workspaceRoot: f.root, expiresAt: 0 });
   await assert.rejects(bind(f), /VS Code/u);
   assert.equal(await readSessionBinding(f.bindingPath, f.root), undefined);
@@ -72,7 +72,7 @@ test('live connect rejects missing identity, an expired ticket and another worki
   await assert.rejects(execute(process.execPath, [resolve('dist/live-connect.cjs'), '--connection', f.connectionPath,
     '--binding', f.bindingPath, '--ticket', f.ticketPath, '--session', firstSession], {
     cwd: other, env: { ...process.env, CLAUDE_CODE_SESSION_ID: firstSession }, encoding: 'utf8', timeout: 5_000,
-  }), /anderen Projekt/u);
+  }), /another project/u);
   assert.equal(await readSessionBinding(f.bindingPath, f.root), undefined);
 });
 
@@ -81,11 +81,11 @@ test('a copied launch releases only its expected owner and refuses a stale selec
   const release = () => execute(process.execPath, [resolve('dist/live-connect.cjs'), '--release',
     f.connectionPath, f.bindingPath, firstSession], { cwd: f.root, encoding: 'utf8', timeout: 5_000 });
   await writePrivateJson(f.bindingPath, { version: 1, workspaceRoot: f.root, sessionId: otherSession });
-  await assert.rejects(release(), /inzwischen ausgewählt/u);
+  await assert.rejects(release(), /chosen in the meantime/u);
   assert.equal((await readSessionBinding(f.bindingPath, f.root))?.sessionId, otherSession);
   await writePrivateJson(f.bindingPath, { version: 1, workspaceRoot: f.root, sessionId: firstSession });
   await writeFile(`${f.bindingPath}.lock`, '', { mode: 0o600 });
-  await assert.rejects(release(), /gerade eingerichtet/u);
+  await assert.rejects(release(), /being set up/u);
   assert.equal((await readSessionBinding(f.bindingPath, f.root))?.sessionId, firstSession);
   await rm(`${f.bindingPath}.lock`);
   await release();
@@ -209,7 +209,7 @@ test('older Claude builds are rejected before creating or installing a live plug
   const executable = join(f.root, 'old-claude');
   await writeFile(executable, `#!${process.execPath}\nconsole.log('2.1.70 (Claude Code)');\n`, { mode: 0o700 });
   const context = { extensionPath: resolve('.'), subscriptions: [] } as unknown as vscode.ExtensionContext;
-  await assert.rejects(installLivePlugin(context, f.bridge, f.root, executable, process.execPath), /gefunden: 2\.1\.70/u);
+  await assert.rejects(installLivePlugin(context, f.bridge, f.root, executable, process.execPath), /found: 2\.1\.70/u);
   assert.equal((await readdir(f.root)).includes('live'), false);
 });
 

@@ -4,26 +4,26 @@ Updated 26 October 2026 for preview 0.4.12.
 
 ## Choose the conversation
 
-Run **DiffGuide: Mit Claude verbinden** in the trusted project you want to review.
+Run **DiffGuide: Connect Claude** in the trusted project you want to review.
 
 | Choice | Behavior |
 | --- | --- |
-| **Unterhaltung auswählen** | Search recent conversations from this exact project by name or branch. Named conversations retain their names; generated titles and first prompts are fallbacks. **Läuft** marks a live process. **Weitere Unterhaltungen …** opens Claude's own picker. |
-| **Neue Unterhaltung** | Launch a fresh conversation with this project's feedback connection. |
-| **Laufende Unterhaltung verbinden** | Install the local integration, then connect from inside the intended running conversation. A running row in the saved picker uses this flow too. |
+| **Resume a conversation** | Search recent conversations from this exact project by name or branch. Named conversations retain their names; generated titles and first prompts are fallbacks. **Running** marks a live process. **All conversations…** opens Claude's own picker. |
+| **New conversation** | Launch a fresh conversation with this project's feedback connection. |
+| **Connect running Claude** | Install the local integration, then connect from inside the intended running conversation. A running row in the saved picker uses this flow too. |
 
-The first two choices use VS Code's integrated terminal. **Verbindungsbefehl kopieren** provides the same new/resume launch for a separate terminal. Copying a command does not start or stop anything. It changes to the project directory when executed, passes review settings again and preserves ordinary Claude configuration and permissions. Additional flags from a previous invocation must be supplied again on resume. See [Claude session restoration](https://code.claude.com/docs/en/sessions#what-a-resumed-session-restores).
+The first two choices use VS Code's integrated terminal. **Copy connect command** provides the same new/resume launch for a separate terminal. Copying a command does not start or stop anything. It changes to the project directory when executed, passes review settings again and preserves ordinary Claude configuration and permissions. Additional flags from a previous invocation must be supplied again on resume. See [Claude session restoration](https://code.claude.com/docs/en/sessions#what-a-resumed-session-restores).
 
 ## Connect a running conversation
 
-Choose **Laufende Unterhaltung verbinden** in VS Code, then execute the two copyable commands in the intended Claude terminal:
+Choose **Connect running Claude** in VS Code, then execute the two copyable commands in the intended Claude terminal:
 
 ```text
 /reload-plugins --force
 /diffguide:connect
 ```
 
-Requires **Claude Code 2.1.280 or newer**. The original process and conversation remain active. Loading the new tool set invalidates Claude's prompt cache, so the first command explicitly rereads the conversation context once. This is not a new conversation. The second command selects exactly the conversation in which it runs and arms automatic delivery. Wait for **Feedback aktiv** in the setup view.
+Requires **Claude Code 2.1.280 or newer**. The original process and conversation remain active. Loading the new tool set invalidates Claude's prompt cache, so the first command explicitly rereads the conversation context once. This is not a new conversation. The second command selects exactly the conversation in which it runs and arms automatic delivery. Wait for **Feedback on** in the setup view.
 
 The connection works independently of whether Claude runs in an integrated or separate local terminal. The authenticated end-to-end walkthrough currently covers the integrated terminal; a separate terminal application remains an additional verification task. Claude must be running at the same project root, with the same local configuration directory used by the setup CLI. Set `diffGuide.claudePath` if installations differ. Trusted workspace overrides are supported for both Claude and Node paths.
 

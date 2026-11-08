@@ -1,13 +1,13 @@
-# Feedback auf dem Mac diktieren
+# Dictate feedback on a Mac
 
-Du kannst das vorhandene macOS-Diktat im Kommentarfeld verwenden. Eine zusätzliche Erweiterung oder ein eigener Transkriptionsdienst ist dafür nicht nötig.
+You can use the built-in macOS Dictation in the comment field. No extra extension or transcription service is needed.
 
-Klicke zuerst in das **Kommentar- oder Antwortfeld**. Tippe bei Bedarf `/a` für eine Frage oder `/i` für eine Änderung. Drücke dann die Mikrofontaste deines Macs oder den in macOS eingestellten Diktat-Kurzbefehl und sprich dein Feedback. In der Seitenansicht kannst du den Modus auch über die vorhandenen Schaltflächen auswählen.
+Click into the **comment or reply field** first. Then press your Mac's Microphone key or the Dictation shortcut set in macOS, and speak your feedback.
 
-Beende das Diktat, prüfe den erkannten Text und wähle **Senden**. Diktierte Wörter bleiben bis dahin ein Entwurf und werden wie getippter Text behandelt. Das Diktat löst keine automatische Veröffentlichung oder Codeänderung aus.
+Stop dictating, check the recognized text, and choose **Ask** for a question or **Implement** for a change. Until then, dictated words stay a draft and are treated like typed text. Dictation never publishes anything or changes code by itself.
 
-Welcher Kurzbefehl gilt, steht unter **Systemeinstellungen → Tastatur → Diktat**. Zweimal `Fn` ist eine mögliche Einstellung, aber nicht auf jedem Mac der aktuelle Kurzbefehl. Falls Diktat ausgeschaltet ist, musst du es dort aktivieren. DiffGuide ändert diese Systemeinstellungen nicht und startet keine Mikrofonaufnahme.
+The shortcut in effect is under **System Settings → Keyboard → Dictation**. Pressing `Fn` twice is one possible setting, but not the current shortcut on every Mac. If Dictation is off, turn it on there. DiffGuide does not change these system settings and does not start any microphone recording.
 
-Ob die Erkennung auf dem Gerät stattfindet oder eine Internetverbindung benötigt, hängt von deiner macOS-Konfiguration und Sprache ab. Den Verarbeitungsort zeigt macOS im Bereich Diktat. [Apple: Nachrichten und Dokumente auf dem Mac diktieren](https://support.apple.com/de-de/guide/mac-help/mh40584/mac)
+Whether recognition runs on the device or needs an internet connection depends on your macOS setup and language. macOS shows where it processes speech in the Dictation settings. [Apple: Dictate messages and documents on Mac](https://support.apple.com/guide/mac-help/mh40584/mac)
 
-Diese Anleitung beschreibt die vorhandene macOS-Eingabefunktion. Ein neuer Mikrofonknopf oder eine eigene Spracherkennung ist nicht Teil der Erweiterung; die Audioeingabe wurde nicht durch die automatisierte Prüfung aktiviert.
+This guide describes the existing macOS input feature. A new microphone button or our own speech recognition is not part of the extension; automated tests did not turn on audio input.

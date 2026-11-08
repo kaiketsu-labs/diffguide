@@ -1,12 +1,9 @@
-import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, join, relative } from 'node:path';
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
 import { createReviewStore } from './store.js';
-import { createReviewController } from './reviewController.js';
-import { prepareConnection, registerClaudeLauncher } from './setup.js';
-import { registerPrExport } from './prExportController.js';
-import { registerReviewAppearance } from './reviewAppearance.js';
+import { type ClaudeChoice, prepareConnection, registerClaudeLauncher } from './setup.js';
 import { GitHubApiProvider } from './pullRequests.js';
 import { signInToGitHub, watchGitHubSessions } from './githubApi.js';
 import { mockPullRequestProvider } from './mockPullRequests.js';
@@ -15,31 +12,37 @@ import { registerPullRequestView, type PullRequestWorktrees } from './pullReques
 import { cleanUpWorktrees } from './worktreeCleanup.js';
 import { PendingWrites, sharedPerTurn } from './autoSync.js';
 import { type PullRequestRole, ensureWorktree, git, hasWorktree, readPullRequestBase, removeWorktree, worktreePath } from './worktrees.js';
-import { highlightSource, readPullRequestDiff, type FileDiff } from './unifiedDiff.js';
-import { fenceFilePaths, inlineLocalImages, markdownBlocks, markdownHtml } from './markdown.js';
-import { htmlPreview } from './htmlPreview.js';
+import { highlightSource, readPullRequestDiff, savedCodeDiff, type FileDiff } from './unifiedDiff.js';
+import { fenceFilePaths, markdownHtml } from './markdown.js';
+import { readFilePreview, readMediaSides } from './fileContent.js';
 import { DefinitionPeeks } from './definitions.js';
 import { FileReviews } from './reviewedFiles.js';
 import { saveSelection } from './pullRequestEdits.js';
-import { buildOverviewState, showPullRequestOverview, type AnalysisView, type AppliedSuggestion, type DiffSelection, type FilesView, type LinkedChange, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
+import { buildOverviewState, isPageOpen, revealOpenPage, showPullRequestOverview, type AnalysisView, type AppliedSuggestion, type DiffSelection, type FilesView, type LinkedChange, type OverviewReveal, type PageComment } from './pullRequestOverview.js';
 import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread } from './pullRequests.js';
 import { githubPageActions } from './pullRequestPageActions.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
 import { linkedChanges } from './linkedController.js';
-import { PullRequestSessions, type WorkspaceRepository, type PullRequestSession } from './pullRequestSessions.js';
+import { checkoutDataPath, PullRequestSessions, type WorkspaceRepository, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
 import { claudeStatus } from './claudeStatus.js';
-import { getHeadRevision, readGitBase, readGitBaseBytes } from './git.js';
+import { isWorkspaceRelativePath, readGitBase } from './git.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
-import { maxMediaBytes, mediaType, type MediaSide } from './media.js';
+import { mediaType } from './media.js';
 import { anchorFromText, fileAnchor } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
 import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
 import { ClaudeAnswersTree, latestAnswers, SeenAnswers, type ClaudeAnswer } from './claudeAnswers.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
+import { readFileIcons } from './fileIcons.js';
+import { type BranchPullRequests, implementThreadRequest, listRepositoryFiles, LocalReview, localClaudeStatus, toDisposable, wholeFile } from './localReview.js';
+import { LocalFilesView } from './localFilesView.js';
+import { listLocalCheckouts, type LocalCheckout } from './localCheckouts.js';
+import { LocalSessions, type LocalSession } from './localSessions.js';
 
 let activeStore: ReviewStore | undefined;
+let activeLocalSessions: LocalSessions | undefined;
 let activeBridge: ReviewBridge | undefined;
 let activePullRequests: Checkouts | undefined;
 
@@ -102,11 +105,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const store = await createReviewStore(join(storage.fsPath, 'review.json'), folder.uri.fsPath);
     activeStore = store;
     activePullRequests = checkouts;
-    const showOverview = async (checkout: Checkout, provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, reveal?: OverviewReveal): Promise<void> => {
-      const { storageRoot, sessions: pullRequestSessions, fileReviews } = checkout;
-      await ensureWorktree(checkout.root, storageRoot, provider, repository, pullRequest, role);
-      const opened = await pullRequestSessions.open(repository, pullRequest.number);
-      const folder = worktreePath(storageRoot, repository, pullRequest.number);
+    /** Files outside the diff each open PR page shows whole, kept across calls that reveal a file on an open page. */
+    const revealedFiles = new Map<string, Set<string>>();
+    /** Review marks of your PRs open on checkouts, by checkout folder. */
+    const checkoutFileReviews = new Map<string, FileReviews>();
+    /**
+     * Show a PR's review page. `onCheckout` opens your own PR on that checkout instead of a worktree, in its local page's tab:
+     * its comments stay in the checkout's review and reach the conversation you connected there, and the checkout never moves on its own.
+     */
+    const showOverview = async (checkout: Checkout, provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, reveal?: OverviewReveal, onCheckout?: LocalSession): Promise<void> => {
+      const { storageRoot, sessions: pullRequestSessions } = checkout;
+      if (onCheckout === undefined) await ensureWorktree(checkout.root, storageRoot, provider, repository, pullRequest, role);
+      const opened = onCheckout === undefined ? await pullRequestSessions.open(repository, pullRequest.number)
+        : await pullRequestSessions.openOnCheckout(repository, pullRequest, { root: onCheckout.root, store: onCheckout.store, bridge: onCheckout.bridge, dataPath: onCheckout.folder });
+      const folder = onCheckout?.root ?? worktreePath(storageRoot, repository, pullRequest.number);
+      let fileReviews = checkout.fileReviews;
+      if (onCheckout !== undefined) {
+        const known = checkoutFileReviews.get(onCheckout.root);
+        fileReviews = known ?? new FileReviews(storageRoot, { folder, data: checkoutDataPath(onCheckout.folder, repository, pullRequest.number) });
+        if (known === undefined) { checkoutFileReviews.set(onCheckout.root, fileReviews); context.subscriptions.push(fileReviews); }
+      }
+      /** Refuses what would move or remove your own checkout. */
+      const notOnCheckout = (what: string): void => { if (onCheckout !== undefined) throw new Error(`${what} works on PR worktrees only, not on your own checkout.`); };
       const listed = provider.listFiles(pullRequest.number).then((files) => files.map((file) => file.path), () => undefined);
       let diffPaths: readonly string[] = [];
       /** Changed files from the latest diff read, so media previews need no second read. */
@@ -146,6 +166,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (await git(folder, ['cat-file', '-e', `${oid}^{commit}`]).then(() => true, () => false)) return;
         await git(folder, ['fetch', '--quiet', 'origin', oid]).catch(() => { throw new Error('That commit is no longer on GitHub, probably after a force push.'); });
       };
+      /** Files outside the diff opened on the page, such as from the Local view; files with open Local threads show without being opened. */
+      const pageKey = `${repository}#${pullRequest.number}`;
+      if (!isPageOpen(pageKey)) revealedFiles.set(pageKey, new Set());
+      const revealed = revealedFiles.get(pageKey) ?? new Set<string>();
+      if (reveal !== undefined && 'path' in reveal && reveal.reload === true && isWorkspaceRelativePath(reveal.path)) revealed.add(reveal.path);
+      /** Files outside the diff with Local threads, shown whole after the changes, or as their saved code once the file is gone. */
+      const threadFiles = async (shown: readonly string[]): Promise<FileDiff[]> => {
+        const threads = opened.session.store.threads;
+        const paths = [...new Set([...threads.filter((thread) => !thread.resolved).map((thread) => thread.anchor.path), ...revealed])]
+          .filter((path) => isWorkspaceRelativePath(path) && !shown.includes(path));
+        await prepareHighlighting(paths);
+        return Promise.all(paths.map(async (path) => await wholeFile(folder, path, 'unchanged')
+          ?? savedCodeDiff(path, threads.filter((thread) => thread.anchor.path === path).map((thread) => thread.anchor))));
+      };
       const readFiles = async (select?: DiffSelection): Promise<FilesView> => {
         const wanted = select ?? selection;
         const { range } = wanted;
@@ -168,7 +202,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         selectionAtHead = to === undefined;
         diffPaths = files.map((file) => file.path);
         diffFiles = files;
-        return { files, selection, atHead: selectionAtHead };
+        const [whole, repositoryFiles] = await Promise.all([range.kind === 'all' ? threadFiles(diffPaths) : [], listRepositoryFiles(folder).catch(() => [])]);
+        const icons = await readFileIcons([...new Set([...repositoryFiles, ...diffPaths, ...whole.map((file) => file.path)])]).catch(() => undefined);
+        return { files: [...files, ...whole], repositoryFiles, selection, atHead: selectionAtHead, ...icons === undefined ? {} : { icons } };
       };
       const readAnalysis = async (): Promise<AnalysisView> => {
         const result = await opened.analysis.result();
@@ -260,8 +296,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const pushedHead = loadedConversation instanceof Error ? undefined : loadedConversation.merge.headOid;
         const [unpushed, local] = await Promise.all([pushedHead === undefined ? [] : unpushedCommits(folder, pushedHead), localChanges(folder, pushedHead)]);
         const linkedNow = await readLinked();
+        const claude = onCheckout === undefined ? state.claude : { ...localClaudeStatus(onCheckout.bridge, onCheckout.store.pendingEvents.length),
+          link: { delivering: onCheckout.bridge.state.deliveryReady === true, terminal: onCheckout.launcher.hasTerminal } };
         return {
-          ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
+          ...state, claude, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
           ...(local.files.size === 0 ? {} : { local: Object.fromEntries(local.files) }), linked: linkedNow,
         };
       };
@@ -299,6 +337,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         fileReviews.onDidChange((changed) => { if (changed === `${repository}#${pullRequest.number}`) listener(changed); }),
         detailsChanged.event(listener),
         claudeFinished(opened.runner, () => { linkedRows = undefined; changedOnGitHub(); }),
+        ...onCheckout === undefined ? [] : [toDisposable(onCheckout.bridge.onChange(() => { listener(undefined); })), onCheckout.launcher.onDidChange(listener)],
       );
       await showPullRequestOverview(`${repository}#${pullRequest.number}`, read, changed, {
         readFiles,
@@ -310,29 +349,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         readPreview: async (path) => {
           if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
-          const text = await readFile(join(folder, path), 'utf8');
-          if (/\.html?$/iu.test(path)) return { kind: 'html', ...htmlPreview(text) };
-          const readImage = async (image: string): Promise<Buffer | undefined> => {
-            const file = join(folder, image);
-            const info = await lstat(file).catch(() => undefined);
-            return info?.isFile() === true && info.size <= maxMediaBytes ? await readFile(file) : undefined;
-          };
-          const blocks = await Promise.all(markdownBlocks(text).map(async (block) => ({ ...block, html: await inlineLocalImages(block.html, path, readImage) })));
-          return { kind: 'markdown', blocks };
+          return readFilePreview(folder, path);
         },
         readMedia: async (path) => {
           const file = diffFiles.find((each) => each.path === path);
-          const mime = mediaType(path);
-          if (file === undefined || mime === undefined) throw new Error(`${path} is not an image or PDF in this PR's changes.`);
-          const side = async (read: () => Promise<Buffer>, size: () => Promise<number>): Promise<MediaSide> =>
-            await size() > maxMediaBytes ? { mime, tooBig: true } : { mime, data: (await read()).toString('base64') };
-          const base = await readBase();
-          const oldPath = file.oldPath ?? path;
-          const [before, after] = await Promise.all([
-            file.change === 'added' ? undefined : side(() => readGitBaseBytes(folder, oldPath, base, maxMediaBytes), async () => Number((await git(folder, ['cat-file', '-s', `${base}:${oldPath}`])).trim())),
-            file.change === 'deleted' ? undefined : side(() => readFile(join(folder, path)), async () => (await stat(join(folder, path))).size),
-          ]);
-          return { ...before === undefined ? {} : { old: before }, ...after === undefined ? {} : { new: after } };
+          if (file === undefined || mediaType(path) === undefined) throw new Error(`${path} is not an image or PDF in this PR's changes.`);
+          return readMediaSides(folder, file, await readBase());
         },
         findDefinition: async (at, line, column) => {
           if ('peek' in at) return definitions.find(definitions.location(at.peek).uri, line, column);
@@ -415,7 +437,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         unmarkRead: (ids) => fileReviews.unmarkRead(repository, pullRequest.number, ids),
         openInEditor: (path) => openPullRequestFile(storageRoot, repository, current(), path),
+        ...onCheckout === undefined ? {} : {
+          claudeConversations: () => onCheckout.launcher.conversations(),
+          connectClaude: (choice: ClaudeChoice) => onCheckout.launcher.connect(choice),
+        },
         openTerminal: async () => {
+          if (onCheckout !== undefined) { await onCheckout.launcher.connect({ how: 'show' }); return; }
           await opened.runner.stop();
           const { command, args, cwd, env } = await opened.runner.launch();
           vscode.window.createTerminal({ name: `Claude · #${pullRequest.number}`, shellPath: command, shellArgs: [...args], cwd, env }).show();
@@ -433,7 +460,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         retry: () => { opened.runner.retry(); },
         stopClaude: () => opened.runner.stop(),
-        revealThread: async (id) => { await vscode.commands.executeCommand('diffGuide.revealThread', id); },
+        revealThread: async (id) => {
+          const { path } = findThread(id).anchor;
+          if (selection.range.kind !== 'all') { await openPullRequestFile(storageRoot, repository, current(), path); return; }
+          revealed.add(path);
+          revealOpenPage(`${repository}#${pullRequest.number}`, { path, reload: true });
+        },
+        openFile: async (path) => {
+          if (!isWorkspaceRelativePath(path)) throw new Error(`Unsupported file path: ${path}`);
+          if (selection.range.kind !== 'all') { await openPullRequestFile(storageRoot, repository, current(), path); return; }
+          revealed.add(path);
+          revealOpenPage(pageKey, { path, reload: true });
+        },
+        closeFiles: async (paths) => { for (const path of paths) revealed.delete(path); },
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
@@ -449,7 +488,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           let ahead = false;
           if (loaded.canEdit) {
             if ((await git(folder, ['status', '--porcelain', '--', anchor.path])).trim() !== '') throw new Error(`${anchor.path} has uncommitted changes. Commit or discard them first.`);
-            ({ ahead } = await syncKeepingLocalCommits(folder, pullRequest.number));
+            // On your own checkout the suggestion becomes a local commit you push yourself, so the branch never moves under you.
+            ahead = onCheckout !== undefined || (await syncKeepingLocalCommits(folder, pullRequest.number)).ahead;
           }
           const before = await readFile(file, 'utf8');
           const after = applySuggestion(before, anchor, suggestion);
@@ -486,6 +526,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void loadDetails();
         },
         fixConflicts: async (answer) => {
+          notOnCheckout('Fix conflicts');
           const loaded = await currentDetails();
           if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
           const base = await prepareConflictFix(folder, pullRequest.number, baseBranch);
@@ -543,6 +584,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void loadDetails();
         },
         removeWorktree: async () => {
+          notOnCheckout('Remove worktree');
           await pullRequestSessions.close(repository, pullRequest.number);
           await removeWorktree(checkout.root, storageRoot, repository, pullRequest.number);
           void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
@@ -562,7 +604,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           shownHead ??= before;
           let problem: string | undefined;
           const ahead = await git(folder, ['merge-base', '--is-ancestor', version.head, 'HEAD']).then(() => true, () => false);
-          if (version.head !== before && !ahead) {
+          if (version.head !== before && !ahead && onCheckout !== undefined) {
+            problem = `GitHub has commits on ${pullRequest.headBranch} that this checkout does not. Pull them to see them here.`;
+          } else if (version.head !== before && !ahead) {
             await syncToPullRequestHead(folder, pullRequest.number, previous?.head).catch((error: unknown) => { problem = error instanceof Error ? error.message : String(error); });
           }
           const head = await readHead();
@@ -571,7 +615,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return { reload: reload || files, files, ...(problem === undefined ? {} : { problem }) };
         },
         ...githubPageActions({
-          provider, number: pullRequest.number, headBranch: pullRequest.headBranch, baseBranch: () => baseBranch, folder, hooksOff: role === 'reviewer',
+          provider, number: pullRequest.number, headBranch: pullRequest.headBranch, baseBranch: () => baseBranch, folder, hooksOff: role === 'reviewer', keepCheckout: onCheckout !== undefined,
           details: currentDetails, conversation: currentConversation,
           threads: async () => { const loaded = await loadThreads(); if (loaded instanceof Error) throw loaded; return loaded; },
           pushTarget, claudeBusy: () => opened.runner.activity.running,
@@ -590,7 +634,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           });
         },
         stopAnalysis: () => { opened.analysis.stop(); },
-      }, context.extensionUri, reveal);
+      }, context.extensionUri, reveal, undefined, onCheckout?.review.key);
     };
     const worktreesOf = (checkout: Checkout): PullRequestWorktrees => {
       const { root: checkoutRoot, storageRoot, sessions, fileReviews } = checkout;
@@ -675,12 +719,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (event.affectsConfiguration('diffGuide.mockPullRequests') || event.affectsConfiguration('github-enterprise.uri')) void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
       }),
     );
-    await createReviewController(store, context, getHeadRevision, checkouts);
-    context.subscriptions.push(registerReviewAppearance(context));
-    context.subscriptions.push(registerPrExport(context, store));
     const bridge = await createReviewBridge(store, join(storage.fsPath, 'selected-session.json'));
     activeBridge = bridge;
-    context.subscriptions.push(bridge, registerClaudeLauncher(context, bridge, storage.fsPath), vscode.commands.registerCommand('diffGuide.showFocusedClaude', () => {
+    const launchers = registerClaudeLauncher(context, bridge, storage.fsPath);
+    const mainRoot = await realpath(root).catch(() => root);
+    const main = await repositoryRoot(root) === mainRoot
+      ? { root: mainRoot, folder: storage.fsPath, store, bridge, launcher: launchers.local, review: new LocalReview(context, root, store, bridge, join(storage.fsPath, 'local-review'), launchers.local) } : undefined;
+    /** Your open PR from a checkout's branch, and opening it in the checkout's local page tab. */
+    const branchPullRequests = (session: LocalSession): BranchPullRequests => ({
+      find: async (branch) => {
+        if (!/^[\w./-]+$/u.test(branch)) return undefined;
+        const repository = await checkouts.forFolder(session.root);
+        if (repository === undefined) return undefined;
+        const found = await (await repository.connect()).search(`is:open author:@me head:${branch}`);
+        return found.find((pullRequest) => pullRequest.headBranch === branch);
+      },
+      open: async (pullRequest) => {
+        const repository = await checkouts.forFolder(session.root);
+        if (repository === undefined) throw new Error('This folder is not a GitHub repository.');
+        const provider = await repository.connect();
+        await showOverview(repository, provider, (await provider.readRepository()).name, pullRequest, 'author', undefined, session);
+      },
+    });
+    const localSessions = new LocalSessions(context, storage.fsPath, main, (session) => { session.review.usePullRequests(branchPullRequests(session)); });
+    activeLocalSessions = localSessions;
+    const openPullRequestCheckout = async (local: LocalCheckout, path?: string): Promise<void> => {
+      const metadata = local.pullRequest;
+      if (metadata === undefined) throw new Error(`${local.root} holds no pull request.`);
+      const located = await checkouts.locate(metadata.repository, metadata.pullRequest.number);
+      if (located === undefined) throw new Error(`#${metadata.pullRequest.number} is no longer checked out.`);
+      await showOverview(located, await located.connect(), metadata.repository, metadata.pullRequest, metadata.role, path === undefined ? undefined : { path, reload: true });
+    };
+    const pullRequestThreads = async (local: LocalCheckout): Promise<readonly ReviewThread[]> => {
+      const metadata = local.pullRequest;
+      if (metadata === undefined) return [];
+      const located = await checkouts.locate(metadata.repository, metadata.pullRequest.number).catch(() => undefined);
+      return located?.sessions.get(metadata.repository, metadata.pullRequest.number)?.session.store.threads ?? [];
+    };
+    const repositories = async (): Promise<readonly string[]> => {
+      const folders = (vscode.workspace.workspaceFolders ?? []).filter((each) => each.uri.scheme === 'file').map((each) => each.uri.fsPath);
+      const tops = await Promise.all(folders.map(async (folder) => await repositoryRoot(folder) === await realpath(folder).catch(() => folder) ? [folder] : []));
+      const nested = await Promise.all(folders.map((folder) => nestedRepositoryRoots(folder)));
+      return [...tops.flat(), ...nested.flat()];
+    };
+    context.subscriptions.push(localSessions, ...registerLocalReview(context.workspaceState, localSessions, mainRoot, async () => listLocalCheckouts(await repositories()), openPullRequestCheckout, pullRequestThreads, checkouts.onDidChangeState));
+    void localSessions.restore(async (folder) => stat(folder).then((info) => info.isDirectory(), () => false));
+    context.subscriptions.push(bridge, launchers, vscode.commands.registerCommand('diffGuide.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
       if (focused !== undefined) showClaude(focused);
@@ -690,52 +774,146 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     await prepareConnection(context, bridge, storage.fsPath);
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
-    status.command = 'diffGuide.startClaude';
+    status.command = 'diffGuide.showFocusedClaude';
     const updateStatus = (): void => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
-      if (focused !== undefined) {
-        const current = claudeStatus(focused.runner.activity);
-        status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
-        status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
-        status.command = 'diffGuide.showFocusedClaude';
-        status.show();
+      if (focused === undefined) {
+        status.hide();
         return;
       }
-      status.command = 'diffGuide.startClaude';
-      const waiting = store.pendingEvents.length;
-      const ready = bridge.state.deliveryReady === true;
-      const label = !bridge.state.connected ? '$(diffguide-orb-away) Review · Verbinden'
-        : ready ? '$(diffguide-orb) Review' : '$(diffguide-orb-asleep) Review · Zustellung pausiert';
-      status.text = `${label}${waiting ? ` · ${waiting} wartet` : ''}`;
-      status.tooltip = !bridge.state.connected
-        ? 'Mit Claude Code verbinden. Abgeschickte Kommentare bleiben bis zur Bestätigung gespeichert.'
-        : ready ? 'Automatische Zustellung aktiv. Claude bestätigt jeden Kommentar separat.'
-          : 'Claude-Verbindung vorhanden. Die automatische Zustellung ist noch nicht aktiv. Zum Wiederverbinden klicken.';
+      const current = claudeStatus(focused.runner.activity);
+      status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
+      status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
       status.show();
     };
-    context.subscriptions.push(
-      status, store.onChange(updateStatus), bridge.onChange(updateStatus),
-      checkouts.onDidChangeState(updateStatus), vscode.window.onDidChangeActiveTextEditor(updateStatus),
-    );
+    context.subscriptions.push(status, checkouts.onDidChangeState(updateStatus), vscode.window.onDidChangeActiveTextEditor(updateStatus));
     updateStatus();
   } catch (error: unknown) {
     activeBridge?.dispose();
-    await vscode.window.showErrorMessage(`DiffGuide konnte nicht starten: ${error instanceof Error ? error.message : String(error)}`);
+    await vscode.window.showErrorMessage(`DiffGuide could not start: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
-
-/** What an Implement without a note asks Claude in a thread that already has a conversation. */
-const implementThreadRequest = 'Implement what this thread discussed.';
 
 /** Finish persisted mutations before VS Code unloads the extension. */
 export async function deactivate(): Promise<void> {
   activeBridge?.dispose();
   await activeStore?.flush();
+  await activeLocalSessions?.flush();
   await activePullRequests?.flush();
   activePullRequests = undefined;
   activeBridge = undefined;
   activeStore = undefined;
+  activeLocalSessions = undefined;
+}
+
+/** The Git repository's top folder for `folder`, or undefined outside a repository. */
+async function repositoryRoot(folder: string): Promise<string | undefined> {
+  const top = await git(folder, ['rev-parse', '--show-toplevel']).then((output) => output.trim(), () => undefined);
+  return top === undefined ? undefined : await realpath(top).catch(() => top);
+}
+
+const localFilterKey = 'diffGuide.localFilter';
+
+/**
+ * The Local view and the checkouts' local review pages. A PR worktree's files open on that PR's page.
+ * Without any checkout, when no workspace folder is or holds a Git repository, the view explains that instead.
+ */
+function registerLocalReview(
+  state: vscode.Memento,
+  sessions: LocalSessions,
+  mainRoot: string,
+  listCheckouts: () => Promise<readonly LocalCheckout[]>,
+  openPullRequest: (checkout: LocalCheckout, path?: string) => Promise<void>,
+  pullRequestThreads: (checkout: LocalCheckout) => Promise<readonly ReviewThread[]>,
+  onDidChangePullRequests: vscode.Event<unknown>,
+): vscode.Disposable[] {
+  const report = (error: unknown): void => { void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error)); };
+  const run = (action: () => Promise<void>): void => { void action().catch(report); };
+  const files = new LocalFilesView(async () => {
+    const checkouts = await listCheckouts();
+    void vscode.commands.executeCommand('setContext', 'diffGuide.localAvailable', checkouts.length > 0);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.localSingle', checkouts.length === 1);
+    return checkouts;
+  }, async (checkout) => checkout.kind === 'pr' ? pullRequestThreads(checkout) : (await sessions.find(checkout.root))?.store.threads ?? []);
+  /** A checkout the Local view lists, so command arguments cannot point anywhere else. */
+  const listed = async (root: unknown): Promise<LocalCheckout> => {
+    const checkout = typeof root === 'string' ? (await files.checkouts()).find((each) => each.root === root) : undefined;
+    if (checkout === undefined) throw new Error('That checkout is no longer listed. Refresh the Local view.');
+    return checkout;
+  };
+  const nodeOf = (node: unknown): { readonly root?: unknown } => {
+    if (typeof node !== 'object' || node === null) return {};
+    return { root: 'checkout' in node && typeof node.checkout === 'object' && node.checkout !== null && 'root' in node.checkout ? node.checkout.root : undefined };
+  };
+  const openCheckout = async (checkout: LocalCheckout, path?: string): Promise<void> => {
+    if (checkout.kind === 'pr') { await openPullRequest(checkout, path); return; }
+    const { review } = await sessions.get(checkout.root);
+    await (path === undefined ? review.open() : review.openFile(path));
+  };
+  const tree = vscode.window.createTreeView('diffGuide.local', { treeDataProvider: files });
+  /** Show only checkouts matching `filter`, remember it for this workspace, and say so above the tree. */
+  const applyFilter = async (filter: string): Promise<void> => {
+    files.setFilter(filter);
+    tree.message = files.filter === '' ? '' : `Filter: ${files.filter}`;
+    void vscode.commands.executeCommand('setContext', 'diffGuide.localFiltered', files.filter !== '');
+    await state.update(localFilterKey, files.filter);
+  };
+  const chooseFilter = async (): Promise<void> => {
+    const filter = await vscode.window.showInputBox({
+      title: 'Filter checkouts', value: files.filter, placeHolder: 'Repository, branch or PR',
+      prompt: 'Shows checkouts whose repository, branch, or PR number or title contains this text. Leave empty to show all.',
+    });
+    if (filter !== undefined) await applyFilter(filter);
+  };
+  void applyFilter(state.get<string>(localFilterKey, ''));
+  let listing: ReturnType<typeof setTimeout> | undefined;
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+  const relist = (uri: vscode.Uri): void => {
+    const parts = uri.fsPath.split(/[\\/]/u);
+    const worktreeAdded = parts.at(-3) === '.git' && parts.at(-2) === 'worktrees';
+    if (parts.includes('.git') && !worktreeAdded) return;
+    if (listing !== undefined) clearTimeout(listing);
+    listing = setTimeout(() => { listing = undefined; files.reload(); }, 500);
+  };
+  let counting: ReturnType<typeof setTimeout> | undefined;
+  /** Count changed files again after an edit or commit, without listing the checkouts again. */
+  const recount = (uri: vscode.Uri): void => {
+    const parts = uri.fsPath.split(/[\\/]/u);
+    if (parts.includes('.git') && parts.at(-1) !== 'index') return;
+    if (counting !== undefined) clearTimeout(counting);
+    counting = setTimeout(() => { counting = undefined; files.recount(); }, 500);
+  };
+  return [
+    vscode.commands.registerCommand('diffGuide.openLocalReview', (node: unknown) => {
+      run(async () => {
+        const { root } = nodeOf(node);
+        const checkouts = await files.checkouts();
+        const checkout = root === undefined ? checkouts.find((each) => each.root === mainRoot) ?? checkouts[0] : await listed(root);
+        if (checkout === undefined) throw new Error('Open a Git repository to review its local changes.');
+        await openCheckout(checkout);
+      });
+    }),
+    vscode.commands.registerCommand('diffGuide.showOnReviewPage', (uri: unknown) => {
+      if (!(uri instanceof vscode.Uri) || uri.scheme !== 'file') return;
+      run(async () => {
+        // The innermost checkout holds the file, since worktrees can sit inside their repository's folder.
+        const holding = (await files.checkouts()).filter((checkout) => !relative(checkout.root, uri.fsPath).startsWith('..') && !isAbsolute(relative(checkout.root, uri.fsPath)))
+          .sort((a, b) => b.root.length - a.root.length)[0];
+        const path = holding === undefined ? undefined : relative(holding.root, uri.fsPath).split(sep).join('/');
+        if (holding === undefined || path === undefined || !isWorkspaceRelativePath(path)) throw new Error('This file is not in a checkout the Local view lists.');
+        await openCheckout(holding, path);
+      });
+    }),
+    vscode.commands.registerCommand('diffGuide.refreshLocalFiles', () => { files.reload(); }),
+    vscode.commands.registerCommand('diffGuide.filterLocal', () => { run(chooseFilter); }),
+    vscode.commands.registerCommand('diffGuide.filterLocalActive', () => { run(chooseFilter); }),
+    files, watcher, watcher.onDidCreate(relist), watcher.onDidDelete(relist), watcher.onDidChange(recount),
+    { dispose: () => { if (listing !== undefined) clearTimeout(listing); if (counting !== undefined) clearTimeout(counting); } },
+    sessions.onDidChange(() => { files.redraw(); }),
+    onDidChangePullRequests(() => { files.redraw(); }),
+    tree,
+  ];
 }
 
 /** Call `then` each time a Claude run ends, since Claude may have changed the PR on GitHub, such as its title with `gh pr edit`. */

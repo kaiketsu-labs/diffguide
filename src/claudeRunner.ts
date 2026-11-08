@@ -84,6 +84,8 @@ export interface ClaudeRunnerOptions {
   readonly stopped?: () => void;
   /** Runs after every run, whatever its outcome, such as releasing the worktree locks it held. */
   readonly released?: () => Promise<void>;
+  /** A conversation the user connected answers the comments, so this runner only runs tasks it is given. */
+  readonly answersElsewhere?: boolean;
 }
 
 /** How to start this PR's Claude conversation interactively, such as in a terminal. */
@@ -207,7 +209,7 @@ export class ClaudeRunner implements vscode.Disposable {
   }
 
   #next(): void {
-    if (this.#disposed || this.#child !== undefined || this.#activity.running) return;
+    if (this.#disposed || this.#child !== undefined || this.#activity.running || this.options.answersElsewhere === true) return;
     const pending = this.options.store.pendingEvents;
     const fresh = pending.filter((event) => !this.#sent.has(event.id));
     const skipped = pending.length - fresh.length;

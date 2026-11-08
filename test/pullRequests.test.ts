@@ -280,13 +280,13 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
   let attempts = 0;
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => {
     attempts += 1;
-    throw new Error('GitHub CLI wurde nicht gefunden.');
+    throw new Error('GitHub CLI was not found.');
   }, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
   const [message] = await level(tree);
-  assert.equal(message?.item.label, 'GitHub CLI wurde nicht gefunden.');
+  assert.equal(message?.item.label, 'GitHub CLI was not found.');
   await level(tree);
   assert.equal(attempts, 1);
   await commands.executeCommand('diffGuide.refreshPullRequests');
