@@ -203,7 +203,7 @@ test('delivers queued feedback through hook exit 2 without acknowledging it befo
   const hook = startHook('review-session');
   await connected;
   assert.equal(bridge.state.deliveryReady, true);
-  const feedback = 'Warum wird hier der gespeicherte Wert verwendet?';
+  const feedback = 'Why is the saved value used here?';
   const thread = await store.submit(anchor(), feedback, 'ask');
   const result = await hook.completed;
 
@@ -227,16 +227,16 @@ test('delivers queued feedback through hook exit 2 without acknowledging it befo
   assert.deepEqual(received.events, store.events);
   assert.equal(received.events[0]?.acknowledged, true);
 
-  await store.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'Der Wert wurde bereits berechnet.' });
+  await store.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'The value was already computed.' });
   const answered = await pendingReviews(store, bridge);
   assert.deepEqual(answered.events, []);
   assert.deepEqual(answered.threads, []);
-  assert.equal(store.threads[0]?.messages.at(-1)?.text, 'Der Wert wurde bereits berechnet.');
+  assert.equal(store.threads[0]?.messages.at(-1)?.text, 'The value was already computed.');
 });
 
 test('recovers acknowledged but unfinished feedback when a Claude session starts', { timeout: 15_000 }, async (t) => {
   const { store, startHook } = await fixture(t);
-  const thread = await store.submit(anchor(), 'Bitte behebe diesen Fehler.', 'implement');
+  const thread = await store.submit(anchor(), 'Please fix this bug.', 'implement');
   await store.updateFromAgent({ eventId: thread.latestEventId, status: 'working' });
 
   const recovered = await startHook('resumed-session', 'SessionStart').completed;
@@ -244,27 +244,27 @@ test('recovers acknowledged but unfinished feedback when a Claude session starts
   assert.equal(recovered.code, 2);
   assert.equal(recovered.signal, null);
   assert.ok(recovered.stderr.includes(thread.latestEventId));
-  assert.ok(recovered.stderr.includes('Bitte behebe diesen Fehler.'));
+  assert.ok(recovered.stderr.includes('Please fix this bug.'));
   assert.equal(store.events[0]?.acknowledged, true);
   assert.equal(store.threads[0]?.status, 'working');
 });
 
 test('delivers a second comment after a tool finishes without waiting for the current turn to stop', { timeout: 15_000 }, async (t) => {
   const { store, startHook } = await fixture(t);
-  const first = await store.submit(anchor(), 'Bitte prüfe die Berechnung.', 'implement');
+  const first = await store.submit(anchor(), 'Please check the calculation.', 'implement');
   const initial = await startHook('active-session', 'SessionStart').completed;
   assert.equal(initial.code, 2);
   assert.ok(initial.stderr.includes(first.latestEventId));
   await store.updateFromAgent({ eventId: first.latestEventId, status: 'working' });
 
   const rearmed = startHook('active-session', 'PostToolUse');
-  const second = await store.submit(anchor(), 'Berücksichtige außerdem leere Eingaben.', 'implement');
+  const second = await store.submit(anchor(), 'Also handle empty input.', 'implement');
   const delivered = await rearmed.completed;
 
   assert.equal(delivered.code, 2);
   assert.equal(delivered.signal, null);
   assert.ok(delivered.stderr.includes(second.latestEventId));
-  assert.ok(delivered.stderr.includes('Berücksichtige außerdem leere Eingaben.'));
+  assert.ok(delivered.stderr.includes('Also handle empty input.'));
   assert.ok(!delivered.stderr.includes(first.latestEventId));
   assert.equal(store.events[0]?.acknowledged, true);
   assert.equal(store.events[1]?.acknowledged, false);
@@ -285,7 +285,7 @@ test('exits a duplicate workspace watcher cleanly while its owner continues wait
   assert.equal(owner.process.exitCode, null);
   assert.equal(owner.process.signalCode, null);
 
-  const thread = await store.submit(anchor(), 'Bitte erkläre diese Entscheidung.', 'ask');
+  const thread = await store.submit(anchor(), 'Please explain this decision.', 'ask');
   const delivered = await owner.completed;
   assert.equal(delivered.code, 2);
   assert.ok(delivered.stderr.includes(thread.latestEventId));
@@ -294,16 +294,16 @@ test('exits a duplicate workspace watcher cleanly while its owner continues wait
 
 test('does not repeat unacknowledged comments on Stop and PostToolUse while delivering genuinely new feedback', { timeout: 15_000 }, async (t) => {
   const { store, startHook } = await fixture(t);
-  const first = await store.submit(anchor(), 'Die erste Frage bitte nur einmal zustellen.', 'ask');
+  const first = await store.submit(anchor(), 'Deliver the first question only once.', 'ask');
   assert.equal((await startHook('active-session', 'SessionStart').completed).code, 2);
 
-  const second = await store.submit(anchor(), 'Die zweite Frage ist ein neuer Auftrag.', 'ask');
+  const second = await store.submit(anchor(), 'The second question is a new request.', 'ask');
   const afterStop = await startHook('active-session', 'Stop').completed;
   assert.equal(afterStop.code, 2);
   assert.ok(afterStop.stderr.includes(second.latestEventId));
   assert.ok(!afterStop.stderr.includes(first.latestEventId));
 
-  const third = await store.submit(anchor(), 'Die dritte Frage kam nach dem Tool.', 'ask');
+  const third = await store.submit(anchor(), 'The third question came after the tool.', 'ask');
   const afterTool = await startHook('active-session', 'PostToolUse').completed;
   assert.equal(afterTool.code, 2);
   assert.ok(afterTool.stderr.includes(third.latestEventId));
@@ -315,7 +315,7 @@ test('does not repeat unacknowledged comments on Stop and PostToolUse while deli
 
 test('replays unfinished work after SessionStart in the same resumed session and in a new session', { timeout: 15_000 }, async (t) => {
   const { store, startHook } = await fixture(t);
-  const thread = await store.submit(anchor(), 'Nach einem Abbruch bitte wieder aufnehmen.', 'implement');
+  const thread = await store.submit(anchor(), 'Pick this up again after an interruption.', 'implement');
   const first = await startHook('resumed-session', 'SessionStart').completed;
   assert.equal(first.code, 2);
   await store.updateFromAgent({ eventId: thread.latestEventId, status: 'working' });
@@ -335,7 +335,7 @@ test('ignores subagent hooks before they can claim the workspace watcher', { tim
   assert.equal(subagent.code, 0);
   assert.equal(subagent.stdout, '');
   assert.equal(subagent.stderr, '');
-  const thread = await store.submit(anchor(), 'Dieser Kommentar gehört in den Hauptchat.', 'ask');
+  const thread = await store.submit(anchor(), 'This comment belongs in the main chat.', 'ask');
   const parent = await startHook('parent-session', 'Stop').completed;
   assert.equal(parent.code, 2);
   assert.ok(parent.stderr.includes(thread.latestEventId));
@@ -344,7 +344,7 @@ test('ignores subagent hooks before they can claim the workspace watcher', { tim
 
 test('keeps an unacknowledged old event quiet through idle Stop rearming and duplicate PostToolUse hooks', { timeout: 15_000 }, async (t) => {
   const { store, bridge, startHook, runningHooks } = await fixture(t);
-  const old = await store.submit(anchor(), 'Diese Frage ist bereits einmal zugestellt.', 'ask');
+  const old = await store.submit(anchor(), 'This question was already delivered once.', 'ask');
   const initial = await startHook('idle-session', 'SessionStart').completed;
   assert.equal(initial.code, 2);
   assert.ok(initial.stderr.includes(old.latestEventId));
@@ -359,7 +359,7 @@ test('keeps an unacknowledged old event quiet through idle Stop rearming and dup
   assert.deepEqual(runningHooks(), [waiting]);
   await assertQuietWatcher(waiting);
 
-  const fresh = await store.submit(anchor(), 'Diese neue Frage soll den wartenden Chat wecken.', 'ask');
+  const fresh = await store.submit(anchor(), 'This new question should wake the waiting chat.', 'ask');
   const delivered = await waiting.completed;
   assert.equal(delivered.code, 2);
   assert.equal(delivered.signal, null);
@@ -379,7 +379,7 @@ test('keeps an unacknowledged old event quiet through idle Stop rearming and dup
 test('preserves same-session emission receipts through a live bridge restart and delivers only new feedback', { timeout: 15_000 }, async (t) => {
   const context = await fixture(t);
   const { store, startHook, runningHooks } = context;
-  const old = await store.submit(anchor(), 'Ein Verbindungswechsel soll diese Frage nicht wiederholen.', 'ask');
+  const old = await store.submit(anchor(), 'Switching the connection should not repeat this question.', 'ask');
   assert.equal((await startHook('reconnecting-session', 'SessionStart').completed).code, 2);
 
   const polling = waitForRequests(context.bridge, 2);
@@ -394,7 +394,7 @@ test('preserves same-session emission receipts through a live bridge restart and
   assert.deepEqual(runningHooks(), [waiting]);
   assert.equal(store.events[0]?.acknowledged, false);
 
-  const fresh = await store.submit(anchor(), 'Nach dem Wiederverbinden ist dies der neue Auftrag.', 'implement');
+  const fresh = await store.submit(anchor(), 'After reconnecting, this is the new request.', 'implement');
   const delivered = await waiting.completed;
   assert.equal(delivered.code, 2);
   assert.equal(delivered.signal, null);

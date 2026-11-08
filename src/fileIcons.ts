@@ -3,10 +3,10 @@ import { basename, dirname, extname, join } from 'node:path';
 import { parse as parseJsonc } from 'jsonc-parser/lib/esm/main.js';
 import * as vscode from 'vscode';
 
-/** A file's icon from the user's file icon theme: a glyph of one of its fonts, or an image as a data URI. */
+/** A file's icon from the user's file icon theme: a glyph of one of its fonts, or one of its images by id. */
 export type FileIcon = { readonly font: string; readonly char: string; readonly color?: string } | { readonly image: string };
-/** Icons for some files, with the theme's fonts as data URIs by font id. */
-export interface FileIcons { readonly fonts: Readonly<Record<string, string>>; readonly byPath: Readonly<Record<string, FileIcon>> }
+/** Icons for some files, with the theme's fonts and images as data URIs by id, so files sharing an icon send it once. */
+export interface FileIcons { readonly fonts: Readonly<Record<string, string>>; readonly images: Readonly<Record<string, string>>; readonly byPath: Readonly<Record<string, FileIcon>> }
 
 interface Associations {
   readonly file?: string;
@@ -91,14 +91,16 @@ export async function readFileIcons(paths: readonly string[]): Promise<FileIcons
   const sets = light && document.light !== undefined ? [document.light, document] : [document];
   const languages = languageIndex();
   const fonts: Record<string, string> = {};
+  const images: Record<string, string> = {};
   const byPath: Record<string, FileIcon> = {};
   const defaultFont = document.fonts?.[0]?.id;
   for (const path of paths) {
     const definitionId = iconId(path, sets, languages);
     const definition = definitionId === undefined ? undefined : document.iconDefinitions?.[definitionId];
-    if (definition?.iconPath !== undefined) {
+    if (definitionId !== undefined && definition?.iconPath !== undefined) {
       const file = join(folder, definition.iconPath);
-      byPath[path] = { image: dataUri(await readFile(file), file) };
+      images[definitionId] ??= dataUri(await readFile(file), file);
+      byPath[path] = { image: definitionId };
     } else if (definition?.fontCharacter !== undefined) {
       const fontId = definition.fontId ?? defaultFont;
       const source = document.fonts?.find((font) => font.id === fontId)?.src[0];
@@ -108,5 +110,5 @@ export async function readFileIcons(paths: readonly string[]): Promise<FileIcons
       byPath[path] = { font: fontId, char: glyph(definition.fontCharacter), ...definition.fontColor === undefined ? {} : { color: definition.fontColor } };
     }
   }
-  return { fonts, byPath };
+  return { fonts, images, byPath };
 }

@@ -1,64 +1,64 @@
-# Code reviewen. Gemeinsam mit deinem Agenten.
+# Review code together with your agent
 
-![Änderungen ansehen, direkt am Code kommentieren, gemeinsam klären und prüfen](media/diffguide-flow.svg)
+![Inspect changes, comment on the code, discuss and verify together](media/diffguide-flow.svg)
 
-**Änderungen ansehen, Fragen klären und den Code gemeinsam verbessern — direkt in VS Code.** Dein Agent bekommt gesendetes Feedback automatisch und antwortet im selben Kommentarverlauf.
+**Inspect changes, settle questions and improve the code together, right in VS Code.** Your agent receives sent feedback automatically and answers in the same comment thread.
 
-Die Bilder sind nachgestellte Beispiele der Bedienung, keine Aufnahme einer geprüften Live-Sitzung.
+The images are staged examples of the UI, not a recording of a verified live session.
 
-## Einmal verbinden
+## Connect once
 
-Öffne dein Projekt in VS Code und wähle **DiffGuide: Mit Claude verbinden**. Starte eine neue Claude-Code-Unterhaltung oder setze die letzte fort. Die verbundene Unterhaltung läuft im integrierten Terminal. Eine unabhängig gestartete Claude-Sitzung wird nicht automatisch verbunden. [Installation und Verbindung](INSTALL.md)
+Open your project in VS Code and run **DiffGuide: Connect Claude**. Start a new Claude Code conversation or resume an earlier one. The connected conversation runs in the integrated terminal. A Claude session you started separately does not connect automatically. [Installation and connection](INSTALL.md)
 
-## Direkt im Code kommentieren
+## Comment on the code
 
-Öffne in der Seitenleiste die Ansicht **Local** und wähle **Review local changes**. Die Review-Seite zeigt deine noch nicht committeten Änderungen und neuen Dateien. Klicke auf eine Zeilennummer, schreibe zum Beispiel „Nutze exponentielles Backoff.“ und wähle **Implement**. Claude bekommt deinen Kommentar zusammen mit Datei, Zeilen und Codekontext. Ein ungesendeter Entwurf bleibt ein Entwurf.
+Open the **Local** view in the sidebar and click **Review local changes** on a checkout row. The review page shows your uncommitted changes and new files. Click a line number, write for example "Use exponential backoff.", and choose **Implement**. Claude receives your comment with its file, lines and code context. An unsent draft stays a draft.
 
-| Schaltfläche | Was du möchtest |
+| Button | What you want |
 | --- | --- |
-| **Ask** | Eine Frage stellen oder den Code besprechen. |
-| **Implement** | Eine konkrete Änderung umsetzen lassen. |
+| **Ask** | Ask a question or discuss the code. |
+| **Implement** | Have a specific change made. |
 
-## Antwort prüfen
+## Check the answer
 
-Der Status zeigt, ob dein Auftrag wartet, empfangen wurde, bearbeitet wird oder zur Prüfung bereitsteht. Claudes Antwort erscheint im ursprünglichen Thread auf der Review-Seite. Mehrzeiliger Code steht in einem eigenen farbigen Codeblock. **Open in editor** öffnet die Datei im Editor.
+The status shows whether your request is waiting, received, in progress or ready to check. Claude's answer appears in the original thread on the review page. Multi-line code gets its own highlighted code block. **Open in editor** opens the file in the editor.
 
-Du kannst weiterfragen, eine weitere Änderung anfordern oder den Thread erledigen. **Eine Antwort von Claude erledigt den Thread nicht automatisch.**
+You can ask a follow-up, request another change or finish the thread. **An answer from Claude does not finish the thread by itself.**
 
-Mit **Resolve** erledigst du einen Thread, mit **Reopen** machst du ihn wieder aktiv. Der Verlauf bleibt gespeichert.
+**Resolve** finishes a thread, and **Reopen** makes it active again. The history stays saved.
 
-## Fragt Claude ständig nach Kommentaren?
+## Does Claude keep checking for comments?
 
-**Das Sprachmodell tut das nicht.** Ein kleiner Helfer auf deinem Rechner wartet im Hintergrund auf gesendetes Feedback. Sobald ein Kommentar vorliegt, gibt er dessen Inhalt an Claude weiter. Dafür sind keine laufenden Modellanfragen nötig. Falls gerade ein Werkzeug läuft, darf es zunächst fertig werden.
+**The language model does not.** A small helper on your machine waits in the background for sent feedback. As soon as a comment arrives, it passes the content to Claude. No model requests run while it waits. If a tool is running, it finishes first.
 
 <details>
-<summary>Technische Details und Quellen</summary>
+<summary>Technical details and sources</summary>
 
-Der Standardweg kombiniert Claude-Code-Hooks mit MCP-Werkzeugen. Das Modell führt keine wiederkehrende Abfrage aus; ein lokaler Hilfsprozess verwendet **Long Polling**.
+The default path combines Claude Code hooks with MCP tools. The model runs no repeated query; a local helper process uses **long polling**.
 
-DiffGuide speichert jeden Auftrag zuerst mit unveränderlicher Ereignis-ID, Datei, Zeilen und Codekontext im lokalen Workspace-Speicher von VS Code. Erst nach erfolgreichem Speichern werden wartende Komponenten benachrichtigt. [Speicherung](../src/store.ts) · [Übergebener Kontext](../src/eventPrompt.ts)
+DiffGuide first saves each request with an immutable event ID, file, lines and code context in VS Code's local workspace storage. Only after a successful save does it notify waiting components. [Storage](../src/store.ts) · [Context passed on](../src/eventPrompt.ts)
 
-Der Hook-Helfer liest ausstehende Aufträge über `GET /pending` und hält anschließend eine lokale Anfrage über `GET /events?after=<sequence>` offen. Ein neues gespeichertes Ereignis beantwortet diese Anfrage sofort. Ohne Arbeit läuft eine leere Anfrage nach spätestens 20 Sekunden aus; der Helfer prüft den aktuellen Arbeitsstand und wartet erneut. **Die 20 Sekunden sind kein Zustellintervall.** Der Helfer liefert den Auftrag über einen `asyncRewake`-Hook an Claude Code. Claude erhält ihn an einem sicheren Verarbeitungspunkt; laufende Werkzeugaufrufe werden nicht abgebrochen. [Hook-Helfer](../src/hookWaiter.ts) · [Long Polling](../src/bridge.ts)
+The hook helper reads pending requests with `GET /pending` and then keeps a local request open with `GET /events?after=<sequence>`. A newly saved event answers that request at once. With no work, an empty request times out after at most 20 seconds; the helper checks the current state and waits again. **The 20 seconds are not a delivery interval.** The helper hands the request to Claude Code through an `asyncRewake` hook. Claude receives it at a safe processing point; running tool calls are not interrupted. [Hook helper](../src/hookWaiter.ts) · [Long polling](../src/bridge.ts)
 
-Eine lokale Zustellhistorie pro Claude-Sitzung verhindert, dass jeder neue `Stop`- oder Werkzeug-Hook denselben noch unbestätigten Kommentar wieder ankündigt. Die Nachricht beginnt mit Datei, Modus und kurzem Feedback-Auszug; gemeinsame Anweisungen stehen pro Nachrichtenpaket nur einmal darin. Die Bestätigung im Review-Speicher ändert sich dadurch nicht. `SessionStart` umgeht die Historie bewusst und stellt den neuesten unerledigten Auftrag jedes offenen Threads wieder bereit, auch beim Fortsetzen derselben Unterhaltung. Frühere Aufträge bleiben als Verlauf erhalten, werden nach einem Folgekommentar aber nicht als neue Arbeit zugestellt.
+A local delivery history per Claude session keeps each new `Stop` or tool hook from announcing the same unconfirmed comment again. The message starts with the file, mode and a short feedback excerpt; shared instructions appear once per batch. This does not change the confirmation in the review store. `SessionStart` skips the history on purpose and offers the newest open request of each open thread again, also when resuming the same conversation. Earlier requests stay in the history, but after a follow-up comment they are not delivered as new work.
 
-Claude bestätigt mit `acknowledge_review`, meldet den Arbeitsbeginn mit `set_review_working` und antwortet mit `reply_to_review`. „Verbunden“ allein bestätigt keinen einzelnen Auftrag. Der MCP-Helfer prüft zusätzlich alle 15 Sekunden die lokale Verbindung. Auch diese Prüfung ist kein Modellaufruf. [MCP-Werkzeuge und Verbindungsprüfung](../src/channel.ts)
+Claude confirms with `acknowledge_review`, reports that work started with `set_review_working` and answers with `reply_to_review`. "Connected" alone confirms no single request. The MCP helper also checks the local connection every 15 seconds. That check is not a model call either. [MCP tools and connection check](../src/channel.ts)
 
-Die Hook-Konfiguration aktiviert den Wartehelfer bei `SessionStart`, `UserPromptSubmit`, `PostToolUse` und `Stop`. Eine Sperre begrenzt ihn auf einen aktiven Helfer pro Workspace. Nach bis zu 24 Stunden endet ein Helfer; erneut verbinden oder Claude eine Eingabe senden aktiviert den Warteweg wieder. Bereits gesendete Aufträge bleiben gespeichert. Nach Unterbrechungen kann eine Zustellung wiederholt werden. Ereignis-IDs unterstützen die Zuordnung, garantieren aber keine exakt einmaligen Codeänderungen. [Start und Konfiguration](../src/setup.ts) · [Wiederanlauf und Sperre](../src/hookWaiter.ts)
+The hook configuration starts the waiting helper on `SessionStart`, `UserPromptSubmit`, `PostToolUse` and `Stop`. A lock allows one active helper per workspace. A helper ends after at most 24 hours; reconnecting or sending Claude a prompt starts the waiting path again. Requests already sent stay saved. After interruptions, a delivery can repeat. Event IDs help match requests but do not guarantee code changes happen exactly once. [Start and configuration](../src/setup.ts) · [Restart and lock](../src/hookWaiter.ts)
 
-Die lokale Übergabe verwendet eine authentifizierte Verbindung auf `127.0.0.1`. Claude nutzt für die eigentliche Modellverarbeitung weiterhin seinen konfigurierten Anbieter. Erzeugte Integrationsdateien liegen außerhalb des Projekt-Repositories im Workspace-Speicher. Dafür werden keine Projektdateien wie `.claude/settings.json` oder `.mcp.json` umgeschrieben. [Verbindungsprüfung](../src/connection.ts) · [Lokaler Server](../src/bridge.ts) · [Integrationsdateien](../src/setup.ts)
+The local handoff uses an authenticated connection on `127.0.0.1`. Claude keeps using its configured provider for the model itself. Generated integration files live in workspace storage, outside the project repository. No project files such as `.claude/settings.json` or `.mcp.json` are rewritten. [Connection check](../src/connection.ts) · [Local server](../src/bridge.ts) · [Integration files](../src/setup.ts)
 
-**Warum Hooks der Standard sind:** Sie passen zum aktuellen Terminal- und Gateway-Ablauf. Der alternative Channels-Modus leitet Benachrichtigungen über MCP an Claude weiter und lässt sich ausdrücklich auswählen. Er ist derzeit eine Research Preview mit besonderen Anforderungen an Anmeldung und Organisationsfreigabe. Laut Claude-Dokumentation werden Bedrock, Vertex AI und Microsoft Foundry dafür nicht unterstützt. Die Kompatibilität mit einem beliebigen Gateway ist damit nicht zugesichert. Channels bleibt eine optionale Alternative. [Offizielle Claude-Code-Dokumentation zu Channels](https://code.claude.com/docs/en/channels) · [Transportwahl](../src/setup.ts) · [Channel-Benachrichtigungen](../src/channel.ts)
+**Why hooks are the default:** they fit the current terminal and gateway workflow. The alternative Channels mode forwards notifications to Claude through MCP and must be chosen explicitly. It is a research preview with special sign-in and organization requirements. According to the Claude documentation, Bedrock, Vertex AI and Microsoft Foundry are not supported for it, so compatibility with an arbitrary gateway is not guaranteed. Channels stays an optional alternative. [Claude Code documentation on Channels](https://code.claude.com/docs/en/channels) · [Transport choice](../src/setup.ts) · [Channel notifications](../src/channel.ts)
 
 </details>
 
 <details>
-<summary>Zur Grafik und zum Prüfstand</summary>
+<summary>About the diagram and test status</summary>
 
-Die [SVG-Grafik](media/diffguide-flow.svg) zeigt den gemeinsamen Review-Zyklus mit nachgestellten Kommentaren und echten JavaScript-Ausschnitten. Neutrale helle Flächen, klare Typografie und dezente Akzente halten den Fokus auf dem Code und den Entscheidungen im Review. Die Grafik enthält keine externen Abhängigkeiten.
+The [SVG diagram](media/diffguide-flow.svg) shows the shared review cycle with staged comments and real JavaScript snippets. Neutral light surfaces, clear type and quiet accents keep the focus on the code and the review decisions. The diagram has no external dependencies.
 
-Die daraus gerenderte [PNG-Version](media/diffguide-flow.png) wird im README und Installationspaket verwendet, weil VS Codes Paketprüfung SVG-Bilder im README ablehnt.
+The [PNG version](media/diffguide-flow.png) rendered from it is used in the README and the package, because VS Code's package check rejects SVG images in the README.
 
-Stand: Version 0.4.4. Die Darstellung erklärt die implementierte Bedienung und ist kein Nachweis einer bereits vollständig geprüften Live-Sitzung. Den aktuellen Prüfstand dokumentiert [REVIEW.md](REVIEW.md).
+As of version 0.4.4. The diagram explains the implemented UI and is not proof of a fully verified live session. [REVIEW.md](REVIEW.md) records the current test status.
 
 </details>

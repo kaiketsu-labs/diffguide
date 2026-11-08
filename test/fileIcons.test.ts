@@ -31,9 +31,10 @@ test('picks icons by file name, then extension, then language, then the default,
 
   const icons = await readFileIcons(['agents.md', 'docs/README.md', 'tests/a.test.py', 'src/app.py', 'Makefile']);
   assert.equal(icons?.fonts.glyphs, 'data:font/woff;base64,' + Buffer.from('font').toString('base64'));
+  assert.deepEqual(icons?.images, { md: 'data:image/svg+xml;base64,' + Buffer.from('<svg/>').toString('base64') });
   assert.deepEqual(icons?.byPath, {
     'agents.md': { font: 'glyphs', char: '', color: '#ff657a' },
-    'docs/README.md': { image: 'data:image/svg+xml;base64,' + Buffer.from('<svg/>').toString('base64') },
+    'docs/README.md': { image: 'md' },
     'tests/a.test.py': { font: 'glyphs', char: '' },
     'src/app.py': { font: 'glyphs', char: '' },
     Makefile: { font: 'glyphs', char: '' },

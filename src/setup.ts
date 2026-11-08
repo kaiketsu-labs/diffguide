@@ -58,7 +58,7 @@ export async function prepareConnection(
     },
   });
   const waiterCommand = [nodePath, waiterPath, '--connection', connectionPath].map(quotePosix).join(' ');
-  const waiter = { type: 'command', command: waiterCommand, asyncRewake: true, timeout: 86_400, statusMessage: 'Wartet auf Review-Feedback' };
+  const waiter = { type: 'command', command: waiterCommand, asyncRewake: true, timeout: 86_400, statusMessage: 'Waiting for review feedback' };
   await writePrivateJson(hooksPath, {
     hooks: Object.fromEntries(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop'].map(event => [event, [{ hooks: [waiter] }]])),
   });
@@ -69,26 +69,26 @@ export async function prepareConnection(
 async function selectConversation(workspaceRoot: string, includeRunning = true): Promise<boolean | string | undefined> {
   const choices = [
     {
-      label: 'Unterhaltung auswählen', description: 'Frühere Unterhaltung fortsetzen', resume: true as boolean | 'running',
-      detail: 'Nach Name oder Branch suchen; laufende Unterhaltungen werden erkannt.',
+      label: 'Resume a conversation', description: 'Continue an earlier conversation', resume: true as boolean | 'running',
+      detail: 'Search by name or branch; running conversations are detected.',
     },
-    { label: 'Neue Unterhaltung', description: 'Mit leerem Gespräch beginnen', resume: false },
+    { label: 'New conversation', description: 'Start with an empty conversation', resume: false },
   ];
-  if (includeRunning) choices.push({ label: 'Laufende Unterhaltung verbinden', description: 'Im bestehenden Claude bleiben',
-    detail: '/diffguide:connect verbindet genau die Unterhaltung, in der du den Befehl ausführst.', resume: 'running' });
+  if (includeRunning) choices.push({ label: 'Connect running Claude', description: 'Stay in your open Claude',
+    detail: '/diffguide:connect connects the conversation you run it in.', resume: 'running' });
   const selection = await vscode.window.showQuickPick(choices, {
-    title: 'Claude Code verbinden', placeHolder: 'Laufend verbinden, frühere Unterhaltung fortsetzen oder neu starten', matchOnDescription: true,
+    title: 'Connect Claude Code', placeHolder: 'Connect running Claude, resume a conversation or start a new one', matchOnDescription: true,
   });
   if (selection?.resume !== true) return selection?.resume;
   const sessions = await listClaudeConversations(workspaceRoot).catch(() => []);
   if (sessions.length === 0) return true;
   const rows = sessions.map(session => ({ label: session.title,
-    description: `${session.running ? 'Läuft · ' : ''}${new Date(session.modifiedAt).toLocaleString()}${session.branch ? ` · ${session.branch}` : ''}`,
-    detail: session.running ? 'Im ursprünglichen Prozess verbinden.' : `Kontext behalten · ${session.id.slice(0, 8)}`,
+    description: `${session.running ? 'Running · ' : ''}${new Date(session.modifiedAt).toLocaleString()}${session.branch ? ` · ${session.branch}` : ''}`,
+    detail: session.running ? 'Connect in its original process.' : `Keeps context · ${session.id.slice(0, 8)}`,
     value: session.running ? 'running' : session.id,
   }));
-  const chosen = await vscode.window.showQuickPick([...rows, { label: 'Weitere Unterhaltungen …', description: 'Claude-Auswahl öffnen', detail: '', value: 'picker' }], {
-    title: 'Unterhaltung auswählen', placeHolder: 'Nach Name oder Branch suchen', matchOnDescription: true,
+  const chosen = await vscode.window.showQuickPick([...rows, { label: 'All conversations…', description: 'Open the Claude picker', detail: '', value: 'picker' }], {
+    title: 'Resume a conversation', placeHolder: 'Search by name or branch', matchOnDescription: true,
   });
   return chosen?.value === 'picker' ? true : chosen?.value;
 }
@@ -169,7 +169,7 @@ export function createClaudeLauncher(
   /** Why a new receiver must wait: another conversation outside the review terminal still receives comments. */
   const receiverConflict = (ownedTerminal: vscode.Terminal | undefined): string | undefined => {
     if (bridge.state.deliveryReady !== true || isLive(ownedTerminal)) return undefined;
-    return 'Die Review-Verbindung ist noch aktiv oder wird getrennt. Falls Claude noch läuft: /exit. Der Status aktualisiert sich innerhalb von 45 Sekunden.';
+    return 'The review connection is still active or closing. If Claude is still running, type /exit. The status updates within 45 seconds.';
   };
   const requireNoConflict = (ownedTerminal: vscode.Terminal | undefined): void => {
     const conflict = receiverConflict(ownedTerminal);
@@ -181,7 +181,7 @@ export function createClaudeLauncher(
     launching = true;
     try {
       if (process.platform === 'win32') {
-        throw new Error('Die automatische Claude-Verbindung dieser ersten Version unterstützt macOS und Linux. Windows folgt nach einer eigenen Prüfung.');
+        throw new Error('Connecting Claude works on macOS and Linux for now. Windows support needs its own testing first.');
       }
       return await action();
     } finally {
@@ -219,7 +219,7 @@ export function createClaudeLauncher(
     await forgetSelectedSession();
   };
   const connectRunning = async (): Promise<void> => {
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Laufendes Claude verbinden' }, prepareRunning);
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Connecting running Claude' }, prepareRunning);
     context.subscriptions.push(showLiveConnection(bridge));
   };
   /** Start Claude in the review terminal, replacing the conversation that runs there. */
@@ -250,14 +250,14 @@ export function createClaudeLauncher(
       return;
     }
     if (currentTerminal !== undefined) {
-      const show = { label: 'Terminal anzeigen', description: 'Die bestehende Unterhaltung öffnen', restart: false };
+      const show = { label: 'Show terminal', description: 'Open the current conversation', restart: false };
       const restart = {
-        label: bridge.state.deliveryReady === true ? 'Unterhaltung wechseln' : 'Verbindung neu starten',
-        description: 'Das bisherige Review-Terminal schließen',
-        detail: 'Danach wählst du eine bestehende Unterhaltung oder startest eine neue.', restart: true,
+        label: bridge.state.deliveryReady === true ? 'Switch conversation' : 'Restart connection',
+        description: 'Close the current review terminal',
+        detail: 'Then resume a conversation or start a new one.', restart: true,
       };
       const action = await vscode.window.showQuickPick(bridge.state.deliveryReady === true ? [show, restart] : [restart, show], {
-        title: bridge.state.deliveryReady === true ? 'Claude Code ist verbunden' : 'Automatische Zustellung wiederherstellen',
+        title: bridge.state.deliveryReady === true ? 'Claude Code is connected' : 'Restore delivery',
       });
       if (action === undefined) return;
       if (!action.restart) {
@@ -278,7 +278,7 @@ export function createClaudeLauncher(
       return;
     }
     await copy(resume);
-    void vscode.window.showInformationMessage('Befehl kopiert. Im Shell-Prompt ausführen; laufendes Claude vorher mit /exit beenden.');
+    void vscode.window.showInformationMessage('Command copied. Run it at a shell prompt; exit any running Claude with /exit first.');
   });
   const connect = (choice: ClaudeChoice): Promise<string | undefined> => exclusive(async () => {
     switch (choice.how) {

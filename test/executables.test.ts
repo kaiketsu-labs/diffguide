@@ -40,7 +40,7 @@ test('reports an unsuccessful exit without including process output', async (t) 
     assert.ok(error instanceof Error);
     assert.match(error.message, /Exit-Code 7/u);
     assert.ok(error.message.includes(executable));
-    assert.doesNotMatch(error.message, /PRIVATE_RUNTIME_OUTPUT|Prüfe den Node-Pfad/u);
+    assert.doesNotMatch(error.message, /PRIVATE_RUNTIME_OUTPUT|Check the Node path/u);
     assert.ok(error.cause instanceof Error && 'code' in error.cause);
     assert.equal(error.cause.code, 7);
     return true;
@@ -64,7 +64,7 @@ test('identifies the existing five-second timeout', { timeout: 10_000 }, async (
 
   await assert.rejects(requireNodeRuntime(executable), (error: unknown) => {
     assert.ok(error instanceof Error);
-    assert.match(error.message, /nicht rechtzeitig.*Zeitlimit: 5 s/u);
+    assert.match(error.message, /did not respond in time.*timed out after 5 s/u);
     assert.ok(error.message.includes(executable));
     assert.ok(error.cause instanceof Error && 'killed' in error.cause);
     assert.equal(error.cause.killed, true);
@@ -88,5 +88,5 @@ test('bounds diagnostic paths and removes embedded control characters', async ()
 test('keeps the existing actionable message for unsupported Node versions', async (t) => {
   const executable = await runtime(t, "process.stdout.write('v18.20.0\\n');");
 
-  await assert.rejects(requireNodeRuntime(executable), /Node\.js 20 oder neuer; gefunden wurde v18\.20\.0/u);
+  await assert.rejects(requireNodeRuntime(executable), /Node\.js 20 or newer; found v18\.20\.0/u);
 });

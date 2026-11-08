@@ -20,16 +20,16 @@ function nodeRuntimeFailure(executable: string, error: ExecFileException): Error
     : typeof error.code === 'string' ? boundedDiagnostic(error.code, 64) : undefined;
   const signal = error.signal === null || error.signal === undefined ? undefined
     : `Signal ${boundedDiagnostic(error.signal, 32)}`;
-  const reason = timeout ? `Zeitlimit: ${nodeRuntimeTimeoutMs / 1_000} s`
-    : [code, signal].filter(detail => detail !== undefined).join(', ') || 'unbekannter Prozessfehler';
-  const summary = timeout ? 'Node.js hat nicht rechtzeitig geantwortet' : 'Node.js konnte nicht gestartet werden';
-  return new Error(`${summary} (${reason}). Ausführbare Datei: „${boundedDiagnostic(executable, 512)}“.`, { cause: error });
+  const reason = timeout ? `timed out after ${nodeRuntimeTimeoutMs / 1_000} s`
+    : [code, signal].filter(detail => detail !== undefined).join(', ') || 'unknown process error';
+  const summary = timeout ? 'Node.js did not respond in time' : 'Node.js could not start';
+  return new Error(`${summary} (${reason}). Executable: "${boundedDiagnostic(executable, 512)}".`, { cause: error });
 }
 
 /** Locate the requested executable without depending on a terminal's later shell startup. */
 export async function resolveExecutable(configured: string, workspaceRoot: string): Promise<string> {
   const executable = configured.trim();
-  if (!executable || executable.includes('\0')) throw new Error('Der Programmpfad ist leer oder ungültig.');
+  if (!executable || executable.includes('\0')) throw new Error('The executable path is empty or invalid.');
   const explicit = isAbsolute(executable) || executable.includes('/') || executable.includes('\\');
   const directories = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
   const fallbacks = executable === 'claude'
@@ -45,7 +45,7 @@ export async function resolveExecutable(configured: string, workspaceRoot: strin
       // A later standard installation path can still provide the executable.
     }
   }
-  throw new Error(`${executable} wurde nicht gefunden. Prüfe den Programmpfad in den DiffGuide-Einstellungen.`);
+  throw new Error(`${executable} was not found. Check the executable path in the DiffGuide settings.`);
 }
 
 /** Explain a missing or outdated Node runtime before opening a broken Claude session. */
@@ -61,6 +61,6 @@ export async function requireNodeRuntime(executable: string): Promise<void> {
   });
   const major = /^v(\d+)\./u.exec(version)?.[1];
   if (major === undefined || Number(major) < 20) {
-    throw new Error(`DiffGuide benötigt Node.js 20 oder neuer; gefunden wurde ${version || 'keine gültige Version'}.`);
+    throw new Error(`DiffGuide needs Node.js 20 or newer; found ${version || 'no valid version'}.`);
   }
 }

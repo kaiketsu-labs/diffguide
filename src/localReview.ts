@@ -175,9 +175,10 @@ export class LocalReview implements vscode.Disposable {
   async readFiles(select?: DiffSelection): Promise<FilesView> {
     const whitespace = select?.whitespace ?? this.#selection.whitespace;
     const head = await getHeadRevision(this.root);
-    const [tracked, untracked] = await Promise.all([
+    const [tracked, untracked, repositoryFiles] = await Promise.all([
       head === undefined ? [] : readPullRequestDiff(this.root, head, { ignoreWhitespace: whitespace }),
       head === undefined ? listRepositoryFiles(this.root) : gitPaths(this.root, ['ls-files', '--others', '--exclude-standard']),
+      listRepositoryFiles(this.root).catch(() => []),
     ]);
     const changed = new Set([...tracked.map((file) => file.path), ...untracked]);
     const threadPaths = this.store.threads.filter((thread) => !thread.resolved).map((thread) => thread.anchor.path);
@@ -192,8 +193,8 @@ export class LocalReview implements vscode.Disposable {
     this.#selection = { range: { kind: 'all' }, whitespace };
     // Viewed marks and progress count the files shown, so the page's state is read again for them.
     this.#marksChanged.fire();
-    const icons = await readFileIcons(files.filter((file) => file.change === 'unchanged').map((file) => file.path)).catch(() => undefined);
-    return { files, selection: this.#selection, atHead: true, ...icons === undefined ? {} : { icons } };
+    const icons = await readFileIcons([...new Set([...repositoryFiles, ...files.map((file) => file.path)])]).catch(() => undefined);
+    return { files, repositoryFiles, selection: this.#selection, atHead: true, ...icons === undefined ? {} : { icons } };
   }
 
   async #read(): Promise<OverviewState> {
@@ -308,8 +309,9 @@ export class LocalReview implements vscode.Disposable {
         this.#marksChanged.fire();
       },
       openInEditor: async (path) => { await vscode.window.showTextDocument(this.#fileUri(path), { preview: false }); },
-      closeFile: async (path) => {
-        await this.context.workspaceState.update(this.#extrasKey, this.#extras().filter((each) => each !== path));
+      openFile: (path) => this.openFile(path),
+      closeFiles: async (paths) => {
+        await this.context.workspaceState.update(this.#extrasKey, this.#extras().filter((each) => !paths.includes(each)));
       },
       openTerminal: () => this.launcher.connect({ how: 'show' }).then(() => undefined),
       // The conversation you connected answers here, so there is no background run to stop.

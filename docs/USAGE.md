@@ -21,9 +21,9 @@ Open the review page, leave feedback, and keep reviewing. Each submitted comment
 | **Ask** | Explain a decision or discuss the code. |
 | **Implement** | Make the requested change, then return it for your review. |
 
-The **Local** view in the DiffGuide sidebar lists every file of the repository with Git's change marks and the number of open comments. **Review local changes** in its toolbar opens the review page. The **Changes** tab lists uncommitted changes and new files against HEAD. Any file you opened from the view or that has open threads gets its own tab, shown whole and marked **Not changed**. The tab's × closes it while the file has no comments.
+The **Local** view in the DiffGuide sidebar lists each checkout with how many files changed and how many comments are open. Clicking a checkout opens its review page. **Files** lists uncommitted changes and new files against HEAD, each with its icon from your file icon theme. **All files** in the **View** menu adds every other repository file to the list, dimmed; it is on by default on local pages and off on PR pages. Click an unchanged file to show it whole, marked **Not changed**. **Show on review page** in the Explorer's context menu does the same. Files you opened and files with open threads sit in an **Opened** group at the top of the list. × on the row or the file's header closes one while it has no comments; **Close all** closes every such file.
 
-With several checkouts, such as the window's folders, nested repositories and their Git worktrees, the view lists each checkout under its repository's row. The filter button in the view's title bar narrows them by repository, branch, or PR number or title. Its **Review local changes** button opens that checkout's own page, with its own comments, Viewed marks and Claude connection. Rows of PR worktrees open the PR's review page instead; their files open there, whole when the PR does not change them.
+With several checkouts, such as the window's folders, nested repositories and their Git worktrees, the view lists each checkout under its repository's row. The filter button in the view's title bar narrows them by repository, branch, or PR number or title. Each checkout row's **Review local changes** button opens that checkout's own page, with its own comments, Viewed marks and Claude connection. Rows of PR worktrees open the PR's review page instead; their files open there, whole when the PR does not change them.
 
 When a checkout's branch has an open PR of yours, its page shows a **PR #N** chip beside the branch. The chip turns the tab into the PR's review page on that same checkout. Threads, Viewed marks and the connected Claude conversation carry over; DiffGuide never moves the checkout, so pull GitHub's new commits yourself.
 
@@ -48,11 +48,11 @@ Open a trusted local Git repository and click **Connect Claude** on the local re
 | **Connect running Claude** | Keep the original Claude process and conversation; run the menu's two copyable commands inside it. Requires Claude Code 2.1.280+. |
 | **Copy command** | Copy a start command for a terminal outside VS Code. |
 
-The Command Palette's **DiffGuide: Mit Claude verbinden** offers the same choices when no review page is open.
+The Command Palette's **DiffGuide: Connect Claude** offers the same choices when no review page is open.
 
-To connect a running conversation, prepare it in VS Code, then run `/reload-plugins --force` and `/diffguide:connect` in the intended Claude conversation. DiffGuide installs a project-local plugin and waits for that session's actual receiver before showing **Feedback aktiv**. The reload rereads conversation context once. This works in either terminal location; the current authenticated walkthrough covers the integrated terminal. For a new/resumed conversation in a separate app, use **Review → … → Verbindungsbefehl kopieren** at a shell prompt. Keep the project's VS Code window open. [Connection details](CLAUDE-SESSION-ATTACH.md).
+To connect a running conversation, prepare it in VS Code, then run `/reload-plugins --force` and `/diffguide:connect` in the intended Claude conversation. DiffGuide installs a project-local plugin and waits for that session's actual receiver before showing **Feedback on**. The reload rereads conversation context once. This works in either terminal location; the current authenticated walkthrough covers the integrated terminal. For a new/resumed conversation in a separate app, use **DiffGuide: Copy connect command** at a shell prompt. Keep the project's VS Code window open. [Connection details](CLAUDE-SESSION-ATTACH.md).
 
-Click **Review local changes** in the **Local** view, then click a line number. Write your feedback and choose **Ask** or **Implement**. Continue with the thread's **Reply**. Some labels are still German.
+Click **Review local changes** on a checkout in the **Local** view, then click a line number. Write your feedback and choose **Ask** or **Implement**. Continue with the thread's **Reply**.
 
 Requires **VS Code 1.100+**, **Node.js 22+**, **Git**, and an installed, authenticated **Claude Code with `asyncRewake` support**. macOS is the primary target; Linux is unverified. Automatic connection is currently unavailable on Windows. [Installation and troubleshooting →](INSTALL.md)
 
@@ -64,7 +64,7 @@ Send a comment and your connected Claude session receives it automatically. Clau
 
 Hook messages identify the file, review mode and actual feedback. Ordinary tool calls and Stop hooks do not repeatedly announce the same event in one session. Starting or resuming Claude explicitly recovers unfinished work; delivery is still acknowledged only through Claude's review tools.
 
-The status bar distinguishes **Review · Verbinden**, **Review · Zustellung pausiert**, and an active feedback receiver. Readiness is separate from Claude acknowledging a comment. After upgrading, reconnect Claude once so older helpers can report the new readiness signal. A window reload reuses this project's managed **Claude · DiffGuide** terminal instead of creating a second session.
+After upgrading, reconnect Claude once. A window reload reuses this project's managed **Claude · DiffGuide** terminal instead of creating a second session.
 
 Connection files and submitted threads live in VS Code's workspace storage. The extension passes configuration to the session it launches, without editing your repository's `.claude` files or `.mcp.json`. Claude's existing tool permissions still apply; **Ask** is an instruction to avoid edits, not a separate permission sandbox.
 

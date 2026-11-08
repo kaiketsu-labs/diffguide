@@ -14,7 +14,7 @@ function runGit(workspaceRoot: string, args: readonly string[]): Promise<string 
       } else if (error.code === 1 || error.code === 128 || error.code === 'ENOENT') {
         resolve(undefined);
       } else {
-        reject(new Error(`Die Git-Änderungen konnten nicht gelesen werden: ${error.message}`));
+        reject(new Error(`Could not read the Git changes: ${error.message}`));
       }
     });
   });
@@ -52,13 +52,13 @@ export async function readGitBase(
   revision: string,
 ): Promise<string> {
   if (!isWorkspaceRelativePath(relativePath)) {
-    throw new Error('Die Review-Datei muss in diesem Arbeitsbereich liegen.');
+    throw new Error('The review file must be inside this workspace.');
   }
   if (revision === 'unborn') {
     return '';
   }
   if (!/^[a-f\d]{40,64}$/u.test(revision)) {
-    throw new Error('Die ursprüngliche Codeversion muss auf einen festen Git-Commit verweisen.');
+    throw new Error('The original code version must point to a fixed Git commit.');
   }
   return await runGit(workspaceRoot, ['show', `${revision}:./${relativePath}`]) ?? '';
 }

@@ -1,30 +1,33 @@
-import { basename, join } from 'node:path';
 import * as vscode from 'vscode';
 import type { ReviewThread } from './contracts.js';
-import { fileTree, type FileFolder } from './fileTree.js';
 import { checkoutLabel, groupByRepository, type LocalCheckout, matchesFilter } from './localCheckouts.js';
-import { listRepositoryFiles } from './localReview.js';
+import { gitPaths, listRepositoryFiles } from './localReview.js';
 
-interface RepositoryFile { readonly path: string }
 type Node =
   | { readonly kind: 'repository'; readonly repository: string; readonly name: string; readonly checkouts: readonly LocalCheckout[] }
-  | { readonly kind: 'checkout'; readonly checkout: LocalCheckout }
-  | { readonly kind: 'folder'; readonly checkout: LocalCheckout; readonly folder: FileFolder<RepositoryFile> }
-  | { readonly kind: 'file'; readonly checkout: LocalCheckout; readonly path: string };
+  | { readonly kind: 'checkout'; readonly checkout: LocalCheckout };
 
 const checkoutIcons: Record<LocalCheckout['kind'], string> = { folder: 'repo', worktree: 'git-branch', pr: 'git-pull-request' };
 const checkoutNotes: Record<LocalCheckout['kind'], string> = { folder: '', worktree: 'worktree', pr: 'PR' };
 
+/** Files with uncommitted changes in `root`, new files included; every file when the branch has no commit yet. */
+export async function countChangedFiles(root: string): Promise<number> {
+  const [changed, untracked] = await Promise.all([
+    gitPaths(root, ['diff', '--name-only', 'HEAD']).catch(() => listRepositoryFiles(root)),
+    gitPaths(root, ['ls-files', '--others', '--exclude-standard']),
+  ]);
+  return new Set([...changed, ...untracked]).size;
+}
+
 /**
- * The Local view: every checkout's files as a tree, with Git's change marks and the number of open comments.
- * With one checkout its files are the top level; with several, checkouts sit under their repository's row.
- * Clicking a file shows it on that checkout's review page.
+ * The Local view: every checkout under its repository, with how many files changed and how many comments are open.
+ * With one checkout it is the only row. Clicking a checkout opens its review page, which lists its files.
  */
 export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Disposable {
   readonly #changed = new vscode.EventEmitter<Node | undefined>();
   readonly onDidChangeTreeData = this.#changed.event;
   #checkouts: Promise<readonly LocalCheckout[]> | undefined;
-  readonly #trees = new Map<string, Promise<FileFolder<RepositoryFile>>>();
+  readonly #counts = new Map<string, Promise<number>>();
   #filter = '';
 
   constructor(
@@ -33,10 +36,16 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
     private readonly threads: (checkout: LocalCheckout) => Promise<readonly ReviewThread[]>,
   ) {}
 
-  /** List the checkouts and their files again, after files or worktrees were added or removed. */
+  /** List the checkouts and count their changes again, after files or worktrees changed. */
   reload(): void {
     this.#checkouts = undefined;
-    this.#trees.clear();
+    this.#counts.clear();
+    this.#changed.fire(undefined);
+  }
+
+  /** Count changed files again, after an edit or a commit. */
+  recount(): void {
+    this.#counts.clear();
     this.#changed.fire(undefined);
   }
 
@@ -50,7 +59,7 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
     return this.#filter;
   }
 
-  /** Redraw comment counts without listing the files again. */
+  /** Redraw comment counts without listing the checkouts again. */
   redraw(): void {
     this.#changed.fire(undefined);
   }
@@ -61,33 +70,22 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
     return this.#checkouts;
   }
 
-  #tree(checkout: LocalCheckout): Promise<FileFolder<RepositoryFile>> {
-    let tree = this.#trees.get(checkout.root);
-    if (tree === undefined) {
-      tree = listRepositoryFiles(checkout.root).then((paths) => fileTree(paths.map((path) => ({ path }))), () => fileTree<RepositoryFile>([]));
-      this.#trees.set(checkout.root, tree);
+  #count(checkout: LocalCheckout): Promise<number> {
+    let count = this.#counts.get(checkout.root);
+    if (count === undefined) {
+      count = countChangedFiles(checkout.root).catch(() => 0);
+      this.#counts.set(checkout.root, count);
     }
-    return tree;
-  }
-
-  async #contents(checkout: LocalCheckout, folder: FileFolder<RepositoryFile>): Promise<Node[]> {
-    return [
-      ...folder.folders.map((child): Node => ({ kind: 'folder', checkout, folder: child })),
-      ...folder.files.map((file): Node => ({ kind: 'file', checkout, path: file.path })),
-    ];
+    return count;
   }
 
   async getChildren(node?: Node): Promise<Node[]> {
-    if (node === undefined) {
-      const all = await this.checkouts();
-      const [only] = all;
-      if (all.length === 1 && only !== undefined && this.#filter === '') return this.#contents(only, await this.#tree(only));
-      return groupByRepository(all.filter((checkout) => matchesFilter(checkout, this.#filter)))
-        .map(({ repository, name, checkouts }): Node => ({ kind: 'repository', repository, name, checkouts }));
-    }
-    if (node.kind === 'repository') return node.checkouts.map((checkout): Node => ({ kind: 'checkout', checkout }));
-    if (node.kind === 'checkout') return this.#contents(node.checkout, await this.#tree(node.checkout));
-    return node.kind === 'folder' ? this.#contents(node.checkout, node.folder) : [];
+    if (node !== undefined) return node.kind === 'repository' ? node.checkouts.map((checkout): Node => ({ kind: 'checkout', checkout })) : [];
+    const all = await this.checkouts();
+    const [only] = all;
+    if (all.length === 1 && only !== undefined && this.#filter === '') return [{ kind: 'checkout', checkout: only }];
+    return groupByRepository(all.filter((checkout) => matchesFilter(checkout, this.#filter)))
+      .map(({ repository, name, checkouts }): Node => ({ kind: 'repository', repository, name, checkouts }));
   }
 
   async getTreeItem(node: Node): Promise<vscode.TreeItem> {
@@ -96,35 +94,21 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
       const filtering = this.#filter !== '';
       const item = new vscode.TreeItem(node.name, filtering ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
       item.id = `repository:${node.repository}${filtering ? ':filtered' : ''}`;
-      item.iconPath = new vscode.ThemeIcon('repo');
+      item.iconPath = new vscode.ThemeIcon('diffguide-repository', new vscode.ThemeColor('charts.purple'));
       item.description = String(node.checkouts.length);
       item.tooltip = node.repository;
       return item;
     }
-    if (node.kind === 'checkout') {
-      const { checkout } = node;
-      const item = new vscode.TreeItem(checkoutLabel(checkout), vscode.TreeItemCollapsibleState.Collapsed);
-      item.id = `checkout:${checkout.root}`;
-      item.iconPath = new vscode.ThemeIcon(checkoutIcons[checkout.kind]);
-      item.description = checkoutNotes[checkout.kind];
-      item.tooltip = checkout.root;
-      item.contextValue = 'diffGuide.checkout';
-      return item;
-    }
-    // Without a resource, folders get no theme icon, which would draw a second arrow next to the tree's own.
-    if (node.kind === 'folder') {
-      const item = new vscode.TreeItem(node.folder.name, vscode.TreeItemCollapsibleState.Collapsed);
-      item.id = `folder:${node.checkout.root}:${node.folder.path}`;
-      return item;
-    }
-    const item = new vscode.TreeItem(basename(node.path), vscode.TreeItemCollapsibleState.None);
-    item.id = `file:${node.checkout.root}:${node.path}`;
-    item.resourceUri = vscode.Uri.file(join(node.checkout.root, node.path));
-    item.iconPath = vscode.ThemeIcon.File;
-    item.contextValue = 'diffGuide.localFile';
-    item.command = { command: 'diffGuide.openLocalFile', title: 'Show on review page', arguments: [node.checkout.root, node.path] };
-    const open = (await this.threads(node.checkout)).filter((thread) => !thread.resolved && thread.anchor.path === node.path).length;
-    if (open > 0) item.description = open === 1 ? '1 comment' : `${open} comments`;
+    const { checkout } = node;
+    const [changed, threads] = await Promise.all([this.#count(checkout), this.threads(checkout)]);
+    const open = threads.filter((thread) => !thread.resolved).length;
+    const item = new vscode.TreeItem(checkoutLabel(checkout), vscode.TreeItemCollapsibleState.None);
+    item.id = `checkout:${checkout.root}`;
+    item.iconPath = new vscode.ThemeIcon(checkoutIcons[checkout.kind]);
+    item.description = [checkoutNotes[checkout.kind], changed > 0 ? `${changed} changed` : '', open === 0 ? '' : open === 1 ? '1 comment' : `${open} comments`].filter(Boolean).join(' · ');
+    item.tooltip = checkout.root;
+    item.contextValue = 'diffGuide.checkout';
+    item.command = { command: 'diffGuide.openLocalReview', title: 'Review local changes', arguments: [node] };
     return item;
   }
 

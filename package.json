@@ -85,7 +85,7 @@
     "colors": [
       {
         "id": "diffGuide.selectionBackground",
-        "description": "Hintergrund der fixierten Codeauswahl für den aktiven Review-Kommentar.",
+        "description": "Background of the pinned code selection for the active review comment.",
         "defaults": {
           "dark": "#FFFFFF1A",
           "light": "#0000000F",
@@ -95,7 +95,7 @@
       },
       {
         "id": "diffGuide.selectionBorder",
-        "description": "Rahmen der fixierten Codeauswahl für den aktiven Review-Kommentar.",
+        "description": "Border of the pinned code selection for the active review comment.",
         "defaults": {
           "dark": "#FFFFFF66",
           "light": "#00000059",
@@ -107,19 +107,19 @@
     "commands": [
       {
         "command": "diffGuide.startClaude",
-        "title": "Mit Claude verbinden",
+        "title": "Connect Claude",
         "category": "DiffGuide",
         "icon": "$(plug)"
       },
       {
         "command": "diffGuide.copyClaudeCommand",
-        "title": "Verbindungsbefehl kopieren",
+        "title": "Copy connect command",
         "category": "DiffGuide",
         "icon": "$(terminal)"
       },
       {
         "command": "diffGuide.connectRunningClaude",
-        "title": "Laufende Unterhaltung verbinden",
+        "title": "Connect running Claude",
         "category": "DiffGuide",
         "icon": "$(plug)"
       },
@@ -254,15 +254,9 @@
         "icon": "$(git-compare)"
       },
       {
-        "command": "diffGuide.openLocalFile",
+        "command": "diffGuide.showOnReviewPage",
         "title": "Show on review page",
         "category": "DiffGuide"
-      },
-      {
-        "command": "diffGuide.openLocalFileInEditor",
-        "title": "Open in editor",
-        "category": "DiffGuide",
-        "icon": "$(go-to-file)"
       },
       {
         "command": "diffGuide.refreshLocalFiles",
@@ -342,13 +336,8 @@
       "view/title": [
         {
           "command": "diffGuide.openLocalReview",
-          "when": "view == diffGuide.local && diffGuide.localAvailable",
+          "when": "view == diffGuide.local && diffGuide.localSingle",
           "group": "navigation@1"
-        },
-        {
-          "command": "diffGuide.startClaude",
-          "when": "view == diffGuide.local",
-          "group": "navigation@2"
         },
         {
           "command": "diffGuide.filterLocal",
@@ -364,14 +353,6 @@
           "command": "diffGuide.refreshLocalFiles",
           "when": "view == diffGuide.local && diffGuide.localAvailable",
           "group": "navigation@3"
-        },
-        {
-          "command": "diffGuide.copyClaudeCommand",
-          "when": "view == diffGuide.local"
-        },
-        {
-          "command": "diffGuide.connectRunningClaude",
-          "when": "view == diffGuide.local"
         },
         {
           "command": "diffGuide.searchPullRequests",
@@ -425,11 +406,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "diffGuide.openLocalFileInEditor",
-          "when": "view == diffGuide.local && viewItem == diffGuide.localFile",
-          "group": "inline"
-        },
         {
           "command": "diffGuide.openLocalReview",
           "when": "view == diffGuide.local && viewItem == diffGuide.checkout",
@@ -518,16 +494,19 @@
           "when": "false"
         },
         {
-          "command": "diffGuide.openLocalFile",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.openLocalFileInEditor",
-          "when": "false"
-        },
-        {
           "command": "diffGuide.filterLocalActive",
           "when": "false"
+        },
+        {
+          "command": "diffGuide.showOnReviewPage",
+          "when": "false"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "diffGuide.showOnReviewPage",
+          "when": "diffGuide.localAvailable && !explorerResourceIsFolder",
+          "group": "navigation@20"
         }
       ]
     },
@@ -538,13 +517,13 @@
           "type": "string",
           "default": "claude",
           "scope": "machine-overridable",
-          "description": "Pfad zur Claude-Code-Anwendung. In vertrauenswürdigen Projekten überschreibbar."
+          "description": "Path to the Claude Code executable. Trusted projects can override it."
         },
         "diffGuide.nodePath": {
           "type": "string",
           "default": "node",
           "scope": "machine-overridable",
-          "description": "Pfad zu Node.js 20 oder neuer. In vertrauenswürdigen Projekten überschreibbar."
+          "description": "Path to Node.js 20 or newer. Trusted projects can override it."
         },
         "diffGuide.transport": {
           "type": "string",
@@ -553,7 +532,7 @@
             "channels"
           ],
           "default": "hooks",
-          "description": "Automatische Zustellung im Hintergrund (Standard: hooks). channels ist eine experimentelle Alternative mit zusätzlichen Voraussetzungen."
+          "description": "Background delivery (default: hooks). channels is an experimental alternative with extra requirements."
         },
         "diffGuide.worktreeCleanupDays": {
           "type": "number",

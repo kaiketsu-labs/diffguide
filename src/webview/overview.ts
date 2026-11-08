@@ -47,8 +47,9 @@ interface Saved {
   readonly conversationFolded?: boolean;
   /** Collapsed threads leave the diff and show as marks beside their last line. */
   readonly marginThreads?: boolean;
-  readonly fileTab?: string | undefined;
-  readonly tabOrder?: readonly string[];
+  /** The file list shows every repository file, not only the changes. */
+  readonly allFiles?: boolean;
+  readonly listHidden?: boolean;
 }
 type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
@@ -70,12 +71,11 @@ const saved = (api.getState() ?? {}) as Saved;
 const nonce = document.currentScript?.nonce ?? '';
 let layout: Layout = saved.layout === 'split' ? 'split' : 'unified';
 let view: View = saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : saved.view === 'files' ? 'files' : 'overview';
-/** The page's open file tab, a file outside the changes shown alone; undefined shows the Changes tab. */
-let fileTab = saved.fileTab;
-/** The file tab last scrolled into view, so redraws keep the tab row where the user scrolled it. */
-let scrolledTab: string | undefined;
-/** Paths of file tabs in the order they opened, so a new tab goes last instead of by name. */
-const tabOrder: string[] = [...saved.tabOrder ?? []];
+/** Local pages list every repository file by default; PR pages list the changes. */
+let allFiles = saved.allFiles ?? initial.state.localMode === true;
+let listHidden = saved.listHidden === true;
+/** Every file in the repository, for the All files list. */
+let repositoryFiles: readonly string[] = [];
 let fileIcons: FileIcons | undefined;
 /** CSS font families of the icon theme's fonts already added to the page, by font id. */
 const iconFonts = new Map<string, string>();
@@ -272,7 +272,7 @@ function frameMain(): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, fileTab, tabOrder });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -1343,6 +1343,16 @@ function applyFilters(): void {
   renderFiles();
   $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
   $('filter-clear').hidden = fileFilter === '';
+  showListToggle();
+}
+
+/** The file list's collapse icon, with a dot while a hidden list still filters the files. */
+function showListToggle(): void {
+  $('files').parentElement?.classList.toggle('list-hidden', listHidden);
+  const toggle = $('nav-toggle');
+  setTip(toggle, listHidden ? 'Expand file list' : 'Collapse file list');
+  toggle.setAttribute('aria-expanded', String(!listHidden));
+  toggle.classList.toggle('filtered', listHidden && view === 'files' && filtersOn());
 }
 
 function openFilterMenu(): void {
@@ -1371,6 +1381,7 @@ function openViewMenu(): void {
   const rows = [
     ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); }, false, icons.whitespace)] : [],
     ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
+    ...view === 'files' ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], allFiles, (on) => { allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
     menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
     menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }, false, icons.margin),
   ];
@@ -1758,7 +1769,17 @@ function openConnectMenu(): void {
   connectView = 'choices';
   openToolbarMenu('connect', [], 'connect-menu');
   renderConnectMenu();
-  toolbarMenu?.node.querySelector<HTMLElement>('input')?.focus();
+  toolbarMenu?.node.querySelector<HTMLElement>('button, input')?.focus();
+}
+
+/** A Connect menu row: an icon, the action and a one-line hint under it. */
+function connectRow(svg: string | undefined, label: string, hint: string, pick: () => void): HTMLElement {
+  const row = el('button', 'picker-row connect-row');
+  const text = el('span', 'connect-text');
+  text.append(el('span', 'connect-name', label), ...hint ? [el('span', 'muted', hint)] : []);
+  row.append(...svg === undefined ? [] : [icon(svg)], text);
+  row.addEventListener('click', pick);
+  return row;
 }
 
 function renderConnectMenu(): void {
@@ -1769,25 +1790,27 @@ function renderConnectMenu(): void {
     closeToolbarMenu();
     post(session === undefined ? { action: 'connect-claude', how } : { action: 'connect-claude', how: 'resume', session });
   };
-  const choice = (label: string, note: string, pick: () => void): HTMLElement => menuRow([el('span', 'label', label), ...note ? [el('span', 'muted', note)] : []], false, (on) => { if (on) pick(); }, true);
+  const choice = (label: string, note: string, pick: () => void): HTMLElement => connectRow(undefined, label, note, pick);
   if (connectView === 'choices') {
     const switching = link?.terminal === true || link?.delivering === true;
     list.replaceChildren(
-      ...link?.terminal ? [choice('Show terminal', '', () => choose('show')), el('div', 'muted picker-note', 'Switch conversation')] : [],
-      choice('New conversation', '', () => choose('new')),
-      choice('Resume a conversation…', '', () => {
+      ...link?.terminal ? [connectRow(icons.terminal, 'Show terminal', 'The terminal of the connected conversation', () => choose('show')), el('div', 'menu-divider'), el('div', 'muted picker-note', 'Switch conversation')] : [],
+      connectRow(icons.terminal, 'New conversation', 'Starts Claude in a VS Code terminal', () => choose('new')),
+      connectRow(icons.earlier, 'Resume a conversation…', "Pick one of this folder's conversations", () => {
         connectView = 'resume';
         conversations = undefined;
         renderConnectMenu();
         list.querySelector('input')?.focus();
         post({ action: 'claude-conversations' });
       }),
-      choice('Connect running Claude', '', () => {
+      connectRow(icons.copy, 'Copy command', switching ? 'Start a new conversation in another terminal app' : 'Start Claude in another terminal app', () => choose('copy')),
+      el('div', 'menu-divider'),
+      el('div', 'muted picker-note', 'Claude already running'),
+      connectRow(icons.link, 'Connect running Claude', 'Two commands to run in its terminal', () => {
         connectView = 'preparing';
         renderConnectMenu();
         post({ action: 'connect-claude', how: 'running' });
       }),
-      choice('Copy command', switching ? 'new conversation' : 'for another terminal', () => choose('copy')),
     );
   } else if (connectView === 'resume') {
     let search = list.querySelector<HTMLInputElement>('input[type=text]');
@@ -2739,7 +2762,6 @@ function jump(thread: Thread): void {
     return;
   }
   if (view === 'overview' || (view === 'guide' && !document.getElementById('thread-' + thread.id))) setView('files');
-  if (tabOf(thread.path) !== fileTab) { fileTab = tabOf(thread.path); save(); renderFiles(); }
   if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
     collapsed.set(thread.path, false);
     openFolders(thread.path);
@@ -3238,12 +3260,11 @@ function setTip(button: HTMLElement, tip: string): void {
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(layout === name));
-  for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name && (name === 'overview' || fileTab === undefined)));
+  for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(view === name));
   $('panel-overview').hidden = view !== 'overview';
   $('panel-files').hidden = view === 'overview';
   $('files-bar').classList.toggle('on-overview', view === 'overview');
   showGuideTab();
-  if (files) renderFileTabs();
   renderRangeControls();
   setTip($('fold-all'), allFolded() ? 'Expand all files' : 'Collapse all files');
   $('fold-all').innerHTML = allFolded() ? icons.expandAll : icons.collapseAll;
@@ -3254,10 +3275,10 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     requestAnimationFrame(() => { document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
   }
   if (view === 'guide') { keepView(() => renderGuide(only)); return; }
-  const tabs = tabFiles();
-  const tabbed = tabs.find((file) => file.path === fileTab);
-  const allFiles = tabbed ? [tabbed] : files.filter((file) => !tabs.includes(file));
-  const shownFiles = tabbed ? allFiles : filteredFiles(allFiles);
+  const opened = filteredFiles(openedFiles());
+  const changes = files.filter((file) => file.change !== 'unchanged');
+  const shownChanges = filteredFiles(changes);
+  const shownFiles = [...shownChanges, ...opened];
   const container = $('files');
   const threadsByFile = new Map<string, Thread[]>();
   for (const thread of allThreads()) {
@@ -3265,9 +3286,9 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     threadsByFile.set(thread.path, list);
     list.push(thread);
   }
-  const tree = fileTree(shownFiles);
-  $('file-nav').parentElement?.classList.toggle('no-nav', tabbed !== undefined);
-  renderFileNav(tree, shownFiles, threadsByFile);
+  const tree = fileTree(shownChanges);
+  $('files').parentElement?.classList.remove('no-nav');
+  renderFileNav(shownChanges, opened, threadsByFile);
   const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
   const threadsOf = (path: string): Thread[] => threadsByFile.get(path) ?? [];
@@ -3286,7 +3307,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     } else {
       container.replaceChildren();
       fileKeys.clear();
-      if (!shownFiles.length) container.append(el('p', 'muted', allFiles.length ? 'No files match the filter.' : current?.localMode ? 'No uncommitted changes. Pick a file in the Local view to review it.' : diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(diffRange) + '.'));
+      if (!shownFiles.length) container.append(el('p', 'muted', changes.length || openedFiles().length ? 'No files match the filter.' : current?.localMode ? 'No uncommitted changes. Pick a file in the Local view to review it.' : diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(diffRange) + '.'));
       const append = (parent: HTMLElement, folder: FileFolder<FileDiff>, depth: number): void => {
         for (const child of folder.folders) {
           const isCollapsed = collapsed.get('folder:' + child.path) === true;
@@ -3302,73 +3323,121 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
       };
       const put = (parent: HTMLElement, depth: number, child: HTMLElement): void => { parent.append(depth === 0 ? child : railItem(child)); };
       if (folders) append(container, tree, 0);
-      else for (const file of shownFiles) container.append(draw(file));
+      else for (const file of shownChanges) container.append(draw(file));
+      for (const file of opened) container.append(draw(file));
     }
     if (folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
   });
 }
 
-/** Folders folded in the file navigator, apart from the file list's own folders. */
-const navCollapsed = new Set<string>();
+/** Folders opened or folded in the file navigator by hand, apart from the file list's own folders. */
+const navFolders = new Map<string, boolean>();
 /** Whether the navigator is folded to its heading in a narrow window. */
 let navFolded = true;
 
-/** The file navigator beside the diffs: change letter, name, open comments and a Viewed tick per file. */
-function renderFileNav(tree: FileFolder<FileDiff>, shown: readonly FileDiff[], threadsByFile: ReadonlyMap<string, readonly Thread[]>): void {
+/** A navigator entry: a file on the page, or with All files on, a repository file the page does not show yet. */
+interface NavEntry { readonly path: string; readonly file?: FileDiff }
+
+/**
+ * The file navigator beside the diffs: icon, name, open comments, Git letter and a Viewed tick per file.
+ * Opened unchanged files lead in their own group; with All files on, the whole repository follows as one tree.
+ */
+function renderFileNav(changes: readonly FileDiff[], opened: readonly FileDiff[], threadsByFile: ReadonlyMap<string, readonly Thread[]>): void {
   const nav = $('file-nav');
   nav.classList.toggle('folded', navFolded);
   const head = el('button', 'nav-head');
   head.setAttribute('aria-expanded', String(!navFolded));
-  const tabbed = tabFiles();
-  const total = tabbed.some((file) => shown.includes(file)) ? shown.length : (files?.length ?? shown.length) - tabbed.length;
-  head.append(chevronMark(navFolded), (shown.length < total ? shown.length + ' of ' + total : shown.length) + (total === 1 ? ' file' : ' files'), el('span', 'muted', shown.filter((file) => viewed.has(file.path)).length + ' viewed'));
-  head.addEventListener('click', () => { navFolded = !navFolded; renderFileNav(tree, shown, threadsByFile); });
+  const total = (files ?? []).filter((file) => file.change !== 'unchanged').length;
+  const done = changes.filter((file) => viewed.has(file.path)).length;
+  const query = fileFilter.trim().toLowerCase();
+  const entries: NavEntry[] = allFiles ? repositoryEntries().filter((entry) => entry.file ? changes.includes(entry.file) || opened.includes(entry.file)
+    : (!query || entry.path.toLowerCase().includes(query)) && !hiddenTypes.has(fileType(entry.path))) : [];
+  if (allFiles) head.append(chevronMark(navFolded), (changes.length < total ? changes.length + ' of ' + total : total) + ' changed', el('span', 'muted', done + ' viewed · ' + entries.length + (entries.length === 1 ? ' file' : ' files')));
+  else head.append(chevronMark(navFolded), (changes.length < total ? changes.length + ' of ' + total : changes.length) + (total === 1 ? ' file' : ' files'), el('span', 'muted', done + ' viewed'));
+  head.addEventListener('click', () => { navFolded = !navFolded; renderFileNav(changes, opened, threadsByFile); });
   const list = el('ul', 'nav-list');
-  const add = (folder: FileFolder<FileDiff>, depth: number): void => {
+  const redraw = (): void => { renderFileNav(changes, opened, threadsByFile); };
+  const holdsShown = (folder: FileFolder<NavEntry>): boolean => folder.files.some((entry) => entry.file !== undefined) || folder.folders.some(holdsShown);
+  const holdsChange = (folder: FileFolder<NavEntry>): boolean => folder.files.some((entry) => entry.file !== undefined && entry.file.change !== 'unchanged') || folder.folders.some(holdsChange);
+  const add = (folder: FileFolder<NavEntry>, depth: number): void => {
     for (const child of folder.folders) {
-      const isCollapsed = navCollapsed.has(child.path);
+      const isCollapsed = navFolders.get(child.path) ?? (allFiles && !holdsShown(child));
       const row = el('li', 'nav-folder');
       row.style.setProperty('--depth', String(depth));
       row.title = child.path;
-      row.append(chevronMark(isCollapsed), child.name);
-      row.addEventListener('click', () => {
-        if (isCollapsed) navCollapsed.delete(child.path);
-        else navCollapsed.add(child.path);
-        renderFileNav(tree, shown, threadsByFile);
-      });
+      row.append(chevronMark(isCollapsed), el('span', 'nav-name', child.name));
+      if (allFiles && holdsChange(child)) row.append(titled(el('span', 'nav-dot'), 'Holds changed files'));
+      row.addEventListener('click', () => { navFolders.set(child.path, !isCollapsed); redraw(); });
       list.append(row);
       if (!isCollapsed) add(child, depth + 1);
     }
-    for (const file of folder.files) list.append(navFile(file, depth, threadsByFile.get(file.path) ?? []));
+    for (const entry of folder.files) list.append(navFile(entry, depth, threadsByFile.get(entry.path) ?? []));
   };
-  add(tree, 0);
+  if (opened.length) {
+    const group = el('li', 'nav-group');
+    group.append('Opened', el('span', 'muted', String(opened.length)));
+    const closable = opened.filter((file) => !threadsByFile.get(file.path)?.length).map((file) => file.path);
+    if (closable.length) {
+      const closeAll = button('', () => { closeFiles(closable); }, 'quiet small nav-close-all');
+      closeAll.textContent = 'Close all';
+      group.append(closeAll);
+    }
+    list.append(group);
+    for (const file of opened) list.append(navFile({ path: file.path, file }, 0, threadsByFile.get(file.path) ?? [], true));
+    if (changes.length || allFiles) list.append(el('li', 'nav-sep'));
+  }
+  add(allFiles ? fileTree(entries) : fileTree(changes.map((file): NavEntry => ({ path: file.path, file }))), 0);
   nav.replaceChildren(head, list);
   markCurrentNavFile();
 }
 
-function navFile(file: FileDiff, depth: number, threads: readonly Thread[]): HTMLElement {
+/** Every repository file with the page's file for it, plus page files the repository no longer lists, such as deleted ones. */
+function repositoryEntries(): NavEntry[] {
+  const byPath = new Map((files ?? []).map((file) => [file.path, file]));
+  const entries = repositoryFiles.map((path): NavEntry => { const file = byPath.get(path); return file ? { path, file } : { path }; });
+  const listed = new Set(repositoryFiles);
+  for (const file of files ?? []) if (!listed.has(file.path)) entries.push({ path: file.path, file });
+  return entries;
+}
+
+/** One navigator row; `closable` adds × to an opened file that has no comments. */
+function navFile(entry: NavEntry, depth: number, threads: readonly Thread[], closable = false): HTMLElement {
+  const { path, file } = entry;
   const item = el('li');
-  const row = el('button', 'nav-file' + (viewed.has(file.path) ? ' done' : ''));
+  const isViewed = file !== undefined && viewed.has(path);
+  const row = el('button', 'nav-file' + (isViewed ? ' done' : '') + (file === undefined || file.change === 'unchanged' ? ' unchanged' : ''));
   row.style.setProperty('--depth', String(depth));
-  row.dataset.navPath = file.path;
-  row.title = file.path;
-  const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
-  row.append(badge, el('span', 'nav-name', file.path.split('/').at(-1) ?? file.path));
+  row.dataset.navPath = path;
+  row.title = path;
+  const themeIcon = fileIcons?.byPath[path];
+  row.append(themeIcon ? iconNode(themeIcon) : el('span', 'file-icon'), el('span', 'nav-name', path.split('/').at(-1) ?? path));
   const open = threads.filter((thread) => !thread.resolved).length;
   if (open) {
     const count = el('span', 'nav-count', String(open));
     count.title = open + (open === 1 ? ' open comment' : ' open comments');
     row.append(count);
   }
+  if (file && file.change !== 'unchanged') {
+    const badge = el('span', 'badge ' + file.change, changeLetters[file.change]);
+    badge.title = file.change;
+    row.append(badge);
+  }
   const done = el('span', 'nav-done');
-  if (viewed.has(file.path)) {
+  if (isViewed) {
     done.title = 'Viewed';
     done.append(icon(icons.check));
   }
   row.append(done);
-  row.addEventListener('click', () => showFile(file.path));
+  row.addEventListener('click', () => { if (file) showFile(path); else post({ action: 'open-file', path }); });
   item.append(row);
+  if (closable && !threads.length) {
+    const close = button('', () => { closeFiles([path]); }, 'icon-button nav-close');
+    close.append(icon(icons.close));
+    setTip(close, 'Close');
+    item.classList.add('closable');
+    item.append(close);
+  }
   return item;
 }
 
@@ -3385,9 +3454,19 @@ function showFile(path: string): void {
   box()?.scrollIntoView({ block: 'start' });
 }
 
+/** Round a pinned file header into a closed card once its file's end reaches it, so no box edge peeks out below. */
+function markEndingFiles(): void {
+  for (const box of $('files').querySelectorAll<HTMLElement>('.file')) {
+    const head = box.querySelector<HTMLElement>(':scope > .file-head');
+    const rect = box.getBoundingClientRect();
+    if (rect.top > window.innerHeight) break;
+    box.classList.toggle('ending', head !== null && rect.top < 0 && rect.bottom - head.getBoundingClientRect().bottom < 2);
+  }
+}
+
 /** Highlight the navigator row of the file or guide step at the top of the view. */
 function markCurrentNavFile(): void {
-  const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 24;
+  const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 36;
   const guided = view === 'guide';
   let top: string | undefined;
   for (const box of $('files').querySelectorAll<HTMLElement>(guided ? '.step-wrap[data-key]' : '.file[data-path]')) {
@@ -3413,60 +3492,21 @@ function localMark(path: string): HTMLElement[] {
   return change === undefined ? [] : [localMarkOf(change)];
 }
 
-/** Files outside the changes that the page shows in their own tabs, in the order they were opened. */
-function tabFiles(): readonly FileDiff[] {
-  if (!files) return [];
-  const opened = files.filter((file) => file.change === 'unchanged');
-  // A closed tab leaves the order, so opening it again puts it last.
-  tabOrder.splice(0, tabOrder.length, ...tabOrder.filter((path) => opened.some((file) => file.path === path)));
-  for (const file of opened) if (!tabOrder.includes(file.path)) tabOrder.push(file.path);
-  return [...opened].sort((a, b) => tabOrder.indexOf(a.path) - tabOrder.indexOf(b.path));
+/** Take opened unchanged files off the page; files with comments stay. */
+function closeFiles(paths: readonly string[]): void {
+  post({ action: 'close-files', paths });
 }
 
-/** The tab that shows `path`: its own when it is an opened unchanged file, else Changes. */
-function tabOf(path: string): string | undefined {
-  return tabFiles().some((file) => file.path === path) ? path : undefined;
-}
-
-/** One tab per opened unchanged file after Changes, closable while the file has no comments. */
-function renderFileTabs(): void {
-  const tabs = tabFiles();
-  if (fileTab !== undefined && !tabs.some((file) => file.path === fileTab)) fileTab = undefined;
-  $('view-files').setAttribute('aria-selected', String(view === 'files' && fileTab === undefined));
-  for (const id of ['filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files' || fileTab !== undefined);
-  const list = $('file-tabs');
-  const left = list.scrollLeft;
-  for (const old of list.querySelectorAll('.file-tab')) old.remove();
-  for (const file of tabs) {
-    const name = file.path.split('/').pop() ?? file.path;
-    const tab = button(name, () => { fileTab = file.path; setView('files'); });
-    const themeIcon = fileIcons?.byPath[file.path];
-    if (themeIcon) tab.prepend(iconNode(themeIcon));
-    tab.setAttribute('role', 'tab');
-    tab.setAttribute('aria-selected', String(fileTab === file.path));
-    tab.title = file.path;
-    const wrap = el('span', 'file-tab');
-    wrap.append(tab);
-    if (!allThreads().some((thread) => thread.path === file.path)) {
-      const close = button('', () => post({ action: 'close-file', path: file.path }), 'icon-button tab-close');
-      close.append(icon(icons.close));
-      setTip(close, 'Close ' + name);
-      wrap.append(close);
-    }
-    list.append(wrap);
-  }
-  list.scrollLeft = left;
-  if (scrolledTab !== fileTab) {
-    scrolledTab = fileTab;
-    list.querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }
+/** Files outside the changes opened on the page, shown whole after the changes. */
+function openedFiles(): readonly FileDiff[] {
+  return (files ?? []).filter((file) => file.change === 'unchanged');
 }
 
 /** A theme file icon: a glyph of an icon font, added to the page on first use, or an image. */
 function iconNode(icon: FileIcon): HTMLElement {
   if ('image' in icon) {
     const image = el('img', 'file-icon');
-    image.src = icon.image;
+    image.src = fileIcons?.images[icon.image] ?? '';
     image.alt = '';
     return image;
   }
@@ -4066,7 +4106,10 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   for (const chip of chips) chip.title = file.generated ? 'Generated file. GitHub folds these by default.' : 'Large diff, folded by default.';
   const commentFile = toolButton(icons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
   commentFile.hidden = !atHead || file.change === 'deleted';
-  head.append(chevron, name, badge, ...localMark(file.path), stats, ...chips, comments, mode, headTools(full, commentFile, open), label);
+  const themeIcon = fileIcons?.byPath[file.path];
+  const close = toolButton(icons.close, 'Close', () => { closeFiles([file.path]); });
+  close.hidden = file.change !== 'unchanged' || threads.length > 0;
+  head.append(chevron, ...themeIcon ? [iconNode(themeIcon)] : [], name, badge, ...localMark(file.path), stats, ...chips, comments, mode, headTools(full, commentFile, open), label, headTools(close));
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
@@ -4277,9 +4320,10 @@ function showGuideTab(): void {
   count.className = analysis?.running ? 'count working' : 'count';
   count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
   count.hidden = !analysis?.running && steps === undefined;
-  $('files-count').textContent = files ? String(files.length - tabFiles().length) : '';
+  $('files-count').textContent = files ? String(files.length - openedFiles().length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
-  for (const id of ['range', 'filter-box', 'filter-menu']) $(id).classList.toggle('off-view', view !== 'files');
+  for (const id of ['range', 'nav-tools']) $(id).classList.toggle('off-view', view !== 'files');
+  showListToggle();
 }
 
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
@@ -4390,6 +4434,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
   const shownAs = JSON.stringify([diffRange, whitespace, atHead]);
   if (data.selection) { diffRange = data.selection.range; whitespace = data.selection.whitespace; atHead = data.atHead !== false; save(); }
   if (data.icons) fileIcons = data.icons;
+  if (data.repositoryFiles) repositoryFiles = data.repositoryFiles;
   if (data.files) {
     const changed = changedFiles(data.files, shownAs);
     files = data.files;
@@ -4425,7 +4470,6 @@ function onExtensionMessage(data: ExtensionMessage): void {
   }
   if (data.reveal && files) {
     view = 'files';
-    fileTab = tabOf(data.reveal);
     collapsed.set(data.reveal, false);
     openFolders(data.reveal);
     save();
@@ -4579,7 +4623,7 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { layout = 'split'; save(); renderFiles(); });
-for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { fileTab = undefined; setView(name); });
+for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
 $('finish-review').addEventListener('click', finishReview);
 $('range').addEventListener('click', openRangeMenu);
 $<HTMLInputElement>('file-filter').value = fileFilter;
@@ -4588,6 +4632,8 @@ $('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Esc
 $('filter-clear').addEventListener('click', () => { $<HTMLInputElement>('file-filter').value = ''; fileFilter = ''; applyFilters(); $('file-filter').focus(); });
 $('filter-clear').hidden = fileFilter === '';
 $('filter-menu').addEventListener('click', openFilterMenu);
+$('nav-toggle').addEventListener('click', () => { listHidden = !listHidden; save(); showListToggle(); });
+showListToggle();
 $('fold-conversation').addEventListener('click', () => { conversationFolded = !conversationFolded; save(); if (current) renderConversation(current, true); });
 $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
 document.addEventListener('pointerdown', (event) => {
@@ -4677,7 +4723,7 @@ render(initial.state);
 let navFrame = 0;
 window.addEventListener('scroll', () => {
   if (navFrame || view === 'overview') return;
-  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(); });
+  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(); markEndingFiles(); });
 }, { passive: true });
 new ResizeObserver(([entry]) => {
   if (entry) document.body.style.setProperty('--bar-height', (entry.target as HTMLElement).offsetHeight + 'px');

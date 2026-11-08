@@ -144,7 +144,7 @@ test('opening an unchanged file shows it whole until it is closed', async () => 
   const [message] = fileMessages();
   assert.equal(message?.files?.find((file) => file.path === 'src/kept.ts')?.change, 'unchanged');
 
-  panel.receive({ action: 'close-file', path: 'src/kept.ts' });
+  panel.receive({ action: 'close-files', paths: ['src/kept.ts'] });
   await until(() => fileMessages().length > 1);
   assert.equal(fileMessages().at(-1)?.files?.some((file) => file.path === 'src/kept.ts'), false);
 });
@@ -169,7 +169,7 @@ test('says whether comments reach a Claude session and how many wait', () => {
   assert.equal(localClaudeStatus({ state: { connected: true, deliveryReady: false } }, 0).text, 'Delivery paused');
 });
 
-test('lists the repository as a tree without ignored files, with open comments per file', async () => {
+test('lists a single checkout as one row with its changed files and open comments, opening its review page', async () => {
   const { root, store } = await fixture();
   const base = await getHeadRevision(root);
   assert.ok(base !== undefined);
@@ -178,18 +178,16 @@ test('lists the repository as a tree without ignored files, with open comments p
   const view = new LocalFilesView(async () => [checkout], async () => store.threads);
   cleanup.push(() => { view.dispose(); });
   const top = await view.getChildren();
-  assert.deepEqual(top.map((node) => node.kind === 'folder' ? node.folder.name : node.kind === 'file' ? node.path : node.kind), ['src', '.gitignore', 'new.ts']);
-  const folder = top[0];
-  assert.ok(folder !== undefined);
-  const inside = await view.getChildren(folder);
-  const kept = inside.find((node) => node.kind === 'file' && node.path === 'src/kept.ts');
-  assert.ok(kept !== undefined);
-  const item = await view.getTreeItem(kept);
-  assert.equal(item.description, '1 comment');
-  assert.deepEqual(item.command?.arguments, [root, 'src/kept.ts']);
+  assert.deepEqual(top.map((node) => node.kind), ['checkout']);
+  const [row] = top;
+  assert.ok(row !== undefined);
+  const item = await view.getTreeItem(row);
+  assert.equal(item.description, '2 changed · 1 comment');
+  assert.equal(item.command?.command, 'diffGuide.openLocalReview');
+  assert.deepEqual(await view.getChildren(row), []);
 });
 
-test('lists a repository and its worktrees as checkouts, each with its own files', async () => {
+test('lists a repository and its worktrees as checkouts', async () => {
   const { root } = await fixture();
   await git(root, ['add', '.']);
   await git(root, ['commit', '--quiet', '-m', 'more']);
@@ -206,10 +204,9 @@ test('lists a repository and its worktrees as checkouts, each with its own files
   assert.equal((await view.getTreeItem(group)).description, '2');
   const rows = await view.getChildren(group);
   assert.deepEqual(rows.map((node) => node.kind === 'checkout' ? node.checkout.branch : node.kind), ['main', 'fix/anchors']);
-  const files = await view.getChildren(rows[1]);
-  const added = files.find((node) => node.kind === 'file' && node.path === 'new.ts');
-  assert.ok(added !== undefined);
-  assert.deepEqual((await view.getTreeItem(added)).command?.arguments, [worktree, 'new.ts']);
+  const [, fix] = rows;
+  assert.ok(fix !== undefined);
+  assert.equal((await view.getTreeItem(fix)).description, 'worktree');
 });
 
 test('reads Git\'s worktree list without bare or prunable entries', () => {

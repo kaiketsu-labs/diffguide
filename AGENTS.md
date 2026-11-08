@@ -37,7 +37,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.
 - Name controls after existing ones that do the same thing; a checkbox that marks lines reviewed is "Viewed", like the file's.
 - Give each action a distinct weight: one filled button per row (`agent` when it sends to the agent, `primary` otherwise), secondary buttons, text-only Cancel. Don't show hints for standard shortcuts such as ⌘/Ctrl+Enter. Put status text left and buttons right, Cancel first and the filled button last. Align controls on one row height.
-- Before building a new or rearranged surface, sketch it and confirm terms with the user; "checkbox", "button" and "window" have been misread before.
+- Before building a new or rearranged surface, sketch it as a rendered HTML mock in the user's theme colors, not ASCII in chat, and confirm terms with the user; "checkbox", "button" and "window" have been misread before.
 - Repository illustrations use a neutral, clean style focused on reviewing code and collaborating with an agent, with concrete code and review examples.
 
 ## Product invariants

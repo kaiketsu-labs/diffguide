@@ -162,7 +162,7 @@ class DiffGuideBridge implements ReviewBridge {
       const binding = await readSessionBinding(this.sessionBindingPath, this.#store.workspaceRoot);
       if (binding !== undefined && request.headers['x-diffguide-session'] !== binding.sessionId) {
         request.resume();
-        respond(response, 403, { error: 'Diese Claude-Unterhaltung ist nicht für dieses Review ausgewählt.' });
+        respond(response, 403, { error: 'This Claude conversation is not the one chosen for this review.' });
         return;
       }
     }
@@ -218,7 +218,7 @@ class DiffGuideBridge implements ReviewBridge {
       if (this.sessionBindingPath !== undefined) {
         const binding = await readSessionBinding(this.sessionBindingPath, this.#store.workspaceRoot);
         if (binding !== undefined && request.headers['x-diffguide-session'] !== binding.sessionId) {
-          respond(response, 403, { error: 'Die ausgewählte Claude-Unterhaltung hat sich geändert.' });
+          respond(response, 403, { error: 'The chosen Claude conversation has changed.' });
           return;
         }
       }
@@ -349,11 +349,11 @@ class DiffGuideBridge implements ReviewBridge {
         const binding = this.sessionBindingPath === undefined ? undefined
           : await readSessionBinding(this.sessionBindingPath, this.#store.workspaceRoot);
         if (binding !== undefined && poll.sessionId !== binding.sessionId) {
-          respond(poll.response, 403, { error: 'Die ausgewählte Claude-Unterhaltung hat sich geändert.' });
+          respond(poll.response, 403, { error: 'The chosen Claude conversation has changed.' });
         } else {
           respond(poll.response, 200, this.#payload(this.#eventsAfter(poll.after)));
         }
-      } catch { respond(poll.response, 503, { error: 'Die Claude-Verbindung muss erneut ausgewählt werden.' }); }
+      } catch { respond(poll.response, 503, { error: 'Choose the Claude connection again.' }); }
     })();
   }
 

@@ -19,7 +19,7 @@ export async function readSessionBinding(path: string, workspaceRoot: string): P
   if (value === undefined) return undefined;
   const data = record(value);
   if (data?.version !== 1 || data.workspaceRoot !== workspaceRoot || !isSessionId(data.sessionId)) {
-    throw new Error('Die gespeicherte Claude-Verbindung ist ungültig. In VS Code erneut verbinden.');
+    throw new Error('The saved Claude connection is invalid. Connect again in VS Code.');
   }
   return { version: 1, workspaceRoot, sessionId: data.sessionId };
 }

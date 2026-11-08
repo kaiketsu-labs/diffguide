@@ -47,7 +47,7 @@ export function parseAgentUpdate(value: unknown): AgentUpdate {
   }
   return Object.freeze({
     eventId: readId(record['eventId']), status,
-    ...(record['text'] === undefined ? {} : { text: readBoundedText(record['text'], 'Antwort', maximumReplyLength, true) }),
+    ...(record['text'] === undefined ? {} : { text: readBoundedText(record['text'], 'Reply', maximumReplyLength, true) }),
     ...(record['title'] === undefined ? {} : { title: readTitle(record['title']) }),
     ...(record['githubReply'] === undefined ? {} : { githubReply: readBoundedText(record['githubReply'], 'GitHub reply', maximumReplyLength, true) }),
   });
@@ -104,7 +104,7 @@ class FileReviewStore implements ReviewStore {
   /** Capture a human comment as a new immutable event and reopen its thread. */
   submit(anchor: CodeAnchor, text: string, intent: ReviewIntent, threadId?: string): Promise<ReviewThread> {
     const capturedAnchor = readAnchor(anchor);
-    const capturedText = readBoundedText(text, 'Kommentar', maximumReviewTextLength, true);
+    const capturedText = readBoundedText(text, 'Comment', maximumReviewTextLength, true);
     const capturedIntent = readIntent(intent);
     const capturedThreadId = threadId === undefined ? undefined : readId(threadId);
     return this.#mutate((snapshot) => {
@@ -482,22 +482,22 @@ function readAnchor(value: unknown): CodeAnchor {
 
 /** Reject newly captured context that the agent transport cannot deliver. */
 function validateNewAnchor(anchor: CodeAnchor): void {
-  readBoundedText(anchor.path, 'Dateipfad', maximumPathLength, true);
-  readBoundedText(anchor.selectedText, 'Codeauswahl', maximumReviewTextLength);
-  readBoundedText(anchor.contextBefore, 'Codekontext vor der Auswahl', maximumReviewTextLength);
-  readBoundedText(anchor.contextAfter, 'Codekontext nach der Auswahl', maximumReviewTextLength);
-  readBoundedText(anchor.documentHash, 'Dokumentkennung', maximumIdentifierLength, true);
-  readBoundedText(anchor.baseRevision, 'Git-Referenz', maximumPathLength);
+  readBoundedText(anchor.path, 'File path', maximumPathLength, true);
+  readBoundedText(anchor.selectedText, 'Code selection', maximumReviewTextLength);
+  readBoundedText(anchor.contextBefore, 'Code before the selection', maximumReviewTextLength);
+  readBoundedText(anchor.contextAfter, 'Code after the selection', maximumReviewTextLength);
+  readBoundedText(anchor.documentHash, 'Document ID', maximumIdentifierLength, true);
+  readBoundedText(anchor.baseRevision, 'Git reference', maximumPathLength);
 }
 
 /** Match wire limits for new data without rejecting older stored snapshots. */
 function readBoundedText(value: unknown, label: string, maximum: number, required = false): string {
   const text = required ? readNonemptyText(value, label) : readText(value, label);
   if (text.length > maximum) {
-    throw new ReviewStoreError(`${label} ist zu groß (maximal ${maximum.toLocaleString('de-DE')} Zeichen). Verkleinere die Auswahl oder teile dein Feedback auf.`);
+    throw new ReviewStoreError(`${label} is too long (at most ${maximum.toLocaleString('en-US')} characters). Select less code or split your feedback.`);
   }
   if (text.includes('\0')) {
-    throw new ReviewStoreError(`${label} enthält ein nicht unterstütztes Nullzeichen.`);
+    throw new ReviewStoreError(`${label} contains an unsupported null character.`);
   }
   return text;
 }

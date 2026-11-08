@@ -87,7 +87,7 @@ code --install-extension ./diffguide-<version>.vsix --force
 
 **Connect Claude**
 
-Open a trusted local Git repository, click **Review local changes** in the **Local** view, then **Connect Claude** on the review page.
+Open a trusted local Git repository, click **Review local changes** on a checkout in the **Local** view, then **Connect Claude** on the review page.
 
 | Choose | What happens |
 | --- | --- |
@@ -96,15 +96,15 @@ Open a trusted local Git repository, click **Review local changes** in the **Loc
 | **Connect running Claude** | Keep your original Claude process and conversation. Run the two commands the menu shows in that conversation. |
 | **Copy command** | Copy a start command for a terminal outside VS Code. |
 
-Once connected, the button reads **Open in terminal** and the same menu switches conversations. Without a review page open, **DiffGuide: Mit Claude verbinden** in the Command Palette offers the same choices.
+Once connected, the button reads **Open in terminal** and the same menu switches conversations. Without a review page open, **DiffGuide: Connect Claude** in the Command Palette offers the same choices.
 
-To connect a running conversation, execute `/reload-plugins --force`, then `/diffguide:connect` inside it. This requires **Claude Code 2.1.280+** and installs a project-local plugin; reloading rereads the conversation context once. Wait for **Feedback aktiv** before sending a comment.
+To connect a running conversation, execute `/reload-plugins --force`, then `/diffguide:connect` inside it. This requires **Claude Code 2.1.280+** and installs a project-local plugin; reloading rereads the conversation context once. Wait for **Feedback on** before sending a comment.
 
-For a separate terminal app, the same running-conversation commands apply. To start or resume there instead, use **Review → … → Verbindungsbefehl kopieren** at its shell prompt. Keep the project's VS Code window open. [Connection details →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/CLAUDE-SESSION-ATTACH.md)
+For a separate terminal app, the same running-conversation commands apply. To start or resume there instead, run **DiffGuide: Copy connect command** and paste the command at its shell prompt. Keep the project's VS Code window open. [Connection details →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/CLAUDE-SESSION-ATTACH.md)
 
 **Leave your first comment**
 
-Open the **Local** view in the DiffGuide sidebar and click **Review local changes**. On the review page, click a line number, write your feedback and choose **Ask** or **Implement**. Continue in the thread's **Reply**. Clicking a file in the **Local** view shows it on the page, even without changes. With several checkouts, such as Git worktrees of the same repository, the **Local** view lists each one; every checkout gets its own review page tab and its own Claude conversation.
+Open the **Local** view in the DiffGuide sidebar and click **Review local changes** on a checkout row. On the review page, click a line number, write your feedback and choose **Ask** or **Implement**. Continue in the thread's **Reply**. To show any other file on the page, right-click it in the Explorer and choose **Show on review page**, or turn on **All files** in the page's **View** menu. With several checkouts, such as Git worktrees of the same repository, the **Local** view lists each one; every checkout gets its own review page tab and its own Claude conversation.
 
 Requires **VS Code 1.100+**, **Node.js 20+**, **Git**, and authenticated **Claude Code with `asyncRewake` support**. macOS is the verified primary platform; Linux is unverified, and automatic Windows connection is not supported yet. [Setup and troubleshooting →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/INSTALL.md)
 
@@ -150,7 +150,7 @@ Threads and private connection files live in VS Code's workspace storage. The la
 | `diffGuide.nodePath` | Choose the Node.js 20+ executable used by the integration. |
 | `diffGuide.transport` | `hooks` is the default. `channels` is an experimental alternative with additional prerequisites. |
 
-Some labels are still German. On the review page, Cmd/Ctrl-click a name to peek at its definition, or use **Open in editor**. [Full usage guide →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/USAGE.md)
+On the review page, Cmd/Ctrl-click a name to peek at its definition, or use **Open in editor**. [Full usage guide →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/USAGE.md)
 
 ## Roadmap and verification
 

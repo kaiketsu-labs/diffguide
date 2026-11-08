@@ -62,8 +62,8 @@ test('reuses this project\'s latest managed Claude terminal after the extension 
   assert.equal(terminal.showCalls, 1);
   assert.equal(terminal.disposed, false);
   assert.deepEqual(terminal.sendTextCalls, []);
-  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Terminal anzeigen', 'Unterhaltung wechseln']);
-  assert.match(window.quickPicks[0]?.[1]?.description ?? '', /beende|schließen/u);
+  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Show terminal', 'Switch conversation']);
+  assert.match(window.quickPicks[0]?.[1]?.description ?? '', /exit|Close/u);
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -78,7 +78,7 @@ test('does not adopt another project\'s terminal or dispose it when connection s
 
   assert.equal(terminal.showCalls, 0);
   assert.equal(terminal.disposed, false);
-  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Unterhaltung auswählen', 'Neue Unterhaltung', 'Laufende Unterhaltung verbinden']);
+  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Resume a conversation', 'New conversation', 'Connect running Claude']);
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -90,7 +90,7 @@ test('an active external review receiver prevents launching a competing managed 
 
   await commands.executeCommand('diffGuide.startClaude');
 
-  assert.match(window.information[0] ?? '', /Review-Verbindung.*\/exit.*45 Sekunden/u);
+  assert.match(window.information[0] ?? '', /review connection.*\/exit.*45 seconds/u);
   assert.deepEqual(window.quickPicks, []);
   assert.equal(window.terminals.length, 1);
   assert.equal(external.showCalls, 0);
@@ -122,7 +122,7 @@ test('an ended managed session cannot authorize takeover or be rediscovered as t
   window.quickPickIndex = undefined;
   await commands.executeCommand('diffGuide.startClaude');
 
-  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Unterhaltung auswählen', 'Neue Unterhaltung', 'Laufende Unterhaltung verbinden']);
+  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Resume a conversation', 'New conversation', 'Connect running Claude']);
   assert.equal(terminal.disposed, false);
   assert.deepEqual(await readdir(root), []);
 });
@@ -136,7 +136,7 @@ test('a receiver connecting while the conversation picker is open prevents a com
   await commands.executeCommand('diffGuide.startClaude');
 
   assert.equal(window.quickPicks.length, 1);
-  assert.match(window.information[0] ?? '', /Review-Verbindung.*aktiv oder wird getrennt/u);
+  assert.match(window.information[0] ?? '', /review connection.*active or closing/u);
   assert.equal(window.terminals.length, 0);
   assert.deepEqual(await readdir(root), []);
 });
@@ -164,7 +164,7 @@ test('a receiver taking over after managed command completion during setup preve
 
   assert.equal(configurationReads, 2);
   assert.deepEqual(window.errors, []);
-  assert.match(window.information[0] ?? '', /Review-Verbindung.*aktiv oder wird getrennt/u);
+  assert.match(window.information[0] ?? '', /review connection.*active or closing/u);
   assert.equal(window.terminals.length, 1);
   assert.equal(terminal.disposed, false);
   assert.deepEqual(terminal.sendTextCalls, []);
@@ -225,7 +225,7 @@ test('a tool-only connection offers recovery before reopening the existing inact
 
   await commands.executeCommand('diffGuide.startClaude');
 
-  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Verbindung neu starten', 'Terminal anzeigen']);
+  assert.deepEqual(window.quickPicks[0]?.map((item) => item.label), ['Restart connection', 'Show terminal']);
   assert.equal(terminal.disposed, false);
   assert.deepEqual(terminal.sendTextCalls, []);
 });
@@ -242,7 +242,7 @@ test('a failed replacement setup preserves the existing Claude conversation', as
   assert.equal(window.terminals.length, 1);
   assert.equal(terminal.disposed, false);
   assert.deepEqual(terminal.sendTextCalls, []);
-  assert.match(window.errors[0] ?? '', /wurde nicht gefunden/u);
+  assert.match(window.errors[0] ?? '', /was not found/u);
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -383,7 +383,7 @@ test('failed external command setup leaves the clipboard and active conversation
 
   await commands.executeCommand('diffGuide.copyClaudeCommand');
 
-  assert.match(window.errors[0] ?? '', /wurde nicht gefunden/u);
+  assert.match(window.errors[0] ?? '', /was not found/u);
   assert.deepEqual(env.clipboard.writes, []);
   assert.equal(terminal.disposed, false);
   assert.deepEqual(terminal.sendTextCalls, []);

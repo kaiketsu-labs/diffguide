@@ -1,5 +1,5 @@
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
-import { basename, join, relative } from 'node:path';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from './bridge.js';
 import { createReviewStore } from './store.js';
@@ -36,7 +36,7 @@ import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
 import { ClaudeAnswersTree, latestAnswers, SeenAnswers, type ClaudeAnswer } from './claudeAnswers.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
 import { readFileIcons } from './fileIcons.js';
-import { type BranchPullRequests, implementThreadRequest, LocalReview, localClaudeStatus, toDisposable, wholeFile } from './localReview.js';
+import { type BranchPullRequests, implementThreadRequest, listRepositoryFiles, LocalReview, localClaudeStatus, toDisposable, wholeFile } from './localReview.js';
 import { LocalFilesView } from './localFilesView.js';
 import { listLocalCheckouts, type LocalCheckout } from './localCheckouts.js';
 import { LocalSessions, type LocalSession } from './localSessions.js';
@@ -171,7 +171,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!isPageOpen(pageKey)) revealedFiles.set(pageKey, new Set());
       const revealed = revealedFiles.get(pageKey) ?? new Set<string>();
       if (reveal !== undefined && 'path' in reveal && reveal.reload === true && isWorkspaceRelativePath(reveal.path)) revealed.add(reveal.path);
-      /** Files outside the diff with Local threads, shown whole in tabs, or as their saved code once the file is gone. */
+      /** Files outside the diff with Local threads, shown whole after the changes, or as their saved code once the file is gone. */
       const threadFiles = async (shown: readonly string[]): Promise<FileDiff[]> => {
         const threads = opened.session.store.threads;
         const paths = [...new Set([...threads.filter((thread) => !thread.resolved).map((thread) => thread.anchor.path), ...revealed])]
@@ -202,9 +202,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         selectionAtHead = to === undefined;
         diffPaths = files.map((file) => file.path);
         diffFiles = files;
-        const tabs = range.kind === 'all' ? await threadFiles(diffPaths) : [];
-        const icons = tabs.length === 0 ? undefined : await readFileIcons(tabs.map((file) => file.path)).catch(() => undefined);
-        return { files: [...files, ...tabs], selection, atHead: selectionAtHead, ...icons === undefined ? {} : { icons } };
+        const [whole, repositoryFiles] = await Promise.all([range.kind === 'all' ? threadFiles(diffPaths) : [], listRepositoryFiles(folder).catch(() => [])]);
+        const icons = await readFileIcons([...new Set([...repositoryFiles, ...diffPaths, ...whole.map((file) => file.path)])]).catch(() => undefined);
+        return { files: [...files, ...whole], repositoryFiles, selection, atHead: selectionAtHead, ...icons === undefined ? {} : { icons } };
       };
       const readAnalysis = async (): Promise<AnalysisView> => {
         const result = await opened.analysis.result();
@@ -466,7 +466,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           revealed.add(path);
           revealOpenPage(`${repository}#${pullRequest.number}`, { path, reload: true });
         },
-        closeFile: async (path) => { revealed.delete(path); },
+        openFile: async (path) => {
+          if (!isWorkspaceRelativePath(path)) throw new Error(`Unsupported file path: ${path}`);
+          if (selection.range.kind !== 'all') { await openPullRequestFile(storageRoot, repository, current(), path); return; }
+          revealed.add(path);
+          revealOpenPage(pageKey, { path, reload: true });
+        },
+        closeFiles: async (paths) => { for (const path of paths) revealed.delete(path); },
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
@@ -768,38 +774,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     await prepareConnection(context, bridge, storage.fsPath);
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
-    status.command = 'diffGuide.startClaude';
+    status.command = 'diffGuide.showFocusedClaude';
     const updateStatus = (): void => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);
-      if (focused !== undefined) {
-        const current = claudeStatus(focused.runner.activity);
-        status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
-        status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
-        status.command = 'diffGuide.showFocusedClaude';
-        status.show();
+      if (focused === undefined) {
+        status.hide();
         return;
       }
-      status.command = 'diffGuide.startClaude';
-      const waiting = store.pendingEvents.length;
-      const ready = bridge.state.deliveryReady === true;
-      const label = !bridge.state.connected ? '$(diffguide-orb-away) Review · Verbinden'
-        : ready ? '$(diffguide-orb) Review' : '$(diffguide-orb-asleep) Review · Zustellung pausiert';
-      status.text = `${label}${waiting ? ` · ${waiting} wartet` : ''}`;
-      status.tooltip = !bridge.state.connected
-        ? 'Mit Claude Code verbinden. Abgeschickte Kommentare bleiben bis zur Bestätigung gespeichert.'
-        : ready ? 'Automatische Zustellung aktiv. Claude bestätigt jeden Kommentar separat.'
-          : 'Claude-Verbindung vorhanden. Die automatische Zustellung ist noch nicht aktiv. Zum Wiederverbinden klicken.';
+      const current = claudeStatus(focused.runner.activity);
+      status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
+      status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
       status.show();
     };
-    context.subscriptions.push(
-      status, store.onChange(updateStatus), bridge.onChange(updateStatus),
-      checkouts.onDidChangeState(updateStatus), vscode.window.onDidChangeActiveTextEditor(updateStatus),
-    );
+    context.subscriptions.push(status, checkouts.onDidChangeState(updateStatus), vscode.window.onDidChangeActiveTextEditor(updateStatus));
     updateStatus();
   } catch (error: unknown) {
     activeBridge?.dispose();
-    await vscode.window.showErrorMessage(`DiffGuide konnte nicht starten: ${error instanceof Error ? error.message : String(error)}`);
+    await vscode.window.showErrorMessage(`DiffGuide could not start: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -841,6 +833,7 @@ function registerLocalReview(
   const files = new LocalFilesView(async () => {
     const checkouts = await listCheckouts();
     void vscode.commands.executeCommand('setContext', 'diffGuide.localAvailable', checkouts.length > 0);
+    void vscode.commands.executeCommand('setContext', 'diffGuide.localSingle', checkouts.length === 1);
     return checkouts;
   }, async (checkout) => checkout.kind === 'pr' ? pullRequestThreads(checkout) : (await sessions.find(checkout.root))?.store.threads ?? []);
   /** A checkout the Local view lists, so command arguments cannot point anywhere else. */
@@ -849,10 +842,9 @@ function registerLocalReview(
     if (checkout === undefined) throw new Error('That checkout is no longer listed. Refresh the Local view.');
     return checkout;
   };
-  const nodeOf = (node: unknown): { readonly root?: unknown; readonly path?: unknown } => {
+  const nodeOf = (node: unknown): { readonly root?: unknown } => {
     if (typeof node !== 'object' || node === null) return {};
-    const checkout = 'checkout' in node && typeof node.checkout === 'object' && node.checkout !== null && 'root' in node.checkout ? node.checkout.root : undefined;
-    return { root: checkout, ...'path' in node ? { path: node.path } : {} };
+    return { root: 'checkout' in node && typeof node.checkout === 'object' && node.checkout !== null && 'root' in node.checkout ? node.checkout.root : undefined };
   };
   const openCheckout = async (checkout: LocalCheckout, path?: string): Promise<void> => {
     if (checkout.kind === 'pr') { await openPullRequest(checkout, path); return; }
@@ -876,13 +868,21 @@ function registerLocalReview(
   };
   void applyFilter(state.get<string>(localFilterKey, ''));
   let listing: ReturnType<typeof setTimeout> | undefined;
-  const watcher = vscode.workspace.createFileSystemWatcher('**/*', false, true, false);
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*');
   const relist = (uri: vscode.Uri): void => {
     const parts = uri.fsPath.split(/[\\/]/u);
     const worktreeAdded = parts.at(-3) === '.git' && parts.at(-2) === 'worktrees';
     if (parts.includes('.git') && !worktreeAdded) return;
     if (listing !== undefined) clearTimeout(listing);
     listing = setTimeout(() => { listing = undefined; files.reload(); }, 500);
+  };
+  let counting: ReturnType<typeof setTimeout> | undefined;
+  /** Count changed files again after an edit or commit, without listing the checkouts again. */
+  const recount = (uri: vscode.Uri): void => {
+    const parts = uri.fsPath.split(/[\\/]/u);
+    if (parts.includes('.git') && parts.at(-1) !== 'index') return;
+    if (counting !== undefined) clearTimeout(counting);
+    counting = setTimeout(() => { counting = undefined; files.recount(); }, 500);
   };
   return [
     vscode.commands.registerCommand('diffGuide.openLocalReview', (node: unknown) => {
@@ -894,20 +894,22 @@ function registerLocalReview(
         await openCheckout(checkout);
       });
     }),
-    vscode.commands.registerCommand('diffGuide.openLocalFile', (root: unknown, path: unknown) => {
-      if (typeof path === 'string' && isWorkspaceRelativePath(path)) run(async () => { await openCheckout(await listed(root), path); });
-    }),
-    vscode.commands.registerCommand('diffGuide.openLocalFileInEditor', (node: unknown) => {
-      const { root, path } = nodeOf(node);
-      if (typeof path === 'string' && isWorkspaceRelativePath(path)) {
-        run(async () => { await vscode.window.showTextDocument(vscode.Uri.file(join((await listed(root)).root, path)), { preview: false }); });
-      }
+    vscode.commands.registerCommand('diffGuide.showOnReviewPage', (uri: unknown) => {
+      if (!(uri instanceof vscode.Uri) || uri.scheme !== 'file') return;
+      run(async () => {
+        // The innermost checkout holds the file, since worktrees can sit inside their repository's folder.
+        const holding = (await files.checkouts()).filter((checkout) => !relative(checkout.root, uri.fsPath).startsWith('..') && !isAbsolute(relative(checkout.root, uri.fsPath)))
+          .sort((a, b) => b.root.length - a.root.length)[0];
+        const path = holding === undefined ? undefined : relative(holding.root, uri.fsPath).split(sep).join('/');
+        if (holding === undefined || path === undefined || !isWorkspaceRelativePath(path)) throw new Error('This file is not in a checkout the Local view lists.');
+        await openCheckout(holding, path);
+      });
     }),
     vscode.commands.registerCommand('diffGuide.refreshLocalFiles', () => { files.reload(); }),
     vscode.commands.registerCommand('diffGuide.filterLocal', () => { run(chooseFilter); }),
     vscode.commands.registerCommand('diffGuide.filterLocalActive', () => { run(chooseFilter); }),
-    files, watcher, watcher.onDidCreate(relist), watcher.onDidDelete(relist),
-    { dispose: () => { if (listing !== undefined) clearTimeout(listing); } },
+    files, watcher, watcher.onDidCreate(relist), watcher.onDidDelete(relist), watcher.onDidChange(recount),
+    { dispose: () => { if (listing !== undefined) clearTimeout(listing); if (counting !== undefined) clearTimeout(counting); } },
     sessions.onDidChange(() => { files.redraw(); }),
     onDidChangePullRequests(() => { files.redraw(); }),
     tree,
