@@ -237,7 +237,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
 
   const legend = await level(window.trees.at(-2)?.provider as vscode.TreeDataProvider<unknown>);
   assert.deepEqual(legend.map(({ item }) => [item.label, (item.iconPath as vscode.ThemeIcon).id]), [
-    ['Repository', 'repo'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'], ['Merged', 'git-merge'], ['Awaiting review', 'eye'],
+    ['Repository', 'diffguide-repository'], ['Open', 'git-pull-request'], ['Draft', 'git-pull-request-draft'], ['Merged', 'git-merge'], ['Awaiting review', 'eye'],
     ['Approved', 'pass'], ['Changes requested', 'request-changes'], ['Commented', 'comment-discussion'], ['Checked out in a worktree', 'git-pull-request'],
   ]);
   assert.equal(decoratePullRequest(legend.at(-1)?.item)?.badge, 'W');
@@ -592,7 +592,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   };
   const shown = async () => {
     const roles = await level(tree);
-    const pinned = roles[0]?.item.label === 'PINNED' ? await level(tree, roles[0].node) : [];
+    const pinned = roles[0]?.item.label === 'BOOKMARKS' ? await level(tree, roles[0].node) : [];
     return {
       roles: roles.map(({ item }) => `${String(item.label)} ${String(item.description)}`),
       pinned: pinned.map(({ item }) => `${String(item.label)} · ${String(item.description)} · ${String(item.contextValue)}`),
@@ -603,7 +603,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   await commands.executeCommand('diffGuide.pinPullRequest', three?.node);
   await commands.executeCommand('diffGuide.pinPullRequest', one?.node);
   assert.deepEqual(await shown(), {
-    roles: ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
+    roles: ['BOOKMARKS 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
     pinned: ['Three · #3 · app · review · octo · diffGuide.pullRequest.pinned', 'One · #1 · app · review · octo · diffGuide.pullRequest.pinned'],
   });
   assert.deepEqual((await reviewRows()).map(({ item }) => item.label), ['Two']);
@@ -618,10 +618,10 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three']);
   await drag([two?.node], (await level(tree))[0]?.node);
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three', 'Two']);
-  assert.deepEqual((await shown()).roles, ['PINNED 3', 'REVIEW REQUESTED 0', 'MINE 0', 'ALL OPEN undefined']);
+  assert.deepEqual((await shown()).roles, ['BOOKMARKS 3', 'REVIEW REQUESTED 0', 'MINE 0', 'ALL OPEN undefined']);
 
   await commands.executeCommand('diffGuide.unpinPullRequest', (await level(tree, (await level(tree))[0]?.node))[2]?.node);
-  assert.deepEqual((await shown()).roles, ['PINNED 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
+  assert.deepEqual((await shown()).roles, ['BOOKMARKS 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
 
   reviewRequested = [pr(2, 'Two')];
   open = new Set([1]);
@@ -629,7 +629,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   await level(tree);
   await settle();
   assert.deepEqual(await shown(), {
-    roles: ['PINNED 1', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
+    roles: ['BOOKMARKS 1', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
     pinned: ['Still open 1 · #1 · app · review · octo · diffGuide.pullRequest.pinned'],
   });
   assert.deepEqual(asked, [[1, 3]]);

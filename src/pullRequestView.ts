@@ -98,7 +98,7 @@ const verdicts: Record<ReviewVerdict, { readonly icon: string; readonly color: s
   commented: { icon: 'comment-discussion', color: 'descriptionForeground', label: 'Commented' },
 };
 
-const repositoryIcon = new vscode.ThemeIcon('repo', new vscode.ThemeColor('charts.purple'));
+const repositoryIcon = new vscode.ThemeIcon('diffguide-repository', new vscode.ThemeColor('charts.purple'));
 
 const mergedIcon = new vscode.ThemeIcon('git-merge', new vscode.ThemeColor('charts.purple'));
 
@@ -136,7 +136,7 @@ const legendProvider: vscode.TreeDataProvider<vscode.TreeItem> = {
 };
 
 const sectionLabels: Record<PullRequestRole, string> = { author: 'Mine', reviewer: 'Review requested' };
-const roleIcons: Record<PullRequestRole, string> = { author: 'account', reviewer: 'eye' };
+const roleIcons: Record<PullRequestRole, string> = { author: 'diffguide-outbox', reviewer: 'diffguide-inbox' };
 const roles: readonly PullRequestRole[] = ['reviewer', 'author'];
 
 /** "alice, team Core" for a PR's pending reviewers. */
@@ -515,11 +515,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   async getTreeItem(node: Node): Promise<vscode.TreeItem> {
     switch (node.kind) {
       case 'pinned': {
-        const item = new vscode.TreeItem('PINNED', vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem('BOOKMARKS', vscode.TreeItemCollapsibleState.Expanded);
         item.id = 'pinned';
-        item.iconPath = new vscode.ThemeIcon('pinned');
+        item.iconPath = new vscode.ThemeIcon('diffguide-bookmark');
         item.description = String(node.rows.length);
-        item.tooltip = 'Drag PRs here to pin them, and within this section to reorder them.';
+        item.tooltip = 'Drag PRs here to bookmark them, and within this section to reorder them.';
         return item;
       }
       case 'role': {
@@ -552,13 +552,13 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       }
       case 'allOpenRoot': {
         const item = new vscode.TreeItem('ALL OPEN', vscode.TreeItemCollapsibleState.Collapsed);
-        item.iconPath = new vscode.ThemeIcon('git-pull-request');
+        item.iconPath = new vscode.ThemeIcon('diffguide-stack');
         return item;
       }
       case 'allOpen': {
         const { owner, name } = splitRepository(node.listing.repository.name);
         const item = new vscode.TreeItem(this.byRole ? name : 'All open', vscode.TreeItemCollapsibleState.Collapsed);
-        item.iconPath = this.byRole ? repositoryIcon : new vscode.ThemeIcon('git-pull-request');
+        item.iconPath = this.byRole ? repositoryIcon : new vscode.ThemeIcon('diffguide-stack');
         if (this.byRole) item.description = owner;
         item.tooltip = `Every open PR in ${node.listing.repository.name}`;
         return item;

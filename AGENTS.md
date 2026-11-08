@@ -31,7 +31,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude: native inline c
 - Color names who is involved: `brand` is you and stays neutral (the theme's text color), `agent` slate is the coding agent and its orb, `github` blue is GitHub. Everything else follows the VS Code theme.
 - Page controls use the page's own menus (`.picker`, as on Labels and the Files filter) for choices, not native `<select>` or VS Code quick picks. Text fields keep the shared thin inset focus line from `webviewStyles`.
 - Use our own page widgets wherever a page can host them: confirm in place (`askInline` row, or `askInMenu` under a button with no row), edit text in an inline form, pick from a `.picker` menu, report results in the page notice. A button that opens a form becomes that form's confirm button, as Merge does. Use VS Code modals, input boxes, quick picks and toasts only where no page is open, such as the sidebar, editor commands and setup, and for errors that must reach a closed page.
-- Webview icons are codicon SVGs from `src/codicons.ts`; add new ones there from microsoft/vscode-codicons.
+- Draw every new icon ourselves in `src/icons.ts`, following [docs/ICONS.md](docs/ICONS.md): 1.25 px line icons, pixels only for the orb and the DiffGuide mark. Don't copy codicons or other icon sets. Native surfaces use the font `npm run icons` builds from the same file.
 - Use clear system sans-serif fonts for extension UI and monospace fonts for code. Never use Comic Sans or handwritten novelty fonts.
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.
 - Name controls after existing ones that do the same thing; a checkbox that marks lines reviewed is "Viewed", like the file's.

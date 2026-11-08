@@ -14,7 +14,7 @@ a{color:var(--vscode-textLink-foreground,var(--brand));cursor:pointer;text-decor
 button{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-6);box-sizing:border-box;min-height:28px;padding:0 var(--space-12);border:1px solid var(--vscode-button-border,transparent);border-radius:var(--radius-sm);color:var(--on-action-secondary);background:var(--action-secondary);font:inherit;cursor:pointer}
 button:hover{filter:brightness(1.08)}
 button.primary{color:var(--on-action);background:var(--action);font-weight:600}
-button.agent{color:var(--on-agent);background:var(--agent);font-weight:600}
+button.agent{color:var(--on-agent);background:var(--agent);font-weight:600}button.agent-outline{color:var(--agent);background:none;border-color:var(--agent);font-weight:600}button.agent-outline:hover{filter:none;background:var(--agent-soft)}
 button.quiet{padding:0 var(--space-4);color:var(--ink-muted);background:none;border-color:transparent}
 button.quiet:hover{color:var(--ink);filter:none;text-decoration:underline}
 button.small{min-height:22px;padding:0 var(--space-8);font-size:12px}

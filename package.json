@@ -56,6 +56,7 @@
   },
   "scripts": {
     "build": "node esbuild.mjs",
+    "icons": "node scripts/icons.mjs",
     "vscode:prepublish": "npm run build",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
@@ -232,13 +233,13 @@
         "command": "diffGuide.refreshPullRequests",
         "title": "Refresh pull requests",
         "category": "DiffGuide",
-        "icon": "$(refresh)"
+        "icon": "$(diffguide-refresh)"
       },
       {
         "command": "diffGuide.searchPullRequests",
         "title": "Search pull requests",
         "category": "DiffGuide",
-        "icon": "$(search)"
+        "icon": "$(diffguide-search)"
       },
       {
         "command": "diffGuide.openPullRequestLink",
@@ -280,13 +281,13 @@
         "command": "diffGuide.filterByAuthor",
         "title": "Filter by author",
         "category": "DiffGuide",
-        "icon": "$(filter)"
+        "icon": "$(diffguide-filter)"
       },
       {
         "command": "diffGuide.filterByAuthorActive",
         "title": "Filter by author",
         "category": "DiffGuide",
-        "icon": "$(filter-filled)"
+        "icon": "$(diffguide-filter-active)"
       },
       {
         "command": "diffGuide.groupByRole",
@@ -324,15 +325,15 @@
       },
       {
         "command": "diffGuide.pinPullRequest",
-        "title": "Pin",
+        "title": "Bookmark",
         "category": "DiffGuide",
-        "icon": "$(pin)"
+        "icon": "$(diffguide-bookmark)"
       },
       {
         "command": "diffGuide.unpinPullRequest",
-        "title": "Unpin",
+        "title": "Remove bookmark",
         "category": "DiffGuide",
-        "icon": "$(pinned)"
+        "icon": "$(diffguide-bookmark-filled)"
       },
       {
         "command": "diffGuide.removePullRequestWorktree",
@@ -344,13 +345,13 @@
         "command": "diffGuide.showPullRequestClaude",
         "title": "Show Claude activity",
         "category": "DiffGuide",
-        "icon": "$(output)"
+        "icon": "$(diffguide-orb)"
       },
       {
         "command": "diffGuide.showPullRequestOverview",
         "title": "Open review page",
         "category": "DiffGuide",
-        "icon": "$(dashboard)"
+        "icon": "$(diffguide-mark)"
       },
       {
         "command": "diffGuide.publishThread",
@@ -779,6 +780,106 @@
           "type": "boolean",
           "default": false,
           "description": "Show sample pull requests instead of querying GitHub. For development and testing only."
+        }
+      }
+    },
+    "icons": {
+      "diffguide-orb": {
+        "description": "DiffGuide orb",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E000"
+        }
+      },
+      "diffguide-orb-asleep": {
+        "description": "DiffGuide orb asleep",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E001"
+        }
+      },
+      "diffguide-orb-away": {
+        "description": "DiffGuide orb away",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E002"
+        }
+      },
+      "diffguide-mark": {
+        "description": "DiffGuide mark",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E003"
+        }
+      },
+      "diffguide-inbox": {
+        "description": "DiffGuide inbox",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E004"
+        }
+      },
+      "diffguide-outbox": {
+        "description": "DiffGuide outbox",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E005"
+        }
+      },
+      "diffguide-stack": {
+        "description": "DiffGuide stack",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E006"
+        }
+      },
+      "diffguide-repository": {
+        "description": "DiffGuide repository",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E007"
+        }
+      },
+      "diffguide-bookmark": {
+        "description": "DiffGuide bookmark",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E008"
+        }
+      },
+      "diffguide-bookmark-filled": {
+        "description": "DiffGuide bookmark filled",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E009"
+        }
+      },
+      "diffguide-search": {
+        "description": "DiffGuide search",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E00A"
+        }
+      },
+      "diffguide-filter": {
+        "description": "DiffGuide filter",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E00B"
+        }
+      },
+      "diffguide-filter-active": {
+        "description": "DiffGuide filter active",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E00C"
+        }
+      },
+      "diffguide-refresh": {
+        "description": "DiffGuide refresh",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontCharacter": "\\E00D"
         }
       }
     }

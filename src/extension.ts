@@ -705,8 +705,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       status.command = 'diffGuide.startClaude';
       const waiting = store.pendingEvents.length;
       const ready = bridge.state.deliveryReady === true;
-      const label = !bridge.state.connected ? '$(debug-disconnect) Review · Verbinden'
-        : ready ? '$(comment-discussion) Review' : '$(warning) Review · Zustellung pausiert';
+      const label = !bridge.state.connected ? '$(diffguide-orb-away) Review · Verbinden'
+        : ready ? '$(diffguide-orb) Review' : '$(diffguide-orb-asleep) Review · Zustellung pausiert';
       status.text = `${label}${waiting ? ` · ${waiting} wartet` : ''}`;
       status.tooltip = !bridge.state.connected
         ? 'Mit Claude Code verbinden. Abgeschickte Kommentare bleiben bis zur Bestätigung gespeichert.'

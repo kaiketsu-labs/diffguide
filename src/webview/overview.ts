@@ -8,7 +8,7 @@ import { fileTree, type FileFolder } from '../fileTree.js';
 import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLines.js';
 import type { LineRange } from '../reviewedFiles.js';
 import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
-import { codicons } from '../codicons.js';
+import { icons } from '../icons.js';
 import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
 import type * as PdfJs from 'pdfjs-dist';
 import { orbCanvas, stepMotion } from './orb.js';
@@ -153,7 +153,7 @@ let author = true;
 /** The description is open for editing, so redraws leave it alone. */
 let editingBody = false;
 const reviewButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-event]')];
-const stateShapes = { done: codicons.check, failed: codicons.close, active: codicons.circleFilled, idle: codicons.circle } as const;
+const stateShapes = { done: icons.check, failed: icons.close, active: icons.dot, idle: icons.circle } as const;
 type StateShape = keyof typeof stateShapes;
 const labels: Record<ReviewerState | CheckState, readonly [StateShape, string, string]> = {
   approved: ['done', 'ok', 'Approved'], changes: ['failed', 'bad', 'Requested changes'], commented: ['active', 'muted', 'Commented'],
@@ -296,8 +296,45 @@ function stepLog(steps: readonly ClaudeStep[], startedAt?: number): HTMLElement 
 }
 
 function button(label: string, onClick: () => void, className?: string): HTMLButtonElement {
-  const node = el('button', className ?? '', label);
+  const node = el('button', className ?? '');
+  setLabel(node, label);
   node.addEventListener('click', onClick);
+  return node;
+}
+
+/** A button that sends to the agent: filled slate for the row's main action, outlined slate otherwise. */
+function agentButton(intent: 'ask' | 'implement', label: string, onClick: () => void, filled = intent === 'ask'): HTMLButtonElement {
+  const node = button(label, onClick, filled ? 'agent' : 'agent-outline');
+  node.replaceChildren(icon(intent === 'ask' ? icons.agentAsk : icons.agentImplement), label);
+  return node;
+}
+
+/** The icon for a text button, by the first two words of its label or else the first. */
+const labelIcons: Readonly<Record<string, string>> = {
+  Cancel: icons.close, Save: icons.check, Comment: icons.comment, Update: icons.check, Post: icons.send, Add: icons.send, Approve: icons.check, Request: icons.requestChanges,
+  Discard: icons.trash, Delete: icons.trash, Dismiss: icons.close, Show: icons.show, Hide: icons.hidden, Merge: icons.merge, Confirm: icons.check, Enable: icons.merge, Disable: icons.close,
+  Remove: icons.close, 'Update branch': icons.sync, Push: icons.push, Link: icons.link, Unlink: icons.unlink, Open: icons.openExternal, Commit: icons.commit, Apply: icons.check,
+  Suggest: icons.suggest, Clear: icons.close, Unmark: icons.close, Retry: icons.sync, Ready: icons.ready, Close: icons.closePullRequest, Reopen: icons.reopen, Build: icons.agentGuide, Rebuild: icons.agentGuide,
+  Stop: icons.stop, Fix: icons.agentFix, Convert: icons.edit, Restore: icons.reopen, Revert: icons.reopen, Publish: icons.github, Full: icons.fullFile, Diff: icons.file, Find: icons.search, Mark: icons.ready, 'Show all': icons.show,
+};
+
+/** Sets a button's label, led by its icon from `labelIcons`. */
+function setLabel(node: HTMLElement, label: string): void {
+  const words = label.split(' ');
+  const svg = labelIcons[words.slice(0, 2).join(' ')] ?? labelIcons[words[0] ?? ''];
+  node.replaceChildren(...svg === undefined ? [] : [icon(svg)], label);
+}
+
+/** Sets a node's tooltip and returns the node. */
+function titled<T extends HTMLElement>(node: T, tip: string): T {
+  node.title = tip;
+  return node;
+}
+
+/** A text button led by `svg` instead of its label's icon. */
+function iconButton(svg: string, label: string, onClick: () => void, className?: string): HTMLButtonElement {
+  const node = button(label, onClick, className);
+  node.replaceChildren(icon(svg), label);
   return node;
 }
 
@@ -328,9 +365,9 @@ function branchRef(name: string): HTMLButtonElement {
 function copyRef(text: string, value: string, what: string): HTMLButtonElement {
   const ref = el('button', 'ref');
   ref.title = 'Copy ' + what;
-  const copy = icon(codicons.copy);
+  const copy = icon(icons.copy);
   copy.classList.add('copy');
-  const done = icon(codicons.check);
+  const done = icon(icons.check);
   done.classList.add('done');
   ref.append(text, copy, done);
   ref.addEventListener('click', () => {
@@ -460,7 +497,7 @@ function renderPicker(filter = picker?.node.querySelector('input')?.value ?? '')
       } else if (box.checked) selected.add(item.key);
       else selected.delete(item.key);
     });
-    const mark = icon(codicons.check);
+    const mark = icon(icons.check);
     mark.classList.add('check');
     row.append(box);
     if (item.color === undefined) row.append(mark, el('span', 'text', item.text));
@@ -534,7 +571,7 @@ function renderState(details: PullRequestDetails): void {
   else drawMergeButtons();
   $('mergeable').textContent = draft ? 'Mark it ready for review before merging.'
     : !details.open ? (details.merged ? '' : 'Closed without merging.')
-    : details.mergeable === 'no' ? 'Has conflicts with the base branch.' : details.mergeable === 'unknown' ? 'GitHub is still checking for conflicts.' : '';
+    : '';
   const conflicted = details.open && details.mergeable === 'no' && details.canEdit;
   const question = conflicted && current?.claude.running !== true ? current?.conflictQuestion : undefined;
   $('conflict-row').hidden = !conflicted || question !== undefined;
@@ -548,8 +585,7 @@ function renderState(details: PullRequestDetails): void {
   const fixing = current?.claude.fixingConflicts;
   const note = $('conflict-note');
   note.className = fixing === undefined ? 'muted' : 'chip agent working';
-  const text = fixing ?? 'Claude merges the base branch, resolves the conflicts and pushes.';
-  note.replaceChildren(fixing === undefined ? text : el('span', '', text));
+  note.replaceChildren(...fixing === undefined ? [] : [el('span', '', fixing)]);
   note.title = fixing ?? '';
   const actions: HTMLButtonElement[] = [];
   const add = (label: string, message: PageMessage, className = 'quiet', question?: string): void => {
@@ -647,7 +683,7 @@ function reactionsRow(subject: string, reactions: readonly ReactionCount[], canR
     row.append(pop);
   } else {
     const add = button('', () => { emojiFor = subject; redraw(); }, 'reaction add');
-    add.append(icon(codicons.reactions));
+    add.append(icon(icons.reaction));
     add.title = 'Add reaction';
     add.setAttribute('aria-label', 'Add reaction');
     row.append(add);
@@ -679,12 +715,12 @@ function toolButton(svg: string, tip: string, onClick: () => void): HTMLButtonEl
 /** Quote, edit, hide and delete, as far as the viewer may. */
 function commentTools(comment: GitHubComment, place: CommentPlace): HTMLElement {
   const tools = el('span', 'msg-tools');
-  if (comment.body.trim() && !hiddenComment(comment)) tools.append(toolButton(codicons.quote, 'Quote reply', () => place.quote(quoted(comment.body))));
-  if (comment.canEdit && !edits.has(comment.id)) tools.append(toolButton(codicons.edit, 'Edit', () => { edits.set(comment.id, comment.body); focusNext = 'edit:' + comment.id; place.redraw(); }));
-  if (comment.canHide && comment.hidden !== undefined) tools.append(toolButton(codicons.eyeClosed, 'Unhide', () => post({ action: 'hide-comment', id: comment.id, hide: false })));
+  if (comment.body.trim() && !hiddenComment(comment)) tools.append(toolButton(icons.quote, 'Quote reply', () => place.quote(quoted(comment.body))));
+  if (comment.canEdit && !edits.has(comment.id)) tools.append(toolButton(icons.edit, 'Edit', () => { edits.set(comment.id, comment.body); focusNext = 'edit:' + comment.id; place.redraw(); }));
+  if (comment.canHide && comment.hidden !== undefined) tools.append(toolButton(icons.hidden, 'Unhide', () => post({ action: 'hide-comment', id: comment.id, hide: false })));
   else if (comment.canHide) {
     const anchor = 'hide-' + place.kind + '-' + comment.id;
-    const hide = toolButton(codicons.eyeClosed, 'Hide', () => openHideMenu(anchor, comment.id));
+    const hide = toolButton(icons.hidden, 'Hide', () => openHideMenu(anchor, comment.id));
     hide.id = anchor;
     hide.setAttribute('aria-haspopup', 'true');
     const wrap = el('span', 'menu-anchor');
@@ -693,7 +729,7 @@ function commentTools(comment: GitHubComment, place: CommentPlace): HTMLElement 
   }
   if (comment.canDelete) {
     const send = (): void => post(place.kind === 'reviewComment' ? { action: 'github-delete', id: comment.id } : { action: 'delete-issue-comment', id: comment.id });
-    const remove = toolButton(codicons.trash, 'Delete on GitHub', () => askInline({ key: 'delete:' + comment.id, question: 'Delete this comment on GitHub? Everyone on the PR loses it.', label: 'Delete', send, redraw: place.redraw }));
+    const remove = toolButton(icons.trash, 'Delete on GitHub', () => askInline({ key: 'delete:' + comment.id, question: 'Delete this comment on GitHub? Everyone on the PR loses it.', label: 'Delete', send, redraw: place.redraw }));
     remove.classList.add('delete');
     tools.append(remove);
   }
@@ -900,7 +936,7 @@ function personAvatar(url: string, name: string | undefined, title: string): HTM
   const fallback = (): HTMLElement => {
     const letters = name === undefined ? '' : initials(name);
     const node = el('span', 'avatar' + (letters ? ' initials' : ''), letters);
-    if (!letters) node.append(icon(codicons.account));
+    if (!letters) node.append(icon(icons.account));
     node.title = title;
     return node;
   };
@@ -1006,7 +1042,7 @@ function eventItem(item: Extract<TimelineItem, { kind: 'event' }>): HTMLElement 
 function commitGroup(commits: readonly Extract<TimelineItem, { kind: 'commit' }>[]): HTMLElement {
   const node = el('div', 'timeline-item commits');
   const mark = el('span', 'avatar');
-  mark.append(icon(codicons.gitCommit));
+  mark.append(icon(icons.commit));
   const authors = [...new Set(commits.map((commit) => commit.author))];
   const main = el('div');
   const last = commits.at(-1);
@@ -1154,7 +1190,7 @@ function renderRangeControls(): void {
   const label = rangeLabel(diffRange);
   const range = $('range');
   range.title = label;
-  range.querySelector('.range-text')?.replaceChildren(...diffRange.kind === 'commits' && diffRange.from === diffRange.to ? [hashChip(diffRange.from), ' ' + label.slice(8)] : [label]);
+  range.querySelector('.range-text')?.replaceChildren(...diffRange.kind === 'commits' && diffRange.from === diffRange.to ? [hashChip(diffRange.from)] : [label]);
   range.classList.toggle('on', diffRange.kind !== 'all');
   const note = $('range-note');
   note.hidden = diffRange.kind === 'all';
@@ -1168,23 +1204,23 @@ function renderRangeControls(): void {
     text.append(title, facts);
     const all = button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small');
     all.title = why;
-    note.replaceChildren(icon(codicons.gitCommit), text, all);
+    note.replaceChildren(icon(icons.commit), text, all);
   }
 }
 
 /** A checkable row of a toolbar menu; `radio` rows close the menu when picked. */
-function menuRow(content: (Node | string)[], checked: boolean, change: (on: boolean) => void, radio = false): HTMLElement {
+function menuRow(content: (Node | string)[], checked: boolean, change: (on: boolean) => void, radio = false, svg?: string): HTMLElement {
   const label = el('label', 'picker-row');
   const box = el('input');
   box.type = radio ? 'radio' : 'checkbox';
   box.name = radio ? 'menu' : '';
   box.checked = checked;
   box.addEventListener('change', () => { change(box.checked); });
-  const mark = icon(codicons.check);
+  const mark = icon(icons.check);
   mark.classList.add('check');
   const text = el('span', 'text');
   text.append(...content);
-  label.append(box, mark, text);
+  label.append(box, mark, ...svg === undefined ? [] : [icon(svg)], text);
   return label;
 }
 
@@ -1251,7 +1287,7 @@ function rangeRow(content: Node[], checked: boolean, choose: (shift: boolean) =>
   const row = el('button', 'picker-row range-row');
   row.setAttribute('role', 'menuitemcheckbox');
   row.setAttribute('aria-checked', String(checked));
-  const mark = icon(codicons.check);
+  const mark = icon(icons.check);
   mark.classList.add('check');
   row.append(mark, ...content);
   row.addEventListener('click', (event) => { choose(event.shiftKey); });
@@ -1311,10 +1347,10 @@ function allFolded(): boolean {
 function openViewMenu(): void {
   const commentsOpen = document.querySelector('details.thread[open]') !== null;
   const rows = [
-    ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); })] : [],
-    ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); })] : [],
-    menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }),
-    menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }),
+    ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); }, false, icons.whitespace)] : [],
+    ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
+    menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
+    menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }, false, icons.margin),
   ];
   openToolbarMenu('view-menu', rows);
 }
@@ -1372,11 +1408,11 @@ function drawMergeButtons(): void {
   const merge = current?.conversation?.merge;
   const form = mergeForm;
   const mergeButton = $('merge');
-  mergeButton.textContent = form?.auto === false ? 'Confirm ' + methodLabels[mergeMethod].toLowerCase() : merge?.mergeQueue ? 'Merge when ready' : 'Merge';
+  setLabel(mergeButton, form?.auto === false ? 'Confirm ' + methodLabels[mergeMethod].toLowerCase() : merge?.mergeQueue ? 'Merge when ready' : 'Merge');
   mergeButton.classList.toggle('primary', form?.auto === false);
   mergeButton.hidden = form?.auto === true;
   const auto = $('auto-merge');
-  auto.textContent = form?.auto ? 'Confirm auto-merge' : 'Enable auto-merge';
+  setLabel(auto, form?.auto ? 'Confirm auto-merge' : 'Enable auto-merge');
   auto.className = form?.auto ? 'primary' : 'quiet';
   auto.hidden = form ? !form.auto : !merge?.canEnableAutoMerge || merge.autoMerge !== undefined || merge.state === 'clean' || merge.mergeQueue;
   $('merge-cancel').hidden = !form;
@@ -1533,6 +1569,8 @@ function mergeChecklist(details: PullRequestDetails, conversation: PullRequestCo
   if (failing.length) add('bad', 'failed', failing.length + (failing.length === 1 ? ' failing check' : ' failing checks') + (failing.some((check) => required.has(check.name)) ? ', some required' : ''));
   else if (running.length) add('wait', 'active', running.length + (running.length === 1 ? ' check running' : ' checks running'));
   else if (details.checks.length) add('ok', 'done', 'All checks passed');
+  if (details.mergeable === 'no') add('bad', 'failed', 'Conflicts with the base branch');
+  else if (details.mergeable === 'unknown') add('wait', 'active', 'Checking for conflicts');
   if (merge.state === 'blocked') add('bad', 'failed', 'Merging is blocked' + (merge.canBypass ? '. You may merge anyway, bypassing the rules.' : '.'));
   if (merge.state !== 'clean' && !merge.autoMergeAllowed && merge.autoMerge === undefined && !merge.mergeQueue && isWriter(conversation)) add('muted', 'idle', 'Auto-merge is off in this repository\'s settings.');
   return rows;
@@ -1565,13 +1603,13 @@ function hiddenComment(entry: { readonly id: string; readonly hidden?: string })
 function renderBatch(): void {
   const node = $<HTMLButtonElement>('commit-batch');
   node.hidden = batch.size === 0;
-  node.textContent = 'Commit ' + batch.size + (batch.size === 1 ? ' suggestion' : ' suggestions');
+  setLabel(node, 'Commit ' + batch.size + (batch.size === 1 ? ' suggestion' : ' suggestions'));
 }
 
 /** One GitHub annotation from a check, under the line it points at. */
 function annotationBox(note: Annotation & { readonly check: string }): HTMLElement {
   const box = el('div', 'annotation-box ' + note.level);
-  box.append(icon(note.level === 'failure' ? codicons.error : note.level === 'warning' ? codicons.warning : codicons.info));
+  box.append(icon(note.level === 'failure' ? icons.error : note.level === 'warning' ? icons.warning : icons.info));
   const text = el('div');
   text.append(el('b', '', (note.title || note.check) + ' '), el('span', 'muted', note.title ? note.check : ''), el('div', '', note.message));
   box.append(text);
@@ -1614,7 +1652,7 @@ function onShortcut(event: KeyboardEvent): void {
 }
 
 function baseButton(): HTMLElement {
-  const edit = toolButton(codicons.edit, 'Change base branch', openBaseMenu);
+  const edit = toolButton(icons.edit, 'Change base branch', openBaseMenu);
   edit.id = 'change-base';
   edit.classList.add('icon-button');
   edit.dataset.prAction = '';
@@ -1636,12 +1674,12 @@ function renderReviewers(state: OverviewState, force = false): void {
   for (const reviewer of details.reviewers) {
     const tools: HTMLElement[] = [];
     if (details.canEdit && details.open && reviewer.team === undefined && reviewer.state !== 'requested' && reviewer.name !== conversation?.viewerLogin) {
-      const again = toolButton(codicons.sync, 'Re-request review', () => changePullRequest({ action: 'rerequest', login: reviewer.name }));
+      const again = toolButton(icons.sync, 'Re-request review', () => changePullRequest({ action: 'rerequest', login: reviewer.name }));
       again.dataset.prAction = '';
       tools.push(again);
     }
     if (isWriter(conversation) && details.open && (reviewer.state === 'approved' || reviewer.state === 'changes') && conversation?.reviewIds[reviewer.name] !== undefined) {
-      const dismiss = toolButton(codicons.close, 'Dismiss review', () => {
+      const dismiss = toolButton(icons.close, 'Dismiss review', () => {
         dismissing = { login: reviewer.name, text: '' };
         renderReviewers(state, true);
         $('reviewers').querySelector('textarea')?.focus();
@@ -1731,7 +1769,7 @@ function render(state: OverviewState): void {
       if (extra?.required) tools.push(el('span', 'file-chip', 'Required'));
       const runId = extra?.runId;
       if (check.state === 'failure' && runId !== undefined && isWriter(state.conversation)) {
-        const rerun = toolButton(codicons.sync, 'Re-run failed jobs', () => changePullRequest({ action: 'rerun', run: runId }));
+        const rerun = toolButton(icons.sync, 'Re-run failed jobs', () => changePullRequest({ action: 'rerun', run: runId }));
         rerun.dataset.prAction = '';
         tools.push(rerun);
       }
@@ -1791,19 +1829,19 @@ function render(state: OverviewState): void {
   const stop = $<HTMLButtonElement>('stop-claude');
   const progress = state.claude.running ? state.claude.progress : undefined;
   claude.after(stop, terminal);
-  if (progress === undefined) claude.textContent = state.claude.text;
+  if (progress === undefined) claude.replaceChildren(...state.claude.running ? [] : [icon(icons.orb)], state.claude.text);
   else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), stop, terminal);
   stop.hidden = !state.claude.running;
   if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; }
-  claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip agent working' : 'chip';
+  claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip agent working' : 'chip orb-chip';
   $('retry').hidden = !state.claude.retry;
   terminal.className = state.claude.running ? 'small' : 'quiet';
-  terminal.textContent = state.claude.running ? 'Stop and open in terminal' : 'Open in terminal';
+  terminal.replaceChildren(icon(icons.terminal), state.claude.running ? 'Stop and open in terminal' : 'Open in terminal');
   terminal.dataset.tip = state.claude.running ? 'Stops the agent\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s agent conversation in a terminal';
   const unpushed = state.unpushed?.length ?? 0;
   const push = $('push');
   push.hidden = !unpushed || !details?.canEdit;
-  push.textContent = 'Push ' + unpushed + (unpushed === 1 ? ' commit' : ' commits');
+  setLabel(push, 'Push ' + unpushed + (unpushed === 1 ? ' commit' : ' commits'));
   $('show-unpushed').hidden = !unpushed;
   renderThreadList();
   renderLinked(state);
@@ -1811,12 +1849,11 @@ function render(state: OverviewState): void {
   setBusy(busy);
   for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.hidden = author;
   document.querySelector<HTMLButtonElement>('[data-event="comment"]')?.classList.toggle('primary', author);
-  $('review-note').textContent = author ? 'This is your PR, so you can only comment.' : '';
+  $('review-box').querySelector<HTMLButtonElement>('[data-event="comment"]')!.title = author ? 'This is your PR, so you can only comment.' : '';
   const pendingCount = details?.pendingComments;
   $('discard-review').hidden = pendingCount === undefined;
-  $('pending-note').textContent = pendingCount !== undefined
-    ? 'Your pending review has ' + pendingCount + ' comment' + (pendingCount === 1 ? '' : 's') + '. Only you see ' + (pendingCount === 1 ? 'it' : 'them') + ' until you submit.'
-    : '';
+  $('pending-note').hidden = pendingCount === undefined;
+  $('pending-note').textContent = pendingCount + ' pending comment' + (pendingCount === 1 ? '' : 's');
   const badge = $('verdict');
   badge.hidden = !details;
   if (details) {
@@ -1840,7 +1877,7 @@ function render(state: OverviewState): void {
   readRanges = state.read;
   const { analysis } = state;
   const analyze = $<HTMLButtonElement>('analyze');
-  analyze.textContent = analysis.running ? 'Stop' : analysis.result ? 'Rebuild guide' : 'Build guide';
+  setLabel(analyze, analysis.running ? 'Stop' : analysis.result ? 'Rebuild guide' : 'Build guide');
   const analysisStatus = $('analysis-status');
   analysisStatus.textContent = analysis.running ? 'Guide · ' + (analysis.step ?? 'Working') : analysis.error ? 'Guide failed' : '';
   analysisStatus.title = analysis.error ?? '';
@@ -1911,7 +1948,7 @@ function renderAnswers(): void {
   for (const thread of away.slice(0, 5)) {
     const row = el('button', 'answer');
     const place = answerPlaces.get(thread.id);
-    row.append(place === 'above' ? icon(codicons.arrowUp) : place === 'below' ? icon(codicons.arrowDown) : el('span'), el('span', 'text', thread.title ?? thread.text), el('span', 'muted', relativeTime(thread.newAnswer ?? '')));
+    row.append(place === 'above' ? icon(icons.arrowUp) : place === 'below' ? icon(icons.arrowDown) : el('span'), el('span', 'text', thread.title ?? thread.text), el('span', 'muted', relativeTime(thread.newAnswer ?? '')));
     row.title = thread.location;
     row.addEventListener('click', () => { jump({ ...thread, source: 'local' }); });
     box.append(row);
@@ -2068,11 +2105,11 @@ function composerBox(draft: Composer): HTMLElement {
     const now = button(busySending && !sentPending ? 'Sending…' : 'Post now', () => send(false));
     now.disabled = busySending || reviewing;
     now.title = reviewing ? 'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.' : 'Posts on GitHub right away.';
-    row.append(...reviewing ? [el('span', 'hint', 'Your review is in progress, so comments go into it.')] : [], el('span', 'gap'), cancelLink, now, review);
+    row.append(...reviewing ? [titled(el('span', 'chip pending', 'Review in progress'), 'New comments go into your pending review.')] : [], el('span', 'gap'), cancelLink, now, review);
   } else {
-    const implement = button('Implement', () => send(true, 'implement'));
+    const implement = agentButton('implement', 'Implement', () => send(true, 'implement'));
     implement.title = 'Agent changes the code';
-    const ask = button(busySending ? 'Sending…' : 'Ask', submit, 'agent');
+    const ask = agentButton('ask', busySending ? 'Sending…' : 'Ask', submit);
     ask.title = 'Agent answers without editing';
     needText.push(implement, ask);
     onDraft(draft.text);
@@ -2189,7 +2226,7 @@ function message(entry: Message, thread?: Thread): HTMLElement {
 }
 
 /** Who can see a thread: Local stays with you and Claude, On GitHub is on the PR, Guide is Claude's note from its guide. */
-const kindMarks: Record<'github' | 'local' | 'analysis', string> = { github: codicons.github, local: codicons.vm, analysis: codicons.map };
+const kindMarks: Record<'github' | 'local' | 'analysis', string> = { github: icons.github, local: icons.local, analysis: icons.agentGuide };
 const kindLabels: Record<'github' | 'local' | 'analysis', string> = { github: 'On GitHub', local: 'Local', analysis: 'Guide' };
 
 function kindLabel(kind: 'github' | 'local' | 'analysis'): HTMLElement {
@@ -2229,6 +2266,14 @@ function threadBox(thread: Thread): HTMLElement {
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
     status, thread.source === 'local' && thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
+  if (thread.url) {
+    const open = el('button', 'icon-button');
+    open.append(icon(icons.github));
+    open.setAttribute('aria-label', 'Open on GitHub');
+    open.dataset.tip = 'Open on GitHub';
+    open.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); post({ action: 'github', id: thread.id }); });
+    summary.append(open);
+  }
   box.append(summary);
   const folded = thread.messages.length > foldThreadsAbove ? thread.messages.length - unfoldedMessages : 0;
   const foldedItems: HTMLElement[] = [];
@@ -2244,10 +2289,10 @@ function threadBox(thread: Thread): HTMLElement {
     }
     if (index === 0 && folded > 0) {
       const label = (): string => `${threadUnfolded.has(thread.id) ? 'Hide' : 'Show'} ${folded} earlier ${folded === 1 ? 'message' : 'messages'}`;
-      const toggle = button(label(), () => {
+      const toggle = iconButton(icons.earlier, label(), () => {
         if (!threadUnfolded.delete(thread.id)) threadUnfolded.add(thread.id);
         for (const each of foldedItems) each.hidden = !threadUnfolded.has(thread.id);
-        toggle.textContent = label();
+        toggle.replaceChildren(icon(icons.earlier), label());
       }, 'quiet unfold');
       box.append(toggle);
     }
@@ -2291,18 +2336,19 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(github ? githubField(key, reply, 'Reply on GitHub, or tell the agent what to do', onReply, () => submit(), cancel)
       : textarea(key, reply, 'Reply', onReply, () => submit(), cancel));
     const busySending = sending.has(key);
-    const primary = button(busySending ? 'Sending…' : !github ? 'Ask' : thread.pending ? 'Add to pending review' : 'Post on GitHub', () => submit(), github ? 'primary' : 'agent');
+    const primaryLabel = busySending ? 'Sending…' : !github ? 'Ask' : thread.pending ? 'Add to pending review' : 'Post on GitHub';
+    const primary = github ? button(primaryLabel, () => submit(), 'primary') : agentButton('ask', primaryLabel, () => submit());
     primary.disabled = busySending;
     actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'));
     if (github) {
-      const ask = button('Ask', () => askClaude('ask'));
+      const ask = agentButton('ask', 'Ask', () => askClaude('ask'), false);
       ask.title = 'Only the agent sees it. Agent answers in a local thread without editing';
-      const implement = button('Implement', () => askClaude('implement'));
+      const implement = agentButton('implement', 'Implement', () => askClaude('implement'));
       implement.title = 'Only the agent sees it. Agent changes the code';
       for (const each of [ask, implement]) { each.disabled = busySending; actions.append(each); }
     } else {
       primary.title = 'Agent answers without editing';
-      const implement = button('Implement', () => submit('implement'));
+      const implement = agentButton('implement', 'Implement', () => submit('implement'));
       implement.title = 'Agent changes the code. Without a note, it implements what the thread discussed';
       implement.disabled = busySending;
       needText.push(primary);
@@ -2314,7 +2360,7 @@ function threadBox(thread: Thread): HTMLElement {
     return box;
   }
   if (thread.source === 'local' && isArchived(thread)) {
-    actions.append(el('span', 'gap'), button('Unarchive', () => setArchived(thread, false)));
+    actions.append(el('span', 'gap'), iconButton(icons.unarchive, 'Unarchive', () => setArchived(thread, false)));
     box.append(actions);
     return box;
   }
@@ -2323,16 +2369,14 @@ function threadBox(thread: Thread): HTMLElement {
     box.append(publishBox(thread, draft));
     return box;
   }
-  actions.append(el('span', 'gap'), thread.url
-    ? button('Open on GitHub ↗', () => post({ action: 'github', id: thread.id }), 'quiet')
-    : thread.source === 'local' ? toGitHubButton(thread) : button('Publish to GitHub…', () => post({ action: 'publish', id: thread.id }), 'quiet'));
+  actions.append(el('span', 'gap'), ...thread.url ? [] : [thread.source === 'local' ? toGitHubButton(thread) : titled(iconButton(icons.github, 'Publish', () => post({ action: 'publish', id: thread.id }), 'quiet'), 'Publish to GitHub')]);
   if (thread.source === 'local') {
-    const archive = button('Archive', () => setArchived(thread, true), 'quiet');
+    const archive = iconButton(icons.archive, 'Archive', () => setArchived(thread, true), 'quiet');
     archive.title = 'Hide this thread. Show archived threads in the filter menu brings it back';
     actions.append(archive);
   }
-  actions.append(button(thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
-  if (!thread.resolved) actions.append(button('Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
+  actions.append(iconButton(thread.resolved ? icons.reopen : icons.check, thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
+  if (!thread.resolved) actions.append(iconButton(icons.reply, 'Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
   box.append(actions);
   return box;
 }
@@ -2351,7 +2395,7 @@ function stopClaude(): void {
 /** Stop beside a thread's live log, for the run that is answering it. */
 function stopButton(): HTMLButtonElement {
   const stop = button('', stopClaude, 'icon-button stop-claude');
-  stop.append(icon(codicons.stopCircle));
+  stop.append(icon(icons.stop));
   setTip(stop, 'Stop. The comments it was answering wait for Retry.');
   stop.disabled = stoppingClaude;
   return stop;
@@ -2361,7 +2405,7 @@ function stopButton(): HTMLButtonElement {
 function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButtonElement {
   const parent = current?.github?.find((github) => github.id === thread.linkedTo);
   if (thread.linkedTo !== undefined) {
-    return button('Reply on GitHub…', () => {
+    return titled(iconButton(icons.github, 'Reply', () => {
       if (parent === undefined || parent.resolved) {
         if (parent) threadOpen.set(parent.id, true);
         post({ action: 'publish', id: thread.id });
@@ -2371,9 +2415,9 @@ function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButt
       focusNext = 'reply:' + parent.id;
       save();
       renderFiles([parent.path]);
-    }, 'quiet');
+    }, 'quiet'), 'Reply on GitHub');
   }
-  return button('Publish to GitHub…', () => { publishing.set(thread.id, thread.draft ?? ''); focusNext = 'publish:' + thread.id; save(); renderFiles([thread.path]); }, 'quiet');
+  return titled(iconButton(icons.github, 'Publish', () => { publishing.set(thread.id, thread.draft ?? ''); focusNext = 'publish:' + thread.id; save(); renderFiles([thread.path]); }, 'quiet'), 'Publish to GitHub');
 }
 
 /** Edit a local thread's comment and post it on the PR diff, now or into the pending review. */
@@ -2399,7 +2443,7 @@ function publishBox(thread: Thread & { readonly source: 'local' }, draft: string
   now.disabled = busySending || reviewing;
   now.title = reviewing ? 'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.' : 'Posts on GitHub right away.';
   const row = el('div', 'row actions composer-actions');
-  row.append(...reviewing ? [el('span', 'hint', 'Your review is in progress, so comments go into it.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), now, review);
+  row.append(...reviewing ? [titled(el('span', 'chip pending', 'Review in progress'), 'New comments go into your pending review.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), now, review);
   const fragment = document.createDocumentFragment();
   fragment.append(field, row);
   return fragment;
@@ -3081,6 +3125,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   showGuideTab();
   renderRangeControls();
   setTip($('fold-all'), allFolded() ? 'Expand all files' : 'Collapse all files');
+  $('fold-all').innerHTML = allFolded() ? icons.expandAll : icons.collapseAll;
   if (!files || view === 'overview') return;
   if (focusThread !== undefined) {
     const id = focusThread;
@@ -3097,7 +3142,6 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     threadsByFile.set(thread.path, list);
     list.push(thread);
   }
-  $('files-title').textContent = (shownFiles.length < allFiles.length ? shownFiles.length + ' of ' + allFiles.length + ' files · ' : '') + shownFiles.filter((file) => viewed.has(file.path)).length + '/' + shownFiles.length + ' viewed';
   const tree = fileTree(shownFiles);
   renderFileNav(tree, shownFiles, threadsByFile);
   const visible = !folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
@@ -3152,7 +3196,8 @@ function renderFileNav(tree: FileFolder<FileDiff>, shown: readonly FileDiff[], t
   nav.classList.toggle('folded', navFolded);
   const head = el('button', 'nav-head');
   head.setAttribute('aria-expanded', String(!navFolded));
-  head.append(chevronMark(navFolded), shown.length + (shown.length === 1 ? ' file' : ' files'), el('span', 'muted', shown.filter((file) => viewed.has(file.path)).length + ' viewed'));
+  const total = files?.length ?? shown.length;
+  head.append(chevronMark(navFolded), (shown.length < total ? shown.length + ' of ' + total : shown.length) + (total === 1 ? ' file' : ' files'), el('span', 'muted', shown.filter((file) => viewed.has(file.path)).length + ' viewed'));
   head.addEventListener('click', () => { navFolded = !navFolded; renderFileNav(tree, shown, threadsByFile); });
   const list = el('ul', 'nav-list');
   const add = (folder: FileFolder<FileDiff>, depth: number): void => {
@@ -3194,7 +3239,7 @@ function navFile(file: FileDiff, depth: number, threads: readonly Thread[]): HTM
   const done = el('span', 'nav-done');
   if (viewed.has(file.path)) {
     done.title = 'Viewed';
-    done.append(icon(codicons.check));
+    done.append(icon(icons.check));
   }
   row.append(done);
   row.addEventListener('click', () => showFile(file.path));
@@ -3432,7 +3477,7 @@ function staleGuideRow(result: Analysis, groups: readonly GuideGroup[]): HTMLEle
     unplaced > 0 ? unplaced + (unplaced === 1 ? ' change is' : ' changes are') + ' in Not placed by the guide' : undefined,
   ].filter(Boolean).join('. ') + '.';
   const row = el('div', 'row range-note stale-guide');
-  row.append(icon(codicons.warning), el('span', 'gap wait', facts));
+  row.append(icon(icons.warning), el('span', 'gap wait', facts));
   const rebuild = button(current?.analysis.running ? 'Rebuilding…' : 'Rebuild guide', () => { $('error').textContent = ''; post({ action: 'analyze' }); }, 'claude small');
   rebuild.disabled = current?.analysis.running === true;
   row.append(rebuild);
@@ -3570,13 +3615,11 @@ function railItem(child: HTMLElement): HTMLElement {
 function foldToggle(isCollapsed: boolean): HTMLElement {
   const button = el('span', 'fold-toggle');
   button.title = isCollapsed ? 'Unfold' : 'Fold';
-  button.innerHTML = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5 8h6' + (isCollapsed ? 'M8 5v6' : '') + '"/></svg>';
+  button.innerHTML = isCollapsed ? icons.unfold : icons.fold;
   return button;
 }
 
 function updateGuideProgress(groups: readonly GuideGroup[]): void {
-  const steps = groups.flatMap((group) => group.steps);
-  $('files-title').textContent = steps.filter(stepViewed).length + '/' + steps.length + ' steps viewed';
   for (const group of groups) {
     const head = document.querySelector('[data-group="' + CSS.escape(group.key) + '"]');
     const progress = head?.querySelector('.progress');
@@ -3591,7 +3634,6 @@ function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const container = $('files');
   const result = current?.analysis.result;
   if (!files || !result) {
-    $('files-title').textContent = '';
     $('files').parentElement?.classList.add('no-nav');
     container.replaceChildren(guideIntro());
     return;
@@ -3643,20 +3685,25 @@ function renderGuideNav(groups: readonly GuideGroup[]): void {
   head.addEventListener('click', () => { navFolded = !navFolded; renderGuideNav(groups); });
   const list = el('ul', 'nav-list');
   for (const group of groups) {
+    const isCollapsed = groupCollapsed(group);
+    const fold = chevronMark(isCollapsed);
+    fold.title = isCollapsed ? 'Unfold section' : 'Fold section';
+    fold.addEventListener('click', (event) => { event.stopPropagation(); collapsed.set(guideState('group', group.key), !isCollapsed); save(); renderFiles(); });
     const row = el('button', 'nav-section sev-' + group.severity);
     row.title = severityLabels[group.severity] + ': ' + group.title;
-    row.append(el('span', 'nav-sev'), el('span', 'nav-name', group.title), el('span', 'nav-progress', group.steps.filter(stepViewed).length + '/' + group.steps.length));
+    row.append(fold, el('span', 'nav-sev'), el('span', 'nav-name', group.title), el('span', 'nav-progress', group.steps.filter(stepViewed).length + '/' + group.steps.length));
     row.addEventListener('click', () => revealGroup(group.key));
     const item = el('li');
     item.append(row);
     list.append(item);
+    if (isCollapsed) continue;
     group.steps.forEach((step, index) => {
       const done = stepViewed(step);
       const stepRow = el('button', 'nav-file nav-step' + (done ? ' done' : ''));
       stepRow.dataset.navStep = step.key;
       stepRow.title = step.path + (step.note === undefined ? '' : '\n\n' + step.note);
       const mark = el('span', 'nav-done');
-      if (done) mark.append(icon(codicons.check));
+      if (done) mark.append(icon(icons.check));
       stepRow.append(el('span', 'nav-number', String(index + 1)), el('span', 'nav-name', step.title ?? step.path.split('/').at(-1) ?? step.path), mark);
       stepRow.addEventListener('click', () => revealStep(step.key));
       const stepItem = el('li');
@@ -3715,7 +3762,7 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   label.append(check, 'Viewed');
   const kind = previewKind(file);
   const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
-  head.append(chevron, name, badge, ...localMark(step.path), stats, previewSwitch(file, showPreview), label, button('Open in editor', () => post({ action: 'editor', path: step.path })));
+  head.append(chevron, name, badge, ...localMark(step.path), stats, previewSwitch(file, showPreview), headTools(toolButton(icons.openExternal, 'Open in editor', () => post({ action: 'editor', path: step.path }))), label);
   box.append(head);
   const diff = el('div', 'diff');
   if (step.fileNote) {
@@ -3736,6 +3783,14 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   box.append(diff);
   wrap.append(box);
   return wrap;
+}
+
+/** A file header's icon buttons, kept together before Viewed. */
+function headTools(...buttons: HTMLButtonElement[]): HTMLElement {
+  const tools = el('span', 'head-tools');
+  for (const each of buttons) each.classList.add('icon-button');
+  tools.append(...buttons);
+  return tools;
 }
 
 /** Diff and Preview buttons for a file that can be previewed and still has a readable diff. */
@@ -3787,9 +3842,9 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
     renderFiles([file.path]);
   });
   label.append(check, 'Viewed');
-  const open = button('Open in editor', () => post({ action: 'editor', path: file.path }));
+  const open = toolButton(icons.openExternal, 'Open in editor', () => post({ action: 'editor', path: file.path }));
   const whole = fullFile(file);
-  const full = button(whole ? 'Diff only' : 'Full file', () => {
+  const full = toolButton(whole ? icons.file : icons.fullFile, whole ? 'Diff only' : 'Full file', () => {
     expanded.set(file.path, whole ? new Map() : new Map(Array.from({ length: file.hunks.length + 1 }, (_, index) => [index, { top: Infinity, bottom: 0 }])));
     loadContext(file);
     renderFiles([file.path]);
@@ -3799,13 +3854,16 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   full.hidden = showPreview || file.binary || file.change === 'added' || file.change === 'deleted' || !file.hunks.length || !atHead;
   const mode = previewSwitch(file, showPreview);
   const unresolved = threads.filter((thread) => !thread.resolved).length;
-  const comments = el('span', 'muted comments', !threads.length ? '' : threads.length + (threads.length === 1 ? ' comment' : ' comments') + (unresolved === threads.length ? '' : ', ' + unresolved + ' open'));
+  const comments = el('span', 'muted comments');
+  if (threads.length) {
+    comments.append(icon(icons.comment), String(threads.length));
+    comments.title = threads.length + (threads.length === 1 ? ' comment' : ' comments') + (unresolved === threads.length ? '' : ', ' + unresolved + ' open');
+  }
   const chips = file.generated ? [el('span', 'file-chip', 'Generated')] : isLarge(file) ? [el('span', 'file-chip', 'Large diff')] : [];
   for (const chip of chips) chip.title = file.generated ? 'Generated file. GitHub folds these by default.' : 'Large diff, folded by default.';
-  const commentFile = toolButton(codicons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
-  commentFile.classList.add('icon-button');
+  const commentFile = toolButton(icons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
   commentFile.hidden = !atHead || file.change === 'deleted';
-  head.append(chevron, name, badge, ...localMark(file.path), stats, ...chips, comments, mode, label, commentFile, full, open);
+  head.append(chevron, name, badge, ...localMark(file.path), stats, ...chips, comments, mode, headTools(full, commentFile, open), label);
   box.append(head);
   const diff = el('div', 'diff');
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
@@ -3860,9 +3918,9 @@ function fileComposerBox(draft: FileComposer): HTMLElement {
     renderFiles([draft.path]);
     post({ action: 'file-comment', form: 'file-composer', path: draft.path, text: draft.text, intent });
   };
-  const implement = button('Implement', () => send('implement'));
+  const implement = agentButton('implement', 'Implement', () => send('implement'));
   implement.title = 'Agent changes the code';
-  const ask = button(busySending ? 'Sending…' : 'Ask', () => send('ask'), 'agent');
+  const ask = agentButton('ask', busySending ? 'Sending…' : 'Ask', () => send('ask'));
   ask.title = 'Agent answers without editing';
   const onDraft = (value: string): void => { draft.text = value; save(); for (const each of [implement, ask]) each.disabled = sending.has('file-composer') || !value.trim(); };
   const area = textarea('file-composer', draft.text, 'Ask about this file', onDraft, () => send('ask'), cancel);

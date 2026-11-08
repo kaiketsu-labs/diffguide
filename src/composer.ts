@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 
 import { parseComposerInput } from './composerIntent.js';
 import { codePreviewHtml, codePreviewStyles } from './codePreview.js';
+import { icons } from './icons.js';
 import type { CodeAnchor, ReviewIntent } from './contracts.js';
 import { maximumIdentifierLength, maximumPathLength, maximumReviewTextLength } from './limits.js';
 import { webviewStyles } from './webviewStyles.js';
@@ -364,10 +365,11 @@ ${codePreviewStyles()}
 * { box-sizing: border-box; } body { margin: 0; padding: var(--space-16) var(--space-12); }
 main { max-width: 640px; margin: auto; } .code-header { display: flex; align-items: center; gap: var(--space-8); min-height: 34px; padding: var(--space-2) var(--space-6) var(--space-2) var(--space-12); border-bottom: 1px solid var(--line); } #path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: var(--ink-muted); font: 11px/16px var(--font-code); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.code-context { margin-bottom: var(--space-12); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); overflow: hidden; } pre { white-space: pre; tab-size: 4; max-height: 158px; overflow: auto; margin: 0; padding: var(--space-12); background: var(--surface); color: var(--vscode-editor-foreground, var(--ink)); font: 12px/19px var(--font-code); } #code { font: inherit; color: inherit; background: transparent; padding: 0; border: 0; border-radius: 0; } #openCode svg { fill: none; } #openCode[hidden] { display: none; }
+.code-context { margin-bottom: var(--space-12); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); overflow: hidden; } pre { white-space: pre; tab-size: 4; max-height: 158px; overflow: auto; margin: 0; padding: var(--space-12); background: var(--surface); color: var(--vscode-editor-foreground, var(--ink)); font: 12px/19px var(--font-code); } #code { font: inherit; color: inherit; background: transparent; padding: 0; border: 0; border-radius: 0; } #openCode[hidden] { display: none; }
 .selection { border: 1px solid var(--brand-line); border-radius: var(--radius-md); padding: var(--space-8) var(--space-12); margin: 0 0 var(--space-12); background: var(--brand-soft); font-size: 12px; } .selection p { margin: 0 0 var(--space-6); } .selection[hidden] { display: none; }
 .compose-card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); overflow: hidden; } .compose-card:focus-within { border-color: var(--focus); } .compose-toolbar { padding: var(--space-8) var(--space-8) 0; }
 .modes { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.mode svg { width: 14px; height: 14px; }
 .mode { min-height: 22px; padding: 0 var(--space-8); border: 0; border-radius: 3px; color: var(--ink-muted); background: none; font-size: 12px; } .mode:hover { color: var(--ink); filter: none; } .mode[aria-pressed="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 0 0 1px var(--line); font-weight: 600; } .mode kbd { height: 16px; margin-left: var(--space-4); }
 .mode-hint { margin: var(--space-8) var(--space-12) 0; color: var(--ink-muted); font-size: 12px; }
 textarea { display: block; width: 100%; min-height: 90px; border: 0; border-radius: 0; color: var(--ink); background: transparent; padding: var(--space-12); line-height: 1.6; } textarea:focus { outline: none; } textarea:disabled { opacity: .7; }
@@ -379,10 +381,10 @@ textarea { display: block; width: 100%; min-height: 90px; border: 0; border-radi
 </style></head><body><main>
 <h1 id="title" class="sr-only">Review-Kommentar</h1>
 <aside id="selection" class="selection" hidden aria-live="polite"><p><strong>Neue Auswahl:</strong> <span id="selectionPath"></span></p><p class="muted">Aktueller Entwurf bleibt gespeichert.</p><button type="button" id="takeSelection">Neue Auswahl kommentieren</button></aside>
-<section class="code-context" aria-label="Ausgewählter Code"><header class="code-header"><p id="path"></p><button type="button" id="openCode" class="icon-button" hidden title="Code im Editor öffnen" aria-label="Code im Editor öffnen"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5H5v14h14v-8M13 3h8v8m0-8L10 14"/></svg></button></header><pre id="codeViewport" tabindex="0" aria-label="Ausgewählter Code"><code id="code"></code></pre></section><section class="compose-card" aria-label="Feedback an Claude"><div class="compose-toolbar"><div class="modes" role="group" aria-label="Review-Modus">
-<button type="button" class="mode" data-mode="ask" aria-pressed="true">Fragen <kbd>/a</kbd></button>
-<button type="button" class="mode" data-mode="implement" aria-pressed="false">Umsetzen <kbd>/i</kbd></button>
-<button type="button" class="mode" data-mode="summarize" aria-pressed="false">Zusammenfassen <kbd>/r</kbd></button></div></div>
+<section class="code-context" aria-label="Ausgewählter Code"><header class="code-header"><p id="path"></p><button type="button" id="openCode" class="icon-button" hidden title="Code im Editor öffnen" aria-label="Code im Editor öffnen">${icons.openExternal}</button></header><pre id="codeViewport" tabindex="0" aria-label="Ausgewählter Code"><code id="code"></code></pre></section><section class="compose-card" aria-label="Feedback an Claude"><div class="compose-toolbar"><div class="modes" role="group" aria-label="Review-Modus">
+<button type="button" class="mode" data-mode="ask" aria-pressed="true">${icons.ask}Fragen <kbd>/a</kbd></button>
+<button type="button" class="mode" data-mode="implement" aria-pressed="false">${icons.implement}Umsetzen <kbd>/i</kbd></button>
+<button type="button" class="mode" data-mode="summarize" aria-pressed="false">${icons.summarize}Zusammenfassen <kbd>/r</kbd></button></div></div>
 <p id="modeHint" class="sr-only" role="status" aria-live="polite"></p><label for="feedback" class="sr-only">Dein Feedback</label>
 <textarea id="feedback" maxlength="${maximumReviewTextLength}" placeholder="Was möchtest du Claude mitgeben?" aria-describedby="modeHint error deliveryHint" spellcheck="true"></textarea>
 <div class="footer"><span id="saved" class="muted" role="status">Entwurf bleibt lokal</span><div class="actions"><button type="button" id="discard" title="Entwurf verwerfen">Verwerfen</button><button id="send" type="button">Frage senden</button></div></div>
