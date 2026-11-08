@@ -15,7 +15,7 @@ const bookmark = 'M4 1.5h8a.5.5 0 0 1 .5.5v12.5L8 11.25 3.5 14.5V2a.5.5 0 0 1 .5
 
 /**
  * DiffGuide's icons, drawn for the extension. Webviews inline the SVG strings; `npm run icons` builds the native
- * ones into `resources/diffguide-icons.woff` for menus, the sidebar and the status bar. See `docs/ICONS.md`.
+ * ones into `resources/diffguide-icons-<hash>.woff` for menus, the sidebar and the status bar. See `docs/ICONS.md`.
  */
 export const icons = {
   orb: pixels('M6 2h4v1h-4zM4 3h8v1h-8zM3 4h10v1h-10zM3 5h10v1h-10zM2 6h3v1h-3zM7 6h2v1h-2zM11 6h3v1h-3zM2 7h3v1h-3zM7 7h2v1h-2zM11 7h3v1h-3zM2 8h12v1h-12zM2 9h12v1h-12zM3 10h10v1h-10zM3 11h10v1h-10zM4 12h8v1h-8zM6 13h4v1h-4z'),
