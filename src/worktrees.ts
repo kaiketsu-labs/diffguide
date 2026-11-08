@@ -91,9 +91,15 @@ export function reviewDataPath(worktree: string): string {
 
 /** Create a worktree's review data folder, retrying briefly when the file system reports a transient error. */
 export async function createReviewData(
-  worktree: string, create = async (folder: string): Promise<void> => { await mkdir(folder, { recursive: true, mode: 0o700 }); }, attempts = 5, delayMs = 200,
+  worktree: string, create?: (folder: string) => Promise<void>, attempts?: number, delayMs?: number,
 ): Promise<string> {
-  const folder = reviewDataPath(worktree);
+  return await createDataFolder(reviewDataPath(worktree), create, attempts, delayMs);
+}
+
+/** Create a private review data folder, retrying briefly when the file system reports a transient error. */
+export async function createDataFolder(
+  folder: string, create = async (path: string): Promise<void> => { await mkdir(path, { recursive: true, mode: 0o700 }); }, attempts = 5, delayMs = 200,
+): Promise<string> {
   for (let attempt = 1; ; attempt++) {
     try {
       await create(folder);

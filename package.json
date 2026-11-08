@@ -1,7 +1,7 @@
 {
   "name": "diffguide",
   "displayName": "DiffGuide",
-  "description": "An AI-powered code review companion that helps you explore changes, ask questions and improve code while keeping you in control.",
+  "description": "Review local changes and GitHub pull requests with Claude Code on one review page, with automatic feedback delivery.",
   "version": "0.5.1",
   "icon": "resources/icon.png",
   "galleryBanner": {
@@ -43,7 +43,8 @@
   "activationEvents": [
     "onStartupFinished",
     "onView:diffGuide.pullRequests",
-    "onFileSystem:diffguide-pr"
+    "onFileSystem:diffguide-pr",
+    "onView:diffGuide.local"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -121,113 +122,6 @@
         "title": "Laufende Unterhaltung verbinden",
         "category": "DiffGuide",
         "icon": "$(plug)"
-      },
-      {
-        "command": "diffGuide.addComment",
-        "title": "Kommentar hinzufügen",
-        "category": "DiffGuide",
-        "icon": "$(comment-add)"
-      },
-      {
-        "command": "diffGuide.openComposer",
-        "title": "Feedback in Seitenansicht schreiben",
-        "category": "DiffGuide",
-        "icon": "$(open-preview)"
-      },
-      {
-        "command": "diffGuide.openCode",
-        "title": "Code im Editor öffnen",
-        "category": "DiffGuide",
-        "icon": "$(go-to-file)"
-      },
-      {
-        "command": "diffGuide.openCommentCode",
-        "title": "Code im Editor öffnen",
-        "category": "DiffGuide",
-        "icon": "$(go-to-file)"
-      },
-      {
-        "command": "diffGuide.submitInline",
-        "title": "Senden",
-        "category": "DiffGuide",
-        "enablement": "!commentIsEmpty"
-      },
-      {
-        "command": "diffGuide.cancelDraft",
-        "title": "Entwurf verwerfen",
-        "category": "DiffGuide",
-        "icon": "$(close)"
-      },
-      {
-        "command": "diffGuide.openChanges",
-        "title": "Änderungen reviewen",
-        "category": "DiffGuide",
-        "icon": "$(git-compare)"
-      },
-      {
-        "command": "diffGuide.revealThread",
-        "title": "Zum Kommentar springen",
-        "category": "DiffGuide"
-      },
-      {
-        "command": "diffGuide.composeReply",
-        "title": "In Seitenansicht antworten",
-        "category": "DiffGuide",
-        "icon": "$(open-preview)"
-      },
-      {
-        "command": "diffGuide.resumeDraft",
-        "title": "Entwurf fortsetzen",
-        "category": "DiffGuide",
-        "icon": "$(edit)"
-      },
-      {
-        "command": "diffGuide.exportToPr",
-        "title": "An GitHub-PR übergeben",
-        "category": "DiffGuide",
-        "icon": "$(git-pull-request)"
-      },
-      {
-        "command": "diffGuide.resolve",
-        "title": "Als erledigt markieren",
-        "category": "DiffGuide",
-        "icon": "$(check)"
-      },
-      {
-        "command": "diffGuide.showResolved",
-        "title": "Erledigte anzeigen",
-        "category": "DiffGuide",
-        "icon": "$(eye)"
-      },
-      {
-        "command": "diffGuide.hideResolved",
-        "title": "Erledigte ausblenden",
-        "category": "DiffGuide",
-        "icon": "$(eye-closed)"
-      },
-      {
-        "command": "diffGuide.enhanceContrast",
-        "title": "Kommentarfenster hervorheben",
-        "category": "DiffGuide",
-        "icon": "$(color-mode)"
-      },
-      {
-        "command": "diffGuide.toggleCenteredLayout",
-        "title": "Zentrierte Ansicht",
-        "category": "DiffGuide",
-        "icon": "$(layout-centered)"
-      },
-      {
-        "command": "diffGuide.resetContrast",
-        "title": "Standarddarstellung wiederherstellen",
-        "category": "DiffGuide",
-        "icon": "$(discard)"
-      },
-      {
-        "command": "diffGuide.reopen",
-        "title": "Wieder öffnen",
-        "category": "DiffGuide",
-        "icon": "$(debug-restart)"
       },
       {
         "command": "diffGuide.refreshPullRequests",
@@ -354,16 +248,39 @@
         "icon": "$(diffguide-mark)"
       },
       {
-        "command": "diffGuide.publishThread",
-        "title": "Publish to GitHub",
+        "command": "diffGuide.openLocalReview",
+        "title": "Review local changes",
         "category": "DiffGuide",
-        "icon": "$(cloud-upload)"
+        "icon": "$(git-compare)"
       },
       {
-        "command": "diffGuide.openPublishedThread",
-        "title": "Open on GitHub",
+        "command": "diffGuide.openLocalFile",
+        "title": "Show on review page",
+        "category": "DiffGuide"
+      },
+      {
+        "command": "diffGuide.openLocalFileInEditor",
+        "title": "Open in editor",
         "category": "DiffGuide",
-        "icon": "$(github)"
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "diffGuide.refreshLocalFiles",
+        "title": "Refresh files",
+        "category": "DiffGuide",
+        "icon": "$(diffguide-refresh)"
+      },
+      {
+        "command": "diffGuide.filterLocal",
+        "title": "Filter checkouts",
+        "category": "DiffGuide",
+        "icon": "$(diffguide-filter)"
+      },
+      {
+        "command": "diffGuide.filterLocalActive",
+        "title": "Filter checkouts",
+        "category": "DiffGuide",
+        "icon": "$(diffguide-filter-active)"
       }
     ],
     "viewsContainers": {
@@ -383,13 +300,13 @@
           "icon": "resources/review.svg"
         },
         {
-          "id": "diffGuide.answers",
-          "name": "Claude Answers",
+          "id": "diffGuide.local",
+          "name": "Local",
           "icon": "resources/review.svg"
         },
         {
-          "id": "diffGuide.threads",
-          "name": "Review",
+          "id": "diffGuide.answers",
+          "name": "Claude Answers",
           "icon": "resources/review.svg"
         },
         {
@@ -402,8 +319,9 @@
     },
     "viewsWelcome": [
       {
-        "view": "diffGuide.threads",
-        "contents": "Feedback direkt an Claude Code.\n[Mit Claude verbinden](command:diffGuide.startClaude)\n[Änderungen reviewen](command:diffGuide.openChanges)\nMarkiere Code und füge einen Kommentar hinzu. Abgeschickte Kommentare werden automatisch zugestellt."
+        "view": "diffGuide.local",
+        "contents": "Open a Git repository to review its local changes with Claude.",
+        "when": "!diffGuide.localAvailable"
       },
       {
         "view": "diffGuide.answers",
@@ -421,28 +339,40 @@
       }
     ],
     "menus": {
-      "editor/context": [
-        {
-          "command": "diffGuide.addComment",
-          "when": "(resourceScheme == file || resourceScheme == diffguide-base || resourceScheme == diffguide-pr) && isWorkspaceTrusted",
-          "group": "navigation@20"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "diffGuide.addComment",
-          "when": "(resourceScheme == file || resourceScheme == diffguide-base || resourceScheme == diffguide-pr) && isWorkspaceTrusted",
-          "group": "navigation@20"
-        }
-      ],
-      "scm/title": [
-        {
-          "command": "diffGuide.openChanges",
-          "when": "scmProvider == git",
-          "group": "navigation@20"
-        }
-      ],
       "view/title": [
+        {
+          "command": "diffGuide.openLocalReview",
+          "when": "view == diffGuide.local && diffGuide.localAvailable",
+          "group": "navigation@1"
+        },
+        {
+          "command": "diffGuide.startClaude",
+          "when": "view == diffGuide.local",
+          "group": "navigation@2"
+        },
+        {
+          "command": "diffGuide.filterLocal",
+          "when": "view == diffGuide.local && diffGuide.localAvailable && !diffGuide.localFiltered",
+          "group": "navigation@2.5"
+        },
+        {
+          "command": "diffGuide.filterLocalActive",
+          "when": "view == diffGuide.local && diffGuide.localFiltered",
+          "group": "navigation@2.5"
+        },
+        {
+          "command": "diffGuide.refreshLocalFiles",
+          "when": "view == diffGuide.local && diffGuide.localAvailable",
+          "group": "navigation@3"
+        },
+        {
+          "command": "diffGuide.copyClaudeCommand",
+          "when": "view == diffGuide.local"
+        },
+        {
+          "command": "diffGuide.connectRunningClaude",
+          "when": "view == diffGuide.local"
+        },
         {
           "command": "diffGuide.searchPullRequests",
           "when": "view == diffGuide.pullRequests",
@@ -492,54 +422,19 @@
           "command": "diffGuide.openPullRequestLink",
           "when": "view == diffGuide.pullRequests",
           "group": "0_open@1"
-        },
-        {
-          "command": "diffGuide.startClaude",
-          "when": "view == diffGuide.threads",
-          "group": "navigation@1"
-        },
-        {
-          "command": "diffGuide.copyClaudeCommand",
-          "when": "view == diffGuide.threads",
-          "group": "connection@1"
-        },
-        {
-          "command": "diffGuide.openChanges",
-          "when": "view == diffGuide.threads",
-          "group": "navigation@2"
-        },
-        {
-          "command": "diffGuide.exportToPr",
-          "when": "view == diffGuide.threads",
-          "group": "navigation@3"
-        },
-        {
-          "command": "diffGuide.showResolved",
-          "when": "view == diffGuide.threads && !diffGuide.showResolved",
-          "group": "navigation@4"
-        },
-        {
-          "command": "diffGuide.hideResolved",
-          "when": "view == diffGuide.threads && diffGuide.showResolved",
-          "group": "navigation@4"
-        },
-        {
-          "command": "diffGuide.enhanceContrast",
-          "when": "view == diffGuide.threads",
-          "group": "navigation@5"
-        },
-        {
-          "command": "diffGuide.toggleCenteredLayout",
-          "when": "view == diffGuide.threads",
-          "group": "appearance@1"
-        },
-        {
-          "command": "diffGuide.resetContrast",
-          "when": "view == diffGuide.threads",
-          "group": "appearance@2"
         }
       ],
       "view/item/context": [
+        {
+          "command": "diffGuide.openLocalFileInEditor",
+          "when": "view == diffGuide.local && viewItem == diffGuide.localFile",
+          "group": "inline"
+        },
+        {
+          "command": "diffGuide.openLocalReview",
+          "when": "view == diffGuide.local && viewItem == diffGuide.checkout",
+          "group": "inline"
+        },
         {
           "command": "diffGuide.pinPullRequest",
           "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest(\\.checkedOut)?$/",
@@ -579,72 +474,6 @@
           "command": "diffGuide.showPullRequestOverview",
           "when": "view == diffGuide.pullRequests && viewItem =~ /^diffGuide\\.pullRequest\\.checkedOut/",
           "group": "1_pullRequest@0"
-        },
-        {
-          "command": "diffGuide.resolve",
-          "when": "view == diffGuide.threads && viewItem =~ /^diffGuide\\.open/",
-          "group": "inline@1"
-        },
-        {
-          "command": "diffGuide.reopen",
-          "when": "view == diffGuide.threads && viewItem =~ /^diffGuide\\.resolved/",
-          "group": "inline@1"
-        },
-        {
-          "command": "diffGuide.publishThread",
-          "when": "view == diffGuide.threads && viewItem =~ /\\.publishable$/",
-          "group": "inline@0"
-        },
-        {
-          "command": "diffGuide.openPublishedThread",
-          "when": "view == diffGuide.threads && viewItem =~ /\\.published$/",
-          "group": "inline@0"
-        }
-      ],
-      "comments/commentThread/context": [
-        {
-          "command": "diffGuide.submitInline",
-          "when": "commentController == diffGuide",
-          "group": "inline@1"
-        }
-      ],
-      "comments/comment/title": [
-        {
-          "command": "diffGuide.openCommentCode",
-          "when": "commentController == diffGuide && comment == diffGuide.code",
-          "group": "inline@1"
-        }
-      ],
-      "comments/commentThread/title": [
-        {
-          "command": "diffGuide.cancelDraft",
-          "when": "commentController == diffGuide && commentThreadIsEmpty",
-          "group": "inline@1"
-        },
-        {
-          "command": "diffGuide.composeReply",
-          "when": "commentController == diffGuide && commentThread =~ /^diffGuide\\.open/",
-          "group": "navigation@1"
-        },
-        {
-          "command": "diffGuide.publishThread",
-          "when": "commentController == diffGuide && commentThread =~ /\\.publishable$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "diffGuide.openPublishedThread",
-          "when": "commentController == diffGuide && commentThread =~ /\\.published$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "diffGuide.resolve",
-          "when": "commentController == diffGuide && commentThread =~ /^diffGuide\\.open/",
-          "group": "inline@2"
-        },
-        {
-          "command": "diffGuide.reopen",
-          "when": "commentController == diffGuide && commentThread =~ /^diffGuide\\.resolved/",
-          "group": "inline@1"
         }
       ],
       "commandPalette": [
@@ -681,71 +510,27 @@
           "when": "false"
         },
         {
-          "command": "diffGuide.publishThread",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.openPublishedThread",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.openCode",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.openCommentCode",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.submitInline",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.cancelDraft",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.composeReply",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.showResolved",
-          "when": "!diffGuide.showResolved"
-        },
-        {
-          "command": "diffGuide.hideResolved",
-          "when": "diffGuide.showResolved"
-        },
-        {
-          "command": "diffGuide.resolve",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.reopen",
-          "when": "false"
-        },
-        {
-          "command": "diffGuide.revealThread",
-          "when": "false"
-        },
-        {
           "command": "diffGuide.hideRepository",
           "when": "false"
         },
         {
           "command": "diffGuide.copyPullRequestLink",
           "when": "false"
+        },
+        {
+          "command": "diffGuide.openLocalFile",
+          "when": "false"
+        },
+        {
+          "command": "diffGuide.openLocalFileInEditor",
+          "when": "false"
+        },
+        {
+          "command": "diffGuide.filterLocalActive",
+          "when": "false"
         }
       ]
     },
-    "keybindings": [
-      {
-        "command": "diffGuide.addComment",
-        "key": "ctrl+alt+m",
-        "mac": "cmd+alt+m",
-        "when": "editorTextFocus && (resourceScheme == file || resourceScheme == diffguide-base)"
-      }
-    ],
     "configuration": {
       "title": "DiffGuide",
       "properties": {
