@@ -1,4 +1,4 @@
-/** The DiffGuide orb as a stepped one-color sprite, for "Claude is working" chips and the Guide tab's count. */
+/** The DiffGuide orb as a stepped one-color sprite, for "Claude is working" chips. */
 
 interface Frame { readonly art: readonly string[]; readonly y: number; readonly ms: number }
 export interface OrbLoader { readonly width: number; readonly height: number; readonly frames: readonly Frame[] }
@@ -38,7 +38,7 @@ export function spriteStrip({ width, height, frames }: OrbLoader): string {
 
 const percent = (value: number): string => `${+value.toFixed(3)}%`;
 
-/** Styles that animate the working chip's dot and the Guide tab's count as the orb. */
+/** Styles that animate the working chip's dot as the orb. */
 export function orbLoaderStyles(): string {
   const { width, height, frames } = orbLoader;
   const total = frames.reduce((sum, frame) => sum + frame.ms, 0);
@@ -48,7 +48,7 @@ export function orbLoaderStyles(): string {
     elapsed += frame.ms;
     return `${at}{mask-position:${percent((index / (frames.length - 1)) * 100)} 0}`;
   }).join('');
-  const targets = '.chip.working::before,.tabs .count.working';
+  const targets = '.chip.working::before';
   return `${targets}{width:${width}px;height:${height}px;border-radius:0;background:var(--orb);mask:url("data:image/svg+xml,${encodeURIComponent(spriteStrip(orbLoader))}") 0 0/${frames.length * 100}% 100% no-repeat;animation:orb ${total}ms step-end infinite}
 @keyframes orb{${keyframes}}
 @media (prefers-reduced-motion:reduce){${targets}{animation:none}}`;
