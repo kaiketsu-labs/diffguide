@@ -21,7 +21,7 @@ test('summarizes a PR for its overview and keeps model text out of the page mark
   };
   const opened = {
     session: {
-      store: { threads: [thread] },
+      store: { threads: [thread], events: [] },
       activity: () => undefined,
       publication: () => ({ url: 'https://github.com/acme/app/pull/3#r1', pending: true }),
     },
@@ -55,7 +55,7 @@ test('renders local messages as Markdown with highlighted code, and marks whole-
       { id: 'm2', author: 'claude', text: 'Yes:\n\n```ts\nconst a = 1;\n```\n\n```suggestion\nnot a suggestion here\n```', createdAt: '' }],
   };
   const opened = {
-    session: { store: { threads: [thread] }, activity: () => undefined, publication: () => undefined },
+    session: { store: { threads: [thread], events: [] }, activity: () => undefined, publication: () => undefined },
     runner: { activity: { running: false, threads: new Set(), skipped: 0 } },
     commits: () => [],
   } as unknown as PullRequestSession;
@@ -76,13 +76,29 @@ test('a thread Claude was answering when the user stopped it reads Stopped, not 
     messages: [{ id: 'm1', author: 'human', text: 'Fix it', createdAt: '2026-11-06T10:00:00.000Z' }],
   };
   const opened = {
-    session: { store: { threads: [thread] }, activity: () => 'Stopped', publication: () => undefined },
+    session: { store: { threads: [thread], events: [] }, activity: () => 'Stopped', publication: () => undefined },
     runner: { activity: { running: false, threads: new Set(['t1']), skipped: 0, stopped: true, error: undefined } },
     commits: () => [],
   } as unknown as PullRequestSession;
   const [view] = buildOverviewState({ number: 3, title: 'T', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'f', baseBranch: 'main' }, opened, [], [], 1).threads;
   assert.equal(view?.working, undefined);
   assert.equal(view?.status, 'Stopped');
+});
+
+test('marks each human message with the intent it was sent with, and leaves Claude\'s and unmatched ones unmarked', () => {
+  const thread = {
+    id: 't1', intent: 'implement', status: 'answered', resolved: false, outdated: false, latestEventId: 'e2',
+    anchor: { path: 'src/a.ts', startLine: 1, endLine: 1, side: 'working', selectedText: 'x' },
+    messages: [{ id: 'm1', eventId: 'e1', author: 'human', text: 'Why?', createdAt: '' }, { id: 'm2', eventId: 'e1', author: 'claude', text: 'Because.', createdAt: '' },
+      { id: 'm3', eventId: 'e2', author: 'human', text: 'Fix it', createdAt: '' }, { id: 'm4', author: 'human', text: 'Old', createdAt: '' }],
+  };
+  const opened = {
+    session: { store: { threads: [thread], events: [{ id: 'e1', intent: 'ask' }, { id: 'e2', intent: 'implement' }] }, activity: () => undefined, publication: () => undefined },
+    runner: { activity: { running: false, threads: new Set(), skipped: 0 } },
+    commits: () => [],
+  } as unknown as PullRequestSession;
+  const [view] = buildOverviewState({ number: 3, title: 'T', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'f', baseBranch: 'main' }, opened, [], [], 1).threads;
+  assert.deepEqual(view?.messages.map((message) => message.intent), ['ask', undefined, 'implement', undefined]);
 });
 
 test('quotes a GitHub thread for Claude after the user\'s note, or a default for the intent', () => {
@@ -117,7 +133,7 @@ test('ends a thread\'s live log once Claude\'s reply from the current run arrive
       messages: [{ id: 'm1', author: 'human', text: 'hello?', createdAt: '2026-11-05T09:59:00Z' }, { id: 'm2', author: 'claude', text: 'Hi.', createdAt: replyAt }],
     };
     const opened = {
-      session: { store: { threads: [thread] }, activity: () => 'Claude · Thinking', publication: () => undefined },
+      session: { store: { threads: [thread], events: [] }, activity: () => 'Claude · Thinking', publication: () => undefined },
       runner: { activity: { running: true, step: 'Thinking', threads: new Set(['t1']), skipped: 0, progress: { steps: [], startedAt } } },
       commits: () => [],
     } as unknown as PullRequestSession;
