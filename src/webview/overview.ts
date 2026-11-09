@@ -314,8 +314,8 @@ const elapsed = (since: number): string => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
-/** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb and the run's time on the current one. */
-function stepLog(steps: readonly ClaudeStep[], startedAt?: number): HTMLElement {
+/** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb, the run's time and `stop` on the current one. */
+function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
@@ -329,6 +329,7 @@ function stepLog(steps: readonly ClaudeStep[], startedAt?: number): HTMLElement 
       time.dataset.since = String(startedAt);
       row.append(time);
     }
+    if (stop !== undefined && index === shown.length - 1) row.append(stop);
     if (step.detail) row.append(el('span', 'detail', step.detail));
     log.append(row);
   });
@@ -2047,7 +2048,7 @@ function render(state: OverviewState): void {
   const progress = state.claude.running ? state.claude.progress : undefined;
   claude.after(stop, terminal);
   if (progress === undefined) claude.replaceChildren(...state.claude.running ? [] : [icon(icons.orb)], state.claude.text);
-  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt), stop, terminal);
+  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt, stop), terminal);
   stop.hidden = !state.claude.running;
   if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; }
   claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip agent working' : 'chip orb-chip';
@@ -2546,7 +2547,7 @@ function threadBox(thread: Thread): HTMLElement {
     const live = el('div', 'claude-live');
     live.dataset.thread = thread.id;
     const progress = thread.source === 'local' ? thread.progress : undefined;
-    live.append(progress === undefined ? stepLog([{ verb: working, done: false }]) : stepLog(progress.steps, progress.startedAt), stopButton());
+    live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, stopButton()) : stepLog(progress.steps, progress.startedAt, stopButton()));
     box.append(live);
   }
   const key = 'reply:' + thread.id;
