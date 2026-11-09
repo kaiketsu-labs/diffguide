@@ -1,5 +1,6 @@
 import type { ClaudeStep } from '../claudeRunner.js';
 import type { ClaudeConversation } from '../claudeSessions.js';
+import type { ReviewIntent } from '../contracts.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type Analysis, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
@@ -2441,6 +2442,7 @@ function message(entry: Message, thread?: Thread): HTMLElement {
   }
   if (!('avatarUrl' in entry)) {
     const meta = el('span', 'msg-meta');
+    if ('intent' in entry && entry.intent !== undefined) meta.append(intentChip(entry.intent));
     meta.append(...timeLabel(entry.createdAt));
     if (meta.childElementCount > 0) main.append(meta);
   }
@@ -2448,6 +2450,18 @@ function message(entry: Message, thread?: Thread): HTMLElement {
   body.innerHTML = entry.html;
   main.append(body);
   return item;
+}
+
+const intentLabels: Readonly<Record<ReviewIntent, readonly [string, string]>> = {
+  ask: ['Ask', icons.agentAsk], implement: ['Implement', icons.agentImplement], summarize: ['Summarize', icons.agentAsk],
+};
+
+/** Which button sent a human message: Ask or Implement. */
+function intentChip(intent: ReviewIntent): HTMLElement {
+  const [label, svg] = intentLabels[intent];
+  const chip = el('span', 'chip intent');
+  chip.append(icon(svg), label);
+  return chip;
 }
 
 /** Who can see a thread: Local stays with you and Claude, On GitHub is on the PR, Guide is Claude's note from its guide. */

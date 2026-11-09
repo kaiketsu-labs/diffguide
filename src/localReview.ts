@@ -8,7 +8,7 @@ import { readFilePreview, readMediaSides } from './fileContent.js';
 import { readFileIcons } from './fileIcons.js';
 import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from './git.js';
 import { mediaType } from './media.js';
-import { type DiffSelection, type FilesView, type OverviewActions, type OverviewReveal, type OverviewState, type PageComment, revealOpenPage, showPullRequestOverview, threadView } from './pullRequestOverview.js';
+import { type DiffSelection, type FilesView, type OverviewActions, type OverviewReveal, type OverviewState, type PageComment, eventIntents, revealOpenPage, showPullRequestOverview, threadView } from './pullRequestOverview.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from './reviewedFiles.js';
 import { applySuggestion, parseSuggestions } from './suggestions.js';
 import { type FileDiff, highlightSource, readPullRequestDiff, wholeFileDiff } from './unifiedDiff.js';
@@ -207,6 +207,7 @@ export class LocalReview implements vscode.Disposable {
     ]);
     const branch = current || base.slice(0, 7);
     const pullRequest = current === '' ? undefined : this.#branchPullRequest(current);
+    const intents = eventIntents(this.store.events);
     return {
       localMode: true,
       ...pullRequest === undefined ? {} : { branchPullRequest: { number: pullRequest.number, title: pullRequest.title } },
@@ -223,7 +224,7 @@ export class LocalReview implements vscode.Disposable {
         link: { delivering: this.bridge.state.deliveryReady === true, terminal: this.launcher.hasTerminal } },
       analysis: { running: false, stale: false },
       threads: this.store.threads.map((thread) => {
-        const view = threadView(thread);
+        const view = threadView(thread, { intents });
         const applied = this.#applied.get(thread.id);
         return applied === undefined ? view : { ...view, applied: { message: applied.message, option: applied.option, done: 'applied' as const } };
       }),

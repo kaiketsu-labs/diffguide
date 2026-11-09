@@ -93,7 +93,8 @@ export interface OverviewState {
     /** The commented lines as highlighted HTML, sent when a message has suggestions. */
     readonly original?: readonly string[];
     /** Rendered from Markdown with escaped text only; `suggestions` holds each ```suggestion block's lines as highlighted HTML, shown as options. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly suggestions?: readonly (readonly string[])[] }[];
+    /** `intent` is what the human sent the message with; messages from before it was shown leave it out. */
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly intent?: ReviewIntent; readonly suggestions?: readonly (readonly string[])[] }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];
@@ -1047,6 +1048,7 @@ details.thread:not([open]){padding-bottom:0}
 .msg .delete{min-height:20px;padding:0 var(--space-2)}.msg .delete svg{width:14px;height:14px}.msg .delete:hover{color:var(--danger);text-decoration:none}
 details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size:12px}
 .chip.bad{color:var(--danger);background:var(--danger-soft)}.chip.orb-chip::before{display:none}.chip.orb-chip svg{width:12px;height:12px;color:var(--agent)}
+.chip.intent{height:18px;padding:0 var(--space-6);gap:var(--space-4);font-size:11px;color:var(--agent);background:var(--agent-soft)}.chip.intent::before{display:none}.chip.intent svg{width:12px;height:12px}
 .guide-intro{margin-top:var(--space-12)}.guide-intro p{margin:var(--space-6) 0}
 .tree-node{margin-top:var(--space-12)}
 .node-head{position:sticky;top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px);z-index:2;box-shadow:0 -12px 0 var(--surface);box-sizing:border-box;height:32px;display:flex;align-items:center;gap:var(--space-8);padding:0 10px;background:var(--surface);cursor:pointer;user-select:none}
@@ -1216,6 +1218,7 @@ export function buildOverviewState(
 ): OverviewState {
   const { session, runner } = opened;
   const claude = claudeStatus(runner.activity);
+  const intents = eventIntents(session.store.events);
   return {
     title: `#${pullRequest.number} ${pullRequest.title}`,
     number: pullRequest.number,
@@ -1245,7 +1248,7 @@ export function buildOverviewState(
       return threadView(thread, {
         ...(activity === undefined ? {} : { activity }), ...(publication === undefined ? {} : { publication }),
         ...(linkedTo === undefined ? {} : { linkedTo }), ...(progress === undefined ? {} : { progress }),
-        running: runner.activity.threads.has(thread.id), publishable: true, commits: opened.commits(thread.id),
+        running: runner.activity.threads.has(thread.id), publishable: true, commits: opened.commits(thread.id), intents,
       });
     }),
   };
@@ -1262,10 +1265,17 @@ interface ThreadExtras {
   /** Whether the thread can be posted on GitHub, so the page offers its text as a draft. */
   readonly publishable?: boolean;
   readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
+  /** Each event's intent by event ID, so a human message can show whether it was sent with Ask or Implement. */
+  readonly intents?: ReadonlyMap<string, ReviewIntent>;
+}
+
+/** Each stored event's intent by event ID, for `threadView`. */
+export function eventIntents(events: readonly { readonly id: string; readonly intent: ReviewIntent }[]): ReadonlyMap<string, ReviewIntent> {
+  return new Map(events.map((event) => [event.id, event.intent]));
 }
 
 /** One local thread as the review page shows it, its messages rendered from Markdown. */
-export function threadView(thread: ReviewThread, { activity, progress, running = false, publication, linkedTo, publishable = false, commits = [] }: ThreadExtras = {}): OverviewState['threads'][number] {
+export function threadView(thread: ReviewThread, { activity, progress, running = false, publication, linkedTo, publishable = false, commits = [], intents }: ThreadExtras = {}): OverviewState['threads'][number] {
   const last = thread.messages.at(-1);
   const wholeFile = thread.anchor.scope === 'file';
   const onPullRequest = thread.anchor.scope === 'pullRequest';
@@ -1294,10 +1304,11 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
     ...(thread.archived ? { archived: true as const } : {}),
     ...(thread.origin === undefined ? {} : { origin: thread.origin }),
     ...(!wholeFile && !onPullRequest && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
-    messages: thread.messages.map(({ author, text, createdAt }) => {
+    messages: thread.messages.map(({ author, text, createdAt, eventId }) => {
       // A suggestion replaces the commented lines, and a whole-file comment has none.
       const suggestions = wholeFile || onPullRequest ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
-      return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
+      const intent = author === 'human' && eventId !== undefined ? intents?.get(eventId) : undefined;
+      return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(intent === undefined ? {} : { intent }), ...(suggestions.length ? { suggestions } : {}) };
     }),
     ...(publication === undefined ? {} : { url: publication.url }),
     ...(linkedTo === undefined ? {} : { linkedTo }),
