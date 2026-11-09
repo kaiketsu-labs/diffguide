@@ -326,6 +326,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return linkedRows;
       };
       const changedLinks = (): void => { linkedRows = undefined; detailsChanged.fire(); };
+      /** After a Claude run, reload from GitHub behind the last values, so the page shows the run ended without waiting for GitHub. */
+      const refreshAfterClaude = (): void => {
+        const nextDetails = provider.details(pullRequest.number).catch(asError);
+        const nextConversation = provider.conversation(pullRequest.number).catch(asError);
+        const nextLinked = linked.read().catch(() => []);
+        void nextDetails.then(() => { details = nextDetails; detailsChanged.fire(); });
+        void nextConversation.then(() => { conversation = nextConversation; detailsChanged.fire(); });
+        void nextLinked.then(() => { linkedRows = nextLinked; detailsChanged.fire(); });
+        void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
+      };
       const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
         pullRequestSessions.onDidChangeState((changedSession) => {
           if (changedSession !== opened) return;
@@ -336,7 +346,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         fileReviews.onDidChange((changed) => { if (changed === `${repository}#${pullRequest.number}`) listener(changed); }),
         detailsChanged.event(listener),
-        claudeFinished(opened.runner, () => { linkedRows = undefined; changedOnGitHub(); }),
+        claudeFinished(opened.runner, refreshAfterClaude),
         ...onCheckout === undefined ? [] : [toDisposable(onCheckout.bridge.onChange(() => { listener(undefined); })), onCheckout.launcher.onDidChange(listener)],
       );
       await showPullRequestOverview(`${repository}#${pullRequest.number}`, read, changed, {

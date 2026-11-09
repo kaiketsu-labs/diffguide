@@ -227,7 +227,9 @@ export class ClaudeRunner implements vscode.Disposable {
     let error: string | undefined;
     try {
       await this.options.hold?.();
+      if (this.#stopping) throw new Error('Stopped.');
       await this.options.prepare?.();
+      if (this.#stopping) throw new Error('Stopped.');
       const prompt = buildReviewBatchPrompt(events, this.options.store.threads, await this.options.instructions?.() ?? '');
       error = await this.#spawn({
         prompt: `${this.options.role === 'reviewer' ? reviewerNote : authorNote}\n\n${prompt}\n\n${suggestionNote}`,
