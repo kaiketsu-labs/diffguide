@@ -160,6 +160,8 @@ export interface GitHubThreadView {
   readonly resolved: boolean;
   /** In the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
+  /** Set when the thread is about the whole file; the page shows it above the file's diff. */
+  readonly scope?: 'file';
   /** Bodies as GitHub rendered and sanitized them; `suggestion` when the body holds exactly one suggestion block to commit. */
   readonly messages: readonly GitHubMessageView[];
 }
@@ -225,6 +227,8 @@ export interface OverviewActions {
   publish(threadId: string): Promise<void>;
   /** Comment on the PR diff on GitHub, into the pending review or posted right away. */
   commentOnGitHub(comment: Omit<PageComment, 'intent'>, pending: boolean): Promise<void>;
+  /** Comment on a whole file on GitHub, into the pending review or posted right away. */
+  commentOnGitHubFile(path: string, text: string, pending: boolean): Promise<void>;
   replyOnGitHub(threadId: string, text: string): Promise<void>;
   /** Post a local thread on the PR diff with the text the user edited on the page. */
   postToGitHub(threadId: string, text: string, pending: boolean): Promise<void>;
@@ -364,6 +368,7 @@ export type PageMessage =
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
   | { readonly action: 'file-comment'; readonly form: string; readonly path: string; readonly text: string; readonly intent: CommentIntent }
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
+  | { readonly action: 'github-file-comment'; readonly form: string; readonly path: string; readonly text: string; readonly pending: boolean }
   | (PageRange & { readonly action: 'read'; readonly viewed: boolean })
   | { readonly action: 'unread'; readonly ids: readonly string[] }
   | { readonly action: 'seen-answers'; readonly ids: readonly string[] }
@@ -594,6 +599,9 @@ export async function showPullRequestOverview(
         } else if (action === 'github-comment' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
           && startLine <= endLine && isText(text) && typeof pending === 'boolean') {
           await actions.commentOnGitHub({ path, side, startLine, endLine, text: text.trim() }, pending);
+          post({ done: formKey });
+        } else if (action === 'github-file-comment' && typeof path === 'string' && isText(text) && typeof pending === 'boolean') {
+          await actions.commentOnGitHubFile(path, text.trim(), pending);
           post({ done: formKey });
         } else if (action === 'reply' && typeof id === 'string' && commentIntents.includes(intent) && (isText(text) || (intent === 'implement' && isOptionalText(text)))) {
           await actions.reply(id, (text ?? '').trim(), intent as CommentIntent);
@@ -1163,7 +1171,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 function githubThreadView(thread: RemoteThread): GitHubThreadView {
   return {
     id: thread.id,
-    location: `${thread.path}:${thread.startLine}`,
+    location: thread.scope === 'file' ? thread.path : `${thread.path}:${thread.startLine}`,
     text: plainText(thread.comments[0]?.bodyHtml ?? '').slice(0, 140),
     status: [thread.pending ? 'Pending' : thread.resolved ? 'Resolved' : 'Open', thread.outdated ? 'Outdated' : undefined].filter(Boolean).join(' · '),
     url: thread.url,
@@ -1174,9 +1182,10 @@ function githubThreadView(thread: RemoteThread): GitHubThreadView {
     outdated: thread.outdated,
     resolved: thread.resolved,
     pending: thread.pending,
+    ...(thread.scope === 'file' ? { scope: 'file' as const } : {}),
     messages: thread.comments.map(({ id, author, authorName, avatarUrl, pending, bodyHtml, body, canDelete, canEdit, canHide, canReact, hidden, edited, reactions, createdAt }) => ({
       id, author, ...authorName === undefined ? {} : { authorName }, avatarUrl, pending, html: bodyHtml, body, canDelete, canEdit, canHide, canReact,
-      ...hidden === undefined ? {} : { hidden }, edited, reactions, createdAt, ...parseSuggestions(body).length === 1 ? { suggestion: true as const } : {} })),
+      ...hidden === undefined ? {} : { hidden }, edited, reactions, createdAt, ...thread.scope !== 'file' && parseSuggestions(body).length === 1 ? { suggestion: true as const } : {} })),
   };
 }
 

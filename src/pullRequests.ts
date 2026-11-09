@@ -203,6 +203,8 @@ export interface RemoteThread {
   /** Still in the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
   readonly comments: readonly (GitHubComment & { readonly pending: boolean })[];
+  /** Set when the thread is about the whole file; its lines are then a placeholder for line 1. */
+  readonly scope?: 'file';
 }
 
 /** `description` is read only for the label picker. */
@@ -428,7 +430,7 @@ const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuth
 const reactionFields = 'reactionGroups{content viewerHasReacted reactors{totalCount}}';
 const commentFields = `id url body bodyHTML createdAt lastEditedAt viewerCanUpdate viewerCanDelete viewerCanMinimize viewerCanReact isMinimized minimizedReason
   author{login avatarUrl(size:40) ... on User{name}} ${reactionFields}`;
-const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved
+const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved subjectType
   comments(first:100){nodes{${commentFields} state}}} pageInfo{hasNextPage endCursor}}`;
 const actorField = 'actor{login avatarUrl(size:40)}';
 const userLogin = '... on User{login} ... on Bot{login} ... on Mannequin{login}';
@@ -1478,7 +1480,7 @@ export function parsePickerOptions(repository: Record<string, unknown>): PickerO
   };
 }
 
-/** Read review threads, skipping file-level ones and threads whose comments are all gone. */
+/** Read review threads, file-level ones at placeholder line 1, skipping threads whose comments are all gone. */
 export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
   const threads: RemoteThread[] = [];
   for (const node of list(nodes)) {
@@ -1487,18 +1489,20 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
     const endLine = outdated ? thread['originalLine'] : thread['line'];
     const startLine = (outdated ? thread['originalStartLine'] : thread['startLine']) ?? endLine;
     const comments = list(object(thread['comments'])['nodes']).map(object);
-    if (!Number.isSafeInteger(endLine) || !Number.isSafeInteger(startLine) || comments.length === 0) continue;
+    const file = thread['subjectType'] === 'FILE';
+    if ((!file && (!Number.isSafeInteger(endLine) || !Number.isSafeInteger(startLine))) || comments.length === 0) continue;
     threads.push({
       id: text(thread['id']),
       path: text(thread['path']),
       side: thread['diffSide'] === 'LEFT' ? 'LEFT' : 'RIGHT',
-      startLine: startLine as number,
-      endLine: endLine as number,
+      startLine: file ? 1 : startLine as number,
+      endLine: file ? 1 : endLine as number,
       outdated,
       resolved: thread['isResolved'] === true,
       pending: comments[0]?.['state'] === 'PENDING',
       url: httpsUrl(comments[0]?.['url']),
       comments: comments.map((comment) => ({ ...parseComment(comment), pending: comment['state'] === 'PENDING' })),
+      ...(file ? { scope: 'file' as const } : {}),
     });
   }
   return threads;

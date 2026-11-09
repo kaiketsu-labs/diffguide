@@ -160,7 +160,7 @@ export function suggestionEdits(threads: readonly RemoteThread[], picked: readon
     const comment = thread?.comments.find((entry) => entry.id === commentId);
     const suggestions = parseSuggestions(comment?.body ?? '');
     const [suggestion] = suggestions;
-    if (thread === undefined || suggestion === undefined || suggestions.length !== 1 || thread.outdated || thread.side !== 'RIGHT') {
+    if (thread === undefined || suggestion === undefined || suggestions.length !== 1 || thread.outdated || thread.side !== 'RIGHT' || thread.scope === 'file') {
       throw new Error('A suggestion is outdated or gone. Refresh and pick again.');
     }
     if (thread.path.startsWith('/') || thread.path.includes('\0') || thread.path.split('/').includes('..')) throw new Error('GitHub returned an invalid file path.');
