@@ -37,6 +37,8 @@ interface Saved {
   readonly composer?: Composer | undefined;
   readonly fileComposer?: FileComposer | undefined;
   readonly showArchived?: boolean;
+  /** The Files tab shows Claude's guide notes too, not only the Guide tab. */
+  readonly guideInFiles?: boolean;
   readonly replies?: Record<string, string>;
   readonly publishing?: Record<string, string>;
   readonly range?: DiffRange;
@@ -109,6 +111,7 @@ const fileKeys = new Map<string, string>();
 let composer = saved.composer;
 let fileComposer = saved.fileComposer;
 let showArchived = saved.showArchived === true;
+let guideInFiles = saved.guideInFiles === true;
 let marginThreads = saved.marginThreads === true;
 /** Archive toggles the page shows before the extension's next state confirms them, by thread id. */
 const archiving = new Map<string, boolean>();
@@ -292,7 +295,7 @@ function frameMain(scripts: boolean): void {
 }
 
 function save(): void {
-  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
+  api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, guideInFiles, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
     range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden, navWidth, navThreadsHeight });
 }
 
@@ -669,6 +672,11 @@ function localThreads(): Thread[] {
 function allThreads(): Thread[] {
   if (!current) return [];
   return [...localThreads(), ...(current.github ?? []).map((thread) => ({ ...thread, source: 'github' as const }))];
+}
+
+/** Whether the Files tab shows a thread: guide notes only while Show guide comments is on. */
+function inFiles(thread: Thread): boolean {
+  return guideInFiles || thread.source !== 'local' || thread.origin !== 'analysis';
 }
 
 /** Local threads Claude opened from this GitHub thread; the page shows them inside it. */
@@ -1384,6 +1392,8 @@ function openFilterMenu(): void {
   rows.push(menuRow(['Hide viewed files'], hideViewed, (on) => { hideViewed = on; applyFilters(); }));
   const archived = (current?.threads ?? []).filter(isArchived).length;
   rows.push(menuRow(['Show archived threads', el('span', 'muted', String(archived))], showArchived, (on) => { showArchived = on; save(); renderFiles(); renderThreadList(); }));
+  const notes = (current?.threads ?? []).filter((thread) => thread.origin === 'analysis' && (showArchived || !isArchived(thread))).length;
+  rows.push(menuRow(['Show guide comments', el('span', 'muted', String(notes))], guideInFiles, (on) => { guideInFiles = on; save(); renderFiles(); }));
   const reset = button('Clear filters', () => { clearFilters(); closeToolbarMenu(); }, 'small');
   reset.disabled = !filtersOn();
   const foot = el('div', 'menu-foot');
@@ -2792,7 +2802,7 @@ function jump(thread: Thread): void {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
   }
-  if (view === 'overview' || (view === 'guide' && !document.getElementById('thread-' + thread.id))) setView('files');
+  if (!inFiles(thread)) { if (view !== 'guide') setView('guide'); } else if (view === 'overview' || (view === 'guide' && !document.getElementById('thread-' + thread.id))) setView('files');
   if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
     collapsed.set(thread.path, false);
     openFolders(thread.path);
@@ -3329,7 +3339,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   const shownFiles = [...shownChanges, ...opened];
   const container = $('files');
   const threadsByFile = new Map<string, Thread[]>();
-  for (const thread of allThreads()) {
+  for (const thread of allThreads().filter(inFiles)) {
     const list = threadsByFile.get(thread.path) ?? [];
     threadsByFile.set(thread.path, list);
     list.push(thread);
