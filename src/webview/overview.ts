@@ -51,6 +51,8 @@ interface Saved {
   /** The file list shows every repository file, not only the changes. */
   readonly allFiles?: boolean;
   readonly listHidden?: boolean;
+  /** Width of the file list in pixels, when the user resized it. */
+  readonly navWidth?: number | undefined;
 }
 type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
@@ -75,6 +77,7 @@ let view: View = saved.view === 'guide' || (saved.view === undefined && saved.la
 /** Local pages list every repository file by default; PR pages list the changes. */
 let allFiles = saved.allFiles ?? initial.state.localMode === true;
 let listHidden = saved.listHidden === true;
+let navWidth = saved.navWidth;
 /** Every file in the repository, for the All files list. */
 let repositoryFiles: readonly string[] = [];
 let fileIcons: FileIcons | undefined;
@@ -287,7 +290,7 @@ function frameMain(scripts: boolean): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden, navWidth });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -4693,6 +4696,35 @@ $('filter-clear').addEventListener('click', () => { $<HTMLInputElement>('file-fi
 $('filter-clear').hidden = fileFilter === '';
 $('filter-menu').addEventListener('click', openFilterMenu);
 $('nav-toggle').addEventListener('click', () => { listHidden = !listHidden; save(); showListToggle(); });
+/** Drag the file list's right edge to resize it; double-click restores the default width. */
+function showNavWidth(): void {
+  if (navWidth === undefined) document.body.style.removeProperty('--nav-width');
+  else document.body.style.setProperty('--nav-width', navWidth + 'px');
+}
+showNavWidth();
+$('nav-resize').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const handle = $('nav-resize');
+  const left = $('nav-col').getBoundingClientRect().left;
+  handle.setPointerCapture(event.pointerId);
+  handle.classList.add('dragging');
+  document.body.classList.add('resizing');
+  const move = (moved: PointerEvent): void => {
+    navWidth = Math.round(Math.min(window.innerWidth / 2, Math.max(160, moved.clientX - left)));
+    showNavWidth();
+  };
+  const stop = (): void => {
+    handle.removeEventListener('pointermove', move);
+    handle.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    save();
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', stop, { once: true });
+  handle.addEventListener('pointercancel', stop, { once: true });
+});
+$('nav-resize').addEventListener('dblclick', () => { navWidth = undefined; showNavWidth(); save(); });
 showListToggle();
 $('fold-conversation').addEventListener('click', () => { conversationFolded = !conversationFolded; save(); if (current) renderConversation(current, true); });
 $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
