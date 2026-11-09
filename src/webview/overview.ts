@@ -4546,6 +4546,7 @@ function showGuideTab(): void {
   const count = $('guide-count');
   const steps = analysis?.result?.groups.reduce((sum, group) => sum + group.steps.length, 0);
   $('view-guide').classList.toggle('busy', analysis?.running === true);
+  $('guide-stale').hidden = analysis?.running === true || analysis?.result === undefined || !analysis.stale;
   count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
   count.hidden = analysis?.running === true || steps === undefined;
   $('files-count').textContent = files ? String(files.length - openedFiles().length) : '';
