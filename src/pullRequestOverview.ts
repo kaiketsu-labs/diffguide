@@ -914,6 +914,7 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty{display:none}
 #view-guide.busy>svg{color:var(--agent)}#view-guide.busy>svg>path{animation:guide-busy 1.2s steps(1,end) infinite}@keyframes guide-busy{25%{transform:translateY(-1px)}50%{transform:none}75%{transform:translateY(1px)}}
 @media (prefers-reduced-motion:reduce){#view-guide.busy>svg>path{animation:none}}
+.tabs .tab-warning{display:inline-flex;margin-left:calc(-1 * var(--space-2));color:var(--warning)}.tabs .tab-warning[hidden]{display:none}.tabs .tab-warning svg{width:12px;height:12px}.tab-warning[data-tip]:hover::after{left:0;right:auto}
 ${orbLoaderStyles()}
 .off-view{display:none}
 .files-layout{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:var(--space-16);align-items:start}.files-layout>#files{min-width:0}.files-layout.no-nav,.files-layout.list-hidden{grid-template-columns:minmax(0,1fr)}.files-layout.no-nav>#nav-col,.files-layout.list-hidden>#nav-col{display:none}
@@ -1135,7 +1136,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <div id="files-bar" class="row head"><span class="row view-head"><button id="nav-toggle" class="icon-button" aria-controls="nav-col">${icons.fileList}</button><span class="tabs" role="tablist" aria-label="Show">
 <button id="view-overview" role="tab">${icons.overview}Overview</button>
 <button id="view-files" role="tab">${icons.file}Files<span id="files-count" class="count"></span></button>
-<button id="view-guide" class="pr-only" role="tab">${icons.agentGuide}Guide<span id="guide-count" class="count" hidden></span></button></span>
+<button id="view-guide" class="pr-only" role="tab">${icons.agentGuide}Guide<span id="guide-stale" class="tab-warning" data-tip="Built for an older commit. Rebuild it in the guide." aria-label="Out of date" hidden>${icons.warning}</span><span id="guide-count" class="count" hidden></span></button></span>
 <span class="menu-anchor pr-only"><button id="range" class="range-button" aria-label="Changes from" aria-haspopup="true" aria-expanded="false">${icons.commit}<span class="range-text">All changes</span>${icons.chevronDown}</button></span>
 </span><span class="toolbar">
 <span id="analysis-status" class="pr-only"></span><button id="analyze" class="small pr-only">Build guide</button>
