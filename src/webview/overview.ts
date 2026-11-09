@@ -4644,6 +4644,7 @@ async function hopIntoAvatar(live: LiveLog): Promise<void> {
   text.animate([{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 180, easing: 'ease-out', fill: 'backwards' });
   avatar.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 180, delay: 300, easing: 'ease-out', fill: 'backwards', pseudoElement: '::before' });
   pose.style.transform = `translate(${dx}px, ${dy}px)`;
+  pose.dataset.pose = 'air';
   const flight = pose.animate(Array.from({ length: 13 }, (_, step) => {
     const done = step / 12, left = 1 - done, eased = done < .5 ? 2 * done * done : 1 - (-2 * done + 2) ** 2 / 2;
     return { transform: `translate(${Math.round(dx * (1 - eased))}px, ${Math.round(dy * (1 - eased) - 6 * Math.sin(Math.PI * done) * left)}px)` };
