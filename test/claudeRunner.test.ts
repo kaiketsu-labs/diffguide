@@ -309,6 +309,23 @@ test('stop ends the running answer without an error and leaves its comments wait
   await until(() => children.length === 2);
 });
 
+test('a stop while the run gets ready skips the rest of the setup and starts no Claude', async (t) => {
+  let held: () => void = () => undefined;
+  let prepared = 0;
+  const { instance, store, children } = await runner('author', t, undefined, async () => { prepared++; }, {
+    hold: () => new Promise<void>((resolve) => { held = resolve; }),
+  });
+  store.setPending([event('one')]);
+  await until(() => instance.activity.running);
+  const stopped = instance.stop();
+  held();
+  await stopped;
+  assert.equal(prepared, 0);
+  assert.equal(children.length, 0);
+  assert.equal(instance.activity.stopped, true);
+  assert.equal(instance.activity.error, undefined);
+});
+
 test('waits for a busy worktree, shows who holds it, and stops while waiting without starting Claude', async (t) => {
   const worktree = path.join(await mkdtemp(path.join(tmpdir(), 'diffguide-busy-')), 'pr-3');
   const releaseOther = await lockWorktree(worktree, 'acme/api#12');
