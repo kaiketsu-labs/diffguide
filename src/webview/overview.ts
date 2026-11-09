@@ -53,6 +53,8 @@ interface Saved {
   readonly listHidden?: boolean;
   /** Width of the file list in pixels, when the user resized it. */
   readonly navWidth?: number | undefined;
+  /** Height of the comments panel under the file list in pixels, when the user resized it. */
+  readonly navThreadsHeight?: number | undefined;
 }
 type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
@@ -78,6 +80,7 @@ let view: View = saved.view === 'guide' || (saved.view === undefined && saved.la
 let allFiles = saved.allFiles ?? initial.state.localMode === true;
 let listHidden = saved.listHidden === true;
 let navWidth = saved.navWidth;
+let navThreadsHeight = saved.navThreadsHeight;
 /** Every file in the repository, for the All files list. */
 let repositoryFiles: readonly string[] = [];
 let fileIcons: FileIcons | undefined;
@@ -290,7 +293,7 @@ function frameMain(scripts: boolean): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden, navWidth });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden, navWidth, navThreadsHeight });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -1359,6 +1362,7 @@ function filtersOn(): boolean {
 function applyFilters(): void {
   save();
   renderFiles();
+  renderNavThreads();
   $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
   $('filter-clear').hidden = fileFilter === '';
   showListToggle();
@@ -3817,6 +3821,48 @@ function renderThreadList(): void {
     }
     list.append(group);
   }
+  renderNavThreads();
+}
+
+/** The comments panel under the file list: open threads on files the filters leave, grouped by file in page order; a click jumps to the thread. */
+function renderNavThreads(): void {
+  const pageFiles = files ?? [];
+  const order = new Map(pageFiles.map((file, index) => [file.path, index]));
+  const shown = new Set(filteredFiles(pageFiles).map((file) => file.path));
+  const threads = allThreads().filter((thread) => !thread.resolved && standalone(thread) && (shown.has(thread.path) || (!order.has(thread.path) && !filtersOn())));
+  const byFile = new Map<string, Thread[]>();
+  for (const thread of threads) byFile.set(thread.path, [...byFile.get(thread.path) ?? [], thread]);
+  const paths = [...byFile.keys()].sort((left, right) => (order.get(left) ?? Infinity) - (order.get(right) ?? Infinity) || left.localeCompare(right));
+  const panel = $('nav-threads');
+  panel.hidden = threads.length === 0;
+  $('nav-split').hidden = panel.hidden;
+  const head = el('div', 'nav-head');
+  head.append('Comments', el('span', 'muted', String(threads.length)));
+  const list = el('ul', 'nav-list');
+  const wholeFile = (thread: Thread): boolean => thread.source === 'local' && thread.scope === 'file';
+  for (const path of paths) {
+    const fileRow = el('li', 'nav-thread-file');
+    fileRow.title = path;
+    const themeIcon = fileIcons?.byPath[path];
+    fileRow.append(themeIcon ? iconNode(themeIcon) : el('span', 'file-icon'), el('span', 'nav-name', path.split('/').at(-1) ?? path));
+    list.append(fileRow);
+    const members = (byFile.get(path) ?? []).sort((left, right) => (wholeFile(left) ? 0 : left.startLine) - (wholeFile(right) ? 0 : right.startLine));
+    for (const thread of members) {
+      const kind = threadKind(thread);
+      const row = el('button', 'nav-file nav-thread ' + kind);
+      row.style.setProperty('--depth', '1');
+      row.title = thread.location + '\n' + thread.text;
+      const mark = titled(el('span', 'nav-kind'), kindLabels[kind]);
+      mark.append(icon(kindMarks[kind]));
+      const lines = wholeFile(thread) ? 'File' : 'L' + thread.startLine + (thread.endLine > thread.startLine ? '–' + thread.endLine : '');
+      row.append(mark, el('span', 'nav-lines', lines), el('span', 'nav-name', thread.text.split('\n')[0] ?? ''));
+      row.addEventListener('click', () => { jump(thread); });
+      const item = el('li');
+      item.append(row);
+      list.append(item);
+    }
+  }
+  panel.replaceChildren(head, list);
 }
 
 /** Plain text with `backtick` spans shown as code. */
@@ -4507,6 +4553,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
       for (const path of changed) { contextLines.delete(path); loading.delete(path); }
       renderFiles(changed);
     }
+    renderNavThreads();
   }
   if (data.markdown) {
     const entry = renderedPreviews.get(data.markdown.form);
@@ -4725,6 +4772,35 @@ $('nav-resize').addEventListener('pointerdown', (event) => {
   handle.addEventListener('pointercancel', stop, { once: true });
 });
 $('nav-resize').addEventListener('dblclick', () => { navWidth = undefined; showNavWidth(); save(); });
+/** Drag the line between the file list and the comments panel to share their height; double-click restores the default. */
+function showNavThreadsHeight(): void {
+  if (navThreadsHeight === undefined) document.body.style.removeProperty('--nav-threads-height');
+  else document.body.style.setProperty('--nav-threads-height', navThreadsHeight + 'px');
+}
+showNavThreadsHeight();
+$('nav-split').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const handle = $('nav-split');
+  const column = $('nav-col').getBoundingClientRect();
+  handle.setPointerCapture(event.pointerId);
+  handle.classList.add('dragging');
+  document.body.classList.add('resizing-rows');
+  const move = (moved: PointerEvent): void => {
+    navThreadsHeight = Math.round(Math.min(column.height - 80, Math.max(48, column.bottom - moved.clientY)));
+    showNavThreadsHeight();
+  };
+  const stop = (): void => {
+    handle.removeEventListener('pointermove', move);
+    handle.classList.remove('dragging');
+    document.body.classList.remove('resizing-rows');
+    save();
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', stop, { once: true });
+  handle.addEventListener('pointercancel', stop, { once: true });
+});
+$('nav-split').addEventListener('dblclick', () => { navThreadsHeight = undefined; showNavThreadsHeight(); save(); });
 showListToggle();
 $('fold-conversation').addEventListener('click', () => { conversationFolded = !conversationFolded; save(); if (current) renderConversation(current, true); });
 $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
