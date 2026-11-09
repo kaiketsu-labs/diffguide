@@ -10,6 +10,7 @@ export interface ClaudeAnswer {
   readonly number: number;
   readonly threadId: string;
   readonly title: string;
+  /** Empty for a thread about the whole PR. */
   readonly path: string;
   readonly line: number;
   readonly createdAt: string;
@@ -98,9 +99,9 @@ export class ClaudeAnswersTree implements vscode.TreeDataProvider<ClaudeAnswer>,
     const fresh = this.seen.isNew(answer);
     const item = new vscode.TreeItem(fresh ? { label: answer.title, highlights: [[0, answer.title.length]] } : answer.title, vscode.TreeItemCollapsibleState.None);
     item.id = `answer:${answer.threadId}`;
-    item.description = `#${answer.number} · ${path.posix.basename(answer.path)}:${answer.line} · ${ago(answer.createdAt)}`;
+    item.description = `#${answer.number} · ${answer.path === '' ? 'Conversation' : `${path.posix.basename(answer.path)}:${answer.line}`} · ${ago(answer.createdAt)}`;
     item.iconPath = new vscode.ThemeIcon(fresh ? 'circle-filled' : 'comment', new vscode.ThemeColor(fresh ? 'charts.orange' : 'descriptionForeground'));
-    item.tooltip = new vscode.MarkdownString().appendText(`${answer.pullRequest} · ${answer.path}:${answer.line}${fresh ? ' · New' : ''}\n\n`).appendMarkdown(answer.text.slice(0, 1500));
+    item.tooltip = new vscode.MarkdownString().appendText(`${answer.pullRequest} · ${answer.path === '' ? 'Conversation' : `${answer.path}:${answer.line}`}${fresh ? ' · New' : ''}\n\n`).appendMarkdown(answer.text.slice(0, 1500));
     item.command = { command: 'diffGuide.openAnswer', title: 'Open answer', arguments: [answer.pullRequest, answer.threadId] };
     return item;
   }

@@ -69,7 +69,7 @@ export interface OverviewState {
     /** Commits Claude made while answering this thread, oldest first. */
     readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
     readonly url?: string;
-    /** The GitHub thread this one answers; the page shows it inside that thread, and publishing replies there. */
+    /** The GitHub thread this one answers; the page shows it inside that thread, and publishing replies there. For a PR-level thread, the conversation comment it quotes. */
     readonly linkedTo?: string;
     /** What posting the thread on GitHub sends unless the user edits it; set while it is open and not posted. */
     readonly draft?: string;
@@ -82,8 +82,8 @@ export interface OverviewState {
     readonly side: DiffSide;
     readonly startLine: number;
     readonly endLine: number;
-    /** Set when the comment is about the whole file; the page shows it above the file's diff. */
-    readonly scope?: 'file';
+    /** `file` when the comment is about the whole file; the page shows it above the file's diff. `pullRequest` when it is about the PR, with an empty path; the page shows it under `linkedTo`, its conversation comment. */
+    readonly scope?: 'file' | 'pullRequest';
     readonly resolved: boolean;
     /** Put away by the user; the page hides it unless archived threads are shown. */
     readonly archived?: true;
@@ -234,6 +234,8 @@ export interface OverviewActions {
   postToGitHub(threadId: string, text: string, pending: boolean): Promise<void>;
   /** Hand a GitHub thread to Claude in a linked local thread; an empty `note` asks Claude to answer or implement the feedback as is. */
   askAboutGitHub(threadId: string, note: string, intent: CommentIntent): Promise<void>;
+  /** Hand a conversation comment or review to Claude in a PR-level local thread that quotes and links it; an empty `note` asks about the comment as is. */
+  askAboutComment(commentId: string, note: string, intent: CommentIntent): Promise<void>;
   resolveOnGitHub(threadId: string, resolved: boolean): Promise<void>;
   /** Delete one of the viewer's GitHub comments; the page asked first. */
   deleteOnGitHub(commentId: string): Promise<void>;
@@ -376,6 +378,7 @@ export type PageMessage =
   | { readonly action: 'github-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'github-publish'; readonly form: string; readonly id: string; readonly text: string; readonly pending: boolean }
   | { readonly action: 'github-ask'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
+  | { readonly action: 'comment-ask'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'archive'; readonly id: string; readonly archived: boolean }
   | { readonly action: 'github-delete'; readonly id: string }
@@ -617,6 +620,10 @@ export async function showPullRequestOverview(
           post({ done: formKey });
         } else if (action === 'github-ask' && typeof id === 'string' && isOptionalText(text) && commentIntents.includes(intent) && state.github?.some((thread) => thread.id === id)) {
           await actions.askAboutGitHub(id, text ?? '', intent as CommentIntent);
+          post({ done: formKey });
+        } else if (action === 'comment-ask' && typeof id === 'string' && isOptionalText(text) && commentIntents.includes(intent)
+          && (conversation()?.timeline ?? []).some((item) => (item.kind === 'comment' || item.kind === 'review') && item.id === id && item.body.trim() !== '')) {
+          await actions.askAboutComment(id, text ?? '', intent as CommentIntent);
           post({ done: formKey });
         } else if (action === 'github-resolve' && typeof id === 'string' && typeof resolved === 'boolean' && state.github?.some((thread) => thread.id === id)) {
           await actions.resolveOnGitHub(id, resolved);
@@ -1261,6 +1268,7 @@ interface ThreadExtras {
 export function threadView(thread: ReviewThread, { activity, progress, running = false, publication, linkedTo, publishable = false, commits = [] }: ThreadExtras = {}): OverviewState['threads'][number] {
   const last = thread.messages.at(-1);
   const wholeFile = thread.anchor.scope === 'file';
+  const onPullRequest = thread.anchor.scope === 'pullRequest';
   // Claude's reply ends the thread's live log, even while the run is still wrapping up.
   const replied = last?.author === 'claude' && Date.parse(last.createdAt) >= (progress?.startedAt ?? Infinity);
   const working = thread.resolved || replied ? undefined : activity?.startsWith('Claude · ') ? activity.slice('Claude · '.length)
@@ -1272,7 +1280,7 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
   ].filter(Boolean).join(' · ');
   return {
     id: thread.id,
-    location: wholeFile ? thread.anchor.path : `${thread.anchor.path}:${thread.anchor.startLine}`,
+    location: onPullRequest ? 'Conversation' : wholeFile ? thread.anchor.path : `${thread.anchor.path}:${thread.anchor.startLine}`,
     text: thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').slice(0, 140) ?? '',
     status,
     ...(working === undefined ? {} : { working }),
@@ -1281,14 +1289,14 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
     side: thread.anchor.side === 'original' ? 'old' : 'new',
     startLine: thread.anchor.startLine,
     endLine: thread.anchor.endLine,
-    ...(wholeFile ? { scope: 'file' as const } : {}),
+    ...(wholeFile ? { scope: 'file' as const } : onPullRequest ? { scope: 'pullRequest' as const } : {}),
     resolved: thread.resolved,
     ...(thread.archived ? { archived: true as const } : {}),
     ...(thread.origin === undefined ? {} : { origin: thread.origin }),
-    ...(!wholeFile && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
+    ...(!wholeFile && !onPullRequest && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
     messages: thread.messages.map(({ author, text, createdAt }) => {
       // A suggestion replaces the commented lines, and a whole-file comment has none.
-      const suggestions = wholeFile ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
+      const suggestions = wholeFile || onPullRequest ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
       return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(suggestions.length ? { suggestions } : {}) };
     }),
     ...(publication === undefined ? {} : { url: publication.url }),

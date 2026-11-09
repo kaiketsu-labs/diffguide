@@ -136,6 +136,8 @@ let conversationAll = false;
 const recentEntries = 6;
 /** Comment edits in progress, by comment id. */
 const edits = new Map<string, string>();
+/** Notes for the agent being written under a conversation comment, by comment id. */
+const commentAsks = new Map<string, string>();
 /** Hidden comments the viewer chose to read anyway. */
 const revealed = new Set<string>();
 /** Forms showing their Preview tab, and GitHub's rendering of the text each last previewed. */
@@ -674,9 +676,19 @@ function allThreads(): Thread[] {
   return [...localThreads(), ...(current.github ?? []).map((thread) => ({ ...thread, source: 'github' as const }))];
 }
 
-/** Whether the Files tab shows a thread: guide notes only while Show guide comments is on. */
+/** Whether the Files tab shows a thread: never one about the whole PR, guide notes only while Show guide comments is on. */
 function inFiles(thread: Thread): boolean {
-  return guideInFiles || thread.source !== 'local' || thread.origin !== 'analysis';
+  return thread.scope !== 'pullRequest' && (guideInFiles || thread.source !== 'local' || thread.origin !== 'analysis');
+}
+
+/** Local threads about the whole PR that quote the conversation comment `id`, oldest first. */
+function commentThreads(id: string): Thread[] {
+  return localThreads().filter((thread) => thread.scope === 'pullRequest' && thread.linkedTo === id).sort((left, right) => started(left) - started(right));
+}
+
+/** Redraw where a thread shows: the Conversation for a thread about the whole PR, else its file. */
+function redrawThread(thread: Thread | undefined): void {
+  if (thread?.scope === 'pullRequest') { if (current) renderConversation(current, true); } else renderFiles([thread?.path]);
 }
 
 /** Local threads Claude opened from this GitHub thread; the page shows them inside it. */
@@ -690,7 +702,7 @@ function setArchived(thread: Thread, archived: boolean): void {
   replies.delete(thread.id);
   save();
   post({ action: 'archive', id: thread.id, archived });
-  renderFiles([thread.path]);
+  redrawThread(thread);
   renderThreadList();
 }
 
@@ -766,6 +778,9 @@ function toolButton(svg: string, tip: string, onClick: () => void): HTMLButtonEl
 /** Quote, edit, hide and delete, as far as the viewer may. */
 function commentTools(comment: GitHubComment, place: CommentPlace): HTMLElement {
   const tools = el('span', 'msg-tools');
+  if (place.kind !== 'reviewComment' && comment.body.trim() && !hiddenComment(comment) && !commentAsks.has(comment.id)) {
+    tools.append(toolButton(icons.agentAsk, 'Ask the agent about this comment', () => { commentAsks.set(comment.id, ''); focusNext = 'comment-ask:' + comment.id; place.redraw(); }));
+  }
   if (comment.body.trim() && !hiddenComment(comment)) tools.append(toolButton(icons.quote, 'Quote reply', () => place.quote(quoted(comment.body))));
   if (comment.canEdit && !edits.has(comment.id)) tools.append(toolButton(icons.edit, 'Edit', () => { edits.set(comment.id, comment.body); focusNext = 'edit:' + comment.id; place.redraw(); }));
   if (comment.canHide && comment.hidden !== undefined) tools.append(toolButton(icons.hidden, 'Unhide', () => post({ action: 'hide-comment', id: comment.id, hide: false })));
@@ -1008,7 +1023,9 @@ let conversationStamp = '';
 
 /** The Conversation card: comments, reviews, pushes and events, oldest first, and a box for a new comment. */
 function renderConversation(state: OverviewState, force = false): void {
-  const stamp = JSON.stringify([asking?.key, conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:'))]);
+  const pullRequestThreads = state.threads.filter((thread) => thread.scope === 'pullRequest');
+  const stamp = JSON.stringify([asking?.key, conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:') || key.startsWith('comment-ask:')),
+    pullRequestThreads, showArchived, [...commentAsks.keys()], pullRequestThreads.map((thread) => [replies.get(thread.id), publishing.get(thread.id), archiving.get(thread.id)])]);
   if (!force && stamp === conversationStamp) return;
   conversationStamp = stamp;
   const timeline = $('timeline');
@@ -1077,8 +1094,38 @@ function commentItem(item: Extract<TimelineItem, { kind: 'comment' | 'review' }>
   const verb = item.kind === 'review' ? reviewVerbs[item.state] : 'commented';
   head.append(el('b', '', item.author), el('span', 'verb', verb), ...timeLabel(item.createdAt), ...item.edited ? [el('span', 'edited', '· edited')] : [], commentTools(item, place));
   main.append(head, ...commentBody(item, place));
+  if (commentAsks.has(item.id)) main.append(commentAskBox(item, place));
+  main.append(...commentThreads(item.id).map(threadBox));
   node.append(personAvatar(item.avatarUrl, item.authorName ?? item.author, item.author), main);
   return node;
+}
+
+/** A note for the agent under a conversation comment; Ask or Implement opens a local thread about the whole PR that quotes the comment. */
+function commentAskBox(comment: GitHubComment, place: CommentPlace): HTMLElement {
+  const key = 'comment-ask:' + comment.id;
+  const box = el('div', 'thread draft');
+  const head = el('div', 'strip');
+  head.append(el('span', 'source', 'New comment'), el('span', 'gap'), el('span', 'muted', 'Whole PR'));
+  const cancel = (): void => { commentAsks.delete(comment.id); place.redraw(); };
+  const busySending = sending.has(key);
+  const send = (intent: Intent): void => {
+    if (sending.has(key)) return;
+    sending.add(key);
+    $('error').textContent = '';
+    place.redraw();
+    post({ action: 'comment-ask', form: key, id: comment.id, text: commentAsks.get(comment.id) ?? '', intent });
+  };
+  const area = textarea(key, commentAsks.get(comment.id) ?? '', 'Tell the agent what to do, or leave empty', (value) => { commentAsks.set(comment.id, value); }, () => send('ask'), cancel);
+  const implement = agentButton('implement', 'Implement', () => send('implement'));
+  implement.title = 'Only the agent sees it. Agent changes the code';
+  const ask = agentButton('ask', busySending ? 'Sending…' : 'Ask', () => send('ask'));
+  ask.title = 'Only the agent sees it. Agent answers in a local thread without editing';
+  implement.disabled = busySending;
+  ask.disabled = busySending;
+  const row = el('div', 'row actions composer-actions');
+  row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), implement, ask);
+  box.append(head, area, row);
+  return box;
 }
 
 function eventItem(item: Extract<TimelineItem, { kind: 'event' }>): HTMLElement {
@@ -2442,7 +2489,7 @@ function threadBox(thread: Thread): HTMLElement {
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
-    status, thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
+    status, thread.scope === 'pullRequest' ? 'Whole PR' : thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
   if (thread.url) {
     const open = el('button', 'icon-button');
@@ -2492,11 +2539,11 @@ function threadBox(thread: Thread): HTMLElement {
   const actions = el('div', 'row actions composer-actions');
   const reply = replies.get(thread.id);
   if (reply !== undefined && !thread.resolved) {
-    const cancel = (): void => { replies.delete(thread.id); save(); renderFiles([thread.path]); };
+    const cancel = (): void => { replies.delete(thread.id); save(); redrawThread(thread); };
     const send = (message: PageMessage): void => {
       sending.add(key);
       $('error').textContent = '';
-      renderFiles([thread.path]);
+      redrawThread(thread);
       post(message);
     };
     const submit = (intent: Intent = 'ask'): void => {
@@ -2554,7 +2601,7 @@ function threadBox(thread: Thread): HTMLElement {
     actions.append(archive);
   }
   actions.append(iconButton(thread.resolved ? icons.reopen : icons.check, thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
-  if (!thread.resolved) actions.append(iconButton(icons.reply, 'Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); renderFiles([thread.path]); }));
+  if (!thread.resolved) actions.append(iconButton(icons.reply, 'Reply', () => { replies.set(thread.id, ''); focusNext = key; save(); redrawThread(thread); }));
   box.append(actions);
   return box;
 }
@@ -2582,7 +2629,7 @@ function stopButton(): HTMLButtonElement {
 /** Reply in the GitHub thread this local thread sits in, else open the box that posts it on the diff. */
 function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButtonElement {
   const parent = current?.github?.find((github) => github.id === thread.linkedTo);
-  if (thread.linkedTo !== undefined) {
+  if (thread.linkedTo !== undefined && thread.scope !== 'pullRequest') {
     return titled(iconButton(icons.github, 'Reply', () => {
       if (parent === undefined || parent.resolved) {
         if (parent) threadOpen.set(parent.id, true);
@@ -2595,24 +2642,35 @@ function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButt
       renderFiles([parent.path]);
     }, 'quiet'), 'Reply on GitHub');
   }
-  return titled(iconButton(icons.github, 'Publish', () => { publishing.set(thread.id, thread.draft ?? ''); focusNext = 'publish:' + thread.id; save(); renderFiles([thread.path]); }, 'quiet'), 'Publish to GitHub');
+  return titled(iconButton(icons.github, 'Publish', () => { publishing.set(thread.id, thread.draft ?? ''); focusNext = 'publish:' + thread.id; save(); redrawThread(thread); }, 'quiet'), 'Publish to GitHub');
 }
 
 /** Edit a local thread's comment and post it on the PR diff, now or into the pending review. */
 function publishBox(thread: Thread & { readonly source: 'local' }, draft: string): DocumentFragment {
   const key = 'publish:' + thread.id;
-  const cancel = (): void => { publishing.delete(thread.id); previewTabs.delete(key); save(); renderFiles([thread.path]); };
+  const cancel = (): void => { publishing.delete(thread.id); previewTabs.delete(key); save(); redrawThread(thread); };
   const send = (pending: boolean): void => {
     const text = publishing.get(thread.id) ?? '';
     if (!text.trim() || sending.has(key)) return;
     sending.add(key);
     sentPending = pending;
     $('error').textContent = '';
-    renderFiles([thread.path]);
+    redrawThread(thread);
     post({ action: 'github-publish', form: key, id: thread.id, text, pending });
   };
-  const field = githubField(key, draft, 'Comment on GitHub', (value) => { publishing.set(thread.id, value); save(); }, () => send(true), cancel);
+  const onPullRequest = thread.scope === 'pullRequest';
+  const field = githubField(key, draft, 'Comment on GitHub', (value) => { publishing.set(thread.id, value); save(); }, () => send(!onPullRequest), cancel);
   const busySending = sending.has(key);
+  if (onPullRequest) {
+    const comment = button(busySending ? 'Sending…' : 'Comment', () => send(false), 'primary');
+    comment.disabled = busySending;
+    comment.title = 'Posts in the PR conversation right away. Everyone on the PR sees it.';
+    const row = el('div', 'row actions composer-actions');
+    row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), comment);
+    const fragment = document.createDocumentFragment();
+    fragment.append(field, row);
+    return fragment;
+  }
   const review = button(busySending && sentPending ? 'Sending…' : 'Add to pending review', () => send(true), 'primary');
   review.disabled = busySending;
   review.title = 'Goes into your pending review. Nobody sees it until you submit the review.';
@@ -2798,6 +2856,15 @@ function inline(content: HTMLElement, width: number): HTMLTableRowElement {
 }
 
 function jump(thread: Thread): void {
+  if (thread.scope === 'pullRequest') {
+    if (view !== 'overview') setView('overview');
+    conversationAll = true;
+    if (conversationFolded) { conversationFolded = false; save(); }
+    threadOpen.set(thread.id, true);
+    if (current) renderConversation(current, true);
+    document.getElementById('thread-' + thread.id)?.scrollIntoView({ block: 'center' });
+    return;
+  }
   if (!files?.some((file) => file.path === thread.path)) {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
@@ -3733,7 +3800,7 @@ function groupCollapsed(group: GuideGroup): boolean {
 function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, FileDiff>): { threads: Map<string, Thread[]>; notes: Map<string, Thread>; draft?: string } {
   const threads = new Map<string, Thread[]>();
   const notes = new Map<string, Thread>();
-  const all = allThreads().filter(standalone);
+  const all = allThreads().filter((thread) => standalone(thread) && thread.scope !== 'pullRequest');
   const steps = groups.flatMap((group) => group.steps);
   for (const step of steps) {
     const note = step.threadId === undefined ? undefined : all.find((thread) => thread.source === 'local' && thread.id === step.threadId);
@@ -4672,14 +4739,19 @@ function onExtensionMessage(data: ExtensionMessage): void {
     publishing.delete(id);
     previewTabs.delete(data.done);
     save();
-    renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
+    redrawThread(allThreads().find((thread) => thread.id === id));
   }
   if (data.done?.startsWith('reply:')) {
     const id = data.done.slice(6);
     sending.delete(data.done);
     replies.delete(id);
     save();
-    renderFiles([allThreads().find((thread) => thread.id === id)?.path]);
+    redrawThread(allThreads().find((thread) => thread.id === id));
+  }
+  if (data.done?.startsWith('comment-ask:')) {
+    sending.delete(data.done);
+    commentAsks.delete(data.done.slice('comment-ask:'.length));
+    if (current) renderConversation(current, true);
   }
   if (data.branches) { baseBranches = data.branches; renderBaseMenu(); }
   if (data.conversations || data.conversationsError !== undefined) { conversations = data.conversations ?? data.conversationsError; renderConnectMenu(); }

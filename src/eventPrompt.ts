@@ -29,7 +29,10 @@ function reviewData(event: ReviewEvent, thread?: ReviewThread): string {
     intent: event.intent,
     currentHumanFeedback: event.text,
     capturedAt: event.createdAt,
-    code: {
+    code: event.anchor.scope === 'pullRequest' ? {
+      scope: 'Pull request: the comment is about the PR as a whole, from its conversation, and has no code anchor. Read the PR\'s changes as needed.',
+      baseRevision: event.anchor.baseRevision,
+    } : {
       ...(event.anchor.scope === 'file' ? { scope: 'Whole file: the comment is about the file as a whole, not about particular lines. Read the current file.' } : {}),
       path: event.anchor.path,
       side: event.anchor.side,
@@ -67,7 +70,7 @@ export function buildReviewBatchPrompt(events: readonly ReviewEvent[], threads: 
   const labels = { ask: 'Ask', implement: 'Implement', summarize: 'Summarize' } as const;
   const summary = events.map((event) => {
     const { path, startLine, endLine, scope } = event.anchor;
-    const location = scope === 'file' ? `${path} (whole file)` : `${path}:${startLine}${endLine === startLine ? '' : `–${endLine}`}`;
+    const location = scope === 'pullRequest' ? 'pull request (no code anchor)' : scope === 'file' ? `${path} (whole file)` : `${path}:${startLine}${endLine === startLine ? '' : `–${endLine}`}`;
     const preview = event.text.replace(/\s+/gu, ' ').trim();
     const excerpt = preview.length > 160 ? `${preview.slice(0, 157)}…` : preview;
     return `VS Code review · ${labels[event.intent]} · ${JSON.stringify(location)}\nFeedback: ${JSON.stringify(excerpt)}`;

@@ -29,7 +29,7 @@ import { claudeStatus } from './claudeStatus.js';
 import { isWorkspaceRelativePath, readGitBase } from './git.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
 import { mediaType } from './media.js';
-import { anchorFromText, fileAnchor } from './anchors.js';
+import { anchorFromText, fileAnchor, pullRequestAnchor } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
 import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
@@ -393,7 +393,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         resolve: (id, resolved) => opened.session.store.resolve(findThread(id).id, resolved),
         archive: (id, archived) => opened.session.store.archive(findThread(id).id, archived),
         publish: async (id) => { await opened.session.publish?.(findThread(id).id); },
-        postToGitHub: async (id, text, pending) => { await opened.session.postToGitHub?.(findThread(id).id, text, pending); },
+        postToGitHub: async (id, text, pending) => {
+          const thread = findThread(id);
+          await opened.session.postToGitHub?.(thread.id, text, pending);
+          if (thread.anchor.scope === 'pullRequest') void loadConversation();
+        },
         commentOnGitHub: async ({ text, ...lines }, pending) => {
           const { anchor, base } = await pageAnchor(lines);
           const placement = await placeComment(folder, base, anchor);
@@ -423,6 +427,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const comments = thread.comments.filter((comment) => comment.hidden === undefined);
           const created = await opened.session.store.submit(anchor, githubFeedbackRequest(note, intent, comments), intent);
           await opened.session.linkToGitHub?.(created.id, { id: thread.id, url: thread.url });
+        },
+        askAboutComment: async (id, note, intent) => {
+          const comment = (await currentConversation()).timeline.find((item) => (item.kind === 'comment' || item.kind === 'review') && item.id === id);
+          if (comment === undefined || comment.kind === 'commit' || comment.kind === 'event' || !comment.body.trim()) throw new Error('This comment no longer exists.');
+          const request = githubFeedbackRequest(note, intent, [comment], 'GitHub PR comment');
+          const created = await opened.session.store.submit(pullRequestAnchor(await readBase()), request, intent);
+          await opened.session.linkToGitHub?.(created.id, { id: comment.id, url: comment.url ?? pullRequest.url });
         },
         resolveOnGitHub: async (id, resolved) => {
           await provider.resolveThread(id, resolved);
@@ -470,7 +481,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         retry: () => { opened.runner.retry(); },
         stopClaude: () => opened.runner.stop(),
         revealThread: async (id) => {
-          const { path } = findThread(id).anchor;
+          const { path, scope } = findThread(id).anchor;
+          if (scope === 'pullRequest') { revealOpenPage(`${repository}#${pullRequest.number}`, { thread: id }); return; }
           if (selection.range.kind !== 'all') { await openPullRequestFile(storageRoot, repository, current(), path); return; }
           revealed.add(path);
           revealOpenPage(`${repository}#${pullRequest.number}`, { path, reload: true });
@@ -489,7 +501,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         applySuggestion: async (id, message, option) => {
           const { anchor, messages } = findThread(id);
           const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
-          if (suggestion === undefined || anchor.scope === 'file') throw new Error('This suggestion no longer exists.');
+          if (suggestion === undefined || anchor.scope !== undefined) throw new Error('This suggestion no longer exists.');
           if (anchor.side !== 'working') throw new Error('Suggestions apply only to the PR\'s version of a file.');
           if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Apply the suggestion when it is done.');
           const loaded = await currentDetails();
@@ -526,7 +538,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         publishSuggestion: async (id, message, option) => {
           const { anchor, messages } = findThread(id);
           const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
-          if (suggestion === undefined || anchor.scope === 'file') throw new Error('This suggestion no longer exists.');
+          if (suggestion === undefined || anchor.scope !== undefined) throw new Error('This suggestion no longer exists.');
           if (anchor.side !== 'working') throw new Error('GitHub takes suggestions only on the PR\'s version of a file.');
           const head = await readHead();
           const lines = suggestionLines(await readGitBase(folder, anchor.path, head), anchor);

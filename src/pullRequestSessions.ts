@@ -382,6 +382,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
           open.reveal();
           return;
         }
+        if (thread.anchor.scope === 'pullRequest') throw new Error('Publish this thread from the Conversation on its review page.');
         const { startLine, endLine, path } = thread.anchor;
         const lines = lineLabel(thread.anchor);
         const text = publishableText(thread);
@@ -407,6 +408,11 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       postToGitHub: async (threadId, body, pending) => {
         const thread = store.threads.find((candidate) => candidate.id === threadId);
         if (thread === undefined) throw new Error('This thread no longer exists.');
+        if (thread.anchor.scope === 'pullRequest') {
+          if (pending) throw new Error('GitHub has no pending review for comments on the whole PR. Post it now instead.');
+          await record(threadId, await (await this.connect()).addComment(number, body), false);
+          return;
+        }
         const placement = await place(thread.anchor);
         await commentOnDiff(threadId, placement, `${outsideDiff(thread.anchor, placement)}${body}`, pending);
       },
