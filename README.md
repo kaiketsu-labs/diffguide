@@ -104,7 +104,7 @@ For a separate terminal app, the same running-conversation commands apply. To st
 
 **Leave your first comment**
 
-Open the **Local** view in the DiffGuide sidebar and click **Review local changes** on a checkout row. On the review page, click a line number, write your feedback and choose **Ask** or **Implement**. Continue in the thread's **Reply**. To show any other file on the page, right-click it in the Explorer and choose **Show on review page**, or turn on **All files** in the page's **View** menu. With several checkouts, such as Git worktrees of the same repository, the **Local** view lists each one; every checkout gets its own review page tab and its own Claude conversation.
+Open the **Local** view in the DiffGuide sidebar and click **Review local changes** on a checkout row. On the review page, click a line number, write your feedback and choose **Ask** or **Implement**. Continue in the thread's **Reply**. To show any other file on the page, right-click it in the Explorer and choose **Show in DiffGuide**, or turn on **All files** in the page's **View** menu. With several checkouts, such as Git worktrees of the same repository, the **Local** view lists each one; every checkout gets its own review page tab and its own Claude conversation.
 
 Requires **VS Code 1.100+**, **Node.js 20+**, **Git**, and authenticated **Claude Code with `asyncRewake` support**. macOS is the verified primary platform; Linux is unverified, and automatic Windows connection is not supported yet. [Setup and troubleshooting →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/INSTALL.md)
 

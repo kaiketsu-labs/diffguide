@@ -42,7 +42,7 @@ The **Connect Claude** button on the review page shows whether the connection is
 
 Open the **Local** view in the DiffGuide sidebar and click **Review local changes** on a checkout row. The review page lists your uncommitted changes and new files against HEAD. Click a line number, or drag across several, write your feedback and choose **Ask** to discuss it or **Implement** to request a change. Typing alone does not send anything.
 
-Right-click a file in the Explorer and choose **Show on review page** to see it there. A file without changes opens whole, marked **Not changed**, and stays while it has open threads.
+Right-click a file in the Explorer and choose **Show in DiffGuide** to see it there. A file without changes opens whole, marked **Not changed**, and stays while it has open threads.
 
 Each comment keeps the code it was written on. Claude's replies appear in the same thread, with code in syntax-colored blocks. Cmd/Ctrl-click a name in the diff to peek at its definition; **Open in editor** opens the file.
 

@@ -265,7 +265,7 @@
       },
       {
         "command": "diffGuide.showOnReviewPage",
-        "title": "Show on review page",
+        "title": "Show in DiffGuide",
         "category": "DiffGuide"
       },
       {
