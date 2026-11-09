@@ -211,6 +211,31 @@
 - Add the `localReview.mockPullRequests` setting, which fills the Pull Requests view with sample data for testing.
 - Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
 
+## [0.6.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.5.1...v0.6.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **local:** removes native inline comments, the side composer, the /a /i /r prefixes, Ctrl+Alt+M, the Review view with its appearance actions, and the PR handoff.
+* **pr:** move files and guide outline from the sidebar to the review page
+* VS Code installs DiffGuide as a new extension. Settings, keybindings and theme color overrides must be renamed by hand, and workspace data such as drafts, pins and local threads in plain workspaces does not carry over.
+
+### Features
+
+* **local:** review local changes on the review page ([#26](https://github.com/kaiketsu-labs/diffguide/issues/26)) ([55ab1b6](https://github.com/kaiketsu-labs/diffguide/commit/55ab1b67fce07476608afb3d4d8a3134dc5e1026))
+* **pr:** flag outdated guides, suggest github replies and list claude's answers ([#39](https://github.com/kaiketsu-labs/diffguide/issues/39)) ([299fd51](https://github.com/kaiketsu-labs/diffguide/commit/299fd511a7a9bfa0b08bfb8f70124964ed2d2adf))
+* **pr:** link prs in other repositories and give claude their worktrees ([b1d8bae](https://github.com/kaiketsu-labs/diffguide/commit/b1d8baee13e96290745e1a7add1f3720975ae19c))
+* **pr:** move files and guide outline from the sidebar to the review page ([07a8e0c](https://github.com/kaiketsu-labs/diffguide/commit/07a8e0c58f68d51e2a63121cc1fa71c73dac7894))
+* **pr:** name agent actions without claude and color them slate ([442933c](https://github.com/kaiketsu-labs/diffguide/commit/442933c6658d40aeeff48ae891d36017f9de97b8))
+* **pr:** replace clawd with the diffguide orb ([#43](https://github.com/kaiketsu-labs/diffguide/issues/43)) ([edd5df0](https://github.com/kaiketsu-labs/diffguide/commit/edd5df00b304127828c362a9365caeabaa70b79d))
+* rebrand pair review to diffguide ([#41](https://github.com/kaiketsu-labs/diffguide/issues/41)) ([693ec75](https://github.com/kaiketsu-labs/diffguide/commit/693ec754d584dcae52ea0718ebdbe922671213a8))
+* **ui:** draw diffguide's own icons ([c7c8f2f](https://github.com/kaiketsu-labs/diffguide/commit/c7c8f2ff3528334c67fbedeb24bc28fab29579c4))
+
+
+### Bug Fixes
+
+* **pr:** keep the review page current and steady while claude works ([c52fa66](https://github.com/kaiketsu-labs/diffguide/commit/c52fa66a55b274bfac2432090301488c8deeb6c3))
+
 ## [0.5.1](https://github.com/kaiketsu-labs/pair-review/compare/v0.5.0...v0.5.1) (2026-11-06)
 
 
