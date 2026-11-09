@@ -98,7 +98,7 @@ async function level(provider: vscode.TreeDataProvider<unknown>, node?: unknown)
   return await Promise.all(children.map(async (child) => ({ node: child, item: await provider.getTreeItem(child) })));
 }
 
-test('parses PR details into reviewers, checks and allowed merge methods', () => {
+test('parses PR details into reviewers, commenters but not the author among them, checks and allowed merge methods', () => {
   const details = parseDetails({
     squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: true, deleteBranchOnMerge: false,
     pullRequest: {
@@ -106,6 +106,8 @@ test('parses PR details into reviewers, checks and allowed merge methods', () =>
       viewerCanUpdate: true, isCrossRepository: false, headRef: { id: 'R1' },
       labels: { nodes: [{ name: 'bug', color: 'd73a4a' }, { name: 'bad', color: 'red' }] }, assignees: { nodes: [{ login: 'alice' }, {}] },
       latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: { login: 'alice' } }, { state: 'COMMENTED', author: null }] },
+      author: { login: 'octo' },
+      latestReviews: { nodes: [{ state: 'COMMENTED', author: { login: 'carol' } }, { state: 'COMMENTED', author: { login: 'alice' } }, { state: 'COMMENTED', author: { login: 'octo' } }] },
       reviewRequests: { nodes: [{ requestedReviewer: { login: 'bob' } }, { requestedReviewer: { name: 'core', slug: 'core-team' } }, { requestedReviewer: { login: 'alice' } }] },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
         { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://ci/1' },
@@ -118,7 +120,7 @@ test('parses PR details into reviewers, checks and allowed merge methods', () =>
     bodyHtml: '<p>Hi</p>', title: 'Add search', body: 'Hi', open: true, merged: false, draft: true, canEdit: true, branchDeletable: true,
     labels: [{ name: 'bug', color: 'd73a4a' }], assignees: ['alice'],
     mergeable: 'no', viewerIsAuthor: true, viewerAvatarUrl: '', mergeMethods: ['squash', 'rebase'],
-    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested', team: 'core-team' }],
+    reviewers: [{ name: 'alice', state: 'approved' }, { name: 'carol', state: 'commented' }, { name: 'bob', state: 'requested' }, { name: 'core', state: 'requested', team: 'core-team' }],
     checks: [{ name: 'build', state: 'success', url: 'https://ci/1' }, { name: 'test', state: 'pending' }, { name: 'deploy', state: 'failure' }],
   });
 });

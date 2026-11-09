@@ -417,11 +417,12 @@ const searchFields = 'number title url isDraft headRefName headRefOid baseRefNam
 const searchPages = 10;
 const mergeMethodFields = 'mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge';
 const viewerField = 'viewer{login name avatarUrl(size:40)}';
-const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id} headRepository{nameWithOwner}
+const detailsFields = `bodyHTML body title state isDraft mergeable viewerDidAuthor viewerCanUpdate isCrossRepository headRef{id} headRepository{nameWithOwner} author{login}
   labels(first:50){nodes{name color}} assignees(first:20){nodes{login}} milestone{number title}
   reviews(states:PENDING,first:20){nodes{viewerDidAuthor comments{totalCount}}}
   reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name slug} ... on Bot{login}}}}
   latestOpinionatedReviews(first:30){nodes{state author{login}}}
+  latestReviews(first:30){nodes{state author{login}}}
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`;
 const reactionFields = 'reactionGroups{content viewerHasReacted reactors{totalCount}}';
@@ -1147,11 +1148,14 @@ export function parseDetails(repository: Record<string, unknown>, viewer: Record
   const pullRequest = object(repository['pullRequest']);
   const methods: readonly [string, MergeMethod][] = [['squashMergeAllowed', 'squash'], ['mergeCommitAllowed', 'merge'], ['rebaseMergeAllowed', 'rebase']];
   const reviewers: PullRequestDetails['reviewers'][number][] = [];
-  for (const node of list(object(pullRequest['latestOpinionatedReviews'])['nodes'])) {
+  const author = object(pullRequest['author'] ?? {})['login'];
+  // Opinionated reviews leave out comment-only ones, so commenters come from latestReviews; the author's replies in review threads count as reviews there.
+  const reviews = [...list(object(pullRequest['latestOpinionatedReviews'])['nodes']), ...list(object(pullRequest['latestReviews'] ?? { nodes: [] })['nodes'])];
+  for (const node of reviews) {
     const review = object(node);
     const login = typeof review['author'] === 'object' && review['author'] !== null ? (review['author'] as { login?: unknown }).login : undefined;
     const state = reviewStates[String(review['state'])];
-    if (typeof login === 'string' && state !== undefined) reviewers.push({ name: login, state });
+    if (typeof login === 'string' && state !== undefined && login !== author && !reviewers.some((entry) => entry.name === login)) reviewers.push({ name: login, state });
   }
   for (const node of list(object(pullRequest['reviewRequests'])['nodes'])) {
     const reviewer = object(node)['requestedReviewer'];
