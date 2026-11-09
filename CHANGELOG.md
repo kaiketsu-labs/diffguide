@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- An HTML file whose content is drawn by scripts can show it on the review page: **Run scripts** in the preview's note row runs the file's scripts in the sandboxed frame. The page's buttons and links then work, and clicks elsewhere start a comment. A comment on drawn content attaches to its nearest element in the source. **Stop scripts** goes back to the static page.
 - In VS Code for the Web, ⌘/Ctrl+J and ⌘/Ctrl+Shift+J on DiffGuide's pages run your VS Code shortcuts again instead of opening the browser's Downloads or DevTools. This covers the review page, **Publish** and **Connect running Claude**. Other extensions' pages and VS Code's own previews still pass these keys to the browser.
 - The **Overview** tab has an icon, like **Files** and **Guide**.
 - All UI text is in English. Connection prompts, error messages, settings descriptions, the **How it works** and **Dictation** guides and the flow diagram were still German.

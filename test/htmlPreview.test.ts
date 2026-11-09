@@ -11,3 +11,16 @@ test('an HTML file gets source lines on each element, a frame marker, and no scr
   assert.match(html, /<b data-lr-lines="7-7">x<\/b>/u);
   assert.doesNotMatch(html, /<script|onclick|<body data-lr/u);
 });
+
+test('an HTML file with scripts also comes with them kept and marked for the page nonce', () => {
+  const { html, marker, scripted } = htmlPreview('<html><head><script nonce="theirs" src="https://cdn.test/a.js"></script></head>\n<body><script type="text/markdown"># A</script><p onclick="x()">p</p></body></html>');
+  assert.doesNotMatch(html, /<script/u);
+  assert.ok(scripted);
+  assert.equal(scripted.match(new RegExp(`<script[^>]* nonce="${marker}"`, 'gu'))?.length, 2);
+  assert.doesNotMatch(scripted, /theirs|onclick/u);
+  assert.match(scripted, /<p data-lr-lines="2-2">p<\/p>/u);
+});
+
+test('an HTML file without scripts has no scripted variant', () => {
+  assert.equal(htmlPreview('<p>a</p>').scripted, undefined);
+});

@@ -92,6 +92,8 @@ let pdfLibrary: Promise<typeof PdfJs> | undefined;
 const frameHeight = new Map<string, number>();
 const frameTops = new Map<string, Record<string, number>>();
 const frameAnchors = new Map<string, Anchor[]>();
+/** HTML files whose preview runs the file's own scripts, until the page reloads. */
+const scriptedFrames = new Set<string>();
 let files: readonly FileDiff[] | undefined;
 let viewed = new Set<string>();
 let current: OverviewState | undefined;
@@ -189,20 +191,31 @@ const verdictText = { changes: ['bad', 'Changes requested by '], approved: ['ok'
 /**
  * Runs inside the HTML preview frame: reports clicks as source lines, and where commented elements sit.
  * The page injects its source text, so it must not use anything from outside its own body.
+ * With `scripts` the file's own scripts run too, and clicks on its controls go to them instead of commenting.
  */
-function frameMain(): void {
+function frameMain(scripts: boolean): void {
   interface FrameAnchor { readonly key: string; readonly start: number; readonly end: number; readonly source: string; node?: Element }
   const lines = (node: Element): [number, number] => {
     const [start = Number.NaN, end = Number.NaN] = ((node as HTMLElement).dataset.lrLines ?? '').split('-').map(Number);
     return [start, end];
   };
-  const target = (event: Event): Element | null => (event.target instanceof Element ? event.target.closest('[data-lr-lines]') : null);
+  const control = (event: Event): boolean => scripts && event.target instanceof Element && event.target.closest('a[href],button,input,select,textarea,label,summary,[role=button],[role=link],[role=tab]') !== null;
+  const target = (event: Event): Element | null => (event.target instanceof Element && !control(event) ? event.target.closest('[data-lr-lines]') : null);
   const style = document.createElement('style');
   style.textContent = '[data-lr-hover]{outline:2px dashed #0078d4!important;outline-offset:1px;cursor:pointer!important}'
     + '[data-lr-sel]{outline:2px solid #0078d4!important;outline-offset:1px;background-color:rgba(0,120,215,.12)!important}'
     + '[data-lr-anchor=local]{outline:2px solid rgba(209,134,22,.75)!important;outline-offset:1px}[data-lr-anchor=github]{outline:2px solid rgba(55,148,255,.75)!important;outline-offset:1px}'
     + '[data-lr-focus]{outline-width:3px!important;background-color:rgba(128,128,128,.15)!important}';
   document.head.append(style);
+  if (scripts) {
+    // A sandboxed srcdoc frame has an opaque origin, where Chromium throws on any history URL change.
+    for (const name of ['pushState', 'replaceState'] as const) {
+      const original = History.prototype[name];
+      History.prototype[name] = function (this: History, ...args: Parameters<History['pushState']>): void {
+        try { original.apply(this, args); } catch { /* the frame keeps its URL */ }
+      };
+    }
+  }
   let hover: Element | null = null;
   let anchors: FrameAnchor[] = [];
   let pending = false;
@@ -243,6 +256,7 @@ function frameMain(): void {
     at?.setAttribute('data-lr-hover', '');
   });
   addEventListener('click', (event) => {
+    if (control(event)) return;
     event.preventDefault();
     event.stopPropagation();
     const at = target(event);
@@ -2949,7 +2963,11 @@ function previewNode(file: FileDiff, threads: readonly Thread[], placed: Set<str
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.title = 'Preview of ' + file.path;
     frame.dataset.path = file.path;
-    frame.srcdoc = data.html.replace('<!--' + data.marker + '-->', '<script nonce="' + nonce + '">(' + frameMain.toString() + ')();</' + 'script>');
+    const scripted = data.scripted !== undefined && scriptedFrames.has(file.path);
+    const frameScript = '<script nonce="' + nonce + '">(' + frameMain.toString() + ')(' + String(scripted) + ');</' + 'script>';
+    frame.srcdoc = scripted && data.scripted !== undefined
+      ? data.scripted.replace('<!--' + data.marker + '-->', frameScript).replaceAll(data.marker, nonce)
+      : data.html.replace('<!--' + data.marker + '-->', frameScript);
     frame.style.height = (frameHeight.get(file.path) ?? 600) + 'px';
     const margin = el('div', 'html-margin');
     margin.dataset.path = file.path;
@@ -2970,7 +2988,18 @@ function previewNode(file: FileDiff, threads: readonly Thread[], placed: Set<str
     frameAnchors.set(file.path, anchors);
     const split = el('div', 'html-split');
     split.append(frame, margin);
-    wrap.append(el('div', 'note muted', 'Click an element to comment on its source lines, Shift-click to extend. Scripts in the file are off, and linked stylesheets and relative images do not load.'), split);
+    const note = el('div', 'row note muted preview-note');
+    note.append(el('span', '', scripted
+      ? 'Scripts are running. The page\'s buttons and links work, click anything else to comment. Comments on drawn content attach to its nearest source element.'
+      : 'Click an element to comment on its source lines, Shift-click to extend. ' + (data.scripted === undefined ? '' : 'Scripts in the file are off. ') + 'Linked stylesheets and relative images do not load.'));
+    if (data.scripted !== undefined) {
+      note.append(titled(button(scripted ? 'Stop scripts' : 'Run scripts', () => {
+        if (scripted) scriptedFrames.delete(file.path);
+        else scriptedFrames.add(file.path);
+        renderFiles([file.path]);
+      }, 'small'), scripted ? 'Show the file without its scripts' : 'Run the file\'s scripts in the sandboxed preview. They can load code from the internet.'));
+    }
+    wrap.append(note, split);
     return wrap;
   }
   const wrap = el('div', 'preview md');

@@ -199,7 +199,7 @@ export interface FilesView {
 /** A suggestion option written from a local thread: pushed, committed after unpushed commits, or only applied to the worktree. */
 export interface AppliedSuggestion { readonly message: number; readonly option: number; readonly done: 'pushed' | 'committed' | 'applied' }
 export interface PickedSuggestion { readonly thread: string; readonly comment: string }
-export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string };
+export type FilePreview = { readonly kind: 'markdown'; readonly blocks: readonly MarkdownBlock[] } | { readonly kind: 'html'; readonly html: string; readonly marker: string; readonly scripted?: string };
 type CommentIntent = Extract<ReviewIntent, 'ask' | 'implement'>;
 
 /** A new comment written on lines of the page's diff. */
@@ -826,7 +826,7 @@ export async function showPullRequestOverview(
 /** `pdfScript` is the URL of pdf.js, which the page loads on its first PDF. */
 export function overviewHtml(state: OverviewState, script: string, pdfScript?: string): string {
   const nonce = randomUUID().replaceAll('-', '');
-  // Inline styles are allowed because an HTML preview frame inherits this policy; its sandbox still blocks scripts.
+  // Inline styles are allowed because an HTML preview frame inherits this policy; its scripts run only with the nonce the page gives them.
   return `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; font-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
@@ -980,6 +980,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .msg-text table{display:block;width:auto;max-width:100%;overflow-x:auto;margin:var(--space-6) 0;table-layout:auto;font:inherit}.msg-text th,.msg-text td{padding:var(--space-4) var(--space-8);border:1px solid var(--line);text-align:left;white-space:normal}.msg-text th{font-weight:600;background:var(--surface-sunken)}.msg-text .right{text-align:right}.msg-text .center{text-align:center}
 .md-block hr{border:0;border-top:1px solid var(--line)}
 .html-preview{display:block;width:100%;border:0}
+.preview-note{margin:0;flex-wrap:nowrap}.preview-note>span{flex:1}
 .html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
 td.num.pick{cursor:pointer;position:relative}td.num.has-marks{position:relative}
