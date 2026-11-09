@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish, such as v0.6.0
+        required: true
 
 permissions:
   contents: write
@@ -15,34 +20,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        if: ${{ github.event_name == 'push' }}
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
       - uses: actions/checkout@v5
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Setup Node.js
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         uses: actions/setup-node@v5
         with:
           node-version: "22"
 
       - name: Install dependencies
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         run: npm ci --ignore-scripts
 
       - name: Check TypeScript
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         run: npm run typecheck
 
       - name: Run regression tests
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         run: npm test
 
       - name: Build VSIX
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         id: build
         run: |
           npm run package
@@ -59,7 +67,7 @@ jobs:
         run: gh release upload "${{ steps.release.outputs.tag_name }}" "${{ steps.build.outputs.vsix }}" "${{ steps.build.outputs.vsix_latest }}" --clobber
 
       - name: Publish to VS Code Marketplace
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           USE_OIDC: ${{ vars.VSCE_USE_OIDC }}
@@ -73,7 +81,7 @@ jobs:
           fi
 
       - name: Publish to Open VSX Registry
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || inputs.tag }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
