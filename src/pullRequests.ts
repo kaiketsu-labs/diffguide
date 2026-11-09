@@ -88,8 +88,8 @@ export interface PullRequestDetails {
   /** Comments in the viewer's unsubmitted review; undefined when there is no such review. */
   readonly pendingComments?: number;
   readonly mergeMethods: readonly MergeMethod[];
-  /** `team` holds the team's slug for a requested team. */
-  readonly reviewers: readonly { readonly name: string; readonly state: 'requested' | 'approved' | 'changes' | 'commented' | 'dismissed'; readonly team?: string }[];
+  /** `team` holds the team's slug for a requested team; `rerequested` marks a reviewer asked again after their review, whose `state` stays that review's. */
+  readonly reviewers: readonly { readonly name: string; readonly state: 'requested' | 'approved' | 'changes' | 'commented' | 'dismissed'; readonly team?: string; readonly rerequested?: true }[];
   readonly checks: readonly { readonly name: string; readonly state: 'success' | 'failure' | 'pending' | 'neutral'; readonly url?: string }[];
   readonly milestone?: Milestone;
 }
@@ -1161,7 +1161,11 @@ export function parseDetails(repository: Record<string, unknown>, viewer: Record
     const reviewer = object(node)['requestedReviewer'];
     const record = typeof reviewer === 'object' && reviewer !== null ? reviewer as { login?: unknown; name?: unknown; slug?: unknown } : {};
     const name = record.login ?? record.name;
-    if (typeof name !== 'string' || reviewers.some((entry) => entry.name === name)) continue;
+    if (typeof name !== 'string') continue;
+    const reviewed = reviewers.findIndex((entry) => entry.name === name);
+    const entry = reviewers[reviewed];
+    if (entry !== undefined && typeof record.login === 'string' && entry.state !== 'requested') reviewers[reviewed] = { ...entry, rerequested: true };
+    if (entry !== undefined) continue;
     reviewers.push({ name, state: 'requested', ...(typeof record.slug === 'string' ? { team: record.slug } : {}) });
   }
   const commit = list(object(pullRequest['commits'])['nodes'])[0];

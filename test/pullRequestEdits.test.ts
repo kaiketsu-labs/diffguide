@@ -70,3 +70,12 @@ test('a team with the same display name as a user stays a separate request', asy
   await saveSelection(provider, 7, { ...details, reviewers: [{ name: 'alice', team: 'core', state: 'requested' }, { name: 'alice', state: 'requested' }] }, 'reviewers', { values: ['alice', 'bob'], teams: [] });
   assert.deepEqual(calls, [['add', 7, { users: ['bob'], teams: [] }], ['remove', 7, { users: [], teams: ['core'] }]]);
 });
+test('a re-requested reviewer counts as requested: kept when ticked, withdrawn when unticked', async () => {
+  const reviewed: PullRequestDetails = { ...details, reviewers: [{ name: 'bob', state: 'approved', rerequested: true }] };
+  const kept = fixture();
+  await saveSelection(kept.provider, 7, reviewed, 'reviewers', { values: ['bob'], teams: [] });
+  assert.deepEqual(kept.calls, []);
+  const withdrawn = fixture();
+  await saveSelection(withdrawn.provider, 7, reviewed, 'reviewers', { values: [], teams: [] });
+  assert.deepEqual(withdrawn.calls, [['remove', 7, { users: ['bob'], teams: [] }]]);
+});

@@ -8,7 +8,7 @@ export interface PickedSelection { readonly values: readonly string[]; readonly 
 export async function saveSelection(provider: PullRequestProvider, number: number, details: PullRequestDetails, what: PickTarget, picked: PickedSelection): Promise<void> {
   if (!details.canEdit) throw new Error('You do not have permission to edit this pull request.');
   if (what === 'reviewers') {
-    const before = details.reviewers.filter((reviewer) => reviewer.state === 'requested');
+    const before = details.reviewers.filter((reviewer) => reviewer.state === 'requested' || reviewer.rerequested === true);
     const { add, remove } = reviewerChanges(
       { users: before.filter((reviewer) => reviewer.team === undefined).map((reviewer) => reviewer.name), teams: before.flatMap((reviewer) => reviewer.team ?? []) },
       { users: picked.values, teams: picked.teams },
