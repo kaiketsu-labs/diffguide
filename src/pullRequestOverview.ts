@@ -5,7 +5,7 @@ import { pollWhileFocused } from './autoSync.js';
 import { claudeStatus } from './claudeStatus.js';
 import { orbLoaderStyles } from './orbLoader.js';
 import type { ClaudeProgress } from './claudeRunner.js';
-import type { ReviewIntent, ReviewThread } from './contracts.js';
+import type { ReviewIntent, ReviewThread, WithdrawnComment } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import type { Publication } from './pullRequestComments.js';
 import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
@@ -225,6 +225,8 @@ export interface OverviewActions {
   resolve(threadId: string, resolved: boolean): Promise<void>;
   /** Hide a local thread from the page, or show it again; it keeps its conversation. */
   archive(threadId: string, archived: boolean): Promise<void>;
+  /** Stop Claude's work on a thread's latest comment and take the comment back, so the page can put it back in a box to edit; an Implement without a note comes back empty. */
+  withdraw(threadId: string): Promise<WithdrawnComment>;
   publish(threadId: string): Promise<void>;
   /** Comment on the PR diff on GitHub, into the pending review or posted right away. */
   commentOnGitHub(comment: Omit<PageComment, 'intent'>, pending: boolean): Promise<void>;
@@ -382,6 +384,7 @@ export type PageMessage =
   | { readonly action: 'comment-ask'; readonly form: string; readonly id: string; readonly text: string; readonly intent: CommentIntent }
   | { readonly action: 'resolve' | 'github-resolve'; readonly id: string; readonly resolved: boolean }
   | { readonly action: 'archive'; readonly id: string; readonly archived: boolean }
+  | { readonly action: 'withdraw'; readonly form: string; readonly id: string }
   | { readonly action: 'github-delete'; readonly id: string }
   | { readonly action: 'apply-suggestion' | 'publish-suggestion'; readonly id: string; readonly message: number; readonly option: number }
   | { readonly action: 'discard-suggestion'; readonly id: string }
@@ -461,6 +464,8 @@ export interface ExtensionMessage {
   readonly conversationsError?: string;
   /** A running Claude can now connect itself with `/diffguide:connect`. */
   readonly runningReady?: true;
+  /** A comment taken back to edit: its reply box when its thread stays, else a new comment box on its lines or file. */
+  readonly restored?: { readonly thread: string; readonly text: string; readonly threadRemoved: boolean; readonly path: string; readonly side: DiffSide; readonly startLine: number; readonly endLine: number; readonly scope?: 'file' };
 }
 
 const reviewEvents: readonly ReviewEvent[] =['approve', 'requestChanges', 'comment'];
@@ -612,6 +617,13 @@ export async function showPullRequestOverview(
           post({ done: formKey });
         } else if (action === 'resolve' && typeof id === 'string' && typeof resolved === 'boolean') await actions.resolve(id, resolved);
         else if (action === 'archive' && typeof id === 'string' && typeof archived === 'boolean' && state.threads.some((thread) => thread.id === id)) await actions.archive(id, archived);
+        else if (action === 'withdraw' && typeof id === 'string' && state.threads.some((thread) => thread.id === id && thread.scope !== 'pullRequest')) {
+          const { text, anchor, received, threadRemoved } = await actions.withdraw(id);
+          post({
+            restored: { thread: id, text, threadRemoved, path: anchor.path, side: anchor.side === 'original' ? 'old' : 'new', startLine: anchor.startLine, endLine: anchor.endLine, ...(anchor.scope === 'file' ? { scope: 'file' as const } : {}) },
+            notice: { text: received ? 'Claude had already read this comment and may have acted on it.' : 'Took the comment back before Claude read it.' },
+          });
+        }
         else if (action === 'publish' && typeof id === 'string') await actions.publish(id);
         else if (action === 'github-reply' && typeof id === 'string' && isText(text) && state.github?.some((thread) => thread.id === id)) {
           await actions.replyOnGitHub(id, text.trim());
@@ -979,7 +991,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .step-log .mark{justify-self:center}.step-log .orb.step{justify-self:center;margin-block:-1px}.step-log .done{color:var(--ink-muted)}.step-log .failed .mark{color:var(--danger)}
 .step-log .step-call,.step-log .detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.step-log .time{color:var(--ink-muted)}
 .step-log .detail{grid-column:2/-1;color:var(--ink-muted)}.step-log .detail::before{content:'⎿ '}
-.step-log .step:has(>.stop-claude,>#stop-claude){grid-template-columns:30px minmax(0,1fr) auto auto}.step-log .step>button{grid-column:-2;width:20px;height:20px;min-height:20px;margin-block:-1px}.step-log .step>button svg{width:14px;height:14px}
+.step-log .step:has(>.step-actions,>#stop-claude){grid-template-columns:30px minmax(0,1fr) auto auto}.step-log .step>:is(button,.step-actions){grid-column:-2}.step-actions{display:flex;gap:var(--space-2)}.step-log .step :is(.step-actions>button,#stop-claude){width:20px;height:20px;min-height:20px;margin-block:-1px}.step-log .step button svg{width:14px;height:14px}
 .thread-commits{margin-top:var(--space-8)}.thread-commits .chevron{cursor:pointer}.commit-preview{display:flex;flex-direction:column;gap:var(--space-8);margin:var(--space-4) 0 var(--space-8) 22px}.commit-preview>*{border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden}.commit-preview .preview-file{display:flex;gap:var(--space-8);padding:var(--space-4) var(--space-8);font-size:12px;background:var(--tint);border-bottom:1px solid var(--line)}.commit-preview .preview-file .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-code)}.commit-preview table{width:100%}.commit-preview .note{padding:var(--space-4) var(--space-8);font-size:12px}.thread-commits svg{flex:none;width:14px;height:14px;align-self:center;color:var(--ink-muted)}.thread-commits .chip{flex:none}
 .suggestion{margin-top:var(--space-8);border:1px solid var(--line-strong);border-radius:var(--radius-md);overflow:hidden}
 .suggestion-head{gap:var(--space-8);padding:var(--space-6) var(--space-8);background:var(--surface-raised);border-bottom:1px solid var(--line-strong)}

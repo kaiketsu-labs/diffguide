@@ -61,6 +61,19 @@ export interface ReviewEvent {
   readonly anchor: CodeAnchor;
   readonly createdAt: string;
   readonly acknowledged: boolean;
+  /** The human took the comment back to edit it before Claude answered. It keeps its ID and sequence but is no longer work, and its message left the thread. */
+  readonly withdrawn?: true;
+}
+
+/** A comment the human took back, with what the page needs to put it back in a box. */
+export interface WithdrawnComment {
+  readonly text: string;
+  readonly intent: ReviewIntent;
+  readonly anchor: CodeAnchor;
+  /** Claude had confirmed receiving it, so it may already have acted on it. */
+  readonly received: boolean;
+  /** It was the thread's only comment, so the thread is gone. */
+  readonly threadRemoved: boolean;
 }
 
 /** Snapshot persisted to workspace-scoped extension storage. */
@@ -107,6 +120,8 @@ export interface ReviewStore {
   /** Hide a thread from the review page, or show it again, without touching its events. */
   archive(threadId: string, archived: boolean): Promise<void>;
   setOutdated(threadId: string, outdated: boolean): Promise<void>;
+  /** Take back the thread's latest human comment before Claude answers it, from an explicit human action. */
+  withdraw(threadId: string): Promise<WithdrawnComment>;
   /** Replace the analysis's notes that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
   replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]>;
   onChange(listener: () => void): Disposable;

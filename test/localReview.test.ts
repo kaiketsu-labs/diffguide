@@ -133,6 +133,29 @@ test('comments from the page go to the workspace review at HEAD, only on files t
   assert.equal(store.threads.length, 1);
 });
 
+test('a comment taken back from the page leaves the review and comes back to edit where it was', async () => {
+  const { store, review } = await fixture();
+  await review.open();
+  const panel = window.panels.at(-1);
+  assert.ok(panel !== undefined);
+  cleanup.push(() => { panel.dispose(); });
+  panel.receive({ action: 'ready' });
+  await until(() => fileMessages().length > 0);
+  panel.receive({ action: 'comment', form: 'composer', path: 'src/changed.ts', side: 'new', startLine: 1, endLine: 1, text: 'Why 2?', intent: 'implement' });
+  await until(() => store.threads.length === 1);
+  const id = store.threads[0]!.id;
+  const shows = (message: unknown): boolean => typeof message === 'object' && message !== null && 'state' in message
+    && (message as { state: { threads: readonly { id: string }[] } }).state.threads.some((thread) => thread.id === id);
+  await until(() => panel.sent.some(shows));
+  panel.receive({ action: 'withdraw', form: 'withdraw:' + id, id });
+  await until(() => panel.sent.some((message) => typeof message === 'object' && message !== null && 'restored' in message));
+  const sent = panel.sent.find((message) => typeof message === 'object' && message !== null && 'restored' in message) as { restored: unknown; notice: { text: string } };
+  assert.deepEqual(sent.restored, { thread: id, text: 'Why 2?', threadRemoved: true, path: 'src/changed.ts', side: 'new', startLine: 1, endLine: 1 });
+  assert.equal(sent.notice.text, 'Took the comment back before Claude read it.');
+  assert.equal(store.threads.length, 0);
+  assert.equal(store.pendingEvents.length, 0);
+});
+
 test('opening an unchanged file shows it whole until it is closed', async () => {
   const { review } = await fixture();
   await review.openFile('src/kept.ts');

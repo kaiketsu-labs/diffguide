@@ -294,6 +294,10 @@ export class LocalReview implements vscode.Disposable {
       },
       resolve: (id, resolved) => this.store.resolve(this.#findThread(id).id, resolved),
       archive: (id, archived) => this.store.archive(this.#findThread(id).id, archived),
+      withdraw: async (id) => {
+        const taken = await this.store.withdraw(this.#findThread(id).id);
+        return { ...taken, text: taken.text === implementThreadRequest ? '' : taken.text };
+      },
       setViewed: async (path, viewed) => {
         onPage(path);
         await setFileReviewed(this.root, path, viewed, this.dataPath);
