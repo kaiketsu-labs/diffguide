@@ -18,6 +18,18 @@ test('renders tables with aligned columns, inline code and escaped pipes, and le
     + '<p>| not a table |</p>');  assert.equal(markdownHtml('Calls:\n| a | b |\n|---|---|\n| 1 | 2 |'), '<p>Calls:</p><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>');
 });
 
+test('renders GFM tables without outer pipes, also right after a paragraph line', () => {
+  assert.equal(markdownHtml('Calls:\nname | count\n:-: | ---\n`retry()` | 2\nlast | 3'),
+    '<p>Calls:</p><table><thead><tr><th class="center">name</th><th>count</th></tr></thead>'
+    + '<tbody><tr><td class="center"><code>retry()</code></td><td>2</td></tr><tr><td class="center">last</td><td>3</td></tr></tbody></table>');
+});
+
+test('needs a divider with as many columns as the header to make a table', () => {
+  assert.equal(markdownHtml('a | b\n---'), '<p>a | b<br>---</p>');
+  assert.equal(markdownHtml('a \\| b\n---|---'), '<p>a \\| b<br>---|---</p>');
+  assert.equal(markdownHtml('| a | b |\n|---|\n| 1 | 2 |'), '<p>| a | b |</p><p>|---|</p><p>| 1 | 2 |</p>');
+});
+
 test('keeps identifiers with underscores and stars intact', () => {
   assert.equal(markdownHtml('snake_case_name and a*b*c'), '<p>snake_case_name and a*b*c</p>');
 });
