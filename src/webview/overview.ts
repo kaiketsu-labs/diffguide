@@ -4540,14 +4540,14 @@ function finishReview(): void {
   $<HTMLTextAreaElement>('review').focus({ preventScroll: true });
 }
 
-/** The Guide tab's count: steps once a guide exists, a pulse while Claude builds it. Build guide shows only in the guide. */
+/** The Guide tab's count of steps once a guide exists; its icon moves while Claude builds it. Build guide shows only in the guide. */
 function showGuideTab(): void {
   const analysis = current?.analysis;
   const count = $('guide-count');
   const steps = analysis?.result?.groups.reduce((sum, group) => sum + group.steps.length, 0);
-  count.className = analysis?.running ? 'count working' : 'count';
+  $('view-guide').classList.toggle('busy', analysis?.running === true);
   count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
-  count.hidden = !analysis?.running && steps === undefined;
+  count.hidden = analysis?.running === true || steps === undefined;
   $('files-count').textContent = files ? String(files.length - openedFiles().length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
   for (const id of ['range', 'nav-tools']) $(id).classList.toggle('off-view', view !== 'files');

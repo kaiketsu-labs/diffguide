@@ -911,8 +911,9 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .tabs button:hover{color:var(--ink);filter:none}.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
 .tabs svg{width:16px;height:16px;fill:currentColor}
 .tabs>*{flex:none;white-space:nowrap}.file-icon{display:inline-block;width:16px;font-size:14px;font-weight:400;line-height:1;text-align:center}img.file-icon{height:16px}.file-head .file-icon{flex:none}
-.tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty:not(.working){display:none}
-.tabs .count.working{min-width:0;padding:0}
+.tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty{display:none}
+#view-guide.busy>svg{color:var(--agent)}#view-guide.busy>svg>path{animation:guide-busy 1.2s steps(1,end) infinite}@keyframes guide-busy{25%{transform:translateY(-1px)}50%{transform:none}75%{transform:translateY(1px)}}
+@media (prefers-reduced-motion:reduce){#view-guide.busy>svg>path{animation:none}}
 ${orbLoaderStyles()}
 .off-view{display:none}
 .files-layout{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:var(--space-16);align-items:start}.files-layout>#files{min-width:0}.files-layout.no-nav,.files-layout.list-hidden{grid-template-columns:minmax(0,1fr)}.files-layout.no-nav>#nav-col,.files-layout.list-hidden>#nav-col{display:none}
