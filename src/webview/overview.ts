@@ -2012,6 +2012,13 @@ function render(state: OverviewState): void {
     badge.className = 'verdict ' + tone;
     badge.textContent = label;
   }
+  const prState = $('pr-state');
+  const ended = details && !details.open ? (details.merged ? 'merged' : 'closed') : undefined;
+  prState.hidden = ended === undefined;
+  if (ended && !prState.classList.contains(ended)) {
+    prState.className = 'verdict pr-state pr-only ' + ended;
+    prState.replaceChildren(icon(ended === 'merged' ? icons.merge : icons.closePullRequest), ended === 'merged' ? 'Merged' : 'Closed');
+  }
   $('review-box').hidden = !details?.open;
   $('bar-review').hidden = !details?.open;
   $('bar-pending').hidden = pendingCount === undefined;

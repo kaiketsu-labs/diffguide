@@ -46,6 +46,9 @@ const brandTokens: Readonly<Record<string, BrandToken>> = {
   // GitHub's attention yellow (Primer), so pending review comments look like they do on GitHub.
   pending: { dark: '#d29922', light: '#9a6700' },
   'pending-soft': { dark: '#d2992226', light: '#9a67001a' },
+  // GitHub's merged purple (Primer), so a merged PR reads as it does on GitHub.
+  merged: { dark: '#ab7df8', light: '#8250df' },
+  'merged-soft': { dark: '#ab7df826', light: '#8250df1a' },
   'danger-soft': { dark: '#f0726a26', light: '#c4322a14' },
   'shadow-overlay': { dark: '0 4px 16px rgba(0,0,0,.35)', light: '0 4px 16px rgba(0,0,0,.12)' },
 };
@@ -73,7 +76,7 @@ const fixedTokens: Readonly<Record<string, string>> = {
 
 /** High-contrast themes carry contrast in their own variables: tints go transparent and lines use the contrast border. */
 const highContrast: Readonly<Record<string, string>> = {
-  'brand-soft': 'transparent', 'agent-soft': 'transparent', 'github-soft': 'transparent', 'pending-soft': 'transparent', 'danger-soft': 'transparent',
+  'brand-soft': 'transparent', 'agent-soft': 'transparent', 'github-soft': 'transparent', 'pending-soft': 'transparent', 'merged-soft': 'transparent', 'danger-soft': 'transparent',
   line: 'var(--vscode-contrastBorder)', 'line-strong': 'var(--vscode-contrastBorder)', 'shadow-overlay': 'none',
 };
 
