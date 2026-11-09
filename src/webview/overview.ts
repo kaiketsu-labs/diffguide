@@ -2926,6 +2926,7 @@ function pdfView(key: string, side: Extract<MediaSide, { data: string }>): HTMLE
   const known = pdfViews.get(key);
   if (known) return known;
   const pages = el('div', 'pdf-pages');
+  pages.dataset.scrollKey = key;
   pages.append(el('div', 'note muted', 'Rendering PDF…'));
   pdfViews.set(key, pages);
   void (async () => {
@@ -2994,6 +2995,7 @@ function previewNode(file: FileDiff, threads: readonly Thread[], placed: Set<str
     if (draft) attach(composerBox(draft), { key: 'composer', start: draft.start, end: draft.end, source: 'draft' });
     frameAnchors.set(file.path, anchors);
     const split = el('div', 'html-split');
+    split.dataset.scrollKey = file.path;
     split.append(frame, margin);
     const note = el('div', 'row note muted preview-note');
     note.append(el('span', '', scripted
@@ -3612,14 +3614,16 @@ function restoreFrames(container: HTMLElement, parked: readonly HTMLIFrameElemen
   frameParking.replaceChildren();
 }
 
-/** Redraw the file list, or `container`, without losing the scroll position, the draft being typed or a loaded HTML preview. */
+/** Redraw the file list, or `container`, without losing the scroll position, a preview's own scroll position, the draft being typed or a loaded HTML preview. */
 function keepView(draw: () => void, container = $('files')): void {
   const scroll = window.scrollY;
   const active = document.activeElement;
   const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
   const frames = parkFrames(container);
+  const scrolls = new Map([...container.querySelectorAll<HTMLElement>('[data-scroll-key]')].map((node) => [node.dataset.scrollKey, node.scrollTop]));
   draw();
   restoreFrames(container, frames);
+  for (const node of container.querySelectorAll<HTMLElement>('[data-scroll-key]')) node.scrollTop = scrolls.get(node.dataset.scrollKey) ?? 0;
   if (focus) {
     const area = container.querySelector<HTMLTextAreaElement>('[data-draft="' + CSS.escape(focus.key) + '"]');
     if (area) { area.focus({ preventScroll: true }); area.setSelectionRange(focus.start, focus.end); }
