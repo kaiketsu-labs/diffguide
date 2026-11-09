@@ -1009,7 +1009,7 @@ details.thread:not([open]){padding-bottom:0}
 .source{display:inline-flex;align-items:center;gap:var(--space-4);font-weight:600;color:var(--accent)}.source svg{width:14px;height:14px;fill:currentColor}
 .strip .muted:last-child{margin-left:auto}
 .thread textarea{margin-top:var(--space-12);min-height:64px}
-.msg{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);margin-top:var(--space-8)}.msg+.msg{padding-top:var(--space-8);border-top:1px solid var(--line)}
+.msg{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:var(--space-8);margin-top:var(--space-8);padding:var(--space-6) var(--space-8);border:1px solid color-mix(in srgb,var(--line) 40%,transparent);border-radius:var(--radius-md);background:var(--surface)}
 .msg .avatar{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--ink-muted)}.msg .avatar.orb-avatar{position:relative;isolation:isolate}
 .orb-avatar::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--orb-soft)}
 .orb-avatar .orb{position:absolute;left:2px;top:2px;z-index:1}.msg .avatar svg{width:20px;height:20px;fill:currentColor}.msg .avatar.initials{font:600 9px/1 var(--font-ui);color:var(--ink);background:color-mix(in srgb,var(--ink) 14%,transparent)}
