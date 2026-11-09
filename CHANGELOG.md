@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- In VS Code for the Web, ⌘/Ctrl+J and ⌘/Ctrl+Shift+J on DiffGuide's pages run your VS Code shortcuts again instead of opening the browser's Downloads or DevTools. This covers the review page, **Publish** and **Connect running Claude**. Other extensions' pages and VS Code's own previews still pass these keys to the browser.
 - The **Overview** tab has an icon, like **Files** and **Guide**.
 - All UI text is in English. Connection prompts, error messages, settings descriptions, the **How it works** and **Dictation** guides and the flow diagram were still German.
 - The **Local** view uses the same purple repository icon as **Pull Requests**. Its title bar drops the connect buttons, since the review page has them. **Review local changes** sits on each checkout row, and in the title bar only when there is a single checkout.

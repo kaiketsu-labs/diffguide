@@ -9,6 +9,7 @@ import { fileTree, type FileFolder } from '../fileTree.js';
 import { fullyRead, rangeReadIds, readLines, type MarkedRange } from '../readLines.js';
 import type { LineRange } from '../reviewedFiles.js';
 import type { DiffHunk, DiffLine, FileDiff } from '../unifiedDiff.js';
+import { blockBrowserShortcuts } from '../browserShortcuts.js';
 import { icons } from '../icons.js';
 import type { FileIcon, FileIcons } from '../fileIcons.js';
 import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
@@ -4562,6 +4563,7 @@ setInterval(() => {
 $('error').addEventListener('click', () => { $('error').textContent = ''; });
 document.addEventListener('pointerdown', (event) => { if (!(event.target instanceof Node && $('notice').contains(event.target))) clearNotice(); });
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });
+blockBrowserShortcuts();
 document.addEventListener('mousemove', (event) => {
   pointer = event;
   if (event.metaKey || event.ctrlKey) probeAt(event);

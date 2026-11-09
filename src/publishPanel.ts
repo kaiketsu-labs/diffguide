@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
+import { blockBrowserShortcutsScript } from './browserShortcuts.js';
 import { webviewStyles } from './webviewStyles.js';
 
 /** A thread's comment as it will be posted, before the user edits it. */
@@ -61,6 +62,7 @@ ${draft.reply === true
     ? '<div class="actions"><button id="direct" class="primary">Reply on GitHub</button></div>\n<p id="status" class="muted" role="status" aria-live="polite">Everyone on the PR sees the reply.</p>'
     : '<div class="actions"><button id="direct">Comment now</button><button id="pending" class="primary">Add to pending review</button></div>\n<p id="status" class="muted" role="status" aria-live="polite">A pending comment stays private until you submit your review on GitHub.</p>'}
 <script nonce="${nonce}">
+${blockBrowserShortcutsScript}
 const api=acquireVsCodeApi();
 const body=document.getElementById('body');
 const pendingButton=document.getElementById('pending');
