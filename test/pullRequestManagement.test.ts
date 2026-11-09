@@ -235,3 +235,12 @@ test('enables auto-merge only when GitHub offers it, and says why not otherwise'
     panel.dispose();
   }
 });
+
+test('re-requesting a review reloads the sidebar too, since it lists pending reviewers', async () => {
+  const requested: unknown[] = [];
+  const reloads: unknown[] = [];
+  const provider = { requestReviewers: async (...args: unknown[]) => { requested.push(args); } } as unknown as PullRequestProvider;
+  await githubPageActions({ provider, number: 7, reload: (listed?: boolean) => { reloads.push(listed); } } as unknown as PageContext).rerequestReview('bob');
+  assert.deepEqual(requested, [[7, { users: ['bob'], teams: [] }]]);
+  assert.deepEqual(reloads, [true]);
+});

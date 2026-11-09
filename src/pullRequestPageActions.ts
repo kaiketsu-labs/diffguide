@@ -70,7 +70,7 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
     },
     rerequestReview: async (login) => {
       await provider.requestReviewers(number, { users: [login], teams: [] });
-      context.reload();
+      context.reload(true);
     },
     updateBranch: async (method) => {
       await provider.updateBranch(number, method);

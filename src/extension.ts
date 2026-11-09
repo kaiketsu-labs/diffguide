@@ -566,8 +566,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         pickerOptions: () => provider.pickerOptions(),
         pick: async (what, picked) => {
-          await saveSelection(provider, pullRequest.number, await currentDetails(), what, picked);
-          void loadDetails();
+          try {
+            await saveSelection(provider, pullRequest.number, await currentDetails(), what, picked);
+          } finally {
+            if (what === 'reviewers') changedOnGitHub(); else void loadDetails();
+          }
         },
         setDraft: async (draft) => {
           await provider.setDraft(pullRequest.number, draft);
