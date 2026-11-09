@@ -530,7 +530,7 @@ export async function showPullRequestOverview(
   const adopted = adopt === undefined ? undefined : panels.get(adopt)?.detach();
   if (adopted !== undefined) adopted.title = state.title;
   const panel = adopted ?? vscode.window.createWebviewPanel('diffGuide.pullRequestOverview', state.title, vscode.ViewColumn.Active,
-    { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true });
+    { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true, enableFindWidget: true });
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
   panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
