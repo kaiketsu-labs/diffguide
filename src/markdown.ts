@@ -59,7 +59,13 @@ export function markdownBlocks(markdown: string): readonly MarkdownBlock[] {
 const listItem = /^\s*([-*+]|\d+[.)])\s+(.*)$/u;
 const blockStart = /^\s*(?:```|~~~|#{1,6}\s|>|[-*+]\s|\d+[.)]\s|\|)/u;
 const tableDivider = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/u;
-const isTableRow = (line: string): boolean => line.trim().startsWith('|');
+const isTableRow = (line: string): boolean => line.trim().startsWith('|') || tableCells(line).length > 1;
+/** A GFM table starts on a row followed by a divider with as many columns; outer pipes are optional. */
+const isTableStart = (lines: readonly string[], index: number): boolean => {
+  const line = lines[index] ?? '';
+  const divider = lines[index + 1] ?? '';
+  return isTableRow(line) && tableDivider.test(divider) && tableCells(divider).length === tableCells(line).length;
+};
 
 /** A table row's cells, split on pipes outside inline code; `\|` is a literal pipe. */
 function tableCells(line: string): string[] {
@@ -107,7 +113,7 @@ export function markdownHtml(markdown: string): string {
       out.push(`<blockquote>${markdownHtml(quoted.join('\n'))}</blockquote>`);
       continue;
     }
-    if (isTableRow(line) && tableDivider.test(lines[index + 1] ?? '')) {
+    if (isTableStart(lines, index)) {
       const align = tableCells(lines[index + 1] ?? '').map((cell) => cell.endsWith(':') ? (cell.startsWith(':') ? ' class="center"' : ' class="right"') : '');
       const row = (cells: readonly string[], tag: 'th' | 'td'): string => `<tr>${align.map((attribute, column) => `<${tag}${attribute}>${inline(cells[column] ?? '')}</${tag}>`).join('')}</tr>`;
       const head = row(tableCells(line), 'th');
@@ -140,7 +146,7 @@ export function markdownHtml(markdown: string): string {
       continue;
     }
     const paragraph: string[] = [];
-    while (index < lines.length && (lines[index] ?? '').trim() !== '' && (paragraph.length === 0 || !blockStart.test(lines[index] ?? ''))) {
+    while (index < lines.length && (lines[index] ?? '').trim() !== '' && (paragraph.length === 0 || !(blockStart.test(lines[index] ?? '') || isTableStart(lines, index)))) {
       paragraph.push(lines[index++] ?? '');
     }
     out.push(`<p>${paragraph.map(inline).join('<br>')}</p>`);
