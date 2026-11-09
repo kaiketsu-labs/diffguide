@@ -351,7 +351,7 @@ export class LocalReview implements vscode.Disposable {
       retry: () => undefined,
       dismissConflictQuestion: () => undefined,
       stopAnalysis: () => undefined,
-      publish: unsupported, postToGitHub: unsupported, commentOnGitHub: unsupported, replyOnGitHub: unsupported, askAboutGitHub: unsupported, resolveOnGitHub: unsupported,
+      publish: unsupported, postToGitHub: unsupported, commentOnGitHub: unsupported, commentOnGitHubFile: unsupported, replyOnGitHub: unsupported, askAboutGitHub: unsupported, resolveOnGitHub: unsupported,
       deleteOnGitHub: unsupported, push: unsupported, readCommit: unsupported, submitReview: unsupported, merge: unsupported, addComment: unsupported,
       editComment: unsupported, deleteIssueComment: unsupported, hideComment: unsupported, react: unsupported, discardReview: unsupported,
       dismissReview: unsupported, rerequestReview: unsupported, updateBranch: unsupported, enableAutoMerge: unsupported, disableAutoMerge: unsupported,

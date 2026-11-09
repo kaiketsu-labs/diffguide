@@ -24,7 +24,7 @@ type View = 'overview' | 'files' | 'guide';
 type Intent = 'ask' | 'implement';
 interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
 /** A new comment on a whole file, written above its diff. */
-interface FileComposer { path: string; text: string }
+interface FileComposer { path: string; text: string; target?: 'claude' | 'github' }
 interface Saved {
   /** 'guided' is how pages saved before Files and Guide became tabs remember the guide. */
   readonly layout?: Layout | 'guided';
@@ -2432,7 +2432,7 @@ function threadBox(thread: Thread): HTMLElement {
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
   const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
-    status, thread.source === 'local' && thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
+    status, thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
   if (thread.url) {
     const open = el('button', 'icon-button');
@@ -3736,7 +3736,7 @@ function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, 
   })?.key;
   for (const thread of all) {
     if (noted.has(thread.id) || thread.outdated) continue;
-    const key = thread.source === 'local' && thread.scope === 'file' ? steps.find((step) => step.path === thread.path && slices.has(step.key))?.key : owner(thread.path, thread.side, thread.endLine);
+    const key = thread.scope === 'file' ? steps.find((step) => step.path === thread.path && slices.has(step.key))?.key : owner(thread.path, thread.side, thread.endLine);
     if (key !== undefined) threads.set(key, [...threads.get(key) ?? [], thread]);
   }
   const draft = composer ? owner(composer.path, composer.side, composer.end) : undefined;
@@ -4242,7 +4242,7 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
 
 /** Threads about the whole file, and its new-comment box when `withComposer`, above the diff; marks those threads placed. */
 function wholeFileBlock(path: string, threads: readonly Thread[], placed: Set<string>, withComposer: boolean): HTMLElement | undefined {
-  const own = threads.filter((thread) => thread.source === 'local' && thread.scope === 'file' && !placed.has(thread.id));
+  const own = threads.filter((thread) => thread.scope === 'file' && standalone(thread) && !placed.has(thread.id));
   const draft = withComposer && fileComposer?.path === path ? fileComposer : undefined;
   if (!own.length && !draft) return undefined;
   for (const thread of own) placed.add(thread.id);
@@ -4260,29 +4260,55 @@ function openFileComposer(path: string): void {
   renderFiles([before, path]);
 }
 
-/** A new Local comment about a whole file: Claude answers it or changes the code, like a comment on lines. */
+/** A new comment about a whole file: Local, where Claude answers it or changes the code, or On GitHub, like a comment on lines. */
 function fileComposerBox(draft: FileComposer): HTMLElement {
-  const box = el('div', 'thread draft');
+  const github = draft.target === 'github' && !current?.localMode;
+  const box = el('div', 'thread draft' + (github ? ' github' : ''));
   const head = el('div', 'strip');
-  head.append(el('span', 'source', 'New comment'), el('span', 'gap'), el('span', 'muted', 'Whole file'));
+  const toggle = el('span', 'seg');
+  toggle.hidden = current?.localMode === true;
+  toggle.setAttribute('role', 'group');
+  toggle.setAttribute('aria-label', 'Who sees this comment');
+  for (const [value, label] of [['claude', 'Local'], ['github', 'On GitHub']] as const) {
+    const option = button(label, () => { draft.target = value; focusNext = 'file-composer'; save(); renderFiles([draft.path]); });
+    option.setAttribute('aria-pressed', String(draft.target === value || (!draft.target && value === 'claude')));
+    toggle.append(option);
+  }
+  head.append(el('span', 'source', 'New comment'), toggle, el('span', 'gap'), el('span', 'muted', 'Whole file'));
   const cancel = (): void => { fileComposer = undefined; save(); renderFiles([draft.path]); };
   const busySending = sending.has('file-composer');
-  const send = (intent: Intent): void => {
+  const send = (intent: Intent, pending = true): void => {
     if (!draft.text.trim() || sending.has('file-composer')) return;
     sending.add('file-composer');
+    sentPending = pending;
     $('error').textContent = '';
     renderFiles([draft.path]);
-    post({ action: 'file-comment', form: 'file-composer', path: draft.path, text: draft.text, intent });
+    post(github ? { action: 'github-file-comment', form: 'file-composer', path: draft.path, text: draft.text, pending }
+      : { action: 'file-comment', form: 'file-composer', path: draft.path, text: draft.text, intent });
   };
-  const implement = agentButton('implement', 'Implement', () => send('implement'));
-  implement.title = 'Agent changes the code';
-  const ask = agentButton('ask', busySending ? 'Sending…' : 'Ask', () => send('ask'));
-  ask.title = 'Agent answers without editing';
-  const onDraft = (value: string): void => { draft.text = value; save(); for (const each of [implement, ask]) each.disabled = sending.has('file-composer') || !value.trim(); };
-  const area = textarea('file-composer', draft.text, 'Ask about this file', onDraft, () => send('ask'), cancel);
-  onDraft(draft.text);
   const row = el('div', 'row actions composer-actions');
-  row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), implement, ask);
+  const needText: HTMLButtonElement[] = [];
+  const onDraft = (value: string): void => { draft.text = value; save(); for (const each of needText) each.disabled = sending.has('file-composer') || !value.trim(); };
+  const area = github ? githubField('file-composer', draft.text, 'Comment on GitHub', onDraft, () => send('ask'), cancel)
+    : textarea('file-composer', draft.text, 'Ask about this file', onDraft, () => send('ask'), cancel);
+  if (github) {
+    const review = button(busySending && sentPending ? 'Sending…' : 'Add to review', () => send('ask', true), 'primary');
+    review.disabled = busySending;
+    review.title = 'Goes into your pending review. Nobody sees it until you submit the review.';
+    const reviewing = current?.details?.pendingComments !== undefined;
+    const now = button(busySending && !sentPending ? 'Sending…' : 'Post now', () => send('ask', false));
+    now.disabled = busySending || reviewing;
+    now.title = reviewing ? 'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.' : 'Posts on GitHub right away.';
+    row.append(...reviewing ? [titled(el('span', 'chip pending', 'Review in progress'), 'New comments go into your pending review.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), now, review);
+  } else {
+    const implement = agentButton('implement', 'Implement', () => send('implement'));
+    implement.title = 'Agent changes the code';
+    const ask = agentButton('ask', busySending ? 'Sending…' : 'Ask', () => send('ask'));
+    ask.title = 'Agent answers without editing';
+    needText.push(implement, ask);
+    onDraft(draft.text);
+    row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), implement, ask);
+  }
   box.append(head, area, row);
   return box;
 }

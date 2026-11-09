@@ -401,6 +401,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await provider.publishComment(pullRequest.number, { ...placement, body: text }, pending);
           await Promise.all([loadThreads(), loadDetails()]);
         },
+        commentOnGitHubFile: async (path, text, pending) => {
+          if (!diffPaths.includes(path)) throw new Error(`${path} is not part of this PR's changes.`);
+          const base = await readBase();
+          const anchor = fileAnchor(await readFile(join(folder, path), 'utf8'), { path, side: 'working', baseRevision: base });
+          await provider.publishComment(pullRequest.number, { ...await placeComment(folder, base, anchor), body: text }, pending);
+          await Promise.all([loadThreads(), loadDetails()]);
+        },
         replyOnGitHub: async (id, text) => {
           await provider.replyToThread(id, text);
           await loadThreads();
@@ -409,8 +416,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const loaded = await (remote ?? loadThreads());
           const thread = loaded instanceof Error ? undefined : loaded.find((each) => each.id === id);
           if (thread === undefined) throw new Error('This GitHub thread no longer exists.');
-          if (thread.outdated) throw new Error('The code changed since this comment, so Claude would read the wrong lines. Comment on the current lines instead.');
-          const { anchor } = await pageAnchor({ path: thread.path, side: thread.side === 'LEFT' ? 'old' : 'new', startLine: thread.startLine, endLine: thread.endLine });
+          if (thread.outdated && thread.scope !== 'file') throw new Error('The code changed since this comment, so Claude would read the wrong lines. Comment on the current lines instead.');
+          const anchor = thread.scope === 'file'
+            ? fileAnchor(await readFile(join(folder, thread.path), 'utf8'), { path: thread.path, side: 'working', baseRevision: await readBase() })
+            : (await pageAnchor({ path: thread.path, side: thread.side === 'LEFT' ? 'old' : 'new', startLine: thread.startLine, endLine: thread.endLine })).anchor;
           const comments = thread.comments.filter((comment) => comment.hidden === undefined);
           const created = await opened.session.store.submit(anchor, githubFeedbackRequest(note, intent, comments), intent);
           await opened.session.linkToGitHub?.(created.id, { id: thread.id, url: thread.url });
