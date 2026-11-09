@@ -868,7 +868,7 @@ ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px
 .where{font-family:var(--font-code);font-size:12px}.text{overflow-wrap:anywhere}
 .ok{color:var(--success)}.bad{color:var(--danger)}.wait{color:var(--warning)}
 .state-icon{display:inline-flex;flex:none;align-items:center;justify-content:center;width:16px;height:16px}.state-icon svg{width:14px;height:14px;fill:currentColor}
-#body{overflow-wrap:anywhere;max-height:320px;overflow:auto}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
+#body{overflow-wrap:anywhere}#body img{max-width:100%}#body pre{overflow:auto;padding:var(--space-8);border-radius:var(--radius-sm);background:var(--surface-sunken)}#body>:first-child{margin-top:0}#body>:last-child{margin-bottom:0}
 textarea{width:100%;min-height:80px}
 .actions,.spaced{margin-top:var(--space-8)}
 .review-actions{justify-content:flex-end}.state-actions{justify-content:flex-end}
