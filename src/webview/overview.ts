@@ -2547,7 +2547,10 @@ function threadBox(thread: Thread): HTMLElement {
     const live = el('div', 'claude-live');
     live.dataset.thread = thread.id;
     const progress = thread.source === 'local' ? thread.progress : undefined;
-    live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, stopButton()) : stepLog(progress.steps, progress.startedAt, stopButton()));
+    const controls = el('span', 'step-actions');
+    if (thread.source === 'local' && thread.linkedTo === undefined && thread.messages.at(-1)?.author === 'human') controls.append(withdrawButton(thread));
+    controls.append(stopButton());
+    live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, controls) : stepLog(progress.steps, progress.startedAt, controls));
     box.append(live);
   }
   const key = 'reply:' + thread.id;
@@ -2639,6 +2642,40 @@ function stopButton(): HTMLButtonElement {
   setTip(stop, 'Stop. The comments it was answering wait for Retry.');
   stop.disabled = stoppingClaude;
   return stop;
+}
+
+/** Stop Claude's work on the thread's latest comment and put the comment back in a box to edit. */
+function withdrawButton(thread: Thread): HTMLButtonElement {
+  const key = 'withdraw:' + thread.id;
+  const edit = button('', () => {
+    sending.add(key);
+    $('error').textContent = '';
+    renderFiles([thread.path]);
+    post({ action: 'withdraw', form: key, id: thread.id });
+  }, 'icon-button');
+  edit.append(icon(icons.edit));
+  setTip(edit, current?.localMode ? 'Take this comment back to edit it' : 'Stop and edit this comment');
+  edit.disabled = sending.has(key);
+  return edit;
+}
+
+/** Put a comment taken back into its thread's reply box, or into a new comment box where it was. */
+function restoreComment(restored: NonNullable<ExtensionMessage['restored']>): void {
+  sending.delete('withdraw:' + restored.thread);
+  const before = restored.scope === 'file' ? fileComposer?.path : composer?.path;
+  if (!restored.threadRemoved) {
+    replies.set(restored.thread, restored.text);
+    focusNext = 'reply:' + restored.thread;
+  } else if (restored.scope === 'file') {
+    fileComposer = { path: restored.path, text: restored.text };
+    focusNext = 'file-composer';
+  } else {
+    composer = { path: restored.path, side: restored.side, start: restored.startLine, end: restored.endLine, text: restored.text, target: 'claude' };
+    focusNext = 'composer';
+  }
+  collapsed.set(restored.path, false);
+  save();
+  renderFiles([before, restored.path]);
 }
 
 /** Reply in the GitHub thread this local thread sits in, else open the box that posts it on the diff. */
@@ -4708,6 +4745,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
     document.querySelector('[data-path="' + CSS.escape(data.reveal) + '"]')?.scrollIntoView({ block: 'start' });
   }
   if (data.filesError) $('files').replaceChildren(el('p', 'bad', 'Could not read the changes: ' + data.filesError));
+  if (data.restored) restoreComment(data.restored);
   if (data.notice) showNotice(data.notice);
   if (data.error) {
     loading.clear();

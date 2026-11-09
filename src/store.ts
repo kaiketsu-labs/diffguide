@@ -15,6 +15,7 @@ import type {
   ReviewStatus,
   ReviewStore,
   ReviewThread,
+  WithdrawnComment,
 } from './contracts.js';
 
 const intents: readonly ReviewIntent[] = ['ask', 'implement', 'summarize'];
@@ -166,6 +167,9 @@ class FileReviewStore implements ReviewStore {
       if (event === undefined) {
         throw new ReviewStoreError('Review event was not found.', 404);
       }
+      if (event.withdrawn) {
+        throw new ReviewStoreError('The human took this comment back to edit it.', 409);
+      }
       const thread = requireThread(snapshot, event.threadId);
       if (thread.resolved && captured.status === 'working') {
         throw new ReviewStoreError('The human has resolved this review thread.', 409);
@@ -228,6 +232,31 @@ class FileReviewStore implements ReviewStore {
       if ((thread.archived === true) === value) return [snapshot, undefined];
       const { archived: _was, ...rest } = thread;
       return [replaceThread(snapshot, value ? { ...rest, archived: true } : rest), undefined];
+    });
+  }
+
+  /** Mark the latest event withdrawn and drop its message; the thread falls back to its previous event, or goes when it had no other. */
+  withdraw(threadId: string): Promise<WithdrawnComment> {
+    const id = readId(threadId);
+    return this.#mutate((snapshot) => {
+      const thread = requireThread(snapshot, id);
+      const event = snapshot.events.find((candidate) => candidate.id === thread.latestEventId);
+      const last = thread.messages.at(-1);
+      if (event === undefined || thread.resolved || last?.author !== 'human' || last.eventId !== event.id) {
+        throw new ReviewStoreError('Claude already answered this comment.', 409);
+      }
+      const previous = snapshot.events.filter((candidate) => candidate.threadId === id && candidate.id !== event.id && candidate.withdrawn !== true).at(-1);
+      const messages = thread.messages.slice(0, -1);
+      const events = snapshot.events.map((candidate) => candidate.id === event.id ? { ...candidate, withdrawn: true as const } : candidate);
+      const answered = previous !== undefined && (previous.acknowledged || messages.some((message) => message.author === 'claude' && message.eventId === previous.id));
+      const threads = previous === undefined || messages.length === 0
+        ? snapshot.threads.filter((candidate) => candidate.id !== id)
+        : snapshot.threads.map((candidate) => candidate.id === id
+          ? { ...thread, messages, latestEventId: previous.id, intent: previous.intent, status: answered ? 'answered' as const : 'queued' as const }
+          : candidate);
+      return [{ ...snapshot, threads, events }, {
+        text: last.text, intent: event.intent, anchor: thread.anchor, received: event.acknowledged, threadRemoved: threads.length < snapshot.threads.length,
+      }];
     });
   }
 
@@ -378,11 +407,11 @@ function readSnapshot(value: unknown, workspaceRoot: string): ReviewSnapshot {
   const eventThreads = new Map(events.map((event) => [event.id, event.threadId]));
   let sequence = 0;
   for (const event of events) {
-    if (!threadIds.has(event.threadId) || event.sequence <= sequence) {
+    if ((!threadIds.has(event.threadId) && event.withdrawn !== true) || event.sequence <= sequence) {
       throw new ReviewStoreError('Review storage contains inconsistent events.');
     }
     sequence = event.sequence;
-    latestEvents.set(event.threadId, event);
+    if (event.withdrawn !== true) latestEvents.set(event.threadId, event);
   }
   for (const thread of threads) {
     if (latestEvents.get(thread.id)?.id !== thread.latestEventId) {
@@ -428,12 +457,14 @@ function readThread(value: unknown): ReviewThread {
 /** Validate an event's immutable work payload and delivery marker. */
 function readEvent(value: unknown): ReviewEvent {
   const record = readObject(value, 'event');
-  checkKeys(record, ['id', 'sequence', 'threadId', 'intent', 'text', 'anchor', 'createdAt', 'acknowledged']);
+  checkKeys(record, ['id', 'sequence', 'threadId', 'intent', 'text', 'anchor', 'createdAt', 'acknowledged', 'withdrawn']);
+  if (record['withdrawn'] !== undefined && record['withdrawn'] !== true) throw new ReviewStoreError('Invalid withdrawn flag.');
   return {
     id: readId(record['id']), sequence: readPositiveInteger(record['sequence'], 'sequence'),
     threadId: readId(record['threadId']), intent: readIntent(record['intent']),
     text: readNonemptyText(record['text'], 'text'), anchor: readAnchor(record['anchor']),
     createdAt: readTimestamp(record['createdAt']), acknowledged: readBoolean(record['acknowledged'], 'acknowledged'),
+    ...(record['withdrawn'] === true ? { withdrawn: true as const } : {}),
   };
 }
 

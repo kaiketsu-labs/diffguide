@@ -297,3 +297,42 @@ test('keeps a PR-level anchor without code across restarts and rejects one that 
   await writeFile(file, JSON.stringify(tampered));
   await assert.rejects(createReviewStore(file, root));
 });
+
+test('withdraws a reply before Claude answers it: the event stays withdrawn, the thread falls back, and nothing is resent', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const first = await store.submit(anchor(), 'Why?', 'ask');
+  await store.updateFromAgent({ eventId: first.latestEventId, status: 'answered', text: 'Because.' });
+  const reply = await store.submit(anchor(), 'Rename it', 'implement', first.id);
+  await store.updateFromAgent({ eventId: reply.latestEventId, status: 'received' });
+  const taken = await store.withdraw(first.id);
+  assert.deepEqual({ text: taken.text, intent: taken.intent, received: taken.received, threadRemoved: taken.threadRemoved }, { text: 'Rename it', intent: 'implement', received: true, threadRemoved: false });
+  const [thread] = store.threads;
+  assert.equal(thread?.latestEventId, first.latestEventId);
+  assert.equal(thread?.status, 'answered');
+  assert.deepEqual(thread?.messages.map((message) => message.text), ['Why?', 'Because.']);
+  assert.equal(store.events.find((event) => event.id === reply.latestEventId)?.withdrawn, true);
+  assert.equal(store.pendingEvents.length, 0);
+  await assert.rejects(store.updateFromAgent({ eventId: reply.latestEventId, status: 'answered', text: 'Done.' }), (error: unknown) => error instanceof ReviewStoreError && error.statusCode === 409);
+  await assert.rejects(store.withdraw(first.id), ReviewStoreError);
+  const again = await store.submit(anchor(), 'Rename it to count', 'implement', first.id);
+  assert.equal(store.events.at(-1)?.sequence, 3);
+  assert.equal(store.pendingEvents[0]?.id, again.latestEventId);
+  const reopened = await createReviewStore(file, root);
+  assert.deepEqual(reopened.events, store.events);
+  assert.deepEqual(reopened.threads, store.threads);
+});
+
+test('withdrawing a new thread\'s only comment removes the thread and keeps its event for the sequence', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const thread = await store.submit(anchor(), 'Typo here', 'ask');
+  const taken = await store.withdraw(thread.id);
+  assert.equal(taken.threadRemoved, true);
+  assert.equal(taken.received, false);
+  assert.equal(store.threads.length, 0);
+  assert.equal(store.events[0]?.withdrawn, true);
+  assert.equal(store.pendingEvents.length, 0);
+  await store.submit(anchor(), 'Typo in the name', 'ask');
+  assert.deepEqual(store.events.map((event) => event.sequence), [1, 2]);
+  const reopened = await createReviewStore(file, root);
+  assert.deepEqual(reopened.events, store.events);
+});

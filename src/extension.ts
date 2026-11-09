@@ -402,6 +402,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         resolve: (id, resolved) => opened.session.store.resolve(findThread(id).id, resolved),
         archive: (id, archived) => opened.session.store.archive(findThread(id).id, archived),
+        withdraw: async (id) => {
+          const thread = findThread(id);
+          // A background run was given the comment in its prompt, whether or not Claude confirmed it yet.
+          const running = opened.runner.activity.running && opened.runner.activity.threads.has(thread.id);
+          if (running) await opened.runner.stop();
+          const taken = await opened.session.store.withdraw(thread.id);
+          return { ...taken, text: taken.text === implementThreadRequest ? '' : taken.text, received: taken.received || running };
+        },
         publish: async (id) => { await opened.session.publish?.(findThread(id).id); },
         postToGitHub: async (id, text, pending) => {
           const thread = findThread(id);
