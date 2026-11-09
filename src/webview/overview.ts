@@ -3368,6 +3368,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     if (folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
   });
+  markCurrentNavFile();
 }
 
 /** Folders opened or folded in the file navigator by hand, apart from the file list's own folders. */
@@ -3503,16 +3504,33 @@ function markEndingFiles(): void {
   }
 }
 
-/** Highlight the navigator row of the file or guide step at the top of the view. */
-function markCurrentNavFile(): void {
+/** The file or guide step the navigator last highlighted. */
+let navTop: string | undefined;
+
+/** Highlight the navigator row of the file or guide step at the top of the view, the first one until any reaches it, and scroll the navigator to it when that changes; `rebuilt` after the rows were redrawn. */
+function markCurrentNavFile(rebuilt = true): void {
   const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 36;
   const guided = view === 'guide';
   let top: string | undefined;
   for (const box of $('files').querySelectorAll<HTMLElement>(guided ? '.step-wrap[data-key]' : '.file[data-path]')) {
-    if (box.getBoundingClientRect().top > line) break;
+    if (top !== undefined && box.getBoundingClientRect().top > line) break;
     top = guided ? box.dataset.key : box.dataset.path;
   }
-  for (const row of $('file-nav').querySelectorAll<HTMLElement>('.nav-file')) row.setAttribute('aria-current', String((guided ? row.dataset.navStep : row.dataset.navPath) === top));
+  const moved = top !== navTop;
+  if (!moved && !rebuilt) return;
+  navTop = top;
+  const nav = $('file-nav');
+  let currentRow: HTMLElement | undefined;
+  for (const row of nav.querySelectorAll<HTMLElement>('.nav-file')) {
+    const isTop = top !== undefined && (guided ? row.dataset.navStep : row.dataset.navPath) === top;
+    row.setAttribute('aria-current', String(isTop));
+    if (isTop) currentRow = row;
+  }
+  if (!moved || !currentRow) return;
+  const list = nav.getBoundingClientRect();
+  const rect = currentRow.getBoundingClientRect();
+  if (rect.top < list.top) nav.scrollTop -= list.top - rect.top + rect.height;
+  else if (rect.bottom > list.bottom) nav.scrollTop += rect.bottom - list.bottom + rect.height;
 }
 
 const localMarks: Record<LocalChange, readonly [string, string]> = {
@@ -4765,7 +4783,7 @@ render(initial.state);
 let navFrame = 0;
 window.addEventListener('scroll', () => {
   if (navFrame || view === 'overview') return;
-  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(); markEndingFiles(); });
+  navFrame = requestAnimationFrame(() => { navFrame = 0; markCurrentNavFile(false); markEndingFiles(); });
 }, { passive: true });
 new ResizeObserver(([entry]) => {
   if (entry) document.body.style.setProperty('--bar-height', (entry.target as HTMLElement).offsetHeight + 'px');
