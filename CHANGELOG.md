@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **All open** in the Pull Requests view shows how many PRs are open. The count can be higher than the rows, which stop at 50.
+- Requesting, removing or re-requesting a reviewer on the review page refreshes the Pull Requests view.
+- A reviewer who only left a comment stays in the reviewer list with **Re-request review**. A re-requested reviewer reads "Approved · Re-requested" (or their earlier verdict), is ticked in the Reviewers menu, and loses the button until they review again.
+- **Show on review page** in the Explorer's context menu is now **Show in DiffGuide**.
+- Tables in the PR description have borders, and Markdown tables in comments render without outer pipes too. The description shows at full length instead of scrolling in its own box.
+- Inline code in comments, replies, the description and Markdown previews has its own color, `diffGuide.inlineCodeForeground`.
+- A merged or closed PR shows **Merged** or **Closed** at the top of the review page.
+- PDF and HTML previews keep a fixed height and scroll inside.
+- ⌘/Ctrl+F opens VS Code's find bar on the review page. It finds text on the page only, so folded files and hunks and PDF pages are not searched.
+- Each comment you send shows whether it went with **Ask** or **Implement**.
+- **Stop** sits next to the running step's time.
+- **Stop and edit** next to **Stop** takes a sent comment back into its box to edit and send again. The page says whether Claude had already read it. Stop shows the run as ended without waiting for GitHub.
+- While the guide builds, the **Guide** tab's icon moves. When the guide is out of date, the tab shows a warning mark.
+- The orb stretches in flight before it lands in a reply.
+- Messages in a thread sit in their own cards, set apart from each other.
+- A comment on a whole file can go to GitHub, and whole-file threads from GitHub show as **Whole file**.
+- **Ask the agent about this comment** on a Conversation comment starts a local thread about the whole PR. It quotes the comment, shows under it and in the Threads card, and can be published as a PR comment.
+- Guide comments show in the **Guide** tab only. **Show guide comments** in the Files filter menu brings them back to **Files**.
+- The file list highlights the file at the top of the view and scrolls to keep it visible. Drag its edge to resize it; double-click resets.
+- A **Comments** panel under the file list lists open threads by file. Click one to jump to it. Drag the line above it to resize it.
+- The Files filter menu opens above sticky thread headers.
 - An HTML file whose content is drawn by scripts can show it on the review page: **Run scripts** in the preview's note row runs the file's scripts in the sandboxed frame. The page's buttons and links then work, and clicks elsewhere start a comment. A comment on drawn content attaches to its nearest element in the source. **Stop scripts** goes back to the static page.
 - In VS Code for the Web, ⌘/Ctrl+J and ⌘/Ctrl+Shift+J on DiffGuide's pages run your VS Code shortcuts again instead of opening the browser's Downloads or DevTools. This covers the review page, **Publish** and **Connect running Claude**. Other extensions' pages and VS Code's own previews still pass these keys to the browser.
 - The **Overview** tab has an icon, like **Files** and **Guide**.
