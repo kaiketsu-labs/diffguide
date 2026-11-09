@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { maximumIdentifierLength, maximumPathLength, maximumReviewTextLength } from './limits.js';
+import { pullRequestAnchor } from './anchors.js';
 import type {
   AgentUpdate,
   CodeAnchor,
@@ -84,6 +85,13 @@ function isRelativePath(value: unknown): value is string {
 /** Validate the immutable code context before it reaches Claude. */
 function parseAnchor(value: unknown): CodeAnchor {
   const data = record(value);
+  if (data?.scope === 'pullRequest') {
+    if (data.path !== '' || data.startLine !== 1 || data.endLine !== 1 || data.side !== 'working' || data.documentHash !== ''
+      || data.selectedText !== '' || data.contextBefore !== '' || data.contextAfter !== '' || !isText(data.baseRevision, maximumPathLength)) {
+      throw new BridgeProtocolError('The review bridge returned invalid source context.');
+    }
+    return pullRequestAnchor(data.baseRevision);
+  }
   if (data === undefined || !isRelativePath(data.path)
     || !isPositiveInteger(data.startLine) || !isPositiveInteger(data.endLine)
     || data.endLine < data.startLine

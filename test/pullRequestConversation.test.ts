@@ -202,3 +202,33 @@ test('changes the base only to a branch GitHub lists, never the head or the curr
   for (const branch of ['main', 'feature', 'evil']) await assert.rejects(actions.changeBase(branch), /not a branch this PR can merge into/u);
   assert.deepEqual(changed, []);
 });
+
+test('hands only a conversation comment with text to the agent, with a known intent', async () => {
+  resetFakeWindow();
+  const calls: string[] = [];
+  const state: OverviewState = {
+    title: 'PR', author: 'alice', headBranch: 'feature', baseBranch: 'main', url: 'https://github.com/acme/app/pull/7', viewed: [], read: [], threads: [],
+    claude: { text: '', running: false, retry: false }, analysis: { running: false, stale: false }, details, conversation, github: [],
+  };
+  const actions = {
+    readFiles: async () => ({ files: [], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }),
+    askAboutComment: async (id: string, note: string, intent: string) => { calls.push(`ask ${id} ${note} ${intent}`); },
+    refresh: () => undefined,
+  } as unknown as OverviewActions;
+  await showPullRequestOverview('comment-ask-test', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  for (const message of [
+    { action: 'comment-ask', form: 'comment-ask:IC1', id: 'IC1', text: 'Agree?', intent: 'ask' },
+    { action: 'comment-ask', form: 'comment-ask:IC1', id: 'IC1', intent: 'implement' },
+    { action: 'comment-ask', form: 'comment-ask:PC1', id: 'PC1', text: '', intent: 'ask' },
+    { action: 'comment-ask', form: 'comment-ask:X', id: 'X', text: '', intent: 'ask' },
+    { action: 'comment-ask', form: 'comment-ask:IC1', id: 'IC1', text: '', intent: 'summarize' },
+    { action: 'comment-ask', form: 'comment-ask:IC1', id: 'IC1', text: 7, intent: 'ask' },
+  ]) {
+    panel.receive(message);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.deepEqual(calls, ['ask IC1 Agree? ask', 'ask IC1  implement']);
+  assert.ok(panel.sent.some((sent) => (sent as { done?: string }).done === 'comment-ask:IC1'));
+  panel.dispose();
+});

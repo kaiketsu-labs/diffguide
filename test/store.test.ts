@@ -10,6 +10,7 @@ import type { CodeAnchor, ReviewStore } from '../src/contracts.js';
 import { createReviewStore, parseAgentUpdate, ReviewStoreError } from '../src/store.js';
 import { maximumReplyLength, maximumReviewTextLength } from '../src/limits.js';
 import { publishableText } from '../src/pullRequestComments.js';
+import { pullRequestAnchor } from '../src/anchors.js';
 
 /** Create isolated storage and register cleanup with the test lifecycle. */
 async function fixture(t: TestContext): Promise<{ store: ReviewStore; file: string; root: string }> {
@@ -281,4 +282,18 @@ test('keeps the GitHub reply Claude proposes with its answer, across a restart',
   assert.equal(publishableText(reopened.threads[0]!), 'Good catch, I will add the check.');
   await reopened.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'Second thought without a reply.' });
   assert.equal(publishableText(reopened.threads[0]!), 'Second thought without a reply.');
+});
+
+test('keeps a PR-level anchor without code across restarts and rejects one that names a file', async (t) => {
+  const { store, file, root } = await fixture(t);
+  await store.submit(pullRequestAnchor('HEAD'), 'What do you think of this comment?', 'ask');
+  const reopened = await createReviewStore(file, root);
+  assert.deepEqual(reopened.threads[0]?.anchor, pullRequestAnchor('HEAD'));
+  assert.equal(reopened.events[0]?.anchor.scope, 'pullRequest');
+  await assert.rejects(async () => store.submit({ ...pullRequestAnchor('HEAD'), path: 'src/example.ts' }, 'Why?', 'ask'), ReviewStoreError);
+  await assert.rejects(async () => store.submit({ ...anchor(), path: '' }, 'Why?', 'ask'), ReviewStoreError);
+  const saved = JSON.parse(await readFile(file, 'utf8')) as { threads: { anchor: Record<string, unknown> }[] };
+  const tampered = { ...saved, threads: saved.threads.map((thread) => ({ ...thread, anchor: { ...thread.anchor, selectedText: 'code' } })) };
+  await writeFile(file, JSON.stringify(tampered));
+  await assert.rejects(createReviewStore(file, root));
 });

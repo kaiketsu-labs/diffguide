@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pullRequestAnchor } from './anchors.js';
 import { maximumIdentifierLength, maximumPathLength, maximumReplyLength, maximumReviewTextLength, maximumTitleLength } from './limits.js';
 
 import type {
@@ -458,7 +459,8 @@ function readMessage(value: unknown): ReviewMessage {
 function readAnchor(value: unknown): CodeAnchor {
   const record = readObject(value, 'anchor');
   checkKeys(record, ['path', 'startLine', 'endLine', 'selectedText', 'contextBefore', 'contextAfter', 'documentHash', 'side', 'baseRevision', 'scope']);
-  if (record['scope'] !== undefined && record['scope'] !== 'file') throw new ReviewStoreError('Invalid anchor scope.');
+  if (record['scope'] !== undefined && record['scope'] !== 'file' && record['scope'] !== 'pullRequest') throw new ReviewStoreError('Invalid anchor scope.');
+  if (record['scope'] === 'pullRequest') return readPullRequestAnchor(record);
   const filePath = readNonemptyText(record['path'], 'path').replaceAll('\\', '/');
   if (path.posix.isAbsolute(filePath) || path.win32.isAbsolute(filePath)
     || filePath.split('/').includes('..') || filePath.includes('\0') || path.posix.normalize(filePath) === '.') {
@@ -480,8 +482,22 @@ function readAnchor(value: unknown): CodeAnchor {
   });
 }
 
+/** A PR-level anchor carries no code: empty path, hash and context, line 1. */
+function readPullRequestAnchor(record: Readonly<Record<string, unknown>>): CodeAnchor {
+  if (record['path'] !== '' || record['startLine'] !== 1 || record['endLine'] !== 1 || record['side'] !== 'working' || record['documentHash'] !== ''
+    || record['selectedText'] !== '' || record['contextBefore'] !== '' || record['contextAfter'] !== '') {
+    throw new ReviewStoreError('Invalid pull request anchor.');
+  }
+  return Object.freeze(pullRequestAnchor(readText(record['baseRevision'], 'baseRevision')));
+}
+
 /** Reject newly captured context that the agent transport cannot deliver. */
 function validateNewAnchor(anchor: CodeAnchor): void {
+  if (anchor.scope === 'pullRequest') {
+    readPullRequestAnchor({ ...anchor });
+    readBoundedText(anchor.baseRevision, 'Git reference', maximumPathLength);
+    return;
+  }
   readBoundedText(anchor.path, 'File path', maximumPathLength, true);
   readBoundedText(anchor.selectedText, 'Code selection', maximumReviewTextLength);
   readBoundedText(anchor.contextBefore, 'Code before the selection', maximumReviewTextLength);

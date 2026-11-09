@@ -15,8 +15,11 @@ export interface CodeAnchor {
   readonly documentHash: string;
   readonly side: 'working' | 'original';
   readonly baseRevision: string;
-  /** Set when the comment is about the whole file; its lines are then a placeholder for line 1. */
-  readonly scope?: 'file';
+  /**
+   * `file` when the comment is about the whole file; its lines are then a placeholder for line 1.
+   * `pullRequest` when it is about the PR as a whole, such as a conversation comment: no code, an empty path and document hash, placeholder line 1.
+   */
+  readonly scope?: 'file' | 'pullRequest';
 }
 
 /** A comment displayed in a native VS Code thread. */

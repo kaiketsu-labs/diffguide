@@ -9,6 +9,7 @@ import type { TestContext } from 'node:test';
 import { createReviewBridge } from '../src/bridge.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/contracts.js';
 import { createReviewStore } from '../src/store.js';
+import { pullRequestAnchor } from '../src/anchors.js';
 import { parseThread, readBatch, record } from '../src/connection.js';
 import { maximumConversationMessages, maximumReviewTextLength } from '../src/limits.js';
 
@@ -332,4 +333,17 @@ test('marks older omitted discussion while keeping the latest request and origin
   assert.match(batch.threads[0]?.messages[0]?.text ?? '', /earlier conversation omitted/u);
   assert.equal(batch.events[0]?.text, `Follow-up ${maximumConversationMessages - 1}.`);
   assert.equal(store.threads[0]?.messages.length, maximumConversationMessages * 2 + 1);
+});
+
+test('delivers a PR-level comment with its scope and no code, and refuses one that also names a file', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-bridge-pr-'));
+  const store = await createReviewStore(path.join(root, 'review.json'), root);
+  await store.submit(pullRequestAnchor('HEAD'), 'What do you think of this comment?', 'ask');
+  const bridge = await createReviewBridge(store);
+  t.after(async () => { bridge.dispose(); await rm(root, { recursive: true, force: true }); });
+  const pending = await fetch(`${bridge.descriptor.url}/pending`, { headers: { Authorization: `Bearer ${bridge.descriptor.token}` } });
+  const payload = await pending.json() as { events: { anchor: Record<string, unknown> }[] };
+  assert.deepEqual(readBatch(payload, root).events[0]?.anchor, pullRequestAnchor('HEAD'));
+  const named = { ...payload, events: payload.events.map((event) => ({ ...event, anchor: { ...event.anchor, path: 'src/a.ts' } })) };
+  assert.throws(() => readBatch(named, root), /invalid source context/u);
 });

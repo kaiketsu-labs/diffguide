@@ -64,3 +64,12 @@ test('tells Claude a whole-file comment is about the file, not about lines', () 
   assert.match(prompt, /"scope": "Whole file: the comment is about the file as a whole, not about particular lines\./u);
   assert.doesNotMatch(buildReviewBatchPrompt([whole], []), /"scope"/u);
 });
+
+test('tells Claude a PR-level comment has no code anchor', () => {
+  const base = event('pr', 'Split the loader?');
+  const pullRequestEvent = { ...base, anchor: { path: '', startLine: 1, endLine: 1, selectedText: '', contextBefore: '', contextAfter: '', documentHash: '', side: 'working' as const, baseRevision: 'HEAD', scope: 'pullRequest' as const } };
+  const prompt = buildReviewBatchPrompt([pullRequestEvent], []);
+  assert.ok(prompt.startsWith('VS Code review · Implement · "pull request (no code anchor)"'));
+  assert.match(prompt, /"scope": "Pull request: the comment is about the PR as a whole, from its conversation, and has no code anchor\./u);
+  assert.doesNotMatch(prompt, /"path"/u);
+});

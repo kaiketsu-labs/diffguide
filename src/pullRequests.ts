@@ -281,8 +281,8 @@ export interface PullRequestProvider {
   /** One PR in any state, or undefined when the repository has none with that number. */
   pullRequest(number: number): Promise<PullRequestSummary | undefined>;
   conversation(number: number): Promise<PullRequestConversation>;
-  /** Post a comment on the PR itself, outside any review. */
-  addComment(number: number, body: string): Promise<void>;
+  /** Post a comment on the PR itself, outside any review; resolves with its link. */
+  addComment(number: number, body: string): Promise<string>;
   editComment(kind: CommentKind, id: string, body: string): Promise<void>;
   /** Delete a comment on the PR itself; review comments use `deleteComment`. */
   deleteIssueComment(id: string): Promise<void>;
@@ -846,8 +846,9 @@ export class GitHubApiProvider implements PullRequestProvider {
     return { ...parsed, awaitingApproval: ids };
   }
 
-  async addComment(number: number, body: string): Promise<void> {
-    await this.#graphql('mutation($id:ID!,$body:String!){addComment(input:{subjectId:$id,body:$body}){clientMutationId}}', { id: await this.#pullRequestId(number), body });
+  async addComment(number: number, body: string): Promise<string> {
+    const data = await this.#graphql('mutation($id:ID!,$body:String!){addComment(input:{subjectId:$id,body:$body}){commentEdge{node{url}}}}', { id: await this.#pullRequestId(number), body });
+    return httpsUrl(object(object(object(data['addComment'])['commentEdge'])['node'])['url']);
   }
 
   async editComment(kind: CommentKind, id: string, body: string): Promise<void> {

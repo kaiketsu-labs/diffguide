@@ -181,7 +181,7 @@ export class LocalReview implements vscode.Disposable {
       listRepositoryFiles(this.root).catch(() => []),
     ]);
     const changed = new Set([...tracked.map((file) => file.path), ...untracked]);
-    const threadPaths = this.store.threads.filter((thread) => !thread.resolved).map((thread) => thread.anchor.path);
+    const threadPaths = this.store.threads.filter((thread) => !thread.resolved && thread.anchor.scope !== 'pullRequest').map((thread) => thread.anchor.path);
     const extras = [...new Set([...this.#extras(), ...threadPaths])].filter((path) => !changed.has(path));
     await prepareHighlighting([...untracked, ...extras]);
     const whole = await Promise.all([
@@ -351,7 +351,7 @@ export class LocalReview implements vscode.Disposable {
       retry: () => undefined,
       dismissConflictQuestion: () => undefined,
       stopAnalysis: () => undefined,
-      publish: unsupported, postToGitHub: unsupported, commentOnGitHub: unsupported, commentOnGitHubFile: unsupported, replyOnGitHub: unsupported, askAboutGitHub: unsupported, resolveOnGitHub: unsupported,
+      publish: unsupported, postToGitHub: unsupported, commentOnGitHub: unsupported, commentOnGitHubFile: unsupported, replyOnGitHub: unsupported, askAboutGitHub: unsupported, askAboutComment: unsupported, resolveOnGitHub: unsupported,
       deleteOnGitHub: unsupported, push: unsupported, readCommit: unsupported, submitReview: unsupported, merge: unsupported, addComment: unsupported,
       editComment: unsupported, deleteIssueComment: unsupported, hideComment: unsupported, react: unsupported, discardReview: unsupported,
       dismissReview: unsupported, rerequestReview: unsupported, updateBranch: unsupported, enableAutoMerge: unsupported, disableAutoMerge: unsupported,

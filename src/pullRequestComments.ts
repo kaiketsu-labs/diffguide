@@ -22,6 +22,7 @@ export type CommentPlacement = Omit<PullRequestComment, 'body'>;
 
 /** Place a thread on the PR diff: on its lines when the diff shows them, else on the whole file, as a whole-file thread always goes. */
 export async function placeComment(worktree: string, base: string, anchor: CodeAnchor): Promise<CommentPlacement> {
+  if (anchor.scope === 'pullRequest') throw new Error('This thread is about the whole PR, so it goes on GitHub as a conversation comment.');
   const side = anchor.side === 'original' ? 'LEFT' : 'RIGHT';
   if (anchor.scope === 'file') return { path: anchor.path, commitId: (await git(worktree, ['rev-parse', 'HEAD'])).trim(), side };
   if (side === 'RIGHT' && (await git(worktree, ['status', '--porcelain', '--', anchor.path])).trim() !== '') {
@@ -123,9 +124,9 @@ export async function writeClaudeCommits(dataPath: string, commits: ReadonlyMap<
   await writePrivateJson(commitsPath(dataPath), { threads: Object.fromEntries(commits) });
 }
 
-/** The request Claude gets for a GitHub thread: the user's note, or a default for the intent, then the thread's comments quoted. */
-export function githubFeedbackRequest(note: string, intent: 'ask' | 'implement', comments: readonly { readonly author: string; readonly body: string }[]): string {
+/** The request Claude gets for GitHub feedback: the user's note, or a default for the intent, then the comments quoted under `source`. */
+export function githubFeedbackRequest(note: string, intent: 'ask' | 'implement', comments: readonly { readonly author: string; readonly body: string }[], source = 'GitHub thread'): string {
   const request = note.trim() || (intent === 'implement' ? 'Address this feedback from GitHub.' : 'What do you think of this feedback from GitHub?');
   const quoted = comments.map(({ author, body }) => `> **@${author}:**\n${body.trim().split('\n').map((line) => `> ${line}`.trimEnd()).join('\n')}`);
-  return `${request}\n\nGitHub thread:\n\n${quoted.join('\n>\n')}`;
+  return `${request}\n\n${source}:\n\n${quoted.join('\n>\n')}`;
 }

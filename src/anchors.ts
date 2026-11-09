@@ -31,6 +31,7 @@ function matchesLines(lines: readonly string[], expected: readonly string[], sta
 /** Locate captured code only when document identity or unique code context confirms it. */
 export function locateCodeAnchor(text: string, anchor: CodeAnchor): AnchorLocation | undefined {
   if (anchor.scope === 'file') return { startLine: 1, endLine: 1 };
+  if (anchor.scope === 'pullRequest') return undefined;
   const lines = normalizeLineEndings(text).split('\n');
   const selected = normalizeLineEndings(anchor.selectedText).split('\n');
   const originalStart = anchor.startLine - 1;
@@ -82,6 +83,11 @@ export function anchorFromText(
     contextAfter: lines.slice(endLine, endLine + 3).join('\n'),
     documentHash: hashDocumentText(text),
   };
+}
+
+/** Anchor a comment on the PR as a whole, which has no code to capture. */
+export function pullRequestAnchor(baseRevision: string): CodeAnchor {
+  return { scope: 'pullRequest', path: '', startLine: 1, endLine: 1, selectedText: '', contextBefore: '', contextAfter: '', documentHash: '', side: 'working', baseRevision };
 }
 
 /** Capture a comment on a whole file: no selected lines, only the file's identity, shown at its first line. */
