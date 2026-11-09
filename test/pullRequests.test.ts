@@ -212,7 +212,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
   const roleRows = await level(tree);
-  assert.deepEqual(roleRows.map(({ item }) => [item.label, item.description]), [['REVIEW REQUESTED', '1'], ['MINE', '0'], ['ALL OPEN', undefined]]);
+  assert.deepEqual(roleRows.map(({ item }) => [item.label, item.description]), [['REVIEW REQUESTED', '1'], ['MINE', '0'], ['ALL OPEN', '0']]);
   const [empty] = await level(tree, roleRows[1]?.node);
   assert.equal(empty?.item.label, 'No open PRs');
   const [repository] = await level(tree, roleRows[0]?.node);
@@ -299,6 +299,7 @@ test('offers GitHub sign-in as the welcome button, or on the repository row when
   const signedOut = async (): Promise<PullRequestProvider> => { throw new GitHubSignInRequired('github'); };
   const loaded = async (): Promise<PullRequestProvider> => ({
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }), listMine: async () => [summary], listReviewRequested: async () => [],
+    openCount: async () => 0,
   } as unknown as PullRequestProvider);
   let checkouts = [{ folder: 'app', connect: signedOut, worktrees: recordingWorktrees() }];
   const settings = new FakeMemento();
@@ -466,6 +467,7 @@ test('reads a PR\'s reviewed files once for its row, and redraws only that PR wh
     listMine: async () => [summary],
     listReviewRequested: async () => [],
     listFiles: async () => [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }, { path: 'b.ts', additions: 1, deletions: 0, change: 'added' }],
+    openCount: async () => 0,
   } as unknown as PullRequestProvider;
   const worktrees = recordingWorktrees();
   worktrees.checkedOut.add(7);
@@ -505,6 +507,7 @@ test('shows unpushed commits and uncommitted edits on a checked-out PR row', asy
     listMine: async () => [summary],
     listReviewRequested: async () => [],
     listFiles: async () => [{ path: 'src/a.ts', additions: 1, deletions: 0, change: 'added' }],
+    openCount: async () => 0,
   } as unknown as PullRequestProvider;
   const worktrees = recordingWorktrees();
   worktrees.checkedOut.add(7);
@@ -532,6 +535,7 @@ test('filters PRs by author and shows their size and dates', async (t) => {
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
     listMine: async () => [],
     listReviewRequested: async () => [pr(7, 'octo'), pr(8, 'alice')],
+    openCount: async () => 0,
   } as unknown as PullRequestProvider;
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
@@ -578,6 +582,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
       asked.push([...numbers]);
       return numbers.filter((number) => open.has(number)).map((number) => pr(number, `Still open ${number}`));
     },
+    openCount: async () => 0,
   } as unknown as PullRequestProvider;
   const workspace = new FakeMemento();
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), workspace);
@@ -603,7 +608,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   await commands.executeCommand('diffGuide.pinPullRequest', three?.node);
   await commands.executeCommand('diffGuide.pinPullRequest', one?.node);
   assert.deepEqual(await shown(), {
-    roles: ['BOOKMARKS 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
+    roles: ['BOOKMARKS 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN 0'],
     pinned: ['Three · #3 · app · review · octo · diffGuide.pullRequest.pinned', 'One · #1 · app · review · octo · diffGuide.pullRequest.pinned'],
   });
   assert.deepEqual((await reviewRows()).map(({ item }) => item.label), ['Two']);
@@ -618,10 +623,10 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three']);
   await drag([two?.node], (await level(tree))[0]?.node);
   assert.deepEqual((await shown()).pinned.map((row) => row.split(' · ')[0]), ['One', 'Three', 'Two']);
-  assert.deepEqual((await shown()).roles, ['BOOKMARKS 3', 'REVIEW REQUESTED 0', 'MINE 0', 'ALL OPEN undefined']);
+  assert.deepEqual((await shown()).roles, ['BOOKMARKS 3', 'REVIEW REQUESTED 0', 'MINE 0', 'ALL OPEN 0']);
 
   await commands.executeCommand('diffGuide.unpinPullRequest', (await level(tree, (await level(tree))[0]?.node))[2]?.node);
-  assert.deepEqual((await shown()).roles, ['BOOKMARKS 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
+  assert.deepEqual((await shown()).roles, ['BOOKMARKS 2', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN 0']);
 
   reviewRequested = [pr(2, 'Two')];
   open = new Set([1]);
@@ -629,14 +634,14 @@ test('pins PRs above the role sections in the dragged order and drops them once 
   await level(tree);
   await settle();
   assert.deepEqual(await shown(), {
-    roles: ['BOOKMARKS 1', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined'],
+    roles: ['BOOKMARKS 1', 'REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN 0'],
     pinned: ['Still open 1 · #1 · app · review · octo · diffGuide.pullRequest.pinned'],
   });
   assert.deepEqual(asked, [[1, 3]]);
 
   await commands.executeCommand('diffGuide.markPullRequestMerged', 'acme/app#1');
   await settle();
-  assert.deepEqual((await shown()).roles, ['REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN undefined']);
+  assert.deepEqual((await shown()).roles, ['REVIEW REQUESTED 1', 'MINE 0', 'ALL OPEN 0']);
 });
 
 test('reads a PR from a GitHub link with any tab, comment anchor or query, or from owner/repo#57', () => {
@@ -714,6 +719,7 @@ test('lists every open PR of a repository under All open only once expanded, wit
     listMine: async () => [summary],
     listReviewRequested: async () => [],
     search: async (query: string) => { searched.push(query); return [summary, { ...summary, number: 12, title: 'Someone else', author: 'bob' }]; },
+    openCount: async () => 2,
   } as unknown as PullRequestProvider;
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
@@ -725,7 +731,7 @@ test('lists every open PR of a repository under All open only once expanded, wit
   const [repository] = await level(tree);
   const groups = await level(tree, repository?.node);
   const allOpen = groups.at(-1);
-  assert.deepEqual([allOpen?.item.label, allOpen?.item.collapsibleState], ['All open', 1]);
+  assert.deepEqual([allOpen?.item.label, allOpen?.item.description, allOpen?.item.collapsibleState], ['All open', '2', 1]);
   assert.deepEqual(searched, []);
   const rows = await level(tree, allOpen?.node);
   assert.deepEqual(searched, ['is:open sort:updated-desc']);

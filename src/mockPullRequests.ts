@@ -104,6 +104,7 @@ export const mockPullRequestProvider: PullRequestProvider = {
   deleteBranch: async () => { throw new Error('Sample pull requests cannot be changed.'); },
   pickerOptions: async () => ({ users: [], teams: [], labels: [], milestones: [] }),
   search: async () => [],
+  openCount: async () => 0,
   openPullRequests: async () => [],
   pullRequest: async () => undefined,
   conversation: async () => ({

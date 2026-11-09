@@ -6,7 +6,7 @@ import { pollWhileFocused } from './autoSync.js';
 import { GitHubSignInRequired } from './githubApi.js';
 
 type Listing =
-  | { readonly kind: 'ready'; readonly folder: string; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }
+  | { readonly kind: 'ready'; readonly folder: string; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[]; readonly openCount?: number }
   | { readonly kind: 'failed'; readonly folder: string; readonly message: string; readonly signIn?: GitHubSignInRequired['provider'] };
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
@@ -46,7 +46,7 @@ function pinKey(pin: Pin): string {
 }
 
 /** A repository's PR lists from the last load, shown at once while fresh ones load. */
-type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>>;
+type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[]; readonly openCount?: number }>>;
 
 const pullRequestScheme = 'diffguide-pr';
 
@@ -331,6 +331,11 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     return (await all).filter((pullRequest) => author === undefined || pullRequest.author === author);
   }
 
+  /** A repository's open PR count for its All open row; unknown while an author filter is on, since the count covers every author. */
+  #openCountOf(listing: Ready): number | undefined {
+    return this.author === undefined ? listing.openCount : undefined;
+  }
+
   /** Open the review page of a PR named by a GitHub link or `owner/name#57`, from the workspace folder that holds its repository. */
   async openLink(link: string): Promise<void> {
     const parsed = parsePullRequestLink(link);
@@ -553,13 +558,17 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'allOpenRoot': {
         const item = new vscode.TreeItem('ALL OPEN', vscode.TreeItemCollapsibleState.Collapsed);
         item.iconPath = new vscode.ThemeIcon('diffguide-stack');
+        const counts = node.listings.map((listing) => this.#openCountOf(listing));
+        if (counts.every((count) => count !== undefined)) item.description = String(counts.reduce((sum, count) => sum + count, 0));
         return item;
       }
       case 'allOpen': {
         const { owner, name } = splitRepository(node.listing.repository.name);
         const item = new vscode.TreeItem(this.byRole ? name : 'All open', vscode.TreeItemCollapsibleState.Collapsed);
         item.iconPath = this.byRole ? repositoryIcon : new vscode.ThemeIcon('diffguide-stack');
-        if (this.byRole) item.description = owner;
+        const count = this.#openCountOf(node.listing);
+        const description = [this.byRole ? owner : undefined, count === undefined ? undefined : String(count)].filter(Boolean).join(' · ');
+        if (description) item.description = description;
         item.tooltip = `Every open PR in ${node.listing.repository.name}`;
         return item;
       }
@@ -745,7 +754,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
   async #remember(listing: Listing): Promise<void> {
     const snapshot = { ...this.workspace.get<Snapshot>(snapshotKey, {}) };
-    if (listing.kind === 'ready') snapshot[listing.folder] = { repository: listing.repository, mine: listing.mine, reviewRequested: listing.reviewRequested };
+    if (listing.kind === 'ready') snapshot[listing.folder] = { repository: listing.repository, mine: listing.mine, reviewRequested: listing.reviewRequested, ...listing.openCount === undefined ? {} : { openCount: listing.openCount } };
     else delete snapshot[listing.folder];
     await this.workspace.update(snapshotKey, snapshot);
   }
@@ -753,10 +762,10 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   async #loadOne({ folder, connect, worktrees }: PullRequestCheckout): Promise<Listing> {
     try {
       const provider = await connect();
-      const [repository, mine, reviewRequested] = await Promise.all([
-        provider.readRepository(), provider.listMine(), provider.listReviewRequested(),
+      const [repository, mine, reviewRequested, openCount] = await Promise.all([
+        provider.readRepository(), provider.listMine(), provider.listReviewRequested(), provider.openCount().catch(() => undefined),
       ]);
-      const listing: Ready = { kind: 'ready', folder, provider, worktrees, repository, mine, reviewRequested };
+      const listing: Ready = { kind: 'ready', folder, provider, worktrees, repository, mine, reviewRequested, ...openCount === undefined ? {} : { openCount } };
       await this.#refreshPins(listing);
       return listing;
     } catch (error: unknown) {
