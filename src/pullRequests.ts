@@ -272,6 +272,8 @@ export interface PullRequestProvider {
   pickerOptions(): Promise<PickerOptions>;
   /** Search this repository's PRs with GitHub search syntax, such as `is:closed` or `assignee:@me`. */
   search(query: string): Promise<readonly PullRequestSummary[]>;
+  /** How many open PRs this repository has, from GitHub search's count without listing them. */
+  openCount(): Promise<number>;
   /** The PRs among `numbers` that are still open, read fresh. */
   openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]>;
   /** One PR in any state, or undefined when the repository has none with that number. */
@@ -762,6 +764,14 @@ export class GitHubApiProvider implements PullRequestProvider {
       { query: `repo:${owner}/${name} is:pr ${query}` });
     const nodes = list(object(data['search'])['nodes']).filter((node) => typeof node === 'object' && node !== null && 'number' in node);
     return parsePullRequestList(nodes.map(searchNode));
+  }
+
+  async openCount(): Promise<number> {
+    const { owner, name, host } = await this.#repo();
+    const data = await this.#graphqlOn(host, 'query($query:String!){search(query:$query,type:ISSUE,first:0){issueCount}}', { query: `repo:${owner}/${name} is:pr is:open` });
+    const count = object(data['search'])['issueCount'];
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) throw new Error('GitHub returned an invalid PR count.');
+    return count;
   }
 
   async openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]> {
