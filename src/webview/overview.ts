@@ -471,7 +471,7 @@ function pickedKeys(what: PickTarget, details: PullRequestDetails): Set<string> 
   if (what === 'milestone') return new Set(details.milestone === undefined ? [] : [String(details.milestone.number)]);
   if (what === 'labels') return new Set(details.labels.map((label) => label.name));
   if (what === 'assignees') return new Set(details.assignees);
-  return new Set(details.reviewers.filter((reviewer) => reviewer.state === 'requested').map((reviewer) => reviewer.team === undefined ? 'user:' + reviewer.name : 'team:' + reviewer.team));
+  return new Set(details.reviewers.filter((reviewer) => reviewer.state === 'requested' || reviewer.rerequested === true).map((reviewer) => reviewer.team === undefined ? 'user:' + reviewer.name : 'team:' + reviewer.team));
 }
 
 /** The repository's choices plus whatever the PR already has, so current values stay removable. */
@@ -1728,7 +1728,7 @@ function renderReviewers(state: OverviewState, force = false): void {
   if (!details) return;
   for (const reviewer of details.reviewers) {
     const tools: HTMLElement[] = [];
-    if (details.canEdit && details.open && reviewer.team === undefined && reviewer.state !== 'requested' && reviewer.name !== conversation?.viewerLogin) {
+    if (details.canEdit && details.open && reviewer.team === undefined && reviewer.state !== 'requested' && reviewer.rerequested !== true && reviewer.name !== conversation?.viewerLogin) {
       const again = toolButton(icons.sync, 'Re-request review', () => changePullRequest({ action: 'rerequest', login: reviewer.name }));
       again.dataset.prAction = '';
       tools.push(again);
@@ -1742,7 +1742,9 @@ function renderReviewers(state: OverviewState, force = false): void {
       dismiss.dataset.prAction = '';
       tools.push(dismiss);
     }
-    reviewers.append(status(reviewer.state, reviewer.name, undefined, tools));
+    const row = status(reviewer.state, reviewer.name, undefined, tools);
+    if (reviewer.rerequested === true) row.querySelector('.muted')?.append(' · Re-requested');
+    reviewers.append(row);
     if (dismissing?.login === reviewer.name) reviewers.append(dismissForm(dismissing));
   }
   if (!details.reviewers.length) reviewers.append(el('li', 'muted', 'No reviewers yet.'));
