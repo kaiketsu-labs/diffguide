@@ -182,10 +182,33 @@ const anims = [
     if (p < .5) return base(rr, { x: xr, look: [p < .45 ? 1 : -1, 0] });
     if (p < .9) return base(rr, { x: lerp(xr, xl, ease((p - .5) / .4)), y: Y + Math.sin(p * 20) * .4, look: [-1, 0] });
     return base(rr, { x: xl, look: [p < .95 ? -1 : 1, 0] }); }, t, r) },
-  { id: 'think', name: 'Thinking', fits: 'Claude is working', frame: (t, r) => {
+  { id: 'think', name: 'Thinking', fits: 'Thinking, 1 of 7', frame: (t, r) => {
     const p = phase(t, 1900);
     const sparks = [0, 1, 2].map(k => { const a = TAU * p + k * TAU / 3; return { x: X + Math.cos(a) * (r + 3.5), y: Y + Math.sin(a) * (r * .5 + 1.5), a: .55 + .45 * Math.sin(a) }; });
     return base(r, { y: Y + Math.sin(TAU * p) * .5, look: [1, -1], sparks }); } },
+  { id: 'ponder', name: 'Ponder', fits: 'Thinking, 2 of 7', frame: (t, r) => {
+    const p = phase(t, 4200), q = clamp((p - .55) / .4, 0, 1);
+    const glyphs = p > .55 ? [{ ch: '?', x: X + r - 1, y: Y - r - 3 - q * 1.5, a: q < .2 ? q / .2 : 1 - Math.max(0, q - .7) / .3 }] : [];
+    return base(r, { x: X + Math.sin(TAU * p) * 1.2, y: Y + .5, look: p < .4 ? [-1, -1] : p < .45 ? [0, -1] : [1, -1], eyes: blinking(p, .2) ? 'closed' : 'open', glyphs }); } },
+  { id: 'juggle', name: 'Juggle', fits: 'Thinking, 3 of 7', frame: (t, r) => {
+    const p = phase(t, 1500);
+    const sparks = [0, 1, 2].map(k => { const q = frac(p + k / 3); return { x: lerp(X - 5, X + 5, q), y: Y - r - 1 - Math.sin(Math.PI * q) * 3, a: .9 }; });
+    const top = sparks.reduce((a, b) => b.y < a.y ? b : a);
+    return base(r, { y: Y + 1 + Math.abs(Math.sin(TAU * p * 1.5)) * .6, look: [sign(top.x - X, 1.5), -1], sparks }); } },
+  { id: 'dots', name: 'Typing dots', fits: 'Thinking, 4 of 7', frame: (t, r) => {
+    const p = phase(t, 1350);
+    const sparks = [0, 1, 2].map(k => { const on = clamp(1 - Math.abs(p * 4 - k - .5) / 1.2, 0, 1); return { x: X + r + 3 + k * 2, y: Y - 1 - on, a: .3 + .7 * on }; });
+    return base(r, { x: X - 4, look: [1, 0], sparks }); } },
+  { id: 'ripple', name: 'Ripple', fits: 'Thinking, 5 of 7', frame: (t, r) => {
+    const p = phase(t, 2200), b = Math.sin(TAU * p), k = frac(p * 2), rr = r + 1 + k * 7;
+    const sparks = Array.from({ length: 12 }, (_, i) => ({ x: X + Math.cos(i * TAU / 12) * rr, y: Y + Math.sin(i * TAU / 12) * rr * .6, a: (1 - k) * .8 }));
+    return base(r, { sq: 1 - (b + 1) * .03, eyes: b > .6 ? 'closed' : 'open', sparks }); } },
+  { id: 'roll', name: 'Roll', fits: 'Thinking, 6 of 7', frame: (t, r) => {
+    const a = TAU * phase(t, 1800);
+    return base(r, { x: X + Math.cos(a) * 1.5, y: Y + Math.sin(a) * .6, look: [Math.round(Math.cos(a) * 1.2), Math.round(Math.sin(a) * 1.2)] }); } },
+  { id: 'think-hop', name: 'Hop in place', fits: 'Thinking, 7 of 7', frame: (t, r) => {
+    const h = Math.max(0, Math.sin(TAU * phase(t, 950)));
+    return base(r, { y: Y + 1 - h * 3, sq: h < .15 ? .9 : 1 + h * .03, eyes: h < .15 ? 'closed' : 'open', look: [0, -1] }); } },
   { id: 'orbit', name: 'Orbit', fits: 'Working (alt)', frame: (t, r) => {
     const a = TAU * phase(t, 1800), moon = { x: X + Math.cos(a) * (r + 4.5), y: Y + Math.sin(a) * 2.2, r: 1.4, a: 1 };
     const f = base(r, { look: [sign(Math.cos(a), .4), 0] }); (Math.sin(a) < 0 ? f.behind : f.front).push(moon); return f; } },
