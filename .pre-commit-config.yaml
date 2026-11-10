@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=3200"]
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-shebang-scripts-are-executable
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: destroyed-symlinks
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+  - repo: local
+    hooks:
+      - id: tsc
+        name: TypeScript type check
+        language: system
+        entry: npm run typecheck
+        types_or: [ts]
+        pass_filenames: false

@@ -203,4 +203,3 @@ test('summarizes a file whose diff is too large to show in full', () => {
   assert.match(prompt, /\[b1\] new lines 2-3001, 3000 changed\n\+  "package-0"/u);
   assert.ok(prompt.length < 5000);
 });
-

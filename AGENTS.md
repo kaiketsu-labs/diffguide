@@ -72,5 +72,5 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 
 ## Tracking
 
-- Record user-visible changes in `CHANGELOG.md`. Keep installation, publishing, review findings and known limitations current in `README.md` and `docs/`.
+- Record user-visible changes as lines under `## Unreleased` in `CHANGELOG.md`. The release workflow moves them into the release as `### Notes`. Keep installation, publishing, review findings and known limitations current in `README.md` and `docs/`.
 - Commit messages use `<type>(<scope>): <lowercase subject>` with `!` before the colon for breaking changes.

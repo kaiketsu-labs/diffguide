@@ -90,4 +90,3 @@ export function groupByRepository(checkouts: readonly LocalCheckout[]): readonly
       || (a.pullRequest?.pullRequest.number ?? 0) - (b.pullRequest?.pullRequest.number ?? 0) || a.branch.localeCompare(b.branch)),
   })).sort((a, b) => a.name.localeCompare(b.name) || a.repository.localeCompare(b.repository));
 }
-

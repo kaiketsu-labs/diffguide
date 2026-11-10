@@ -1,0 +1,22 @@
+name: Dependabot auto-merge
+
+# Auto-merge waits for the main ruleset's required checks; without them it merges at once.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: dependabot/fetch-metadata@v3
+        id: metadata
+      - name: Enable auto-merge for minor and patch updates
+        if: ${{ steps.metadata.outputs.update-type != 'version-update:semver-major' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"
