@@ -59,7 +59,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 ## Commands
 
 - `npm ci --ignore-scripts` installs dependencies, `npm run build` bundles, and `npm run package` builds the installable VSIX.
-- `npm run typecheck` (under a second) and `npm test` (about 12 s) check types and run the tests. Run them without asking. A project Stop hook runs the type check when a turn changed TypeScript.
+- `npm run typecheck` (under a second) and `npm test` (about 12 s) check types and run the tests. Run them without asking. `npm test -- anchors review` runs only the test files whose names contain `anchors` or `review`; run the full suite before handing over. A project Stop hook runs the type check when a turn changed TypeScript.
 - `npm run render` screenshots the review page in the user's theme (the `render` skill). `make install` packages and installs the VSIX (the `install` skill).
 - Use Python through `uv run` if a supporting media task requires it.
 
