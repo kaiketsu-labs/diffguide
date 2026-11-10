@@ -233,6 +233,7 @@
 - Leave untracked files out of PR diffs, so files tools create in a worktree (such as `.ui-review/`) no longer show up as PR changes.
 - Add the `localReview.mockPullRequests` setting, which fills the Pull Requests view with sample data for testing.
 - Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
+- Fixed: a loaded HTML preview no longer disappears when another file on the page redraws, such as a PDF finishing loading or ticking another file Viewed.
 
 ## [0.6.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.5.1...v0.6.0) (2026-11-08)
 
