@@ -3477,8 +3477,9 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     fileKeys.set(file.path, fileKey(file.path, threadsOf(file.path)));
     return fileBox(file, threadsOf(file.path));
   };
+  const redrawn = targets?.every((path) => boxes.has(path)) ? targets.flatMap((path) => boxes.get(path) ?? []) : undefined;
   keepView(() => {
-    if (targets?.every((path) => boxes.has(path))) {
+    if (redrawn && targets) {
       for (const path of targets) {
         const file = shownFiles.find((item) => item.path === path);
         if (file) boxes.get(path)?.replaceWith(draw(file));
@@ -3507,7 +3508,7 @@ function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
     }
     if (folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
-  });
+  }, container, redrawn);
   markCurrentNavFile();
 }
 
@@ -3753,9 +3754,9 @@ const frameParking = el('div');
 frameParking.hidden = true;
 document.body.append(frameParking);
 
-function parkFrames(container: HTMLElement): HTMLIFrameElement[] {
+function parkFrames(scopes: readonly HTMLElement[]): HTMLIFrameElement[] {
   if (typeof frameParking.moveBefore !== 'function') return [];
-  const frames = [...container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')];
+  const frames = scopes.flatMap((scope) => [...scope.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')]);
   for (const frame of frames) frameParking.moveBefore(frame, null);
   return frames;
 }
@@ -3772,12 +3773,15 @@ function restoreFrames(container: HTMLElement, parked: readonly HTMLIFrameElemen
   frameParking.replaceChildren();
 }
 
-/** Redraw the file list, or `container`, without losing the scroll position, a preview's own scroll position, the draft being typed or a loaded HTML preview. */
-function keepView(draw: () => void, container = $('files')): void {
+/**
+ * Redraw the file list, or `container`, without losing the scroll position, a preview's own scroll position, the draft being typed or a loaded HTML preview.
+ * `redrawn` names the boxes `draw` replaces; frames elsewhere stay where they are.
+ */
+function keepView(draw: () => void, container = $('files'), redrawn: readonly HTMLElement[] = [container]): void {
   const scroll = window.scrollY;
   const active = document.activeElement;
   const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
-  const frames = parkFrames(container);
+  const frames = parkFrames(redrawn);
   const scrolls = new Map([...container.querySelectorAll<HTMLElement>('[data-scroll-key]')].map((node) => [node.dataset.scrollKey, node.scrollTop]));
   draw();
   restoreFrames(container, frames);
