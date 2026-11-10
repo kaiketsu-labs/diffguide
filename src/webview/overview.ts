@@ -2566,8 +2566,16 @@ function threadBox(thread: Thread): HTMLElement {
     const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
     if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
     box.append(item);
+    const made = thread.source === 'local' ? thread.commits?.filter((commit) => commit.after === index) : undefined;
+    if (made?.length) {
+      const list = claudeCommits(made);
+      list.hidden = item.hidden;
+      if (index < folded) foldedItems.push(list);
+      box.append(list);
+    }
   });
-  if (thread.source === 'local' && thread.commits) box.append(claudeCommits(thread.commits));
+  const unplaced = thread.source === 'local' ? thread.commits?.filter((commit) => commit.after === undefined || commit.after >= thread.messages.length) : undefined;
+  if (unplaced?.length) box.append(claudeCommits(unplaced));
   box.append(...nested.map(threadBox));
   const working = thread.source === 'local' ? thread.working : undefined;
   if (working) {

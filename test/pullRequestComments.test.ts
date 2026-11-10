@@ -120,8 +120,8 @@ test('keeps the commits Claude made per local thread across restarts and drops m
   const dataPath = await mkdtemp(join(tmpdir(), 'commits-'));
   assert.equal((await readClaudeCommits(dataPath)).size, 0);
   const oid = 'a'.repeat(40);
-  await writeClaudeCommits(dataPath, new Map([['local-1', [{ oid, subject: 'Use the limit' }, { oid: '--force', subject: 'x' }]], ['bad', [{ oid: 'zz', subject: 'y' }]]]));
-  assert.deepEqual([...await readClaudeCommits(dataPath)], [['local-1', [{ oid, subject: 'Use the limit' }]]]);
+  await writeClaudeCommits(dataPath, new Map([['local-1', [{ oid, subject: 'Use the limit', eventId: 'event-2' }, { oid: '--force', subject: 'x' }]], ['bad', [{ oid: 'zz', subject: 'y' }]]]));
+  assert.deepEqual([...await readClaudeCommits(dataPath)], [['local-1', [{ oid, subject: 'Use the limit', eventId: 'event-2' }]]]);
 });
 
 test('ends a thread\'s live log once Claude\'s reply from the current run arrives, while the run still wraps up', () => {
@@ -147,3 +147,24 @@ test('ends a thread\'s live log once Claude\'s reply from the current run arrive
   assert.equal(earlier?.working, 'Thinking');
   assert.ok(earlier?.progress !== undefined);
 });
+
+test('places each commit under Claude\'s reply to the comment it was made for, and older commits at the end', () => {
+  const thread = {
+    id: 't1', intent: 'implement', status: 'answered', resolved: false, outdated: false, latestEventId: 'e2',
+    anchor: { path: 'src/a.ts', startLine: 1, endLine: 1, side: 'working', selectedText: 'x' },
+    messages: [
+      { id: 'm1', eventId: 'e1', author: 'human', text: 'Use the limit.', createdAt: '2026-11-05T09:00:00Z' },
+      { id: 'm2', eventId: 'e1', author: 'claude', text: 'Done.', createdAt: '2026-11-05T09:01:00Z' },
+      { id: 'm3', eventId: 'e2', author: 'human', text: 'Why?', createdAt: '2026-11-05T09:02:00Z' },
+      { id: 'm4', eventId: 'e2', author: 'claude', text: 'Because.', createdAt: '2026-11-05T09:03:00Z' },
+    ],
+  };
+  const opened = {
+    session: { store: { threads: [thread], events: [] }, activity: () => undefined, publication: () => undefined },
+    runner: { activity: { running: false, threads: new Set(), skipped: 0 } },
+    commits: () => [{ oid: 'a'.repeat(40), subject: 'Use the limit', eventId: 'e1' }, { oid: 'b'.repeat(40), subject: 'Old' }],
+  } as unknown as PullRequestSession;
+  const view = buildOverviewState({ number: 3, title: 'T', url: 'https://github.com/acme/app/pull/3', author: 'alice', draft: false, headBranch: 'f', baseBranch: 'main' }, opened, [], [], 1).threads[0];
+  assert.deepEqual(view?.commits, [{ oid: 'a'.repeat(40), subject: 'Use the limit', after: 1 }, { oid: 'b'.repeat(40), subject: 'Old' }]);
+});
+

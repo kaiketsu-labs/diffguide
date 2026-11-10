@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A commit Claude makes for a comment shows under its reply to that comment, not at the end of the thread. Commits recorded before this update still show at the end.
 - **All open** in the Pull Requests view shows how many PRs are open. The count can be higher than the rows, which stop at 50.
 - Requesting, removing or re-requesting a reviewer on the review page refreshes the Pull Requests view.
 - A reviewer who only left a comment stays in the reviewer list with **Re-request review**. A re-requested reviewer reads "Approved · Re-requested" (or their earlier verdict), is ticked in the Reviewers menu, and loses the button until they review again.

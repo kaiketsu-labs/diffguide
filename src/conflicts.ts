@@ -146,6 +146,8 @@ export async function localChanges(worktree: string, pushedHead: string | undefi
 export interface WorktreeCommit {
   readonly oid: string;
   readonly subject: string;
+  /** The comment Claude made it for; commits recorded before this was kept leave it out. */
+  readonly eventId?: string;
 }
 
 /** The worktree's commit, and whether it has no uncommitted or untracked files. */

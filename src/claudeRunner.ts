@@ -72,8 +72,8 @@ export interface ClaudeRunnerOptions {
   readonly instructions?: () => Promise<string>;
   /** Runs before Claude answers comments, such as bringing the worktree to the PR's latest commit; a failure stops the run with its message. */
   readonly prepare?: () => Promise<void>;
-  /** Runs after Claude answers comments, with the threads it handled, such as recording its commits; a failure is the run's error. */
-  readonly finish?: (threads: ReadonlySet<string>) => Promise<void>;
+  /** Runs after Claude answers comments, with the comments it handled, such as recording its commits; a failure is the run's error. */
+  readonly finish?: (events: readonly ReviewEvent[]) => Promise<void>;
   /** Folders outside the worktree Claude may use, such as the workspace's other repositories. */
   readonly folders?: () => Promise<readonly string[]>;
   /** Folders among `folders` Claude may read but not edit, except inside their DiffGuide worktrees; `guard` is the edit guard script. */
@@ -235,7 +235,7 @@ export class ClaudeRunner implements vscode.Disposable {
         prompt: `${this.options.role === 'reviewer' ? reviewerNote : authorNote}\n\n${prompt}\n\n${suggestionNote}`,
         label: `${events.length} comment${events.length === 1 ? '' : 's'}`, allowedTools: [], mode: 'auto',
       });
-      await this.options.finish?.(threads);
+      await this.options.finish?.(events);
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
