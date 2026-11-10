@@ -311,7 +311,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       stopped: () => { stopping?.abort(); },
       released: releaseAll,
-      finish: async (threads) => {
+      finish: async (events) => {
         const start = before;
         before = undefined;
         if (start === undefined) return;
@@ -322,7 +322,9 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         }
         const made = await commitsSince(worktree, start.head).catch(() => []);
         if (made.length === 0) return;
-        for (const threadId of threads) commits.set(threadId, [...commits.get(threadId) ?? [], ...made]);
+        // A thread's latest comment in the run owns the commits, so two comments in one run do not list them twice.
+        const latest = new Map(events.map((event) => [event.threadId, event.id]));
+        for (const [threadId, eventId] of latest) commits.set(threadId, [...commits.get(threadId) ?? [], ...made.map((commit) => ({ ...commit, eventId }))]);
         await writeClaudeCommits(dataPath, commits);
       },
       ...this.claude,

@@ -113,7 +113,8 @@ export async function readClaudeCommits(dataPath: string): Promise<Map<string, r
   for (const [id, entry] of Object.entries(threads)) {
     const commits = (Array.isArray(entry) ? entry as unknown[] : []).flatMap((commit) => {
       const record = typeof commit === 'object' && commit !== null ? commit as Partial<WorktreeCommit> : {};
-      return typeof record.oid === 'string' && /^[a-f\d]{40,64}$/u.test(record.oid) && typeof record.subject === 'string' ? [{ oid: record.oid, subject: record.subject }] : [];
+      if (typeof record.oid !== 'string' || !/^[a-f\d]{40,64}$/u.test(record.oid) || typeof record.subject !== 'string') return [];
+      return [{ oid: record.oid, subject: record.subject, ...typeof record.eventId === 'string' ? { eventId: record.eventId } : {} }];
     });
     if (commits.length > 0) found.set(id, commits);
   }

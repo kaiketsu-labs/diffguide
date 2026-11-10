@@ -141,11 +141,11 @@ test('on the author\'s own PR, uses the checkout\'s config and asks Claude to co
   assert.equal(children[0]?.env?.['GIT_CONFIG_VALUE_0'], undefined);
 });
 
-test('lets Claude read the workspace\'s other folders, and runs the finish step with the handled threads', async (t) => {
+test('lets Claude read the workspace\'s other folders, and runs the finish step with the handled comments', async (t) => {
   const finished: string[][] = [];
   const { store, children } = await runner('reviewer', t, undefined, undefined, {
     folders: async () => ['/worktree', '/repos/other', '/repos/main'],
-    finish: async (threads) => { finished.push([...threads]); },
+    finish: async (events) => { finished.push(events.map((each) => each.id)); },
   });
   store.setPending([event('one')]);
   await until(() => children.length === 1);
@@ -154,7 +154,7 @@ test('lets Claude read the workspace\'s other folders, and runs the finish step 
   children[0]?.send({ type: 'result', subtype: 'success', is_error: false });
   await children[0]?.exit(0);
   await until(() => finished.length === 1);
-  assert.deepEqual(finished, [['thread-one']]);
+  assert.deepEqual(finished, [['one']]);
 });
 
 test('opens the same conversation interactively with the same flags, and starts one when there is none', async (t) => {

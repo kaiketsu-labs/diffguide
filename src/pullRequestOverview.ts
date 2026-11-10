@@ -66,8 +66,8 @@ export interface OverviewState {
     readonly progress?: ClaudeProgress;
     /** The suggestion option written to the worktree from this thread, while the page is open. */
     readonly applied?: AppliedSuggestion;
-    /** Commits Claude made while answering this thread, oldest first. */
-    readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
+    /** Commits Claude made while answering this thread, oldest first; `after` is the index of the message they show under, else they show at the end. */
+    readonly commits?: readonly { readonly oid: string; readonly subject: string; readonly after?: number }[];
     readonly url?: string;
     /** The GitHub thread this one answers; the page shows it inside that thread, and publishing replies there. For a PR-level thread, the conversation comment it quotes. */
     readonly linkedTo?: string;
@@ -1283,7 +1283,7 @@ interface ThreadExtras {
   readonly linkedTo?: string;
   /** Whether the thread can be posted on GitHub, so the page offers its text as a draft. */
   readonly publishable?: boolean;
-  readonly commits?: readonly { readonly oid: string; readonly subject: string }[];
+  readonly commits?: readonly { readonly oid: string; readonly subject: string; readonly eventId?: string }[];
   /** Each event's intent by event ID, so a human message can show whether it was sent with Ask or Implement. */
   readonly intents?: ReadonlyMap<string, ReviewIntent>;
 }
@@ -1333,6 +1333,10 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
     ...(linkedTo === undefined ? {} : { linkedTo }),
     ...(publishable && publication === undefined && !thread.resolved ? { draft: publishableText(thread) } : {}),
     ...(thread.title === undefined ? {} : { title: thread.title }),
-    ...(commits.length === 0 ? {} : { commits }),
+    ...(commits.length === 0 ? {} : { commits: commits.map(({ oid, subject, eventId }) => {
+      // The comment's reply follows the comment, so the last message of its event is the reply once Claude answered.
+      const after = eventId === undefined ? -1 : thread.messages.findLastIndex((entry) => entry.eventId === eventId);
+      return { oid, subject, ...after === -1 ? {} : { after } };
+    }) }),
   };
 }
