@@ -1,4 +1,4 @@
-import type { ClaudeStep } from '../claudeRunner.js';
+import type { ClaudeProgress, ClaudeStep } from '../claudeRunner.js';
 import type { ClaudeConversation } from '../claudeSessions.js';
 import type { ReviewIntent } from '../contracts.js';
 import type { DefinitionPeek } from '../definitions.js';
@@ -15,7 +15,7 @@ import { icons } from '../icons.js';
 import type { FileIcon, FileIcons } from '../fileIcons.js';
 import { mediaType, type MediaPreview, type MediaSide } from '../media.js';
 import type * as PdfJs from 'pdfjs-dist';
-import { orbCanvas, stepMotion } from './orb.js';
+import { orbCanvas, stepMotion, type OrbMotion } from './orb.js';
 
 declare function acquireVsCodeApi(): { postMessage(message: PageMessage): void; getState(): unknown; setState(state: Saved): void };
 
@@ -314,13 +314,39 @@ const elapsed = (since: number): string => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
+type StepPick = (step: ClaudeStep) => readonly [OrbMotion, (number | undefined)?];
+
+/** A run's orb motion per step: it wakes as the run starts, then follows the step's verb. */
+const runMotion = (progress: ClaudeProgress): StepPick => (step) =>
+  progress.steps.length === 0 ? ['wake', performance.now() - (Date.now() - progress.startedAt)] : [stepMotion(step.verb)];
+
+/** When each thread's current waiting or pickup state began, so its orb plays the change once; threads already in that state when the page opened skip it. */
+const workingSince = new Map<string, { readonly working: string; readonly since: number }>();
+function noteWorking(before: OverviewState | undefined, state: OverviewState): void {
+  const live = new Set<string>();
+  for (const { id, working } of state.threads) {
+    if (working === undefined) continue;
+    live.add(id);
+    if (workingSince.get(id)?.working !== working) workingSince.set(id, { working, since: before === undefined ? -Infinity : performance.now() });
+  }
+  for (const id of workingSince.keys()) if (!live.has(id)) workingSince.delete(id);
+}
+
+/** The orb for a thread that waits for Claude: it dozes off while nothing will pick the comment up, and nods once Claude does. */
+const waitMotion = (id: string): StepPick => ({ verb }) => {
+  const since = workingSince.get(id)?.since;
+  if (verb === 'Picked up') return ['nod', since];
+  if (verb === 'Waiting for Claude' && !(current?.claude.link?.delivering ?? current?.claude.running)) return ['doze', since];
+  return [stepMotion(verb)];
+};
+
 /** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb, the run's time and `stop` on the current one. */
-function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement): HTMLElement {
+function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)]): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
     const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
-    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orbCanvas('step', stepMotion(step.verb)));
+    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orbCanvas('step', ...pick(step)));
     const title = el('span', 'step-call');
     title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
     row.append(title);
@@ -1957,6 +1983,7 @@ function renderBaseMenu(): void {
 }
 
 function render(state: OverviewState): void {
+  noteWorking(current, state);
   current = state;
   queueMicrotask(renderAnswers);
   for (const thread of state.threads) if (archiving.get(thread.id) === (thread.archived === true)) archiving.delete(thread.id);
@@ -2048,7 +2075,7 @@ function render(state: OverviewState): void {
   const progress = state.claude.running ? state.claude.progress : undefined;
   claude.after(stop, terminal);
   if (progress === undefined) claude.replaceChildren(...state.claude.running ? [] : [icon(icons.orb)], state.claude.text);
-  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt, stop), terminal);
+  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt, stop, runMotion(progress)), terminal);
   stop.hidden = !state.claude.running;
   if (!state.claude.running) { stoppingClaude = false; stop.disabled = false; }
   claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip agent working' : 'chip orb-chip';
@@ -2552,7 +2579,7 @@ function threadBox(thread: Thread): HTMLElement {
     // Local mode has no run of its own to stop, so its Stop only takes the comment back.
     if (takeBack) controls.append(withdrawButton(thread));
     else if (!current?.localMode) controls.append(stopButton());
-    live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, controls) : stepLog(progress.steps, progress.startedAt, controls));
+    live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, controls, waitMotion(thread.id)) : stepLog(progress.steps, progress.startedAt, controls, runMotion(progress)));
     box.append(live);
   }
   const key = 'reply:' + thread.id;
@@ -3891,7 +3918,7 @@ function guideIntro(): HTMLElement {
   else if (analysis?.error) row.append(el('span', 'bad', 'Guide failed: ' + analysis.error));
   else row.append(el('span', 'muted', 'Runs Claude read-only on this PR. Large PRs take a few minutes.'));
   card.append(row);
-  if (analysis?.running && analysis.progress !== undefined) card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt));
+  if (analysis?.running && analysis.progress !== undefined) card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt, undefined, () => ['lead']));
   return card;
 }
 
