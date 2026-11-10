@@ -68,7 +68,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - The user tries changes in the installed extension, not the debug host. Reloading the window loads nothing new until you run `npm run package` and `code --install-extension diffguide-<version>.vsix --force`. An install also swaps `dist/overview.js` under open windows, so pages opened before a reload pair old HTML with the new script and break; after every install, tell the user to reload all windows.
 - Before handing over a webview change, run `npm run render` and look at the screenshots of the exact build you install. Add a scene to `test/render/fixtures.ts` when none shows the change. Default colors hide border and contrast problems; the screenshot also catches script errors.
 - Measure latency claims on a large sample diff, before and after, instead of estimating.
-- Verify user-facing flows with end-to-end clicks in VS Code and controlled agent simulation, including the actual failure scenario.
+- Verify user-facing flows with end-to-end clicks in VS Code and controlled agent simulation, including the actual failure scenario. `npm run e2e:docker` runs `scripts/e2e.mjs` in headless VS Code: local review page, comment with Ask, a simulated agent answer through the bridge, Resolve. `npm run e2e` runs it in a visible window. Extend that script for new flows. PR flows against GitHub and authenticated Claude stay manual.
 - Distinguish automated logic, process simulation, observed native UI and authenticated Claude evidence. Keep unverified flows pending; do not claim completion from unit tests or a simulated walkthrough alone.
 
 ## Tracking

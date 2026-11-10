@@ -20,7 +20,7 @@ npm test
 npm run package
 ```
 
-`npm run render` screenshots the review page with fixture data in your VS Code theme and reports page script errors; the PNGs land in `.render/`. `make check` runs the type check and tests, and `make install` packages the VSIX and installs it into VS Code. Run `make` for the full list.
+`npm run render` screenshots the review page with fixture data in your VS Code theme and reports page script errors; the PNGs land in `.render/`. `npm run e2e:docker` packages the VSIX and drives it in headless VS Code inside Docker, with a simulated agent; `npm run e2e` does the same in a visible window. `make check` runs the type check and tests, and `make install` packages the VSIX and installs it into VS Code. Run `make` for the full list.
 
 The automated tests use isolated storage, local Git repositories, and local hook processes. They do not call an LLM. A successful automated run does not replace a real VS Code + Claude walkthrough.
 

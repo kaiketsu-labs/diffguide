@@ -64,6 +64,9 @@
     "test": "node scripts/test.mjs",
     "prerender": "npm run build",
     "render": "node scripts/render.mjs",
+    "pree2e": "npm run package",
+    "e2e": "node scripts/e2e.mjs",
+    "e2e:docker": "npm run package && docker build -q -t diffguide-e2e test/e2e && docker run --rm --init -v \"$PWD\":/work diffguide-e2e",
     "package": "node scripts/package.mjs"
   },
   "dependencies": {

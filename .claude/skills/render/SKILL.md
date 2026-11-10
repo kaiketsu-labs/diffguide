@@ -31,3 +31,7 @@ When a change needs a state no scene shows, add a scene there instead of writing
 ## Limits
 
 The page runs outside VS Code: no extension host, no real Claude or GitHub. Messages the page posts are recorded, not answered. This checks layout, colors and script errors, not end-to-end flows.
+
+## End to end in VS Code
+
+`npm run e2e:docker` packages the VSIX and runs `scripts/e2e.mjs` in headless VS Code inside Docker: it opens the local review page in a throwaway profile and repo, comments with Ask, answers as a simulated agent through the extension's bridge, and resolves. Screenshots land in `.render/e2e/`; a failure saves `failure.png` and names the last step that passed. `npm run e2e` runs the same in a visible window, without taking the mouse. Add steps to that script when a change touches a flow it covers.

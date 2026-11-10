@@ -8,6 +8,8 @@
       "Bash(npm run render)",
       "Bash(npm run render *)",
       "Bash(npm run package)",
+      "Bash(npm run e2e)",
+      "Bash(npm run e2e:docker)",
       "Bash(npm run icons)",
       "Bash(make check)",
       "Bash(make install)",
