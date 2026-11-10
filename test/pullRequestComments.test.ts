@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { diffRanges, githubFeedbackRequest, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/pullRequestComments.js';
+import { diffRanges, draftReplyTask, githubFeedbackRequest, githubReplyTask, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/pullRequestComments.js';
 import { buildOverviewState, overviewHtml } from '../src/pullRequestOverview.js';
 import type { PullRequestSession } from '../src/pullRequestSessions.js';
 
@@ -168,3 +168,36 @@ test('places each commit under Claude\'s reply to the comment it was made for, a
   assert.deepEqual(view?.commits, [{ oid: 'a'.repeat(40), subject: 'Use the limit', after: 1 }, { oid: 'b'.repeat(40), subject: 'Old' }]);
 });
 
+test('has Claude draft one GitHub comment for the other reviewers from the thread, with no file edits or tools', () => {
+  const thread = {
+    id: 't1', intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: 'e2',
+    anchor: { path: 'src/client.ts', startLine: 8, endLine: 9, side: 'working', selectedText: 'retry(err)', contextBefore: '', contextAfter: '', documentHash: 'a'.repeat(64), baseRevision: 'b'.repeat(40) },
+    messages: [
+      { id: 'm1', author: 'human', text: 'Does the client back off on 429?', createdAt: '2026-11-05T09:00:00Z' },
+      { id: 'm2', author: 'claude', text: 'No. request() throws on any 4xx.', createdAt: '2026-11-05T09:01:00Z' },
+    ],
+  } as const;
+  const task = draftReplyTask(thread as never, [{ author: 'alice', body: 'Should this retry on 429 too?' }]);
+  assert.deepEqual(task.allowedTools, []);
+  assert.match(task.prompt, /Do not edit files/u);
+  assert.match(task.prompt, /other reviewers/u);
+  assert.match(task.prompt, /"location": "src\/client\.ts lines 8-9"/u);
+  assert.match(task.prompt, /Should this retry on 429 too\?/u);
+  assert.match(task.prompt, /request\(\) throws on any 4xx/u);
+  assert.doesNotMatch(draftReplyTask(thread as never, []).prompt, /githubThread/u);
+  assert.doesNotMatch(task.prompt, /BEGIN NOTES/u);
+  assert.match(draftReplyTask(thread as never, [], '  say it backs off now\n').prompt, /BEGIN NOTES\nsay it backs off now\nEND NOTES/u);
+});
+
+test('has Claude draft the human\'s next GitHub reply from the thread, its code and the human\'s notes', () => {
+  const task = githubReplyTask({ location: 'src/retry.ts lines 15-15', code: 'if (!isRetryable(error)) throw error;', you: 'fstermann',
+    comments: [{ author: 'alice', body: 'Can we find a better name for this?' }] }, 'suggest shouldRetry, keep it short');
+  assert.deepEqual(task.allowedTools, []);
+  assert.match(task.prompt, /Do not edit files/u);
+  assert.match(task.prompt, /\(@fstermann\)/u);
+  assert.match(task.prompt, /BEGIN NOTES\nsuggest shouldRetry, keep it short\nEND NOTES/u);
+  assert.match(task.prompt, /"code": "if \(!isRetryable\(error\)\) throw error;"/u);
+  assert.match(task.prompt, /Can we find a better name for this\?/u);
+  const bare = githubReplyTask({ location: 'the file src/retry.ts', comments: [] }).prompt;
+  assert.doesNotMatch(bare, /BEGIN NOTES|"code"|\(@/u);
+});

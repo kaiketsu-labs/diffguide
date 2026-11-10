@@ -373,9 +373,9 @@ function button(label: string, onClick: () => void, className?: string): HTMLBut
 }
 
 /** A button that sends to the agent: filled slate for the row's main action, outlined slate otherwise. */
-function agentButton(intent: 'ask' | 'implement', label: string, onClick: () => void, filled = intent === 'ask'): HTMLButtonElement {
+function agentButton(intent: 'ask' | 'implement' | 'draft', label: string, onClick: () => void, filled = intent === 'ask'): HTMLButtonElement {
   const node = button(label, onClick, filled ? 'agent' : 'agent-outline');
-  node.replaceChildren(icon(intent === 'ask' ? icons.agentAsk : icons.agentImplement), label);
+  node.replaceChildren(icon(intent === 'ask' ? icons.agentAsk : intent === 'draft' ? icons.agentDraft : icons.agentImplement), label);
   return node;
 }
 
@@ -2664,12 +2664,13 @@ function threadBox(thread: Thread): HTMLElement {
     const primary = github ? button(primaryLabel, () => submit(), 'primary') : agentButton('ask', primaryLabel, () => submit());
     primary.disabled = busySending;
     actions.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'));
+    if (github || (thread.draft !== undefined && !thread.url && !current?.localMode)) actions.append(draftReplyButton(thread, () => replies.get(thread.id) ?? ''));
     if (github) {
-      const ask = agentButton('ask', 'Ask', () => askClaude('ask'), false);
-      ask.title = 'Only the agent sees it. Agent answers in a local thread without editing';
       const implement = agentButton('implement', 'Implement', () => askClaude('implement'));
       implement.title = 'Only the agent sees it. Agent changes the code';
-      for (const each of [ask, implement]) { each.disabled = busySending; actions.append(each); }
+      const ask = agentButton('ask', 'Ask', () => askClaude('ask'), false);
+      ask.title = 'Only the agent sees it. Agent answers in a local thread without editing';
+      for (const each of [implement, ask]) { each.disabled = busySending; actions.append(each); }
     } else {
       primary.title = 'Agent answers without editing';
       const implement = agentButton('implement', 'Implement', () => submit('implement'));
@@ -2778,6 +2779,29 @@ function toGitHubButton(thread: Thread & { readonly source: 'local' }): HTMLButt
   return titled(iconButton(icons.github, 'Publish', () => { publishing.set(thread.id, thread.draft ?? ''); focusNext = 'publish:' + thread.id; save(); redrawThread(thread); }, 'quiet'), 'Publish to GitHub');
 }
 
+/**
+ * Ask Claude to write the thread's GitHub comment from `notes`, the form's text: a local thread's Publish form opens with it,
+ * a GitHub thread's Reply form gets it in place of the notes.
+ */
+function draftReply(thread: Thread, notes: string): void {
+  const key = 'draft:' + thread.id;
+  if (sending.has(key)) return;
+  sending.add(key);
+  $('error').textContent = '';
+  redrawThread(thread);
+  post({ action: thread.source === 'github' ? 'github-draft-reply' : 'draft-reply', form: key, id: thread.id, text: notes });
+}
+
+/** Draft reply in a Reply or Publish form; `notes` reads the form's text when clicked. */
+function draftReplyButton(thread: Thread, notes: () => string): HTMLButtonElement {
+  const drafting = sending.has('draft:' + thread.id);
+  const draft = agentButton('draft', drafting ? 'Drafting…' : 'Draft reply', () => draftReply(thread, notes()), false);
+  draft.disabled = drafting || current?.claude.running === true;
+  draft.title = current?.claude.running ? 'Claude is working on this PR. Draft when it is done'
+    : 'Agent writes the GitHub comment from this text: your notes, or a draft to revise. You edit it before posting';
+  return draft;
+}
+
 /** Edit a local thread's comment and post it on the PR diff, now or into the pending review. */
 function publishBox(thread: Thread & { readonly source: 'local' }, draft: string): DocumentFragment {
   const key = 'publish:' + thread.id;
@@ -2799,7 +2823,7 @@ function publishBox(thread: Thread & { readonly source: 'local' }, draft: string
     comment.disabled = busySending;
     comment.title = 'Posts in the PR conversation right away. Everyone on the PR sees it.';
     const row = el('div', 'row actions composer-actions');
-    row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), comment);
+    row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), draftReplyButton(thread, () => publishing.get(thread.id) ?? ''), comment);
     const fragment = document.createDocumentFragment();
     fragment.append(field, row);
     return fragment;
@@ -2812,7 +2836,7 @@ function publishBox(thread: Thread & { readonly source: 'local' }, draft: string
   now.disabled = busySending || reviewing;
   now.title = reviewing ? 'You have a review in progress, so GitHub adds new comments to it. Submit the review to publish them.' : 'Posts on GitHub right away.';
   const row = el('div', 'row actions composer-actions');
-  row.append(...reviewing ? [titled(el('span', 'chip pending', 'Review in progress'), 'New comments go into your pending review.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), now, review);
+  row.append(...reviewing ? [titled(el('span', 'chip pending', 'Review in progress'), 'New comments go into your pending review.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), draftReplyButton(thread, () => publishing.get(thread.id) ?? ''), now, review);
   const fragment = document.createDocumentFragment();
   fragment.append(field, row);
   return fragment;
@@ -4849,6 +4873,22 @@ function onExtensionMessage(data: ExtensionMessage): void {
     loading.clear();
     $('error').textContent = data.error;
     if (data.form && sending.delete(data.form)) { renderFiles(); if (current) renderConversation(current, true); }
+  }
+  if (data.drafted) {
+    const { thread: id, text, github } = data.drafted;
+    sending.delete('draft:' + id);
+    if (github) {
+      replies.set(id, text);
+      previewTabs.delete('reply:' + id);
+      focusNext = 'reply:' + id;
+    } else {
+      replies.delete(id);
+      publishing.set(id, text);
+      focusNext = 'publish:' + id;
+    }
+    save();
+    const thread = allThreads().find((each) => each.id === id);
+    if (thread) redrawThread(thread);
   }
   if (data.done === 'review') $<HTMLTextAreaElement>('review').value = '';
   if (data.done === 'merge') closeMergeForm();

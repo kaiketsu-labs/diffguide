@@ -289,6 +289,10 @@ export interface OverviewActions {
   newConversation?(): Promise<void>;
   /** Have Claude Code compact this PR's conversation. */
   compactConversation?(): Promise<void>;
+  /** Claude's draft of the GitHub comment that sums up a local thread for the PR's other reviewers, following the human's `notes`. */
+  draftReply?(id: string, notes: string): Promise<string>;
+  /** Claude's draft of the human's next reply in a GitHub thread, following the human's `notes`. */
+  draftGitHubReply?(id: string, notes: string): Promise<string>;
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   /** Merge the PR, then delete its branch when `deleteBranch` is set and GitHub allows it. */
@@ -371,6 +375,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
   | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
+  | { readonly action: 'draft-reply' | 'github-draft-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor' | 'open-file'; readonly path: string }
   | { readonly action: 'close-files'; readonly paths: readonly string[] }
@@ -429,6 +434,8 @@ export type PageMessage =
 /** What the extension sends the page; each field is handled on its own. */
 export interface ExtensionMessage {
   readonly state?: OverviewState;
+  /** Claude's draft for a local thread's Publish form, or with `github` for a GitHub thread's Reply form. */
+  readonly drafted?: { readonly thread: string; readonly text: string; readonly github?: true };
   readonly files?: readonly FileDiff[];
   /** Theme icons for the page's files and the repository's. */
   readonly icons?: FileIcons;
@@ -748,6 +755,14 @@ export async function showPullRequestOverview(
         } else if (action === 'compact' && actions.compactConversation !== undefined) {
           void actions.compactConversation().then(() => { post({ notice: { text: 'Claude compacted the conversation.' } }); },
             (error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
+        } else if (action === 'draft-reply' && typeof id === 'string' && isOptionalText(text) && actions.draftReply !== undefined
+          && state.threads.some((thread) => thread.id === id && thread.draft !== undefined)) {
+          const drafted = await actions.draftReply(id, text ?? '');
+          post({ drafted: { thread: id, text: drafted }, done: formKey });
+        } else if (action === 'github-draft-reply' && typeof id === 'string' && isOptionalText(text) && actions.draftGitHubReply !== undefined
+          && state.github?.some((thread) => thread.id === id && !thread.resolved)) {
+          const drafted = await actions.draftGitHubReply(id, text ?? '');
+          post({ drafted: { thread: id, text: drafted, github: true }, done: formKey });
         }
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();

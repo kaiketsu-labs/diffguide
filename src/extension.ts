@@ -32,9 +32,11 @@ import { mediaType } from './media.js';
 import { anchorFromText, fileAnchor, pullRequestAnchor } from './anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from './codePreview.js';
 import { editorHighlighter } from './textMate.js';
-import { githubFeedbackRequest, placeComment } from './pullRequestComments.js';
+import { maximumReplyLength } from './limits.js';
+import { draftReplyTask, githubFeedbackRequest, githubReplyTask, placeComment } from './pullRequestComments.js';
 import { ClaudeAnswersTree, latestAnswers, SeenAnswers, type ClaudeAnswer } from './claudeAnswers.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
+import type { ClaudeTask } from './claudeRunner.js';
 import { readFileIcons } from './fileIcons.js';
 import { type BranchPullRequests, implementThreadRequest, listRepositoryFiles, LocalReview, localClaudeStatus, toDisposable, wholeFile } from './localReview.js';
 import { LocalFilesView } from './localFilesView.js';
@@ -155,6 +157,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const content = side === 'old' ? await readBaseContent(folder, path, base) : await readFile(join(folder, path), 'utf8');
         const anchor = anchorFromText(content, { path, startLine, endLine, side: side === 'old' ? 'original' : 'working', baseRevision: base });
         return { anchor, base };
+      };
+      /** Run a drafting task in the PR's conversation and return Claude's comment. */
+      const runDraft = async (task: ClaudeTask): Promise<string> => {
+        const { error, reply } = await opened.runner.runTask(task);
+        if (error !== undefined) throw new Error(`Claude could not draft the reply: ${error}`);
+        if (reply === undefined) throw new Error('Claude did not write a draft. Try again.');
+        return reply.slice(0, maximumReplyLength);
       };
       const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
       /** The PR on GitHub at the last check, so the next one can ask whether it changed. */
@@ -500,6 +509,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         stopClaude: () => opened.runner.stop(),
         newConversation: async () => { notOnCheckout('New conversation'); await opened.runner.forget(); },
         compactConversation: async () => { notOnCheckout('Compact'); await opened.runner.compact(); },
+        draftReply: async (id, notes) => {
+          const thread = findThread(id);
+          const linked = opened.session.linkedGitHubThread?.(thread.id);
+          const loaded = linked === undefined ? [] : await (remote ?? loadThreads());
+          const quoted = loaded instanceof Error ? [] : loaded.find((each) => each.id === linked)?.comments.filter((comment) => comment.hidden === undefined) ?? [];
+          return runDraft(draftReplyTask(thread, quoted, notes));
+        },
+        draftGitHubReply: async (id, notes) => {
+          const loaded = await (remote ?? loadThreads());
+          const thread = loaded instanceof Error ? undefined : loaded.find((each) => each.id === id);
+          if (thread === undefined) throw new Error('This GitHub thread no longer exists.');
+          const lines = thread.scope === 'file' ? undefined : `${thread.path} lines ${thread.startLine}-${thread.endLine}`;
+          // An outdated thread's lines no longer hold the code it was written on, so Claude gets none.
+          const code = lines === undefined || thread.outdated ? undefined : await (thread.side === 'LEFT' ? readBaseContent(folder, thread.path, await readBase()) : readFile(join(folder, thread.path), 'utf8'))
+            .then((content) => content.split('\n').slice(thread.startLine - 1, thread.endLine).join('\n'), () => undefined);
+          const you = await (conversation ?? loadConversation());
+          const comments = thread.comments.filter((comment) => comment.hidden === undefined).map(({ author, body }) => ({ author, body }));
+          return runDraft(githubReplyTask({ location: lines ?? `the file ${thread.path}`, ...code === undefined ? {} : { code }, comments, ...you instanceof Error || !you.viewerLogin ? {} : { you: you.viewerLogin } }, notes));
+        },
         revealThread: async (id) => {
           const { path, scope } = findThread(id).anchor;
           if (scope === 'pullRequest') { revealOpenPage(`${repository}#${pullRequest.number}`, { thread: id }); return; }
