@@ -58,17 +58,20 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Package VSIX
         run: npm run package
-      - uses: docker/setup-buildx-action@v4
-      - name: Build the VS Code image
-        uses: docker/build-push-action@v7
+      - name: Cache VS Code
+        id: vscode
+        uses: actions/cache@v6
         with:
-          context: test/e2e
-          load: true
-          tags: diffguide-e2e
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          path: .vscode-test
+          key: vscode-linux-x64-${{ hashFiles('test/e2e/Dockerfile') }}
+      - name: Download VS Code
+        if: steps.vscode.outputs.cache-hit != 'true'
+        run: |
+          version=$(sed -n 's/^ARG VSCODE_VERSION=//p' test/e2e/Dockerfile)
+          mkdir -p .vscode-test
+          curl -fsSL "https://update.code.visualstudio.com/${version}/linux-x64/stable" | tar -xz -C .vscode-test --strip-components=1
       - name: Drive the local review flow
-        run: docker run --rm --init -v "$PWD":/work diffguide-e2e
+        run: xvfb-run -a node scripts/e2e.mjs --code .vscode-test/code
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v7

@@ -16,7 +16,8 @@ const out = resolve(option('--out') ?? '.render/e2e');
 const metadata = JSON.parse(await readFile('package.json', 'utf8'));
 const vsix = resolve(option('--vsix') ?? `${metadata.name}-${metadata.version}.vsix`);
 const code = option('--code') ?? (process.platform === 'darwin' ? '/Applications/Visual Studio Code.app/Contents/MacOS/Code' : '/usr/share/code/code');
-const cli = process.platform === 'darwin' ? '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' : '/usr/bin/code';
+// The CLI sits beside the binary in the macOS app, the Linux tarball and the .deb install alike.
+const cli = join(code, process.platform === 'darwin' ? '../../Resources/app/bin/code' : '../bin/code');
 if (!existsSync(vsix)) throw new Error(`${vsix} is missing. Run npm run package first.`);
 await mkdir(out, { recursive: true });
 await rm(join(out, 'failure.png'), { force: true });
