@@ -4192,6 +4192,18 @@ function usageChip(usage: ReviewUsage): { chip: HTMLButtonElement; popover: HTML
     }
     popover.append(table);
   }
+  if (usage.agents.length > 0) {
+    const table = el('table', 'usage-table');
+    const head = el('tr');
+    head.append(el('th', '', 'Agent'), titled(el('th', '', 'Cost'), 'Each model\'s cost split by the agents\' share of its tokens, weighted by token price'));
+    table.append(head);
+    for (const row of usage.agents) {
+      const line = el('tr');
+      line.append(el('td', '', row.agent === 'orchestrator' ? 'Orchestrator' : reviewerInfo[row.agent].label), el('td', '', usageCost(row.cost)));
+      table.append(line);
+    }
+    popover.append(table);
+  }
   const chip = el('button', 'usage-chip', `${usageDuration(usage.durationMs)} · ${usageCost(usage.cost)}`);
   chip.type = 'button';
   titled(chip, 'Time and cost of this review');

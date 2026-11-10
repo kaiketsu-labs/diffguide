@@ -80,12 +80,22 @@ export interface ReviewModelUsage {
   readonly cost: number;
 }
 
-/** What a review run used: wall time, turns, API list price and tokens per model, subagents included. */
+/** Who in a review run spent tokens: the orchestrator or a review agent. */
+export type ReviewAgent = 'orchestrator' | Reviewer;
+
+/** One agent's share of a review run's cost. */
+export interface ReviewAgentUsage {
+  readonly agent: ReviewAgent;
+  readonly cost: number;
+}
+
+/** What a review run used: wall time, turns, API list price and tokens per model, subagents included, and that cost split by agent. */
 export interface ReviewUsage {
   readonly durationMs: number;
   readonly cost: number;
   readonly turns: number;
   readonly models: readonly ReviewModelUsage[];
+  readonly agents: readonly ReviewAgentUsage[];
 }
 
 const maximumUsageModels = 20;
@@ -106,7 +116,45 @@ export function parseReviewUsage(message: unknown, durationMs: number): ReviewUs
   const cost = money(record['total_cost_usd']);
   if (record['type'] !== 'result' || cost === undefined) return undefined;
   const models = readUsageModels(record['modelUsage'], { input: 'inputTokens', output: 'outputTokens', cacheRead: 'cacheReadInputTokens', cacheWrite: 'cacheCreationInputTokens', cost: 'costUSD' });
-  return { durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0, cost, turns: count(record['num_turns']), models };
+  return { durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0, cost, turns: count(record['num_turns']), models, agents: [] };
+}
+
+/** One assistant message's tokens, weighted by their price relative to input tokens. */
+export interface WeightedTurn {
+  readonly id: string;
+  readonly model: string;
+  readonly weight: number;
+}
+
+// Price of a cache read relative to an input token where it differs from the usual 0.1, from the Anthropic list prices.
+const cacheReadRatios: readonly (readonly [string, number])[] = [['claude-fable-5-2', 0.025], ['claude-opus-5-5', 0.05], ['claude-sonnet-5-5', 0.05]];
+
+/** An assistant stream message's id, model and price-weighted tokens; undefined for any other message. */
+export function weightedTurn(message: unknown): WeightedTurn | undefined {
+  const record = typeof message === 'object' && message !== null ? message as Record<string, unknown> : {};
+  const inner = record['type'] === 'assistant' && typeof record['message'] === 'object' && record['message'] !== null ? record['message'] as Record<string, unknown> : undefined;
+  const usage = typeof inner?.['usage'] === 'object' && inner['usage'] !== null ? inner['usage'] as Record<string, unknown> : undefined;
+  const { id, model } = inner ?? {};
+  if (usage === undefined || typeof id !== 'string' || typeof model !== 'string') return undefined;
+  const split = typeof usage['cache_creation'] === 'object' && usage['cache_creation'] !== null ? usage['cache_creation'] as Record<string, unknown> : undefined;
+  const longWrite = count(split?.['ephemeral_1h_input_tokens']);
+  const cacheRead = cacheReadRatios.find(([name]) => model.includes(name))?.[1] ?? 0.1;
+  const weight = count(usage['input_tokens']) + 5 * count(usage['output_tokens']) + cacheRead * count(usage['cache_read_input_tokens'])
+    + 1.25 * Math.max(0, count(usage['cache_creation_input_tokens']) - longWrite) + 2 * longWrite;
+  return { id, model, weight };
+}
+
+/** Each model's reported cost split across agents by their share of its weighted tokens; cost no agent's turns account for goes to the orchestrator. */
+export function splitAgentCost(models: readonly ReviewModelUsage[], turns: ReadonlyMap<string, WeightedTurn & { readonly agent: ReviewAgent }>): ReviewAgentUsage[] {
+  const costs = new Map<ReviewAgent, number>();
+  for (const row of models) {
+    const shares = [...turns.values()].filter((turn) => turn.model === row.model);
+    const total = shares.reduce((sum, turn) => sum + turn.weight, 0);
+    if (total === 0) { costs.set('orchestrator', (costs.get('orchestrator') ?? 0) + row.cost); continue; }
+    for (const turn of shares) costs.set(turn.agent, (costs.get(turn.agent) ?? 0) + row.cost * turn.weight / total);
+  }
+  const order: readonly ReviewAgent[] = ['orchestrator', ...reviewers];
+  return order.flatMap((agent) => (costs.get(agent) ?? 0) > 0 ? [{ agent, cost: costs.get(agent) ?? 0 }] : []);
 }
 
 /** Usage as saved; undefined when a file has none or it is malformed. */
@@ -114,7 +162,12 @@ export function readStoredUsage(raw: unknown): ReviewUsage | undefined {
   const record = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
   const cost = money(record['cost']);
   if (cost === undefined) return undefined;
-  return { durationMs: count(record['durationMs']), cost, turns: count(record['turns']), models: readUsageModels(record['models'], { input: 'input', output: 'output', cacheRead: 'cacheRead', cacheWrite: 'cacheWrite', cost: 'cost' }) };
+  const agents = records(Array.isArray(record['agents']) ? record['agents'] : []).flatMap((row): ReviewAgentUsage[] => {
+    const agent = pick<ReviewAgent>(row['agent'], ['orchestrator', ...reviewers]);
+    const share = money(row['cost']);
+    return agent === undefined || share === undefined ? [] : [{ agent, cost: share }];
+  });
+  return { durationMs: count(record['durationMs']), cost, turns: count(record['turns']), models: readUsageModels(record['models'], { input: 'input', output: 'output', cacheRead: 'cacheRead', cacheWrite: 'cacheWrite', cost: 'cost' }), agents };
 }
 
 const reviewerList = { type: 'array', items: { type: 'string', enum: reviewers } } as const;

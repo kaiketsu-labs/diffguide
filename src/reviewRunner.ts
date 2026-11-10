@@ -8,7 +8,7 @@ import type { ReviewView } from './pullRequestOverview.js';
 import { worktreeFolder } from './editGuard.js';
 import { runStructuredClaude, type StructuredRun } from './prAnalysisRunner.js';
 import { writePrivateJson } from './privateFiles.js';
-import { findingText, handbackItems, parseReviewOutput, parseReviewUsage, readStoredReview, reviewAgents, reviewPrompt, reviewSchema, type CodeReviewResult, type DroppedCandidate, type ReviewLane, type ReviewLaneItem, type ReviewLive, type ReviewStage, type ReviewUsage } from './review.js';
+import { findingText, handbackItems, parseReviewOutput, parseReviewUsage, readStoredReview, splitAgentCost, weightedTurn, reviewAgents, reviewPrompt, reviewSchema, type CodeReviewResult, type DroppedCandidate, type ReviewLane, type ReviewLaneItem, type ReviewLive, type ReviewAgent, type ReviewStage, type ReviewUsage, type WeightedTurn } from './review.js';
 import { quotePosix, stopProcess } from './shell.js';
 import type { FileDiff } from './unifiedDiff.js';
 import { excludeFromGit, git } from './worktrees.js';
@@ -37,6 +37,8 @@ export class ReviewTracker {
   #reporting = false;
   #endedAt: number | undefined;
   #usage: ReviewUsage | undefined;
+  // Keyed by message id: the stream repeats a message once per content block.
+  readonly #turns = new Map<string, WeightedTurn & { readonly agent: ReviewAgent }>();
 
   constructor(
     private readonly cwd: string,
@@ -53,9 +55,12 @@ export class ReviewTracker {
     if (message.type === 'result') {
       // A result holds session totals, so the last one stands; wall time runs to the result.
       const usage = parseReviewUsage(message, this.now() - this.startedAt);
-      if (usage !== undefined) { this.#usage = usage; return true; }
+      if (usage !== undefined) { this.#usage = { ...usage, agents: splitAgentCost(usage.models, this.#turns) }; return true; }
     }
     const parent = message.parent_tool_use_id;
+    const turn = weightedTurn(message);
+    // Subagents other than the review agents count toward the orchestrator that called them.
+    if (turn !== undefined) this.#turns.set(turn.id, { ...turn, agent: (parent === undefined || parent === null ? undefined : this.#calls.get(parent)?.reviewer) ?? 'orchestrator' });
     if (parent !== undefined && parent !== null) {
       const call = this.#calls.get(parent);
       if (call === undefined) return false;

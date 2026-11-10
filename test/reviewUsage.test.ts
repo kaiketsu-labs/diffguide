@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseReviewUsage, readStoredReview } from '../src/review.js';
+import { parseReviewUsage, readStoredReview, splitAgentCost, weightedTurn } from '../src/review.js';
 
 const result = {
   type: 'result',
@@ -21,6 +21,7 @@ test('parseReviewUsage reads totals and per-model rows from a result message', (
       { model: 'claude-opus-4-1', input: 1200, output: 340, cacheRead: 1_200_000, cacheWrite: 34_000, cost: 1.5 },
       { model: 'claude-haiku-4-5', input: 10, output: 20, cacheRead: 30, cacheWrite: 40, cost: 0.34 },
     ],
+    agents: [],
   });
 });
 
@@ -45,6 +46,7 @@ test('parseReviewUsage zeroes invalid fields and skips malformed model rows', ()
       { model: 'b', input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
       { model: 'c', input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     ],
+    agents: [],
   });
   assert.deepEqual(parseReviewUsage({ type: 'result', total_cost_usd: 1, modelUsage: 'x' }, 1)?.models, []);
 });
@@ -61,4 +63,31 @@ test('a stored review keeps its usage and reads older files without it', () => {
   assert.equal(readStoredReview(base)?.usage, undefined);
   assert.equal('usage' in (readStoredReview(base) ?? {}), false);
   assert.equal(readStoredReview({ ...base, usage: { cost: 'free' } })?.usage, undefined);
+});
+
+const assistant = (id: string, model: string, usage: Record<string, unknown>) => ({ type: 'assistant', message: { id, model, usage } });
+
+test('weightedTurn weights tokens by price relative to input', () => {
+  assert.deepEqual(weightedTurn(assistant('m1', 'claude-haiku-4-5', { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 100, cache_creation_input_tokens: 40, cache_creation: { ephemeral_5m_input_tokens: 20, ephemeral_1h_input_tokens: 20 } })), { id: 'm1', model: 'claude-haiku-4-5', weight: 10 + 10 + 10 + 25 + 40 });
+  assert.equal(weightedTurn(assistant('m2', 'eu.anthropic.claude-opus-5-5', { cache_read_input_tokens: 100 }))?.weight, 5);
+  assert.equal(weightedTurn({ type: 'user', message: { id: 'x', model: 'm', usage: {} } }), undefined);
+  assert.equal(weightedTurn(assistant('m3', 'm', 'none' as never)), undefined);
+});
+
+test('splitAgentCost splits each model by weight and gives unmatched cost to the orchestrator', () => {
+  const models = [
+    { model: 'a', input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 3 },
+    { model: 'b', input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 1 },
+  ];
+  const turns = new Map([
+    ['1', { id: '1', model: 'a', weight: 1, agent: 'orchestrator' as const }],
+    ['2', { id: '2', model: 'a', weight: 2, agent: 'security' as const }],
+  ]);
+  assert.deepEqual(splitAgentCost(models, turns), [{ agent: 'orchestrator', cost: 2 }, { agent: 'security', cost: 2 }]);
+});
+
+test('a stored review keeps its agent costs and drops malformed rows', () => {
+  const base = { createdAt: '2026-01-01T00:00:00.000Z', ran: [], skipped: [], candidates: 0, findings: [], dropped: [] };
+  const usage = { durationMs: 1, cost: 1, turns: 1, models: [], agents: [{ agent: 'orchestrator', cost: 0.4 }, { agent: 'design', cost: 0.6 }, { agent: 'nobody', cost: 1 }, { agent: 'security', cost: -1 }] };
+  assert.deepEqual(readStoredReview({ ...base, usage })?.usage?.agents, [{ agent: 'orchestrator', cost: 0.4 }, { agent: 'design', cost: 0.6 }]);
 });
