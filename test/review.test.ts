@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import type { CodeAnchor, Finding } from '../src/contracts.js';
-import { handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/review.js';
+import { findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/review.js';
 import { ReviewTracker } from '../src/reviewRunner.js';
 import { createReviewStore } from '../src/store.js';
 import { parseUnifiedDiff } from '../src/unifiedDiff.js';
@@ -98,7 +98,7 @@ test('rejects findings with an unknown reviewer, no reviewers or a bad severity'
 });
 
 const rawFinding = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  reviewers: ['correctness'], path: 'src/a.ts', startLine: 2, endLine: 3, title: 'Wrong result', body: 'It breaks.', severity: 'high', evidence: 'tested', evidenceDetail: 'ran it', ...overrides,
+  reviewers: ['correctness'], path: 'src/a.ts', startLine: 2, endLine: 3, title: 'Wrong result', body: 'It breaks.', severity: 'high', evidence: 'tested', evidenceDetail: 'ran it', fix: 'Use `<=`.', ...overrides,
 });
 const rawOutput = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({ ran: ['correctness'], skipped: [], candidates: 1, findings: [rawFinding()], dropped: [], ...overrides });
 const picked = ['correctness', 'security'] as const;
@@ -107,7 +107,7 @@ test('keeps valid review findings', () => {
   const result = parseReviewOutput(rawOutput(), picked, files);
   assert.deepEqual(result.ran, ['correctness']);
   assert.equal(result.candidates, 1);
-  assert.deepEqual(result.findings, [{ reviewers: ['correctness'], path: 'src/a.ts', startLine: 2, endLine: 3, title: 'Wrong result', body: 'It breaks.', severity: 'high', evidence: 'tested', evidenceDetail: 'ran it' }]);
+  assert.deepEqual(result.findings, [{ reviewers: ['correctness'], path: 'src/a.ts', startLine: 2, endLine: 3, title: 'Wrong result', body: 'It breaks.', severity: 'high', evidence: 'tested', evidenceDetail: 'ran it', fix: 'Use `<=`.' }]);
   assert.deepEqual(result.dropped, []);
 });
 
@@ -231,4 +231,18 @@ test('tracks the orchestrator and one lane per review agent through each stage',
   now = 9000;
   tracker.end();
   assert.equal(tracker.live.endedAt, 9000);
+});
+
+test('keeps a suggestion on its lines and turns it into plain code when the span was clamped', () => {
+  const suggestion = 'Replace it:\n\n```suggestion\nfixed\n```';
+  assert.equal(parseReviewOutput(rawOutput({ findings: [rawFinding({ fix: suggestion })] }), picked, files).findings[0]?.fix, suggestion);
+  assert.equal(parseReviewOutput(rawOutput({ findings: [rawFinding({ fix: suggestion, startLine: 1, endLine: 60 })] }), picked, files).findings[0]?.fix, 'Replace it:\n\n```\nfixed\n```');
+  assert.equal(parseReviewOutput(rawOutput({ findings: [rawFinding({ fix: undefined })] }), picked, files).findings[0]?.fix, '');
+});
+
+test('a finding message puts the fix after the claim and folds the evidence', () => {
+  const finding = parseReviewOutput(rawOutput(), picked, files).findings[0];
+  assert.ok(finding);
+  assert.equal(findingText(finding), 'It breaks.\n\n#### Suggested fix\n\nUse `<=`.\n\n<details>\n<summary>Evidence: tested</summary>\n\nran it\n\n</details>');
+  assert.equal(findingText({ ...finding, fix: '', evidenceDetail: '' }), 'It breaks.');
 });

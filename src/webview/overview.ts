@@ -2627,7 +2627,13 @@ function threadBox(thread: Thread): HTMLElement {
       box.append(toggle);
     }
     const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
-    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
+    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) {
+      const main = item.querySelector('.msg-main');
+      main?.append(suggestionCard(thread, index, suggestions));
+      // A finding's evidence comes after its fix.
+      const evidence = main?.querySelector('.msg-text > details.md-details:last-child');
+      if (evidence) { const tail = el('div', 'msg-text'); tail.append(evidence); main?.append(tail); }
+    }
     box.append(item);
     const made = thread.source === 'local' ? thread.commits?.filter((commit) => commit.after === index) : undefined;
     if (made?.length) {

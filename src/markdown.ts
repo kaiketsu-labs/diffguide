@@ -84,6 +84,15 @@ function tableCells(line: string): string[] {
   return cells;
 }
 
+/** A `<details>` section as GitHub folds it: `<details>`, `<summary>text</summary>` and `</details>` each on their own line, Markdown between. */
+function foldedSection(lines: readonly string[], index: number): { readonly html: string; readonly next: number } | undefined {
+  const summary = /^\s*<summary>(.*)<\/summary>\s*$/u.exec(lines[index + 1] ?? '');
+  if ((lines[index] ?? '').trim() !== '<details>' || summary === null) return undefined;
+  const close = lines.findIndex((line, at) => at > index + 1 && line.trim() === '</details>');
+  if (close === -1) return undefined;
+  return { html: `<details class="md-details"><summary>${inline(summary[1] ?? '')}</summary>${markdownHtml(lines.slice(index + 2, close).join('\n'))}</details>`, next: close + 1 };
+}
+
 /** Render the Markdown subset Claude writes as HTML built only from escaped text and fixed tags. */
 export function markdownHtml(markdown: string): string {
   const lines = markdown.replaceAll('\r\n', '\n').split('\n');
@@ -99,6 +108,12 @@ export function markdownHtml(markdown: string): string {
     }
     if (line.trim() === '') {
       index += 1;
+      continue;
+    }
+    const folded = foldedSection(lines, index);
+    if (folded !== undefined) {
+      out.push(folded.html);
+      index = folded.next;
       continue;
     }
     const heading = /^(#{1,6})\s+(.*)$/u.exec(line);

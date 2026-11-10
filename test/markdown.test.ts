@@ -67,3 +67,10 @@ test('a Markdown file renders block by block with the source lines of each block
 test('names a stand-in file for each known code fence language', () => {
   assert.deepEqual(fenceFilePaths('Text\n```python\nx = 1\n```\n  ~~~TS\nlet a\n~~~\n```\nplain\n```\n```brainfuck\n+\n```\n```diff\n-a\n```'), ['x.py', 'x.ts', 'x.diff']);
 });
+
+test('folds a details section with Markdown inside and escapes anything looser', () => {
+  assert.equal(markdownHtml('Claim.\n\n<details>\n<summary>Evidence: `tested`</summary>\n\n- ran it\n\n</details>'),
+    '<p>Claim.</p><details class="md-details"><summary>Evidence: <code>tested</code></summary><ul><li>ran it</li></ul></details>');
+  assert.equal(markdownHtml('<details>\n<summary>x</summary>\nno end').includes('<details'), false);
+  assert.equal(markdownHtml('<details open>\n<summary>x</summary>\n</details>').includes('<details'), false);
+});
