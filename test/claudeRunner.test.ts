@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
-import { ClaudeRunner, describeTool, StepLog, type ClaudeRunnerOptions } from '../src/claudeRunner.js';
+import { ClaudeRunner, contextTokens, describeTool, StepLog, type ClaudeRunnerOptions } from '../src/claudeRunner.js';
 import { lockWorktree } from '../src/linkedChanges.js';
 import type { ReviewEvent, ReviewStore } from '../src/contracts.js';
 import { settle } from './fakes/vscode.js';
@@ -53,8 +53,8 @@ function fakeStore(): ReviewStore & { setPending(events: ReviewEvent[]): void } 
 }
 
 async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, shell?: string, prepare?: () => Promise<void>, extra: Partial<ClaudeRunnerOptions> = {}) {
-  const dataPath = await mkdtemp(path.join(tmpdir(), 'diffguide-runner-'));
-  t.after(async () => { await rm(dataPath, { recursive: true, force: true }); });
+  const dataPath = extra.dataPath ?? await mkdtemp(path.join(tmpdir(), 'diffguide-runner-'));
+  if (extra.dataPath === undefined) t.after(async () => { await rm(dataPath, { recursive: true, force: true }); });
   const store = fakeStore();
   const children: FakeChild[] = [];
   const log: string[] = [];
@@ -71,7 +71,7 @@ async function runner(role: ClaudeRunnerOptions['role'], t: test.TestContext, sh
     ...extra,
   });
   t.after(() => { instance.dispose(); });
-  return { instance, store, children, log };
+  return { instance, store, children, log, dataPath };
 }
 
 test('answers a sent comment in the background, shows each step, and resumes the same conversation next time', async (t) => {
@@ -357,4 +357,55 @@ test('leaves sent comments to the connected conversation when one answers them',
   await new Promise((done) => setTimeout(done, 20));
   assert.equal(children.length, 0);
   assert.equal(instance.activity.running, false);
+});
+
+test('reads the context size from an assistant turn\'s whole input, or from what a compaction left, and skips subagent turns', () => {
+  const usage = { input_tokens: 2, cache_read_input_tokens: 10772, cache_creation_input_tokens: 8435, output_tokens: 9 };
+  assert.equal(contextTokens({ type: 'assistant', parent_tool_use_id: null, message: { usage } }), 19209);
+  assert.equal(contextTokens({ type: 'assistant', parent_tool_use_id: 'toolu_1', message: { usage } }), undefined);
+  assert.equal(contextTokens({ type: 'system', subtype: 'compact_boundary', compact_metadata: { pre_tokens: 19218, post_tokens: 4098 } }), 4098);
+  assert.equal(contextTokens({ type: 'assistant', message: { usage: { input_tokens: 0 } } }), undefined);
+  assert.equal(contextTokens({ type: 'assistant', message: { usage: { input_tokens: -5 } } }), undefined);
+  assert.equal(contextTokens({ type: 'result', usage }), undefined);
+});
+
+test('keeps the conversation\'s context size across restarts, and forgets it with the conversation', async (t) => {
+  const { instance, store, children, dataPath } = await runner('author', t);
+  assert.equal(await instance.context(), undefined);
+  store.setPending([event('one')]);
+  await until(() => children.length === 1);
+  children[0]?.send({ type: 'assistant', message: { usage: { input_tokens: 100, cache_read_input_tokens: 5000 }, content: [{ type: 'text', text: 'Done.' }] } });
+  children[0]?.send({ type: 'result', subtype: 'success', is_error: false, modelUsage: { 'claude-opus-5-5': { contextWindow: 1000000 } } });
+  store.setPending([]);
+  await children[0]?.exit(0);
+  await until(() => !instance.activity.running);
+  assert.deepEqual(await instance.context(), { tokens: 5100, window: 1000000 });
+  const again = await runner('author', t, undefined, undefined, { dataPath });
+  assert.deepEqual(await again.instance.context(), { tokens: 5100, window: 1000000 });
+  await instance.forget();
+  assert.equal(await instance.context(), undefined);
+  store.setPending([event('two')]);
+  await until(() => children.length === 2);
+  assert.ok(children[1]?.args.includes('--session-id'));
+});
+
+test('compacts the conversation with Claude Code\'s /compact in the same conversation', async (t) => {
+  const { instance, store, children } = await runner('author', t);
+  store.setPending([event('one')]);
+  await until(() => children.length === 1);
+  children[0]?.send({ type: 'assistant', message: { usage: { input_tokens: 9000 }, content: [] } });
+  children[0]?.send({ type: 'result', subtype: 'success', is_error: false });
+  store.setPending([]);
+  await children[0]?.exit(0);
+  await until(() => !instance.activity.running);
+  const sessionId = children[0]?.args[(children[0]?.args.indexOf('--session-id') ?? 0) + 1];
+  const compacting = instance.compact();
+  await until(() => children.length === 2);
+  assert.equal(children[1]?.args[1], '/compact');
+  assert.equal(children[1]?.args[children[1].args.indexOf('--resume') + 1], sessionId);
+  children[1]?.send({ type: 'system', subtype: 'compact_boundary', compact_metadata: { post_tokens: 1200 } });
+  children[1]?.send({ type: 'result', subtype: 'success', is_error: false });
+  await children[1]?.exit(0);
+  await compacting;
+  assert.deepEqual(await instance.context(), { tokens: 1200 });
 });

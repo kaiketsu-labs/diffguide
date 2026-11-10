@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { pollWhileFocused } from './autoSync.js';
 import { claudeStatus } from './claudeStatus.js';
 import { orbLoaderStyles } from './orbLoader.js';
-import type { ClaudeProgress } from './claudeRunner.js';
+import type { ClaudeContext, ClaudeProgress } from './claudeRunner.js';
 import type { ReviewIntent, ReviewThread, WithdrawnComment } from './contracts.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import type { Publication } from './pullRequestComments.js';
@@ -52,6 +52,8 @@ export interface OverviewState {
   /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
   readonly claude: {
     readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string; readonly progress?: ClaudeProgress;
+    /** How full the PR's Claude conversation is after its latest run; left out before its first run and on pages whose conversation you connect. */
+    readonly context?: ClaudeContext;
     /** The connected conversation's link, on pages whose comments go to a conversation you connect: whether it receives comments, and whether its review terminal is open. */
     readonly link?: { readonly delivering: boolean; readonly terminal: boolean };
   };
@@ -283,6 +285,10 @@ export interface OverviewActions {
   retry(): void;
   /** Stop Claude's current run on this PR; resolves once it ended. */
   stopClaude(): Promise<void>;
+  /** Start a new Claude conversation for this PR on its next run; on pages whose conversation you connect, absent. */
+  newConversation?(): Promise<void>;
+  /** Have Claude Code compact this PR's conversation. */
+  compactConversation?(): Promise<void>;
   revealThread(id: string): Promise<void>;
   submitReview(event: ReviewEvent, body: string): Promise<void>;
   /** Merge the PR, then delete its branch when `deleteBranch` is set and GitHub allows it. */
@@ -364,7 +370,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' | 'open-pr' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor' | 'open-file'; readonly path: string }
   | { readonly action: 'close-files'; readonly paths: readonly string[] }
@@ -736,6 +742,13 @@ export async function showPullRequestOverview(
         else if (action === 'push') await actions.push();
         else if (action === 'retry') actions.retry();
         else if (action === 'stop-claude') await actions.stopClaude();
+        else if (action === 'new-conversation' && actions.newConversation !== undefined) {
+          await actions.newConversation();
+          post({ notice: { text: 'The next comment starts a new Claude conversation.' } });
+        } else if (action === 'compact' && actions.compactConversation !== undefined) {
+          void actions.compactConversation().then(() => { post({ notice: { text: 'Claude compacted the conversation.' } }); },
+            (error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
+        }
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
@@ -1095,6 +1108,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .toolbar button.icon-button[aria-pressed=true]{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}
 .filter-box{position:relative}#file-filter{width:120px;height:24px;padding:0 var(--space-24) 0 var(--space-8);font-size:12px}#filter-clear{position:absolute;top:2px;right:2px;width:20px;height:20px;min-height:20px}#filter-clear svg{width:14px;height:14px}
 .toolbar{flex-wrap:wrap;justify-content:flex-end}#files-bar .toolbar{gap:var(--space-8)}#files-bar .toolbar .divider{margin:0 var(--space-2)}.menu-anchor{position:relative;display:inline-flex}.toolbar-menu{top:calc(100% + var(--space-4));left:auto;right:0;width:max-content;min-width:180px;max-width:420px}.toolbar-menu .picker-row .text{display:flex;gap:var(--space-8);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar-menu .picker-row .text .muted{margin-left:auto}.toolbar-menu code{font-family:var(--font-code);color:var(--ink-muted)}.base-menu .picker-row .text{display:block}.base-menu{left:0;right:auto;width:300px;max-width:none}.base-menu .picker-list{gap:var(--space-2)}.base-menu input[type=text]{position:sticky;top:0;z-index:1;flex:none;width:100%;height:26px;margin-bottom:var(--space-4);padding:0 var(--space-8);font-size:12px}.menu-foot{display:flex;justify-content:flex-end;padding-top:var(--space-4);border-top:1px solid var(--line)}
+.context-button{gap:var(--space-6);font-variant-numeric:tabular-nums}.context-button .bar{width:48px;height:4px}.context-button .bar span{display:block;height:100%;background:var(--agent)}.context-button.large .bar span{background:var(--warning)}.context-menu{left:0;right:auto;width:max-content;max-width:min(360px,90vw)}.context-menu .picker-list{gap:var(--space-2)}.context-menu .connect-text .muted{white-space:normal}.status .ask-menu{left:0;right:auto}
 .connect-menu{left:0;right:auto;width:max-content;min-width:0;max-width:min(420px,90vw)}.connect-menu .picker-list{gap:var(--space-2)}.connect-row{width:100%;justify-content:flex-start;align-items:flex-start;gap:var(--space-8);min-height:0;padding:var(--space-4) var(--space-8) var(--space-4) var(--space-6);border:0;color:var(--ink);background:none;font:inherit;font-size:12px;font-weight:400;text-align:left}.connect-row:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}.connect-row>svg{flex:none;width:14px;height:14px;margin-top:var(--space-2);color:var(--ink-muted)}.connect-text{display:flex;flex-direction:column;min-width:0}.connect-text .connect-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.connect-text .muted{margin-left:0;font-size:11px;white-space:nowrap}.connect-menu .picker-note{padding:var(--space-4) var(--space-6) 0;font-size:11px}.menu-divider{height:1px;margin:var(--space-2) 0;background:var(--line)}.connect-command{gap:var(--space-8);padding:var(--space-4) var(--space-6)}.connect-command code{font-family:var(--font-code);font-size:12px;color:var(--ink)}
 .range-menu{left:0;right:auto;width:min(680px,90vw);max-width:none}.range-menu .picker-list{display:grid;grid-template-columns:16px max-content minmax(0,1fr) repeat(6,max-content);column-gap:var(--space-8)}.range-menu .range-row{display:grid;grid-column:1/-1;grid-template-columns:subgrid}.range-row:not(.commit)>.text{grid-column:2/8}.range-row:not(.commit)>.muted{grid-column:8/-1;text-align:right}.range-row .num{text-align:right;font-variant-numeric:tabular-nums}.range-row .ok.num,.range-row .bad.num{font-family:var(--font-code);font-size:11px}.range-row .when{text-align:right}.menu-hint{grid-column:1/-1}.range-row{width:100%;justify-content:flex-start;min-height:28px;padding:0 var(--space-6);border:0;color:var(--ink);background:none;font:inherit;font-size:12px;text-align:left}.range-row:focus-visible{outline:1px solid var(--focus);outline-offset:-1px}.range-row[aria-checked=true] .check{visibility:visible}.range-row .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-row .ref{display:inline-flex;align-items:center;flex:none}.range-row .when{flex:none;color:var(--ink-muted)}.range-row .muted{flex:none}.menu-hint{margin-top:var(--space-4);padding:var(--space-6) var(--space-6) var(--space-2);border-top:1px solid var(--line);font-size:11px}
 .range-button{gap:var(--space-6);min-height:26px;height:26px;max-width:340px;padding:0 var(--space-4) 0 var(--space-8);border:1px solid var(--line);color:var(--ink);background:none;font-size:12px}.range-button:hover{filter:none;background:color-mix(in srgb,var(--ink) 6%,transparent)}.range-button[aria-expanded=true]{border-color:var(--line-strong);background:color-mix(in srgb,var(--ink) 6%,transparent)}.range-button>svg{color:var(--ink-muted)}.range-button .ref{display:inline-flex;align-items:center;height:18px;min-height:18px}.range-button .range-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.range-button.on{color:var(--brand);background:var(--brand-soft)}
@@ -1139,7 +1153,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <div class="row head"><span class="title-row"><span id="number"></span><h1 id="title"></h1><button id="edit-title" class="icon-button" data-pr-action data-tip="Edit title" aria-label="Edit title" hidden>${icons.edit}</button></span><span class="toolbar"><button id="pr" class="icon-button pr-only" data-tip="Open on GitHub" aria-label="Open on GitHub">${icons.github}</button><button id="refresh" class="icon-button" data-tip="Refresh" aria-label="Refresh">${icons.refresh}</button><span class="menu-anchor pr-only"><button id="remove-worktree" class="icon-button" data-tip="Remove worktree" aria-label="Remove worktree" aria-haspopup="true" aria-expanded="false">${icons.trash}</button></span></span></div>
 <div class="row byline"><span id="pr-state" class="verdict pr-state pr-only" hidden></span><span id="byline" class="row muted"></span><span id="verdict" class="verdict" hidden></span></div>
 <div id="facts" class="muted facts pr-only"></div>
-<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><button id="stop-claude" class="icon-button" data-tip="Stop. The comments it was answering wait for Retry." aria-label="Stop Claude" hidden>${icons.stop}</button><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">${icons.terminal}Open in terminal</button><span class="menu-anchor" hidden><button id="connect" class="range-button" aria-haspopup="true" aria-expanded="false"></button></span><button id="retry" class="small">${icons.sync}Retry</button></div>
+<div class="row status"><div class="progress" id="reviewed"></div><span id="claude"></span><span class="menu-anchor" hidden><button id="context" class="quiet small context-button" aria-haspopup="true" aria-expanded="false"></button></span><button id="stop-claude" class="icon-button" data-tip="Stop. The comments it was answering wait for Retry." aria-label="Stop Claude" hidden>${icons.stop}</button><button id="terminal" class="quiet" data-tip="Continue this PR's Claude conversation in a terminal">${icons.terminal}Open in terminal</button><span class="menu-anchor" hidden><button id="connect" class="range-button" aria-haspopup="true" aria-expanded="false"></button></span><button id="retry" class="small">${icons.sync}Retry</button></div>
 <p id="error" role="alert"></p>
 <p id="notice" role="status"></p>
 <div id="answers" class="answers" role="status" hidden></div>
@@ -1233,7 +1247,7 @@ const threadStatus: Record<ReviewThread['status'], string> = {
 export function buildOverviewState(
   pullRequest: PullRequestSummary, opened: PullRequestSession, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
   details?: PullRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
-  conversation?: PullRequestConversation | Error,
+  conversation?: PullRequestConversation | Error, claudeContext?: ClaudeContext,
 ): OverviewState {
   const { session, runner } = opened;
   const claude = claudeStatus(runner.activity);
@@ -1257,7 +1271,8 @@ export function buildOverviewState(
     ...(conversation === undefined ? {} : conversation instanceof Error ? { conversationError: conversation.message } : { conversation }),
     claude: { text: claude.text, running: runner.activity.running, retry: claude.retry,
       ...(runner.activity.task === conflictFixLabel ? { fixingConflicts: runner.activity.step ?? 'Starting' } : {}),
-      ...(runner.activity.progress === undefined ? {} : { progress: runner.activity.progress }) },
+      ...(runner.activity.progress === undefined ? {} : { progress: runner.activity.progress }),
+      ...(claudeContext === undefined ? {} : { context: claudeContext }) },
     analysis,
     threads: session.store.threads.map((thread) => {
       const activity = session.activity?.(thread.id);

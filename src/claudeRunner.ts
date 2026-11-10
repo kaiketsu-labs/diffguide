@@ -27,6 +27,13 @@ export interface ClaudeActivity {
   readonly stopped?: true;
 }
 
+/** How much of Claude's context window this PR's conversation fills, after its latest run. */
+export interface ClaudeContext {
+  readonly tokens: number;
+  /** The model's window, when Claude reported it. */
+  readonly window?: number;
+}
+
 /** One step of a Claude run, shown like a Claude Code transcript line: `verb(target)`, then `detail`. */
 export interface ClaudeStep {
   readonly verb: string;
@@ -121,9 +128,32 @@ export class ClaudeRunner implements vscode.Disposable {
 
   /** Claude's last message in the current or latest run. */
   #reply: string | undefined;
+  /** Context size of the saved conversation, read from its session file on first use. */
+  #context: ClaudeContext | undefined;
 
   get activity(): ClaudeActivity {
     return this.#activity;
+  }
+
+  /** The conversation's context size after its latest run, or undefined before its first. */
+  async context(): Promise<ClaudeContext | undefined> {
+    if (this.#context === undefined) this.#context = readContext(await readPrivateJson(this.#sessionPath).catch(() => undefined));
+    return this.#context;
+  }
+
+  /** Forget this PR's conversation, so the next run starts a new one. Each comment still carries its own thread. */
+  async forget(): Promise<void> {
+    if (this.#child !== undefined || this.#activity.running) throw new Error('Claude is working on this PR. Start a new conversation when it is done.');
+    await writePrivateJson(this.#sessionPath, {});
+    this.#context = undefined;
+    this.#changed.fire();
+  }
+
+  /** Have Claude Code compact this PR's conversation. */
+  async compact(): Promise<void> {
+    if (this.#context === undefined && (await this.context()) === undefined) throw new Error('This PR has no Claude conversation to compact yet.');
+    const { error } = await this.runTask({ label: 'compacting the conversation', prompt: '/compact', allowedTools: [] });
+    if (error !== undefined) throw new Error(`Claude could not compact the conversation: ${error}`);
   }
 
   /**
@@ -315,12 +345,15 @@ export class ClaudeRunner implements vscode.Disposable {
     let result: string | undefined | null = null;
     let saving: Promise<void> = Promise.resolve();
     const steps = new StepLog(this.options.cwd);
+    let tokens: number | undefined;
+    let window: number | undefined;
     const startedAt = this.#activity.progress?.startedAt ?? Date.now();
     const lines = createInterface({ input: child.stdout! });
     lines.on('line', (line) => {
       const message = parseLine(line);
       if (message === undefined) return;
       if (steps.read(message)) this.#set({ ...this.#activity, progress: { steps: steps.steps, startedAt } });
+      tokens = contextTokens(message) ?? tokens;
       if (message.type === 'assistant') {
         for (const block of contentBlocks(message)) {
           if (block.type === 'tool_use' && typeof block.name === 'string') {
@@ -338,7 +371,12 @@ export class ClaudeRunner implements vscode.Disposable {
       }
       if (message.type === 'result') {
         result = message.is_error === true ? clean(typeof message.result === 'string' ? message.result : 'Claude reported an error.', 200) : undefined;
-        if (result === undefined && resume === undefined) saving = writePrivateJson(sessionPath, { sessionId });
+        window = contextWindow(message) ?? window;
+        if (result === undefined && (resume === undefined || tokens !== undefined)) {
+          const context = tokens === undefined ? this.#context : { tokens, ...window === undefined ? {} : { window } };
+          if (context !== undefined) this.#context = context;
+          saving = writePrivateJson(sessionPath, { sessionId, ...context === undefined ? {} : { context } });
+        }
       }
     });
     const code = await new Promise<number | null>((resolveExit, rejectExit) => {
@@ -351,6 +389,7 @@ export class ClaudeRunner implements vscode.Disposable {
       : `Claude exited with code ${code ?? 'unknown'}${reason ? `: ${clean(reason, 200)}` : ''}`;
     if (resume !== undefined && /no conversation found/iu.test(`${error ?? ''} ${stderr}`)) {
       await writePrivateJson(sessionPath, {});
+      this.#context = undefined;
       return 'The earlier Claude conversation was not found. Retry to start a new one.';
     }
     return error;
@@ -358,6 +397,38 @@ export class ClaudeRunner implements vscode.Disposable {
 }
 
 export type StreamMessage = Record<string, unknown>;
+
+/** The context size one stream-json message reports: an assistant turn's whole input, or what a compaction left. */
+export function contextTokens(message: StreamMessage): number | undefined {
+  if (message.type === 'system' && message.subtype === 'compact_boundary') {
+    const after = (message.compact_metadata as { post_tokens?: unknown } | undefined)?.post_tokens;
+    return isCount(after) ? after : undefined;
+  }
+  const inner = message.type === 'assistant' && typeof message.message === 'object' && message.message !== null ? message.message as { usage?: unknown } : undefined;
+  // A subagent's turns carry their parent tool call and have a context of their own.
+  if (inner === undefined || typeof message.parent_tool_use_id === 'string' || typeof inner.usage !== 'object' || inner.usage === null) return undefined;
+  const usage = inner.usage as Record<string, unknown>;
+  const parts = [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens];
+  if (!parts.every((part) => part === undefined || isCount(part))) return undefined;
+  const total = (parts as (number | undefined)[]).reduce<number>((sum, part) => sum + (part ?? 0), 0);
+  return total > 0 ? total : undefined;
+}
+
+/** The largest context window a result message's models report. */
+function contextWindow(message: StreamMessage): number | undefined {
+  const models = typeof message.modelUsage === 'object' && message.modelUsage !== null ? Object.values(message.modelUsage) : [];
+  const windows = models.map((model) => typeof model === 'object' && model !== null ? (model as { contextWindow?: unknown }).contextWindow : undefined).filter(isCount);
+  return windows.length ? Math.max(...windows) : undefined;
+}
+
+function readContext(saved: unknown): ClaudeContext | undefined {
+  const context = typeof saved === 'object' && saved !== null ? (saved as { context?: unknown }).context : undefined;
+  if (typeof context !== 'object' || context === null) return undefined;
+  const { tokens, window } = context as { tokens?: unknown; window?: unknown };
+  return isCount(tokens) ? { tokens, ...isCount(window) ? { window } : {} } : undefined;
+}
+
+const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
 /** Parse one stream-json line; Claude output is untrusted, so anything unexpected is skipped. */
 export function parseLine(line: string): StreamMessage | undefined {

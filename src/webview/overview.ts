@@ -1854,6 +1854,46 @@ function dismissForm(form: { readonly login: string; text: string }): HTMLElemen
   return item;
 }
 
+/** Tokens in a few digits, such as 62k or 1.2M. */
+function tokenCount(tokens: number): string {
+  return tokens >= 1_000_000 ? (tokens / 1_000_000).toFixed(1).replace(/\.0$/u, '') + 'M' : tokens >= 1000 ? Math.round(tokens / 1000) + 'k' : String(tokens);
+}
+
+/** Share of the window from which the meter warns that every run re-reads a large conversation. */
+const largeContext = 0.5;
+
+/** How full the PR's Claude conversation is, as a meter that opens the menu to start fresh or compact. */
+function renderContextButton(claude: OverviewState['claude']): void {
+  const context = claude.link === undefined ? claude.context : undefined;
+  const button = $('context');
+  button.parentElement?.toggleAttribute('hidden', context === undefined);
+  if (context === undefined) { if (toolbarMenu?.anchor === 'context') closeToolbarMenu(); return; }
+  const share = context.window ? Math.min(1, context.tokens / context.window) : undefined;
+  const bar = el('span', 'bar');
+  const fill = el('span');
+  fill.style.width = (share ?? 0) * 100 + '%';
+  bar.append(fill);
+  button.replaceChildren(...share === undefined ? [] : [bar], tokenCount(context.tokens) + ' tokens');
+  button.classList.toggle('large', share !== undefined && share >= largeContext);
+  button.setAttribute('aria-label', 'Claude\'s context: ' + context.tokens + ' tokens' + (context.window ? ' of ' + context.window : ''));
+  button.dataset.tip = 'Claude\'s context after its last run' + (context.window ? ', of ' + tokenCount(context.window) + ' tokens' : '') + '. Every run re-reads it';
+}
+
+function openContextMenu(): void {
+  const context = current?.claude.context;
+  if (!context) return;
+  const running = current?.claude.running === true;
+  const rows = [
+    el('div', 'muted picker-note', tokenCount(context.tokens) + (context.window ? ' of ' + tokenCount(context.window) : '') + ' tokens after the last run'),
+    connectRow(icons.reopen, 'New conversation', 'Claude forgets this PR\'s earlier runs. Each comment still sends its thread', () => {
+      askInMenu('context', 'Start a new conversation on the next comment? Claude forgets what it learned in earlier runs.', 'Start new', () => post({ action: 'new-conversation' }));
+    }),
+    connectRow(icons.summarize, 'Compact', 'Claude summarizes the conversation and keeps going', () => { closeToolbarMenu(); post({ action: 'compact' }); }),
+  ];
+  for (const row of rows.slice(1)) if (row instanceof HTMLButtonElement) { row.disabled = running; if (running) row.title = 'Claude is working on this PR'; }
+  openToolbarMenu('context', rows, 'context-menu');
+}
+
 /** Which part of the Claude menu shows: the choices, conversations to resume, or the steps that connect a running Claude. */
 let connectView: 'choices' | 'resume' | 'preparing' | 'running' = 'choices';
 let conversations: readonly ClaudeConversation[] | string | undefined;
@@ -2076,7 +2116,7 @@ function render(state: OverviewState): void {
   const terminal = $('terminal');
   const stop = $<HTMLButtonElement>('stop-claude');
   const progress = state.claude.running ? state.claude.progress : undefined;
-  claude.after(stop, terminal);
+  claude.after(...$('context').parentElement ? [$('context').parentElement as HTMLElement] : [], stop, terminal);
   if (progress === undefined) claude.replaceChildren(...state.claude.running ? [] : [icon(icons.orb)], state.claude.text);
   else claude.replaceChildren(stepLog(progress.steps, progress.startedAt, stop, runMotion(progress)), terminal);
   stop.hidden = !state.claude.running;
@@ -2087,6 +2127,7 @@ function render(state: OverviewState): void {
   terminal.replaceChildren(icon(icons.terminal), state.claude.running ? 'Stop and open in terminal' : 'Open in terminal');
   terminal.dataset.tip = state.claude.running ? 'Stops the agent\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s agent conversation in a terminal';
   renderConnectButton(state.claude.link);
+  renderContextButton(state.claude);
   const unpushed = state.unpushed?.length ?? 0;
   const push = $('push');
   push.hidden = !unpushed || !details?.canEdit;
@@ -4879,6 +4920,7 @@ $('show-unpushed').addEventListener('click', showUnpushed);
 for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
 $('stop-claude').addEventListener('click', stopClaude);
 $('connect').addEventListener('click', openConnectMenu);
+$('context').addEventListener('click', openContextMenu);
 $('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
   'Remove the worktree for ' + (current?.number === undefined ? 'this PR' : '#' + current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
   'Remove worktree', () => post({ action: 'remove-worktree' })));

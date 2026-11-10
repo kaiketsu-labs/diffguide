@@ -286,7 +286,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const loadedThreads = readThreads instanceof Error ? readThreads : readThreads.map((thread) => ({ ...thread, resolved: written.apply(`resolved:${thread.id}`, thread.resolved) }));
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
         const summary = loadedDetails instanceof Error ? current() : { ...current(), title: loadedDetails.title, draft: loadedDetails.draft };
-        const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation);
+        const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation, await opened.runner.context());
         const answers = new Map(latestAnswers([{ key: opened.session.key, number: pullRequest.number, threads: opened.session.store.threads }], Infinity).filter((answer) => seenAnswers.isNew(answer)).map((answer) => [answer.threadId, answer.createdAt]));
         const threads = state.threads.map((thread) => {
           const done = applied.get(thread.id);
@@ -498,6 +498,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         retry: () => { opened.runner.retry(); },
         stopClaude: () => opened.runner.stop(),
+        newConversation: async () => { notOnCheckout('New conversation'); await opened.runner.forget(); },
+        compactConversation: async () => { notOnCheckout('Compact'); await opened.runner.compact(); },
         revealThread: async (id) => {
           const { path, scope } = findThread(id).anchor;
           if (scope === 'pullRequest') { revealOpenPage(`${repository}#${pullRequest.number}`, { thread: id }); return; }
