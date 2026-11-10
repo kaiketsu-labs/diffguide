@@ -34,8 +34,8 @@ export interface ReviewMessage {
 }
 
 /** The review agents a code review can run. */
-export type Reviewer = 'correctness' | 'design' | 'security' | 'performance';
-export const reviewers: readonly Reviewer[] = ['correctness', 'design', 'security', 'performance'];
+export type Reviewer = 'correctness' | 'design' | 'security' | 'performance' | 'tests';
+export const reviewers: readonly Reviewer[] = ['correctness', 'design', 'security', 'performance', 'tests'];
 
 /** How a code review's finding was proven: by a test that ran, a simpler rewrite that passes the tests, a trace through the code, or a quoted rule or precedent. */
 export type FindingEvidence = 'tested' | 'rewritten' | 'traced' | 'cited';

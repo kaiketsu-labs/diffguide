@@ -8,6 +8,7 @@ import orchestratorTemplate from './prompts/orchestrator.md';
 import performance from './prompts/performance.md';
 import reviewerTemplate from './prompts/reviewer.md';
 import security from './prompts/security.md';
+import tests from './prompts/tests.md';
 
 /** The picker's name and one-line description for each reviewer. */
 export const reviewerInfo: Readonly<Record<Reviewer, { readonly label: string; readonly description: string }>> = {
@@ -15,6 +16,7 @@ export const reviewerInfo: Readonly<Record<Reviewer, { readonly label: string; r
   design: { label: 'Design', description: 'Fit, structure, simpler code' },
   security: { label: 'Security', description: 'Exposure, unsafe input, secrets' },
   performance: { label: 'Performance', description: 'Wasted time or resources' },
+  tests: { label: 'Tests', description: 'Changes no test would catch' },
 };
 
 /** Why the orchestrator did not post a candidate. */
@@ -210,7 +212,7 @@ export const reviewSchema = {
   },
 } as const;
 
-const focus: Readonly<Record<Reviewer, string>> = { correctness, design, security, performance };
+const focus: Readonly<Record<Reviewer, string>> = { correctness, design, security, performance, tests };
 
 /** A prompt file with each `{{name}}` replaced by its value. */
 function fill(template: string, values: Readonly<Record<string, string>>): string {

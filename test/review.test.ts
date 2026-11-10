@@ -183,17 +183,17 @@ test('names each review agent after its reviewer with its worktree and the sonne
 });
 
 test('fills every placeholder in the bundled prompt files', () => {
-  const agents = reviewAgents(new Map([['correctness', '/tmp/wt-c'], ['design', '/tmp/wt-d'], ['security', '/tmp/wt-s'], ['performance', '/tmp/wt-p']]));
+  const agents = reviewAgents(new Map([['correctness', '/tmp/wt-c'], ['design', '/tmp/wt-d'], ['security', '/tmp/wt-s'], ['performance', '/tmp/wt-p'], ['tests', '/tmp/wt-t']]));
   const prompts = [...Object.values(agents).map((agent) => agent.prompt), reviewPrompt(files, '#1 Demo', new Map([['design', '/tmp/wt-d']]))];
   for (const prompt of prompts) assert.doesNotMatch(prompt, /\{\{\w+\}\}/u);
   assert.match(agents['design-reviewer']?.prompt ?? '', /^You are the Design reviewer in a code review\. You ask: is this the simplest structure/u);
-  assert.match(prompts[4] ?? '', new RegExp(`Keep at most ${maximumFindings};`, 'u'));
+  assert.match(prompts[5] ?? '', new RegExp(`Keep at most ${maximumFindings};`, 'u'));
 });
 
 test('lists only the picked reviewers in the prompt and numbers added lines on the new side', () => {
   const prompt = reviewPrompt(files, '#1 Demo', new Map([['security', '/tmp/wt-s']]));
   assert.match(prompt, /- security: subagent security-reviewer/u);
-  assert.doesNotMatch(prompt, /- (correctness|design|performance): subagent/u);
+  assert.doesNotMatch(prompt, /- (correctness|design|performance|tests): subagent/u);
   assert.match(prompt, /#1 Demo/u);
   assert.match(prompt, /^ {4}2 \+const b = 3;$/mu);
   assert.match(prompt, /^ {4}3 \+const c = 4;$/mu);

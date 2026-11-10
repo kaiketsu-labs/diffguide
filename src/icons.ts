@@ -108,6 +108,7 @@ export const icons = {
   design: line('<circle cx="4.75" cy="11.25" r="3"/><rect x="9.25" y="8.75" width="5" height="5" rx=".5"/><path d="M11.75 1.75l3 5h-6z"/>'),
   security: line(`<path d="M8 1.5l5.5 2v4.25c0 3.4-2.3 5.9-5.5 6.75-3.2-.85-5.5-3.35-5.5-6.75V3.5z"/><path ${solid} d="M8 1.5v13c3.2-.85 5.5-3.35 5.5-6.75V3.5z"/>`),
   performance: line('<path d="M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z"/>'),
+  tests: line('<path d="M5.25 1.75h5.5M6.25 1.75v4L2.4 12.6a1.25 1.25 0 0 0 1.1 1.9h9a1.25 1.25 0 0 0 1.1-1.9L9.75 5.75v-4"/><path d="M6.5 11l1 1 2-2"/>'),
   triage: line('<rect x="3" y="2.5" width="10" height="12" rx="1.5"/><path d="M6 1.5h4v2H6zM5.5 7h5M5.5 9.5h5M5.5 12h3"/>'),
   candidates: line('<path d="M1.5 4h7M1.5 8h7M1.5 12h4.5M10.75 8.5a1.6 1.6 0 1 1 2.25 1.45c-.45.2-.75.55-.75 1v.3M12.25 13.75v.01"/>'),
   rank: line('<path d="M2 4h12M2 8h8.5M2 12h5"/>'),
