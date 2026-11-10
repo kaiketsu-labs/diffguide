@@ -1441,8 +1441,6 @@ function openFilterMenu(): void {
   rows.push(menuRow(['Hide viewed files'], hideViewed, (on) => { hideViewed = on; applyFilters(); }));
   const archived = (current?.threads ?? []).filter(isArchived).length;
   rows.push(menuRow(['Show archived threads', el('span', 'muted', String(archived))], showArchived, (on) => { showArchived = on; save(); renderFiles(); renderThreadList(); }));
-  const notes = (current?.threads ?? []).filter((thread) => thread.origin === 'analysis' && (showArchived || !isArchived(thread))).length;
-  rows.push(menuRow(['Show guide comments', el('span', 'muted', String(notes))], guideInFiles, (on) => { guideInFiles = on; save(); renderFiles(); }));
   const reset = button('Clear filters', () => { clearFilters(); closeToolbarMenu(); }, 'small');
   reset.disabled = !filtersOn();
   const foot = el('div', 'menu-foot');
@@ -1459,10 +1457,12 @@ function allFolded(): boolean {
 /** Display settings you set once: whitespace, folders and where comments show. */
 function openViewMenu(): void {
   const commentsOpen = document.querySelector('details.thread[open]') !== null;
+  const notes = (current?.threads ?? []).filter((thread) => thread.origin === 'analysis' && (showArchived || !isArchived(thread))).length;
   const rows = [
     ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); }, false, icons.whitespace)] : [],
     ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
     ...view === 'files' ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], allFiles, (on) => { allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
+    ...view === 'files' ? [menuRow(['Show guide comments', el('span', 'muted', String(notes))], guideInFiles, (on) => { guideInFiles = on; save(); renderFiles(); }, false, icons.agentGuide)] : [],
     menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
     menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }, false, icons.margin),
   ];
