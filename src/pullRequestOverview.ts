@@ -1108,6 +1108,7 @@ details.thread .composer-actions button{min-height:24px;padding:0 10px;font-size
 .msg-tools{display:flex;align-items:center;gap:var(--space-2);margin-left:auto}.msg-tools button{min-height:20px;width:22px;padding:0;border:0;background:none;color:var(--ink-muted)}.msg-tools button:hover{color:var(--ink);filter:none}.msg-tools svg{width:14px;height:14px;fill:currentColor}
 .edited{font-size:12px;color:var(--ink-muted)}.verb{color:var(--ink-muted)}
 .reactions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4);margin-top:var(--space-6)}.reactions:empty{display:none}
+.msg-main>.thread{margin:var(--space-12) 0 var(--space-4)}.msg-main>.thread+.thread{margin-top:var(--space-8)}
 .reaction{min-height:22px;height:22px;padding:0 var(--space-6);border:1px solid var(--line-strong);border-radius:var(--radius-pill);background:none;font-size:12px;gap:var(--space-4)}.reaction[aria-pressed=true]{border-color:var(--github);background:var(--github-soft)}
 .reaction.add{width:26px;padding:0;color:var(--ink-muted)}.reaction.add svg{width:14px;height:14px;fill:currentColor}
 .emoji-pop{display:inline-flex;gap:var(--space-2);padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--surface-raised);box-shadow:var(--shadow-overlay)}.emoji-pop button{min-height:24px;width:28px;padding:0;border:0;background:none;font-size:14px}.emoji-pop button:hover{background:color-mix(in srgb,var(--ink) 10%,transparent)}
