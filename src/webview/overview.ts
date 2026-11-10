@@ -1,6 +1,7 @@
 import type { ClaudeProgress, ClaudeStep } from '../claudeRunner.js';
 import type { ClaudeConversation } from '../claudeSessions.js';
-import type { ReviewIntent } from '../contracts.js';
+import { reviewers, type Finding, type Reviewer, type ReviewIntent } from '../contracts.js';
+import { reviewerInfo, type DropReason } from '../review.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type Analysis, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
@@ -2186,6 +2187,7 @@ function render(state: OverviewState): void {
   analysisStatus.title = analysis.error ?? '';
   analysisStatus.className = analysis.running ? 'chip agent working' : analysis.error ? 'chip bad' : '';
   analysisStatus.hidden = !analysis.running && !analysis.error;
+  showReview();
   const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.behind, analysis.result ? analysis.stale && analysis.running : [analysis.running, analysis.error]]);
   if (stamp !== guideStamp) {
     guideStamp = stamp;
@@ -2543,10 +2545,10 @@ function intentChip(intent: ReviewIntent): HTMLElement {
 }
 
 /** Who can see a thread: Local stays with you and Claude, On GitHub is on the PR, Guide is Claude's note from its guide. */
-const kindMarks: Record<'github' | 'local' | 'analysis', string> = { github: icons.github, local: icons.local, analysis: icons.agentGuide };
-const kindLabels: Record<'github' | 'local' | 'analysis', string> = { github: 'On GitHub', local: 'Local', analysis: 'Guide' };
+const kindMarks: Record<ThreadKind, string> = { github: icons.github, local: icons.local, analysis: icons.agentGuide, review: icons.agentReview };
+const kindLabels: Record<ThreadKind, string> = { github: 'On GitHub', local: 'Local', analysis: 'Guide', review: 'Review' };
 
-function kindLabel(kind: 'github' | 'local' | 'analysis'): HTMLElement {
+function kindLabel(kind: ThreadKind): HTMLElement {
   const label = el('span', 'source');
   label.append(icon(kindMarks[kind]), kindLabels[kind]);
   return label;
@@ -2559,7 +2561,7 @@ function keepInView(box: HTMLElement, summary: HTMLElement): void {
   box.addEventListener('toggle', () => { window.scrollBy(0, box.getBoundingClientRect().top - before); }, { once: true });
 }
 
-function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | 'local' | 'analysis', note: string, status: readonly string[], right: string, title?: string): HTMLElementTagNameMap[K] {
+function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: ThreadKind, note: string, status: readonly string[], right: string, title?: string): HTMLElementTagNameMap[K] {
   const node = el(tag, 'strip');
   const name = kindLabel(kind);
   name.title = note;
@@ -2570,7 +2572,9 @@ function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | '
 function threadBox(thread: Thread): HTMLElement {
   const github = thread.source === 'github';
   const fromAnalysis = thread.source === 'local' && thread.origin === 'analysis';
-  const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : ''));
+  const finding = thread.source === 'local' && thread.origin === 'review' ? thread.finding : undefined;
+  const fromClaude = fromAnalysis || (thread.source === 'local' && thread.origin === 'review');
+  const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : '') + (thread.source === 'local' && thread.origin === 'review' ? ' review' : ''));
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
   box.addEventListener('toggle', () => {
@@ -2580,11 +2584,15 @@ function threadBox(thread: Thread): HTMLElement {
     if (inMargin && !box.open) renderFiles([thread.path]);
   });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
-    : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
-  const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
-    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
+    : thread.status.split(' · ').filter((part) => !fromClaude || part !== 'Answered');
+  const summary = strip('summary', threadKind(thread),
+    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : fromClaude ? 'From Claude\'s code review. Reply to ask about it.' : 'Only you and Claude see it.',
     status, thread.scope === 'pullRequest' ? 'Whole PR' : thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
+  if (finding !== undefined) {
+    summary.querySelector('.source')?.after(...agentTags(finding.reviewers));
+    summary.querySelector('.gap')?.after(...findingMarks(finding));
+  }
   if (thread.url) {
     const open = el('button', 'icon-button');
     open.append(icon(icons.github));
@@ -4041,11 +4049,124 @@ function staleGuideRow(result: Analysis, groups: readonly GuideGroup[]): HTMLEle
   return row;
 }
 
-type ThreadKind = 'github' | 'local' | 'analysis';
-const threadKinds: readonly ThreadKind[] = ['github', 'local', 'analysis'];
+type ThreadKind = 'github' | 'local' | 'analysis' | 'review';
+const threadKinds: readonly ThreadKind[] = ['github', 'local', 'review', 'analysis'];
 
 function threadKind(thread: Thread): ThreadKind {
-  return thread.source === 'github' ? 'github' : thread.origin === 'analysis' ? 'analysis' : 'local';
+  return thread.source === 'github' ? 'github' : thread.origin ?? 'local';
+}
+
+/** A tag per code review agent that raised a finding. */
+function agentTags(names: readonly Reviewer[]): HTMLElement[] {
+  return names.map((name) => el('span', 'agent-tag', reviewerInfo[name].label));
+}
+
+const findingSeverityLabels: Record<Finding['severity'], string> = { high: 'High', medium: 'Medium', low: 'Low' };
+const evidenceLabels: Record<Finding['evidence'], [string, string]> = {
+  tested: ['Tested', 'A test the reviewer ran shows it.'],
+  traced: ['Traced', 'The reviewer traced it through the code.'],
+  cited: ['Cited', 'A rule or existing code the reviewer quotes backs it.'],
+};
+
+/** A finding's severity and how it was proven. */
+function findingMarks({ severity, evidence }: Pick<Finding, 'severity' | 'evidence'>): HTMLElement[] {
+  const [label, tip] = evidenceLabels[evidence];
+  return [el('span', 'sev ' + severity, findingSeverityLabels[severity]), titled(el('span', 'ev ' + evidence, label), tip)];
+}
+
+const dropLabels: Record<DropReason, [string, string]> = {
+  'over-cap': ['Over cap', 'Proven, ranked below the top 10'],
+  refuted: ['Refuted', 'Verification disproved it'],
+  unconfirmed: ['Unconfirmed', 'Verification could not prove or disprove it'],
+  duplicate: ['Duplicate', 'Merged into another finding'],
+  'out-of-scope': ['Out of scope', 'Style, speculation or preference'],
+  unplaced: ['Not placed', 'Its lines are not in the diff'],
+};
+
+/** The code review's summary above the files: findings by rank, who ran, and every dropped candidate with its reason. */
+function renderReviewCard(): void {
+  const card = $('review-card');
+  const result = current?.review?.result;
+  card.hidden = result === undefined;
+  if (result === undefined) { card.replaceChildren(); return; }
+  const box = el('details', 'thread review review-card');
+  box.open = collapsed.get('review-card') !== true;
+  box.addEventListener('toggle', () => { collapsed.set('review-card', !box.open); save(); });
+  const count = result.findings.length;
+  box.append(strip('summary', 'review', 'Claude\'s code review of these changes.', [], `${result.candidates} candidates · ${result.dropped.length} dropped`,
+    count === 0 ? 'No findings' : count + (count === 1 ? ' finding' : ' findings')));
+  box.querySelector('summary')?.append(...timeLabel(result.createdAt));
+  const ran = el('div', 'review-ran muted', result.ran.length === 0 ? 'No reviewer ran.' : 'Ran ' + result.ran.map((name) => reviewerInfo[name].label).join(', '));
+  for (const { reviewer, reason } of result.skipped) ran.append(el('span', '', ' · Skipped ' + reviewerInfo[reviewer].label + (reason ? ': ' + reason : '')));
+  box.append(ran);
+  if (count > 0) {
+    const list = el('ol', 'finding-list');
+    const threads = allThreads();
+    for (const finding of result.findings) {
+      const thread = threads.find((candidate) => candidate.id === finding.threadId);
+      const title = el('button', 'finding-title', finding.title);
+      title.disabled = thread === undefined;
+      if (thread === undefined) title.title = 'The thread is resolved or gone.';
+      title.addEventListener('click', () => { if (thread !== undefined) jump(thread); });
+      const item = el('li');
+      item.append(el('span', 'sev ' + finding.severity, findingSeverityLabels[finding.severity]), title, el('span', 'finding-agents'), ...findingMarks(finding).slice(1), el('span', 'finding-where', finding.path + ':' + finding.startLine));
+      item.querySelector('.finding-agents')?.append(...agentTags(finding.reviewers));
+      list.append(item);
+    }
+    box.append(list);
+  }
+  if (result.dropped.length > 0) {
+    const dropped = el('details', 'review-dropped');
+    dropped.open = collapsed.get('review-dropped') === false;
+    dropped.addEventListener('toggle', () => { collapsed.set('review-dropped', !dropped.open); save(); });
+    const head = el('summary');
+    head.append(icon(icons.chevronDown), 'Dropped (' + result.dropped.length + ')');
+    dropped.append(head);
+    for (const reason of Object.keys(dropLabels) as DropReason[]) {
+      const members = result.dropped.filter((item) => item.reason === reason);
+      if (members.length === 0) continue;
+      const [label, note] = dropLabels[reason];
+      const group = el('div', 'drop-group', label);
+      group.append(el('span', 'muted', note));
+      dropped.append(group);
+      for (const item of members) {
+        const row = el('div', 'drop');
+        const tags = el('span', 'finding-agents');
+        tags.append(...agentTags(item.reviewers));
+        row.append(el('span', 'drop-claim', item.claim), tags, ...item.why ? [el('span', 'drop-why muted', item.why)] : []);
+        dropped.append(row);
+      }
+    }
+    box.append(dropped);
+  }
+  card.replaceChildren(box);
+}
+
+/** Reviewers picked for the next review; the page updates them before the extension confirms. */
+let reviewPicks: readonly Reviewer[] | undefined;
+
+/** The Review button, its reviewer menu and its status chip. */
+function showReview(): void {
+  const review = current?.review;
+  $('review-tools').hidden = review === undefined;
+  if (review === undefined) return;
+  reviewPicks = review.picked;
+  const start = $<HTMLButtonElement>('review');
+  start.replaceChildren(icon(review.running ? icons.stop : icons.agentReview), review.running ? 'Stop review' : review.result ? 'Rerun review' : 'Review');
+  const status = $('review-status');
+  status.textContent = review.running ? 'Review · ' + (review.step ?? 'Working') : review.error ? 'Review failed' : '';
+  status.title = review.error ?? '';
+  status.className = review.running ? 'chip agent working' : review.error ? 'chip bad' : '';
+  status.hidden = !review.running && !review.error;
+  renderReviewCard();
+}
+
+function openReviewMenu(): void {
+  const rows = reviewers.map((name) => menuRow([reviewerInfo[name].label, el('span', 'muted', reviewerInfo[name].description)], reviewPicks?.includes(name) === true, (on) => {
+    reviewPicks = reviewers.filter((other) => other === name ? on : reviewPicks?.includes(other) === true);
+    post({ action: 'review-pick', reviewers: reviewPicks });
+  }));
+  openToolbarMenu('review-pick', [el('div', 'muted picker-note', 'Reviewers'), ...rows, el('div', 'muted picker-note', 'Remembered for this repository.')], 'review-menu');
 }
 
 /** The Threads card: one foldable group per kind, one line per thread. Guide starts folded because its notes already sit in the diff. */
@@ -4132,7 +4253,7 @@ function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElemen
   item.addEventListener('click', () => jump(thread));
   const text = el('span', 'text');
   text.append(...inlineCode((thread.source === 'local' ? thread.title : undefined) ?? thread.text));
-  const status = kind === 'analysis' ? '' : thread.status;
+  const status = kind === 'analysis' || kind === 'review' ? '' : thread.status;
   const working = thread.source === 'local' ? thread.working : undefined;
   const [name = '', line = ''] = (thread.location.split('/').pop() ?? '').split(/(?=:\d+$)/u);
   const where = el('span', 'where');
@@ -5138,6 +5259,12 @@ $('merge-cancel').addEventListener('click', closeMergeForm);
 attachMentions($<HTMLTextAreaElement>('review'), $('review-box'));
 $('view-menu').addEventListener('click', openViewMenu);
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
+$('review').addEventListener('click', () => {
+  $('error').textContent = '';
+  if (current?.review?.running) post({ action: 'review-stop' });
+  else post({ action: 'review', reviewers: reviewPicks ?? reviewers });
+});
+$('review-pick').addEventListener('click', openReviewMenu);
 $('fold-all').addEventListener('click', () => {
   const value = !allFolded();
   if (view === 'guide') {

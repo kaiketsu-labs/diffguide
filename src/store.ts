@@ -8,6 +8,7 @@ import type {
   AgentUpdate,
   CodeAnchor,
   Disposable,
+  Finding,
   ReviewEvent,
   ReviewIntent,
   ReviewMessage,
@@ -15,8 +16,10 @@ import type {
   ReviewStatus,
   ReviewStore,
   ReviewThread,
+  Reviewer,
   WithdrawnComment,
 } from './contracts.js';
+import { reviewers } from './contracts.js';
 
 const intents: readonly ReviewIntent[] = ['ask', 'implement', 'summarize'];
 const statuses: readonly ReviewStatus[] = ['queued', 'received', 'working', 'answered', 'ready'];
@@ -274,29 +277,41 @@ class FileReviewStore implements ReviewStore {
 
   /** Open each analysis note as a thread that starts with Claude's message, after dropping earlier notes nobody touched. */
   replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]> {
-    const captured = notes.map(({ anchor, text }) => {
+    return this.#replaceClaudeThreads('analysis', notes);
+  }
+
+  /** Open each code review finding as a thread that starts with Claude's message, after dropping earlier findings nobody touched. */
+  replaceReviewFindings(findings: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly title: string; readonly finding: Finding }[]): Promise<readonly string[]> {
+    return this.#replaceClaudeThreads('review', findings.map(({ title, finding, ...rest }) => ({ ...rest, extra: { title: readTitle(title), finding: readFinding(finding) } })));
+  }
+
+  #replaceClaudeThreads(
+    origin: 'analysis' | 'review',
+    notes: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly extra?: Pick<ReviewThread, 'title' | 'finding'> }[],
+  ): Promise<readonly string[]> {
+    const captured = notes.map(({ anchor, text, extra }) => {
       const capturedAnchor = readAnchor(anchor);
       validateNewAnchor(capturedAnchor);
-      return { anchor: capturedAnchor, text: readBoundedText(text, 'Note', maximumReplyLength, true) };
+      return { anchor: capturedAnchor, text: readBoundedText(text, 'Note', maximumReplyLength, true), extra };
     });
     // Dropping notes without adding any could remove the newest events and let event sequence numbers repeat.
     if (captured.length === 0) return Promise.resolve([]);
     return this.#mutate((snapshot) => {
       const untouched = new Set(snapshot.threads
-        .filter((thread) => thread.origin === 'analysis' && !thread.resolved && thread.messages.length === 1)
+        .filter((thread) => thread.origin === origin && !thread.resolved && thread.messages.length === 1)
         .map((thread) => thread.id));
       let sequence = snapshot.events.at(-1)?.sequence ?? 0;
       if (sequence + captured.length > Number.MAX_SAFE_INTEGER) {
         throw new ReviewStoreError('Review event sequence is exhausted.', 409);
       }
       const createdAt = new Date().toISOString();
-      const added = captured.map(({ anchor, text }) => {
+      const added = captured.map(({ anchor, text, extra }) => {
         const threadId = randomUUID();
         sequence += 1;
         const event: ReviewEvent = { id: randomUUID(), sequence, threadId, intent: 'ask', text, anchor, createdAt, acknowledged: true };
         const thread: ReviewThread = {
-          id: threadId, anchor, intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: event.id, origin: 'analysis',
-          messages: [{ id: randomUUID(), eventId: event.id, author: 'claude', text, createdAt }],
+          id: threadId, anchor, intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: event.id, origin,
+          messages: [{ id: randomUUID(), eventId: event.id, author: 'claude', text, createdAt }], ...extra,
         };
         return { event, thread };
       });
@@ -430,21 +445,37 @@ function readTitle(value: unknown): string {
   return readBoundedText(value, 'title', maximumTitleLength, true).replaceAll(/\s+/gu, ' ').trim();
 }
 
+/** Validate a code review finding's agents, severity and evidence. */
+function readFinding(value: unknown): Finding {
+  const record = readObject(value, 'finding');
+  checkKeys(record, ['reviewers', 'severity', 'evidence']);
+  const agents = readArray(record['reviewers'], 'reviewers');
+  if (agents.length === 0 || agents.some((agent) => !reviewers.includes(agent as Reviewer)) || new Set(agents).size !== agents.length) {
+    throw new ReviewStoreError('Invalid finding reviewers.');
+  }
+  const { severity, evidence } = record;
+  if (severity !== 'high' && severity !== 'medium' && severity !== 'low') throw new ReviewStoreError('Invalid finding severity.');
+  if (evidence !== 'tested' && evidence !== 'traced' && evidence !== 'cited') throw new ReviewStoreError('Invalid finding evidence.');
+  return { reviewers: agents as Reviewer[], severity, evidence };
+}
+
 /** Validate a stored review thread and its nested messages. */
 function readThread(value: unknown): ReviewThread {
   const record = readObject(value, 'thread');
-  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'title', 'archived']);
+  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'finding', 'title', 'archived']);
   if (record['archived'] !== undefined && record['archived'] !== true) throw new ReviewStoreError('Invalid archived flag.');
   const messages = readArray(record['messages'], 'messages').map(readMessage);
-  if (record['origin'] !== undefined && record['origin'] !== 'analysis') {
+  const origin = record['origin'];
+  if (origin !== undefined && origin !== 'analysis' && origin !== 'review') {
     throw new ReviewStoreError('Invalid thread origin.');
   }
-  const analysis = record['origin'] === 'analysis';
-  if (messages.length === 0 || messages[0]?.author !== (analysis ? 'claude' : 'human')) {
+  if (messages.length === 0 || messages[0]?.author !== (origin === undefined ? 'human' : 'claude')) {
     throw new ReviewStoreError('Review threads must start with a human comment.');
   }
+  if (record['finding'] !== undefined && origin !== 'review') throw new ReviewStoreError('Only code review threads hold a finding.');
   return {
-    ...(analysis ? { origin: 'analysis' as const } : {}),
+    ...(origin === undefined ? {} : { origin }),
+    ...(record['finding'] === undefined ? {} : { finding: readFinding(record['finding']) }),
     id: readId(record['id']), anchor: readAnchor(record['anchor']), messages,
     intent: readIntent(record['intent']), status: readStatus(record['status']),
     resolved: readBoolean(record['resolved'], 'resolved'),

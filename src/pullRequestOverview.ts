@@ -8,7 +8,8 @@ import { pollWhileFocused } from './autoSync.js';
 import { claudeStatus } from './claudeStatus.js';
 import { orbLoaderStyles } from './orbLoader.js';
 import type { ClaudeContext, ClaudeProgress } from './claudeRunner.js';
-import type { ReviewIntent, ReviewThread, WithdrawnComment } from './contracts.js';
+import { reviewers as allReviewers, type Finding, type Reviewer, type ReviewIntent, type ReviewThread, type WithdrawnComment } from './contracts.js';
+import type { CodeReviewResult } from './review.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import type { Publication } from './pullRequestComments.js';
 import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
@@ -93,8 +94,10 @@ export interface OverviewState {
     readonly resolved: boolean;
     /** Put away by the user; the page hides it unless archived threads are shown. */
     readonly archived?: true;
-    /** Set when the thread holds a note from Claude's analysis. */
-    readonly origin?: 'analysis';
+    /** Set when the thread holds a note from Claude's guide (`analysis`) or a code review finding (`review`). */
+    readonly origin?: 'analysis' | 'review';
+    /** The code review agents, severity and evidence of a finding. */
+    readonly finding?: Finding;
     /** The commented code, shown as the lines a suggestion replaces. */
     /** The commented lines as highlighted HTML, sent when a message has suggestions. */
     readonly original?: readonly string[];
@@ -112,6 +115,8 @@ export interface OverviewState {
   readonly conversation?: PullRequestConversation;
   readonly conversationError?: string;
   readonly analysis: AnalysisView;
+  /** Missing on pages that cannot run a code review. */
+  readonly review?: ReviewView;
   /** Claude's question, as HTML, when it stopped fixing conflicts without pushing. */
   readonly conflictQuestion?: string;
   /** Commits in the worktree that the PR's branch on GitHub does not have yet, oldest first. */
@@ -149,6 +154,16 @@ export interface AnalysisView {
   readonly stale: boolean;
   /** Commits since the result's head, or undefined when that head is no longer in the branch's history, as after a force push. */
   readonly behind?: number;
+}
+
+/** The code review: whether it runs, the reviewers picked for the next run, and the last result. */
+export interface ReviewView {
+  readonly running: boolean;
+  readonly step?: string;
+  readonly progress?: ClaudeProgress;
+  readonly error?: string;
+  readonly result?: CodeReviewResult;
+  readonly picked: readonly Reviewer[];
 }
 
 export type DiffSide = 'old' | 'new';
@@ -368,6 +383,11 @@ export interface OverviewActions {
   unlink(key: string): Promise<void>;
   analyze(): Promise<void>;
   stopAnalysis(): void;
+  /** Run a code review with these reviewers, and remember them for the next run. */
+  review(reviewers: readonly Reviewer[]): Promise<void>;
+  stopReview(): void;
+  /** Remember the reviewers for the next run without starting one. */
+  pickReviewers(reviewers: readonly Reviewer[]): Promise<void>;
 }
 
 export type PickTarget = 'reviewers' | 'assignees' | 'labels' | 'milestone';
@@ -378,9 +398,10 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'review-stop' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
   | { readonly action: 'draft-reply' | 'github-draft-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
+  | { readonly action: 'review' | 'review-pick'; readonly reviewers: readonly Reviewer[] }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor' | 'open-file'; readonly path: string }
   | { readonly action: 'close-files'; readonly paths: readonly string[] }
   | { readonly action: 'theme-colors'; readonly colors: Readonly<Record<string, string>> }
@@ -661,7 +682,7 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, paths, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, extension, message, option,
-        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command, reviewers: reviewersPicked } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
@@ -821,6 +842,10 @@ export async function showPullRequestOverview(
         }
         else if (action === 'analyze') await actions.analyze();
         else if (action === 'analysis-stop') actions.stopAnalysis();
+        else if ((action === 'review' || action === 'review-pick') && Array.isArray(reviewersPicked) && reviewersPicked.every((name) => allReviewers.includes(name as Reviewer))) {
+          const picks = allReviewers.filter((name) => reviewersPicked.includes(name));
+          if (action === 'review') await actions.review(picks); else await actions.pickReviewers(picks);
+        } else if (action === 'review-stop') actions.stopReview();
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
         else if (action === 'refresh') {
           actions.refresh();
@@ -1144,6 +1169,19 @@ details.thread:not([open]){padding-bottom:0}
 .file-head{top:calc(var(--bar-height,46px) + var(--space-12) + var(--depth,0) * 32px)}
 .thread.local,.card-thread.local,.thread-group.local{--accent:var(--ink-muted);--tint:color-mix(in srgb,var(--ink) 5%,transparent)}
 .thread.analysis,.card-thread.analysis,.thread-group.analysis{--accent:var(--agent);--tint:var(--agent-soft)}
+.thread.review,.card-thread.review,.thread-group.review{--accent:var(--agent);--tint:var(--agent-soft)}.nav-thread.review{--accent:var(--agent)}.margin-mark.review{background:none;box-shadow:inset 0 0 0 2px var(--agent)}
+.review-tools{display:inline-flex;align-items:center;gap:var(--space-8)}.split{display:inline-flex}.split>button:first-child{border-top-right-radius:0;border-bottom-right-radius:0}.split>.split-menu{margin-left:1px;padding:0 var(--space-4);border-top-left-radius:0;border-bottom-left-radius:0}.split-menu svg{width:14px;height:14px}
+.review-menu{left:auto;right:0;width:300px}.review-menu .picker-list{display:flex}.review-menu .picker-row .text{display:flex;flex:1;gap:var(--space-8)}.review-menu .picker-row .text .muted{margin-left:auto}
+.agent-tag{display:inline-flex;align-items:center;flex:none;height:18px;padding:0 var(--space-6);border:1px solid color-mix(in srgb,var(--agent) 55%,transparent);border-radius:var(--radius-sm);font-size:11px;font-weight:500;color:var(--agent)}
+.sev{flex:none;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:16px}.sev.high{color:var(--danger);background:var(--danger-soft)}.sev.medium{color:var(--warning);background:color-mix(in srgb,var(--warning) 14%,transparent)}.sev.low{color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.ev{flex:none;font-size:11px;font-weight:400;color:var(--ink-muted)}.ev::before{content:'';display:inline-block;width:6px;height:6px;margin-right:var(--space-4);border:1px solid currentColor;border-radius:50%;vertical-align:1px}.ev.tested::before{background:currentColor}.ev.traced::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+#review-card{margin:var(--space-12) 0}.review-card{max-width:none}.thread.review-card>summary.strip{position:static}.review-ran{margin-top:var(--space-8);font-size:12px}
+.finding-list{list-style:none;margin:var(--space-8) 0 0;padding:0}.finding-list li{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) 0;border-bottom:1px solid color-mix(in srgb,var(--line) 40%,transparent)}
+.finding-title{display:block;flex:1;min-width:0;min-height:0;padding:0;border:0;background:none;color:var(--ink);font:inherit;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.finding-title:hover{filter:none;text-decoration:underline}.finding-title:disabled{color:var(--ink-muted);text-decoration:none;cursor:default}
+.finding-agents{display:inline-flex;flex:none;gap:var(--space-4)}.finding-where{flex:none;font:11px var(--font-code);color:var(--ink-muted)}
+.review-dropped{margin-top:var(--space-12)}.review-dropped>summary{display:flex;align-items:center;gap:var(--space-4);font-size:12px;color:var(--ink-muted);cursor:pointer;list-style:none}.review-dropped>summary::-webkit-details-marker{display:none}.review-dropped>summary svg{width:14px;height:14px}.review-dropped:not([open])>summary svg{transform:rotate(-90deg)}
+.drop-group{margin:var(--space-12) 0 var(--space-4);font-size:12px;font-weight:600}.drop-group .muted{margin-left:var(--space-6);font-weight:400}
+.drop{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-2) var(--space-8);padding:var(--space-4) 0 var(--space-4) var(--space-12);font-size:12px}.drop-claim{color:var(--ink-muted);text-decoration:line-through}.drop-why{grid-column:1/-1}
 .thread.github,.card-thread.github,.thread-group.github{--accent:var(--github);--tint:var(--github-soft)}
 .strip .gap{flex:1}.strip .icon-button{width:20px;height:20px;min-height:20px;margin:-2px -4px -2px 0}.strip .icon-button svg{width:14px;height:14px}.pill.state{border-color:var(--line-strong);color:var(--ink-muted)}.strip .pill{line-height:16px}
 .msg .delete{min-height:20px;padding:0 var(--space-2)}.msg .delete svg{width:14px;height:14px}.msg .delete:hover{color:var(--danger);text-decoration:none}
@@ -1239,7 +1277,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <button id="view-guide" class="pr-only" role="tab">${icons.agentGuide}Guide<span id="guide-stale" class="tab-warning" data-tip="Built for an older commit. Rebuild it in the guide." aria-label="Out of date" hidden>${icons.warning}</span><span id="guide-count" class="count" hidden></span></button></span>
 <span class="menu-anchor pr-only"><button id="range" class="range-button" aria-label="Changes from" aria-haspopup="true" aria-expanded="false">${icons.commit}<span class="range-text">All changes</span>${icons.chevronDown}</button></span>
 </span><span class="toolbar">
-<span id="analysis-status" class="pr-only"></span><button id="analyze" class="small pr-only">Build guide</button>
+<span id="review-tools" class="review-tools" hidden><span id="review-status" hidden></span><span class="menu-anchor split"><button id="review" class="small">${icons.agentReview}Review</button><button id="review-pick" class="small split-menu" aria-label="Choose reviewers" aria-haspopup="true" aria-expanded="false">${icons.chevronDown}</button></span><span class="divider"></span></span><span id="analysis-status" class="pr-only"></span><button id="analyze" class="small pr-only">Build guide</button>
 <span id="analyze-divider" class="divider pr-only"></span>
 <button id="commit-batch" class="primary small pr-only" data-pr-action hidden></button>
 <button id="show-unpushed" class="small pr-only" data-tip="Show the commits you would push" hidden>${icons.show}Show changes</button><button id="push" class="primary small pr-only" data-tip="Commits in this worktree that GitHub does not have yet" hidden></button>
@@ -1273,7 +1311,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 </aside>
 </div>
 <div id="panel-files" role="tabpanel">
-<div id="range-note" class="row range-note" hidden></div>
+<div id="range-note" class="row range-note" hidden></div><div id="review-card" hidden></div>
 <div class="files-layout"><div id="nav-col"><div id="nav-tools" class="nav-tools"><span id="filter-box" class="filter-box"><input id="file-filter" type="text" placeholder="Filter files" aria-label="Filter files"><button id="filter-clear" class="icon-button" aria-label="Clear filter" hidden>${icons.close}</button></span><span class="menu-anchor"><button id="filter-menu" class="icon-button" data-tip="Filter files" aria-label="Filter files" aria-haspopup="true" aria-expanded="false">${icons.filter}</button></span></div><nav id="file-nav" aria-label="Changed files"></nav><div id="nav-split" title="Drag to resize. Double-click to reset." hidden></div><section id="nav-threads" aria-label="Open comments" hidden></section><div id="nav-resize" title="Drag to resize. Double-click to reset."></div></div><div id="files"><p class="muted">Loading changes…</p></div></div>
 </div>
 <script id="initial" type="application/json">${JSON.stringify({ state, pdfScript }).replaceAll('<', '\\u003c')}</script>
@@ -1317,7 +1355,7 @@ const threadStatus: Record<ReviewThread['status'], string> = {
 export function buildOverviewState(
   pullRequest: PullRequestSummary, opened: PullRequestSession, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
   details?: PullRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
-  conversation?: PullRequestConversation | Error, claudeContext?: ClaudeContext,
+  conversation?: PullRequestConversation | Error, claudeContext?: ClaudeContext, review?: ReviewView,
 ): OverviewState {
   const { session, runner } = opened;
   const claude = claudeStatus(runner.activity);
@@ -1344,6 +1382,7 @@ export function buildOverviewState(
       ...(runner.activity.progress === undefined ? {} : { progress: runner.activity.progress }),
       ...(claudeContext === undefined ? {} : { context: claudeContext }) },
     analysis,
+    ...(review === undefined ? {} : { review }),
     threads: session.store.threads.map((thread) => {
       const activity = session.activity?.(thread.id);
       const publication = session.publication?.(thread.id);
@@ -1407,6 +1446,7 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
     resolved: thread.resolved,
     ...(thread.archived ? { archived: true as const } : {}),
     ...(thread.origin === undefined ? {} : { origin: thread.origin }),
+    ...(thread.finding === undefined ? {} : { finding: thread.finding }),
     ...(!wholeFile && !onPullRequest && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
     messages: thread.messages.map(({ author, text, createdAt, eventId }) => {
       // A suggestion replaces the commented lines, and a whole-file comment has none.

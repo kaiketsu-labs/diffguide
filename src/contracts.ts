@@ -33,6 +33,21 @@ export interface ReviewMessage {
   readonly githubReply?: string;
 }
 
+/** The review agents a code review can run. */
+export type Reviewer = 'correctness' | 'design' | 'security' | 'performance';
+export const reviewers: readonly Reviewer[] = ['correctness', 'design', 'security', 'performance'];
+
+/** How a code review's finding was proven: by a test that ran, a trace through the code, or a quoted rule or precedent. */
+export type FindingEvidence = 'tested' | 'traced' | 'cited';
+export type FindingSeverity = 'high' | 'medium' | 'low';
+
+/** What a code review thread found, and which agents raised it. */
+export interface Finding {
+  readonly reviewers: readonly Reviewer[];
+  readonly severity: FindingSeverity;
+  readonly evidence: FindingEvidence;
+}
+
 /** Durable review thread, independent of the agent transport. */
 export interface ReviewThread {
   readonly id: string;
@@ -43,8 +58,10 @@ export interface ReviewThread {
   readonly resolved: boolean;
   readonly outdated: boolean;
   readonly latestEventId: string;
-  /** Set when Claude's PR analysis opened the thread; its first message is then Claude's. */
-  readonly origin?: 'analysis';
+  /** Set when Claude's guide (`analysis`) or code review (`review`) opened the thread; its first message is then Claude's. */
+  readonly origin?: 'analysis' | 'review';
+  /** Set on threads a code review opened. */
+  readonly finding?: Finding;
   /** A few words naming what the thread is about, written by Claude with its first reply. */
   readonly title?: string;
   /** The human put the thread away; it keeps its events and can be unarchived. */
@@ -124,6 +141,8 @@ export interface ReviewStore {
   withdraw(threadId: string): Promise<WithdrawnComment>;
   /** Replace the analysis's notes that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
   replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]>;
+  /** Replace the code review's findings that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
+  replaceReviewFindings(findings: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly title: string; readonly finding: Finding }[]): Promise<readonly string[]>;
   onChange(listener: () => void): Disposable;
   flush(): Promise<void>;
 }

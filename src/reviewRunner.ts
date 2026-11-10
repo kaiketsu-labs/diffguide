@@ -1,0 +1,235 @@
+import type { spawn as spawnProcess } from 'node:child_process';
+import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import * as vscode from 'vscode';
+import { untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { reviewers, type CodeAnchor, type Reviewer, type ReviewStore } from './contracts.js';
+import type { ReviewView } from './pullRequestOverview.js';
+import { worktreeFolder } from './editGuard.js';
+import { runStructuredClaude, type StructuredRun } from './prAnalysisRunner.js';
+import { writePrivateJson } from './privateFiles.js';
+import { findingText, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt, reviewSchema, type CodeReviewResult, type DroppedCandidate } from './review.js';
+import { quotePosix, stopProcess } from './shell.js';
+import type { FileDiff } from './unifiedDiff.js';
+import { excludeFromGit, git } from './worktrees.js';
+
+/** What the code review is doing right now. */
+export interface CodeReviewActivity {
+  readonly running: boolean;
+  readonly step?: string;
+  readonly progress?: ClaudeProgress;
+  readonly error?: string;
+}
+
+export interface CodeReviewOptions {
+  readonly store: ReviewStore;
+  /** The checkout under review; review worktrees go below it. */
+  readonly cwd: string;
+  readonly dataPath: string;
+  readonly role: ClaudeRunnerOptions['role'];
+  readonly resolve: StructuredRun['resolve'];
+  readonly log: (line: string) => void;
+  /** The edit guard script and the Node.js that runs it. */
+  readonly guard: () => Promise<{ readonly guard: string; readonly node: string }>;
+  readonly spawn?: typeof spawnProcess;
+}
+
+/** What one review covers. */
+export interface CodeReviewInput {
+  readonly files: readonly FileDiff[];
+  /** What is under review, for the prompt. */
+  readonly about: string;
+  readonly reviewers: readonly Reviewer[];
+  /** Anchor for a finding's lines on the new side. */
+  readonly anchor: (range: { readonly path: string; readonly side: 'new'; readonly startLine: number; readonly endLine: number }) => Promise<CodeAnchor>;
+}
+
+const reviewFile = (dataPath: string): string => join(dataPath, 'review.json');
+const runsFolder = (cwd: string): string => join(cwd, worktreeFolder, 'review');
+/** A run folder this old is left over from a crash or a closed window. */
+const staleRunMs = 24 * 60 * 60 * 1000;
+const noHooks = ['-c', 'core.hooksPath=/dev/null'];
+
+/** The review saved in a data folder, if any. */
+export function readSavedReview(dataPath: string): Promise<CodeReviewResult | undefined> {
+  return readFile(reviewFile(dataPath), 'utf8').then((text) => readStoredReview(JSON.parse(text)), () => undefined);
+}
+
+/** One scratch worktree per reviewer, from the checkout as it is: tracked edits through a stash commit, untracked files copied. */
+async function createWorktrees(cwd: string, root: string, picked: readonly Reviewer[]): Promise<Map<Reviewer, string>> {
+  await excludeFromGit(cwd);
+  const snapshot = (await git(cwd, ['stash', 'create'])).trim() || 'HEAD';
+  const untracked = (await git(cwd, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter((path) => path !== '');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const worktrees = new Map(picked.map((reviewer) => [reviewer, join(root, reviewer)]));
+  for (const folder of worktrees.values()) {
+    await git(cwd, [...noHooks, 'worktree', 'add', '--detach', folder, snapshot]);
+    for (const path of untracked) {
+      await mkdir(dirname(join(folder, path)), { recursive: true });
+      await cp(join(cwd, path), join(folder, path), { force: true, verbatimSymlinks: true }).catch(() => undefined);
+    }
+  }
+  return worktrees;
+}
+
+async function removeRun(cwd: string, root: string): Promise<void> {
+  for (const name of await readdir(root).catch(() => [] as string[])) await git(cwd, ['worktree', 'remove', '--force', join(root, name)]).catch(() => undefined);
+  await rm(root, { recursive: true, force: true });
+  await git(cwd, ['worktree', 'prune']).catch(() => undefined);
+}
+
+/** Remove run folders a crashed or closed window left behind. */
+async function sweepRuns(cwd: string): Promise<void> {
+  const folder = runsFolder(cwd);
+  for (const name of await readdir(folder).catch(() => [] as string[])) {
+    const changed = await stat(join(folder, name)).then((info) => info.mtimeMs, () => Date.now());
+    if (Date.now() - changed > staleRunMs) await removeRun(cwd, join(folder, name));
+  }
+}
+
+/** A headless Claude run that has review agents look for defects, prove them in scratch worktrees, and posts the proven ones as threads. */
+export class CodeReview implements vscode.Disposable {
+  readonly #changed = new vscode.EventEmitter<void>();
+  readonly onDidChange = this.#changed.event;
+  #activity: CodeReviewActivity = { running: false };
+  #result: Promise<CodeReviewResult | undefined> | undefined;
+  #child: ReturnType<typeof spawnProcess> | undefined;
+  #stopped = false;
+  #disposed = false;
+
+  constructor(private readonly options: CodeReviewOptions) {
+    void sweepRuns(options.cwd);
+  }
+
+  get activity(): CodeReviewActivity {
+    return this.#activity;
+  }
+
+  /** The last finished review, if any. */
+  result(): Promise<CodeReviewResult | undefined> {
+    this.#result ??= readSavedReview(this.options.dataPath);
+    return this.#result;
+  }
+
+  /** Start a run unless one is going. */
+  start(input: CodeReviewInput): void {
+    if (this.#activity.running || this.#disposed) return;
+    this.#stopped = false;
+    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() } });
+    void this.#run(input).then(
+      () => { this.#set({ running: false }); },
+      (failure: unknown) => {
+        const error = this.#stopped ? 'Stopped.' : failure instanceof Error ? failure.message : String(failure);
+        this.options.log(`Review failed: ${error}`);
+        this.#set({ running: false, error });
+      },
+    );
+  }
+
+  stop(): void {
+    this.#stopped = true;
+    if (this.#child !== undefined) stopProcess(this.#child);
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    this.stop();
+    this.#changed.dispose();
+  }
+
+  #set(activity: CodeReviewActivity): void {
+    this.#activity = activity;
+    if (!this.#disposed) this.#changed.fire();
+  }
+
+  async #run(input: CodeReviewInput): Promise<void> {
+    const files = input.files.filter((file) => file.change !== 'unchanged' && file.saved !== true);
+    if (files.length === 0) throw new Error('There are no changes to review.');
+    if (input.reviewers.length === 0) throw new Error('Pick at least one reviewer.');
+    const { cwd, dataPath } = this.options;
+    const root = join(runsFolder(cwd), Date.now().toString(36));
+    let output: unknown;
+    try {
+      this.#set({ ...this.#activity, step: 'Preparing worktrees' });
+      const worktrees = await createWorktrees(cwd, root, input.reviewers);
+      if (this.#stopped) throw new Error('Stopped.');
+      const agentsPath = join(dataPath, 'review-agents.json');
+      await writePrivateJson(agentsPath, reviewAgents(worktrees));
+      this.options.log(`Reviewing with ${input.reviewers.join(', ')}`);
+      output = await runStructuredClaude({
+        ...this.options, prompt: reviewPrompt(files, input.about, worktrees), schema: reviewSchema, missing: 'Claude returned no review.',
+        args: [
+          '--agents', agentsPath, '--settings', await this.#guardSettings(),
+          '--allowedTools', 'Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'Agent', 'Task',
+          ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
+        ],
+        // On someone else's PR, Git hooks stay off, since the PR's author controls the checkout.
+        ...this.options.role === 'reviewer' ? { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } } : {},
+        startedAt: this.#activity.progress?.startedAt ?? Date.now(),
+        stopped: () => this.#stopped,
+        onChild: (child) => { this.#child = child; },
+        onStep: (step) => { this.#set({ ...this.#activity, step }); },
+        onProgress: (progress) => { this.#set({ ...this.#activity, progress }); },
+      });
+    } finally {
+      await removeRun(cwd, root);
+    }
+    const parsed = parseReviewOutput(output, input.reviewers, files);
+    const anchors = await Promise.all(parsed.findings.map((finding) => input.anchor({ path: finding.path, side: 'new', startLine: finding.startLine, endLine: finding.endLine }).catch(() => undefined)));
+    const placed = parsed.findings.flatMap((finding, index) => {
+      const anchor = anchors[index];
+      return anchor === undefined ? [] : [{ finding, anchor }];
+    });
+    const unplaced = parsed.findings.filter((_, index) => anchors[index] === undefined).map((finding): DroppedCandidate => ({
+      claim: finding.title, reviewers: finding.reviewers, reason: 'unplaced', why: `Could not place it on ${finding.path}:${finding.startLine}.`,
+    }));
+    const ids = await this.options.store.replaceReviewFindings(placed.map(({ finding, anchor }) => ({
+      anchor, text: findingText(finding), title: finding.title,
+      finding: { reviewers: finding.reviewers, severity: finding.severity, evidence: finding.evidence },
+    })));
+    const saved: CodeReviewResult = {
+      createdAt: new Date().toISOString(), ran: parsed.ran, skipped: parsed.skipped, candidates: parsed.candidates,
+      findings: placed.flatMap(({ finding }, index) => {
+        const threadId = ids[index];
+        return threadId === undefined ? [] : [{ threadId, title: finding.title, severity: finding.severity, evidence: finding.evidence, reviewers: finding.reviewers, path: finding.path, startLine: finding.startLine }];
+      }),
+      dropped: [...parsed.dropped, ...unplaced],
+    };
+    await writePrivateJson(reviewFile(dataPath), saved);
+    this.#result = Promise.resolve(saved);
+    this.options.log(`Review done: ${saved.findings.length} findings, ${saved.dropped.length} dropped.`);
+  }
+
+  /** Settings with the edit guard: file tools may write only below the checkout's DiffGuide worktrees, where the review worktrees are. */
+  async #guardSettings(): Promise<string> {
+    const { guard, node } = await this.options.guard();
+    const foldersPath = join(this.options.dataPath, 'review-read-only.json');
+    const settingsPath = join(this.options.dataPath, 'review-guard.json');
+    await writePrivateJson(foldersPath, [this.options.cwd]);
+    const command = [node, guard, foldersPath].map(quotePosix).join(' ');
+    await writePrivateJson(settingsPath, { hooks: { PreToolUse: [{ matcher: 'Edit|MultiEdit|Write|NotebookEdit', hooks: [{ type: 'command', command }] }] } });
+    return settingsPath;
+  }
+}
+
+const picksKey = (repository: string): string => `diffGuide.reviewers:${repository}`;
+
+/** The reviewers picked for a repository's next review; all of them until the user picks. */
+export function readPicks(state: vscode.Memento, repository: string): Reviewer[] {
+  const saved = state.get<unknown>(picksKey(repository));
+  return Array.isArray(saved) ? reviewers.filter((reviewer) => saved.includes(reviewer)) : [...reviewers];
+}
+
+export async function savePicks(state: vscode.Memento, repository: string, picks: readonly Reviewer[]): Promise<void> {
+  await state.update(picksKey(repository), [...picks]);
+}
+
+/** The page's view of a code review. */
+export async function reviewView(review: CodeReview, picked: readonly Reviewer[]): Promise<ReviewView> {
+  const result = await review.result();
+  const { running, step, progress, error } = review.activity;
+  return {
+    running, picked, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
+    ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }),
+  };
+}

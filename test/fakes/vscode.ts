@@ -711,7 +711,7 @@ export class FakeMemento implements vscode.Memento {
 
 /** Build the single extension-context field consumed by the real composer. */
 export function extensionContext(workspaceState = new FakeMemento()): vscode.ExtensionContext {
-  return { workspaceState } as unknown as vscode.ExtensionContext;
+  return { workspaceState, globalState: new FakeMemento() } as unknown as vscode.ExtensionContext;
 }
 
 /** Reset surfaces between tests without mutating application source. */

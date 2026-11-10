@@ -63,7 +63,7 @@ async function legacyStorage(sourceRoot: string, storageRoot: string): Promise<r
 }
 
 /** Hide worktree storage from Git through the repository's local exclude file, so no `.gitignore` changes are needed. */
-async function excludeFromGit(sourceRoot: string): Promise<void> {
+export async function excludeFromGit(sourceRoot: string): Promise<void> {
   const common = await gitCommonDir(sourceRoot);
   if (common === undefined) return;
   const pattern = '/.claude/worktrees/diffguide/';

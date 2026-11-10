@@ -28,7 +28,7 @@ export interface AnsweredPullRequest {
 export function latestAnswers(pullRequests: readonly AnsweredPullRequest[], limit = 50): ClaudeAnswer[] {
   return pullRequests.flatMap(({ key, number, threads }) => threads.flatMap((thread): ClaudeAnswer[] => {
     const last = thread.messages.at(-1);
-    if (thread.resolved || thread.archived === true || thread.origin === 'analysis' || last?.author !== 'claude') return [];
+    if (thread.resolved || thread.archived === true || thread.origin !== undefined || last?.author !== 'claude') return [];
     const asked = thread.messages[0]?.text.replaceAll(/\s+/gu, ' ').trim() ?? '';
     return [{
       pullRequest: key, number, threadId: thread.id, title: thread.title ?? asked.slice(0, 80),

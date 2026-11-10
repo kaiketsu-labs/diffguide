@@ -1,5 +1,8 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { resolveExecutable } from './executables.js';
+import { loginShell } from './pullRequestSessions.js';
+import { CodeReview, readPicks, reviewView, savePicks } from './reviewRunner.js';
 import * as vscode from 'vscode';
 import { anchorFromText, fileAnchor } from './anchors.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from './contracts.js';
@@ -76,6 +79,7 @@ export class LocalReview implements vscode.Disposable {
   #looking: string | undefined;
   /** Suggestion options written to files while the page is open, by thread, and the content before, so Discard can put it back. */
   readonly #applied = new Map<string, { readonly message: number; readonly option: number; readonly path: string; readonly before: string; readonly after: string }>();
+  readonly #codeReview: CodeReview;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -91,6 +95,19 @@ export class LocalReview implements vscode.Disposable {
     private readonly pageKey: string = mainPageKey,
   ) {
     this.#definitions = new DefinitionPeeks(root);
+    const output = vscode.window.createOutputChannel(`Claude · Review ${basename(root)}`);
+    const configuration = vscode.workspace.getConfiguration('diffGuide');
+    this.#codeReview = new CodeReview({
+      store, cwd: root, dataPath, role: 'author',
+      log: (line) => { output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`); },
+      resolve: async () => {
+        const claudePath = configuration.get<string>('claudePath', 'claude');
+        const shell = loginShell();
+        return shell === undefined ? { executable: await resolveExecutable(claudePath, root) } : { executable: claudePath, shell };
+      },
+      guard: async () => ({ guard: join(context.extensionPath, 'dist', 'edit-guard.cjs'), node: await resolveExecutable(configuration.get<string>('nodePath', 'node'), root) }),
+    });
+    this.#disposables.push(output, this.#codeReview);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*'));
     const changed = (uri: vscode.Uri): void => {
@@ -157,6 +174,7 @@ export class LocalReview implements vscode.Disposable {
       toDisposable(this.bridge.onChange(() => { listener(undefined); })),
       this.launcher.onDidChange(listener),
       this.#marksChanged.event(listener),
+      this.#codeReview.onDidChange(listener),
     ), this.#actions(), this.context.extensionUri, reveal, this.onDidChangeFiles);
   }
 
@@ -223,6 +241,7 @@ export class LocalReview implements vscode.Disposable {
       claude: { ...localClaudeStatus(this.bridge, this.store.pendingEvents.length),
         link: { delivering: this.bridge.state.deliveryReady === true, terminal: this.launcher.hasTerminal } },
       analysis: { running: false, stale: false },
+      review: await reviewView(this.#codeReview, readPicks(this.context.globalState, this.root)),
       threads: this.store.threads.map((thread) => {
         const view = threadView(thread, { intents });
         const applied = this.#applied.get(thread.id);
@@ -356,6 +375,16 @@ export class LocalReview implements vscode.Disposable {
       retry: () => undefined,
       dismissConflictQuestion: () => undefined,
       stopAnalysis: () => undefined,
+      review: async (picks) => {
+        await savePicks(this.context.globalState, this.root, picks);
+        const { files } = await this.readFiles();
+        this.#codeReview.start({
+          files, reviewers: picks, about: `Uncommitted changes in ${basename(this.root)}`,
+          anchor: (range) => this.#anchor(range),
+        });
+      },
+      stopReview: () => { this.#codeReview.stop(); },
+      pickReviewers: async (picks) => { await savePicks(this.context.globalState, this.root, picks); this.#marksChanged.fire(); },
       publish: unsupported, postToGitHub: unsupported, commentOnGitHub: unsupported, commentOnGitHubFile: unsupported, replyOnGitHub: unsupported, askAboutGitHub: unsupported, askAboutComment: unsupported, resolveOnGitHub: unsupported,
       deleteOnGitHub: unsupported, push: unsupported, readCommit: unsupported, submitReview: unsupported, merge: unsupported, addComment: unsupported,
       editComment: unsupported, deleteIssueComment: unsupported, hideComment: unsupported, react: unsupported, discardReview: unsupported,
