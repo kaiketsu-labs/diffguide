@@ -13,7 +13,7 @@
 - ⌘/Ctrl+F opens VS Code's find bar on the review page. It finds text on the page only, so folded files and hunks and PDF pages are not searched.
 - Each comment you send shows whether it went with **Ask** or **Implement**.
 - **Stop** sits next to the running step's time.
-- **Stop and edit** next to **Stop** takes a sent comment back into its box to edit and send again. The page says whether Claude had already read it. Stop shows the run as ended without waiting for GitHub.
+- A thread's **Stop** stops the run and takes your last comment back into its box to edit and send again. The page says whether Claude had already read it. On local review pages Stop only takes the comment back, since your own Claude session answers there. Stop shows the run as ended without waiting for GitHub.
 - While the guide builds, the **Guide** tab's icon moves. When the guide is out of date, the tab shows a warning mark.
 - The orb stretches in flight before it lands in a reply.
 - Messages in a thread sit in their own cards, set apart from each other.
