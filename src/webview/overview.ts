@@ -47,6 +47,8 @@ interface Saved {
   readonly filter?: string;
   readonly hideViewed?: boolean;
   readonly hiddenTypes?: readonly string[];
+  /** Opened files the user closed; they stay off the page until reopened or a comment shown on the page lands on them. */
+  readonly closedFiles?: readonly string[];
   readonly conversationDraft?: string;
   readonly conversationFolded?: boolean;
   /** Collapsed threads leave the diff and show as marks beside their last line. */
@@ -128,6 +130,7 @@ let atHead = true;
 let fileFilter = saved.filter ?? '';
 let hideViewed = saved.hideViewed === true;
 const hiddenTypes = new Set(saved.hiddenTypes ?? []);
+const closedFiles = new Set(saved.closedFiles ?? []);
 /** The open menu under a Files toolbar button: the range or the file filter. */
 let toolbarMenu: { readonly anchor: string; readonly node: HTMLElement } | undefined;
 let conversationDraft = saved.conversationDraft ?? '';
@@ -299,7 +302,7 @@ function frameMain(scripts: boolean): void {
 
 function save(): void {
   api.setState({ layout, view, peekWidth, folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer, fileComposer, showArchived, guideInFiles, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden, navWidth, navThreadsHeight });
+    range: wantedRange ?? diffRange, whitespace, filter: fileFilter, hideViewed, hiddenTypes: [...hiddenTypes], closedFiles: [...closedFiles], conversationDraft, conversationFolded, marginThreads, allFiles, listHidden, navWidth, navThreadsHeight });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -3727,12 +3730,16 @@ function localMark(path: string): HTMLElement[] {
 
 /** Take opened unchanged files off the page; files with comments stay. */
 function closeFiles(paths: readonly string[]): void {
+  for (const path of paths) closedFiles.add(path);
+  save();
+  renderFiles();
   post({ action: 'close-files', paths });
 }
 
-/** Files outside the changes opened on the page, shown whole after the changes. */
+/** Files outside the changes opened on the page, shown whole after the changes. A closed file stays off even when the extension keeps it for a hidden thread, such as a guide note. */
 function openedFiles(): readonly FileDiff[] {
-  return (files ?? []).filter((file) => file.change === 'unchanged');
+  const commented = new Set(allThreads().filter(inFiles).map((thread) => thread.path));
+  return (files ?? []).filter((file) => file.change === 'unchanged' && (!closedFiles.has(file.path) || commented.has(file.path)));
 }
 
 /** A theme file icon: a glyph of an icon font, added to the page on first use, or an image. */
@@ -4635,7 +4642,7 @@ function showGuideTab(): void {
   $('guide-stale').hidden = analysis?.running === true || analysis?.result === undefined || !analysis.stale;
   count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
   count.hidden = analysis?.running === true || steps === undefined;
-  $('files-count').textContent = files ? String(files.length - openedFiles().length) : '';
+  $('files-count').textContent = files ? String(files.filter((file) => file.change !== 'unchanged').length) : '';
   for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', view !== 'guide');
   for (const id of ['range', 'nav-tools']) $(id).classList.toggle('off-view', view !== 'files');
   showListToggle();
@@ -4787,6 +4794,7 @@ function onExtensionMessage(data: ExtensionMessage): void {
   }
   if (data.reveal && files) {
     view = 'files';
+    closedFiles.delete(data.reveal);
     collapsed.set(data.reveal, false);
     openFolders(data.reveal);
     save();
