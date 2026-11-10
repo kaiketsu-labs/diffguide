@@ -237,6 +237,58 @@
 - Let Git change listing compare against an explicit base commit, preparing PR review. Local review still compares against `HEAD`.
 - Fixed: a loaded HTML preview no longer disappears when another file on the page redraws, such as a PDF finishing loading or ticking another file Viewed.
 
+## [0.7.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.6.0...v0.7.0) (2026-11-10)
+
+
+### Features
+
+* **files:** show guide comments only in the guide unless the filter menu turns them on ([8d42ade](https://github.com/kaiketsu-labs/diffguide/commit/8d42ade16c1be3985b008b887cd97d6ed487c7e7))
+* **guide:** animate the guide tab's icon while the guide builds ([c02f204](https://github.com/kaiketsu-labs/diffguide/commit/c02f204b17d26547a282111365ca028a08d8ecd5))
+* **guide:** mark the guide tab when the guide is out of date ([70606ba](https://github.com/kaiketsu-labs/diffguide/commit/70606ba81b521af85afe6b90424b732d98aafb65))
+* **overview:** search the review page with ctrl/cmd+f ([d901fc0](https://github.com/kaiketsu-labs/diffguide/commit/d901fc0609497b431efacc1b2d428b45b8584e9c))
+* **overview:** show merged or closed in the page header ([9da6b64](https://github.com/kaiketsu-labs/diffguide/commit/9da6b64bdef65e526465e09cf41eff0a57d81c92))
+* **preview:** run an html file's scripts on request ([063dc28](https://github.com/kaiketsu-labs/diffguide/commit/063dc2818d250b5c49fe34fa27840167c7aa01b6))
+* **preview:** scroll pdf and html previews inside a fixed-height box ([6f659b8](https://github.com/kaiketsu-labs/diffguide/commit/6f659b8000fd3af2f89965ba7adee1161686c57f))
+* **review:** merge stop and stop and edit into one stop button ([24c86e2](https://github.com/kaiketsu-labs/diffguide/commit/24c86e2c8230653e6961fa04aa2f21120ba583ea))
+* **review:** show whether a comment was sent with ask or implement ([9476deb](https://github.com/kaiketsu-labs/diffguide/commit/9476deba7404b0e3405b8141ea2cb36224efb85b))
+* **review:** stop and take back a sent comment to edit it ([befbdce](https://github.com/kaiketsu-labs/diffguide/commit/befbdced2c12dfb6abcbc0a88a6e5d6b63deb9f0))
+* **sidebar:** show the open pr count on all open ([8b48c4e](https://github.com/kaiketsu-labs/diffguide/commit/8b48c4e2c637a6eb802b8739a86eb401e9afd770))
+* **threads:** ask the agent about a conversation comment in a pr-level local thread ([1a92031](https://github.com/kaiketsu-labs/diffguide/commit/1a92031855d78da262b6e3ecd74fd84c188500e7))
+* **threads:** comment on a whole file on github and show github's whole-file threads ([ed677c0](https://github.com/kaiketsu-labs/diffguide/commit/ed677c069700399932e5915e053b02d0c6f4e3fe))
+* **webview:** color inline code in markdown ([418906c](https://github.com/kaiketsu-labs/diffguide/commit/418906cc9c524b66f82677c5cc82e7cab7c7bf64))
+* **webview:** keep the current file's row in view in the file list ([062c04f](https://github.com/kaiketsu-labs/diffguide/commit/062c04f943de04552df7276405c26aba95016d6e))
+* **webview:** let the orb wake, nod, doze, sleep and lead in step logs ([12a2e58](https://github.com/kaiketsu-labs/diffguide/commit/12a2e588165560a7c2218221941f9f8c5ee08744))
+* **webview:** list open comments under the file list ([4dbeb97](https://github.com/kaiketsu-labs/diffguide/commit/4dbeb97d6a3aaf10843ddd6686cc362939fffeba))
+* **webview:** move show guide comments to the view menu ([07945eb](https://github.com/kaiketsu-labs/diffguide/commit/07945ebf73b03f08194a0d1dd20c02f1c5ae2650))
+* **webview:** resize the file list by dragging its edge ([90ed7b7](https://github.com/kaiketsu-labs/diffguide/commit/90ed7b7edb3f8a8dee45a7975e05e78a2056f5b3))
+* **webview:** rotate the thinking orb through seven motions ([bf99cd7](https://github.com/kaiketsu-labs/diffguide/commit/bf99cd7259aa4955d3c4dd508ff20250106c6eee))
+
+
+### Bug Fixes
+
+* **files:** open the filter menu above sticky thread headers ([21d7270](https://github.com/kaiketsu-labs/diffguide/commit/21d72701c757e4fe6a60e03072c666cd30395b62))
+* **guide:** style the stale guide's rebuild button as an agent action ([25ce55d](https://github.com/kaiketsu-labs/diffguide/commit/25ce55d059e56ccac464036ac43b2b196c846086))
+* **local:** hide a thread's stop when there is no comment to take back ([372664b](https://github.com/kaiketsu-labs/diffguide/commit/372664bc6f831de495a418d5a703421a4498e4b7))
+* **markdown:** render gfm tables without outer pipes ([a8b1fd2](https://github.com/kaiketsu-labs/diffguide/commit/a8b1fd287bb11b99ce023166a52305bb11ad9447))
+* **orb:** stretch the orb in flight before it lands in the reply ([d672bc2](https://github.com/kaiketsu-labs/diffguide/commit/d672bc242df5573b12e586e5faec424d390261e4))
+* **overview:** show the full pr description without a scrollbar ([c22d2f8](https://github.com/kaiketsu-labs/diffguide/commit/c22d2f82e87cf94ba91dde117a60a159343d3403))
+* **overview:** style tables in the pr description ([d7af95b](https://github.com/kaiketsu-labs/diffguide/commit/d7af95bd6a835887a8a82d8e5e2956ab543df0a9))
+* **review:** keep reviewers who only commented in the reviewer list ([19e1b8c](https://github.com/kaiketsu-labs/diffguide/commit/19e1b8c262262410b3014051e2a9408359c68314))
+* **review:** mark re-requested reviewers and tick them in the picker ([a1fb968](https://github.com/kaiketsu-labs/diffguide/commit/a1fb96889d0baa64e058dd1a8f32eb9340d71c8d))
+* **review:** put stop beside the running step's time ([074beeb](https://github.com/kaiketsu-labs/diffguide/commit/074beeb3dbc9057110919f67ee72f0065b23f7e5))
+* **sidebar:** refresh pr rows after reviewer changes ([35cafc2](https://github.com/kaiketsu-labs/diffguide/commit/35cafc2e0db318a58ff0d34ed24dadb588dde661))
+* **webview:** color inline code with the theme's ansi cyan ([fd90a58](https://github.com/kaiketsu-labs/diffguide/commit/fd90a58644ad14666e37e9527e21c1a10fd7c0d3))
+* **webview:** keep cmd/ctrl+j for vs code on diffguide pages ([0cef2f7](https://github.com/kaiketsu-labs/diffguide/commit/0cef2f75561db9fe2a052f4917932ebaf5f86721))
+* **webview:** keep html previews of files that are not redrawn ([2727eac](https://github.com/kaiketsu-labs/diffguide/commit/2727eac3468dd0ba13b2fc2e1f2d071939abf574))
+* **webview:** let the comments panel fill the file column to the bottom ([cb81347](https://github.com/kaiketsu-labs/diffguide/commit/cb81347462a667d22b91ad5830c54ba65d097e43))
+* **webview:** space a pr-level thread from its comment's reactions ([69d1bdc](https://github.com/kaiketsu-labs/diffguide/commit/69d1bdcc4672690157a0a5af840706019815e338))
+* **webview:** tidy the comments panel and the guide's stop button ([4778bd2](https://github.com/kaiketsu-labs/diffguide/commit/4778bd2ad8b73d59fe7a6ac52194525d58aab755))
+
+
+### Performance Improvements
+
+* **claude:** show a stopped run as ended without waiting for github ([b461ec4](https://github.com/kaiketsu-labs/diffguide/commit/b461ec473d0e7bb96852c444e334e55e67c2e8f0))
+
 ## [0.6.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.5.1...v0.6.0) (2026-11-08)
 
 
