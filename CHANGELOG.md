@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The review page shows how many tokens a PR's Claude conversation holds after its last run, beside Claude's status. Its menu starts a new conversation or compacts the current one with Claude Code's `/compact`.
+- **Draft reply** in a thread's Reply form has Claude write the GitHub comment from what you typed: notes on what to say, or a draft to revise. On a GitHub thread the draft replaces your text; on a Local thread it opens the Publish form, whose own **Draft reply** revises it. A GitHub thread's Reply form now lists Implement before Ask, as a Local thread's does.
 - A commit Claude makes for a comment shows under its reply to that comment, not at the end of the thread. Commits recorded before this update still show at the end.
 - **Close all** on the review page closes every opened file without a visible comment, including files that only hold hidden guide notes or archived threads. A closed file comes back when you open it again or a comment you can see lands on it.
 - **All open** in the Pull Requests view shows how many PRs are open. The count can be higher than the rows, which stop at 50.

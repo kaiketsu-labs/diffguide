@@ -98,6 +98,15 @@ Each PR keeps one Claude conversation, and every comment's run continues it, so 
 
 Pages whose comments go to a conversation you connected show no count; manage that conversation in Claude itself.
 
+## Drafting a reply for GitHub
+
+**Draft reply** sits in a thread's Reply form and has Claude write the comment you would post on GitHub. It reads the form's text first: leave it empty, type notes on what to say ("suggest `shouldRetry`, keep it short"), or edit an earlier draft and add what to change.
+
+- On a GitHub thread, Claude writes your next reply in the thread and it replaces the form's text.
+- On a Local thread, Claude writes one self-contained comment for the PR's other reviewers and its author, with the conclusion and without your questions. It opens the Publish form, where you edit it, choose **Draft reply** again to revise it from the form's text, or post it.
+
+Drafting never posts, resolves or adds a message to the thread. Your notes stay on the page.
+
 ## Preview status
 
 This is an early preview. Local review and PR review share one review page; its colors follow your VS Code theme. Current checks and remaining authenticated integration work are recorded in the [review findings](REVIEW.md). The demo uses simulated responses.
