@@ -3181,7 +3181,7 @@ function pdfView(key: string, side: Extract<MediaSide, { data: string }>): HTMLE
   void (async () => {
     const library = await loadPdfLibrary();
     const bytes = Uint8Array.from(atob(side.data), (char) => char.charCodeAt(0));
-    const pdf = await library.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    const pdf = await library.getDocument({ data: bytes }).promise;
     const shown: HTMLElement[] = [];
     for (let number = 1; number <= Math.min(pdf.numPages, maxPdfPages); number += 1) {
       const page = await pdf.getPage(number);
@@ -3189,9 +3189,7 @@ function pdfView(key: string, side: Extract<MediaSide, { data: string }>): HTMLE
       const canvas = el('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      const context = canvas.getContext('2d');
-      if (!context) continue;
-      await page.render({ canvasContext: context, viewport }).promise;
+      await page.render({ canvas, viewport }).promise;
       shown.push(canvas);
     }
     if (pdf.numPages > maxPdfPages) shown.push(el('div', 'note muted', (pdf.numPages - maxPdfPages) + ' more pages. Open the file to see them.'));
