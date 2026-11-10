@@ -14,16 +14,16 @@
 - The thinking orb changes what it does every 6 seconds: it circles sparks, ponders a "?", juggles, shows typing dots, sends out ripples, rolls its eyes or hops.
 - ⌘/Ctrl+F opens VS Code's find bar on the review page. It finds text on the page only, so folded files and hunks and PDF pages are not searched.
 - Each comment you send shows whether it went with **Ask** or **Implement**.
-- **Stop** sits next to the running step's time.
+- **Stop** sits next to the running step's time, in threads and while the guide builds.
 - A thread's **Stop** stops the run and takes your last comment back into its box to edit and send again. The page says whether Claude had already read it. On local review pages Stop only takes the comment back, since your own Claude session answers there. Stop shows the run as ended without waiting for GitHub.
 - While the guide builds, the **Guide** tab's icon moves. When the guide is out of date, the tab shows a warning mark.
 - The orb stretches in flight before it lands in a reply.
 - Messages in a thread sit in their own cards, set apart from each other.
 - A comment on a whole file can go to GitHub, and whole-file threads from GitHub show as **Whole file**.
 - **Ask the agent about this comment** on a Conversation comment starts a local thread about the whole PR. It quotes the comment, shows under it and in the Threads card, and can be published as a PR comment.
-- Guide comments show in the **Guide** tab only. **Show guide comments** in the **View** menu brings them back to **Files**.
+- Guide comments show in the **Guide** tab only. **Show guide comments** in the **View** menu brings them back to **Files** and its **Comments** panel.
 - The file list highlights the file at the top of the view and scrolls to keep it visible. Drag its edge to resize it; double-click resets.
-- A **Comments** panel under the file list lists open threads by file and reaches the bottom of the window. Click one to jump to it. Drag the line above it to resize it.
+- A **Comments** panel under the file list lists open threads by file and reaches the bottom of the window. Click one to jump to it. Drag the line above it to resize it. It scrolls up and down only.
 - The Files filter menu opens above sticky thread headers.
 - An HTML file whose content is drawn by scripts can show it on the review page: **Run scripts** in the preview's note row runs the file's scripts in the sandboxed frame. The page's buttons and links then work, and clicks elsewhere start a comment. A comment on drawn content attaches to its nearest element in the source. **Stop scripts** goes back to the static page.
 - In VS Code for the Web, ⌘/Ctrl+J and ⌘/Ctrl+Shift+J on DiffGuide's pages run your VS Code shortcuts again instead of opening the browser's Downloads or DevTools. This covers the review page, **Publish** and **Connect running Claude**. Other extensions' pages and VS Code's own previews still pass these keys to the browser.
