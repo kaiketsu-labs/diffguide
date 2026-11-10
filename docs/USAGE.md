@@ -89,6 +89,15 @@ Each PR you open gets its own checkout under `.claude/worktrees/diffguide/` in t
 
 DiffGuide removes a PR's worktree when the PR is merged or closed, or when you have not opened it for `diffGuide.worktreeCleanupDays` days (14 by default, 0 turns the age limit off). It never removes a worktree with uncommitted changes or unpushed commits. It checks when VS Code starts, and **DiffGuide: Clean up worktrees** checks right away.
 
+## A PR's Claude conversation
+
+Each PR keeps one Claude conversation, and every comment's run continues it, so it grows. The token count beside Claude's status shows how large it was after the last run. Every run re-reads all of it, and the bar turns yellow at half of the model's context window. Click it for:
+
+- **New conversation**: the next comment starts a fresh conversation. Claude forgets earlier runs, but each comment still sends its own thread.
+- **Compact**: runs Claude Code's `/compact` in the conversation, which summarizes it and keeps going.
+
+Pages whose comments go to a conversation you connected show no count; manage that conversation in Claude itself.
+
 ## Preview status
 
 This is an early preview. Local review and PR review share one review page; its colors follow your VS Code theme. Current checks and remaining authenticated integration work are recorded in the [review findings](REVIEW.md). The demo uses simulated responses.
