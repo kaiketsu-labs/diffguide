@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { record } from './connection.js';
 import type { ReviewThread } from './contracts.js';
 import { ago } from './pullRequestView.js';
 
@@ -71,10 +72,10 @@ export class SeenAnswers implements vscode.Disposable {
 
   #stored(): { readonly since?: string; readonly seen: Record<string, string> } {
     const value = this.memento.get<unknown>(SeenAnswers.key);
-    const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
-    const seen = typeof record['seen'] === 'object' && record['seen'] !== null ? record['seen'] as Record<string, unknown> : {};
+    const stored = record(value) ?? {};
+    const seen = typeof stored['seen'] === 'object' && stored['seen'] !== null ? stored['seen'] as Record<string, unknown> : {};
     return {
-      ...(typeof record['since'] === 'string' ? { since: record['since'] } : {}),
+      ...(typeof stored['since'] === 'string' ? { since: stored['since'] } : {}),
       seen: Object.fromEntries(Object.entries(seen).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
     };
   }

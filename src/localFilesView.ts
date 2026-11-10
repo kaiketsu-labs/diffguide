@@ -11,7 +11,7 @@ const checkoutIcons: Record<LocalCheckout['kind'], string> = { folder: 'repo', w
 const checkoutNotes: Record<LocalCheckout['kind'], string> = { folder: '', worktree: 'worktree', pr: 'PR' };
 
 /** Files with uncommitted changes in `root`, new files included; every file when the branch has no commit yet. */
-export async function countChangedFiles(root: string): Promise<number> {
+async function countChangedFiles(root: string): Promise<number> {
   const [changed, untracked] = await Promise.all([
     gitPaths(root, ['diff', '--name-only', 'HEAD']).catch(() => listRepositoryFiles(root)),
     gitPaths(root, ['ls-files', '--others', '--exclude-standard']),

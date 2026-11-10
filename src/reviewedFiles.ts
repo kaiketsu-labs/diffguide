@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { anchorFromText, locateCodeAnchor } from './anchors.js';
+import { record } from './connection.js';
 import type { CodeAnchor } from './contracts.js';
 import { isWorkspaceRelativePath, readGitBase } from './git.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
@@ -61,7 +62,7 @@ const maximumMarksBytes = 16 * 1024 * 1024;
 /** Rejects when the marks file is unreadable, so a write never replaces marks it could not read. */
 async function readMarks(data: string): Promise<Marks> {
   const value = await readPrivateJson(marksPath(data), maximumMarksBytes);
-  const { files, ranges } = typeof value === 'object' && value !== null ? value as { files?: unknown; ranges?: unknown } : {};
+  const { files, ranges } = record(value) ?? {};
   return {
     files: typeof files === 'object' && files !== null
       ? Object.fromEntries(Object.entries(files).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))

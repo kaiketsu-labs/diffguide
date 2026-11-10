@@ -43,7 +43,7 @@ export interface AnalysisInput {
 const analysisFile = (dataPath: string): string => join(dataPath, 'analysis.json');
 
 /** The analysis saved in a PR's review data folder, if any. */
-export function readSavedAnalysis(dataPath: string): Promise<Analysis | undefined> {
+function readSavedAnalysis(dataPath: string): Promise<Analysis | undefined> {
   return readFile(analysisFile(dataPath), 'utf8').then((text) => readStoredAnalysis(JSON.parse(text)), () => undefined);
 }
 

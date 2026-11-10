@@ -21,7 +21,7 @@ export const reviewerInfo: Readonly<Record<Reviewer, { readonly label: string; r
 
 /** Why the orchestrator did not post a candidate. */
 export type DropReason = 'over-cap' | 'refuted' | 'unconfirmed' | 'duplicate' | 'out-of-scope' | 'unplaced';
-export const dropReasons: readonly DropReason[] = ['over-cap', 'refuted', 'unconfirmed', 'duplicate', 'out-of-scope', 'unplaced'];
+const dropReasons: readonly DropReason[] = ['over-cap', 'refuted', 'unconfirmed', 'duplicate', 'out-of-scope', 'unplaced'];
 const severities: readonly FindingSeverity[] = ['high', 'medium', 'low'];
 const evidences: readonly FindingEvidence[] = ['tested', 'rewritten', 'traced', 'cited'];
 
@@ -168,7 +168,7 @@ export function splitAgentCost(models: readonly ReviewModelUsage[], turns: Reado
 }
 
 /** Usage as saved; undefined when a file has none or it is malformed. */
-export function readStoredUsage(raw: unknown): ReviewUsage | undefined {
+function readStoredUsage(raw: unknown): ReviewUsage | undefined {
   const record = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
   const cost = money(record['cost']);
   if (cost === undefined) return undefined;

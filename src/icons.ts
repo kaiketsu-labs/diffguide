@@ -115,5 +115,3 @@ export const icons = {
   verify: line('<path d="M6 1.5h4M6.75 1.5V6L2.9 12.9a1 1 0 0 0 .87 1.6h8.46a1 1 0 0 0 .87-1.6L9.25 6V1.5M4.6 10h6.8"/>'),
   report: line('<path d="M3.5 14.5V1.75M3.5 2.5h9l-2 3 2 3h-9"/>'),
 } as const;
-
-export type IconName = keyof typeof icons;

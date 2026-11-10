@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import * as vscode from 'vscode';
 import type { ReviewEvent, ReviewStore } from './contracts.js';
+import { record } from './connection.js';
 import { buildReviewBatchPrompt } from './eventPrompt.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 import { quotePosix, stopProcess } from './shell.js';
@@ -434,7 +435,7 @@ const isCount = (value: unknown): value is number => Number.isSafeInteger(value)
 export function parseLine(line: string): StreamMessage | undefined {
   try {
     const value: unknown = JSON.parse(line);
-    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as StreamMessage : undefined;
+    return record(value) as StreamMessage | undefined;
   } catch {
     return undefined;
   }
@@ -467,7 +468,7 @@ export interface ToolStep {
   readonly label: string;
 }
 
-export function toolStep(name: string, input: unknown, cwd: string): ToolStep {
+function toolStep(name: string, input: unknown, cwd: string): ToolStep {
   const fields = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
   const text = (key: string): string | undefined => typeof fields[key] === 'string' ? fields[key] : undefined;
   const file = (key: string): string => {

@@ -226,7 +226,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const squash = { crouch: .86, air: 1.06 } as const;
 
 /** Draw one orb canvas at time `t`. An avatar's `data-pose` squashes it for the hop into a reply. */
-export function paintOrb(canvas: HTMLCanvasElement, t: number): void {
+function paintOrb(canvas: HTMLCanvasElement, t: number): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const avatar = canvas.classList.contains('avatar');

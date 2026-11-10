@@ -154,7 +154,7 @@ const staleRunMs = 24 * 60 * 60 * 1000;
 const noHooks = ['-c', 'core.hooksPath=/dev/null'];
 
 /** The review saved in a data folder, if any. */
-export function readSavedReview(dataPath: string): Promise<CodeReviewResult | undefined> {
+function readSavedReview(dataPath: string): Promise<CodeReviewResult | undefined> {
   return readFile(reviewFile(dataPath), 'utf8').then((text) => readStoredReview(JSON.parse(text)), () => undefined);
 }
 

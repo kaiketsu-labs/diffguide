@@ -212,7 +212,7 @@ async function moveWorktree(sourceRoot: string, folder: string, target: string):
 }
 
 /** Record that a PR worktree was opened, so cleanup measures its age from now. */
-export async function touchWorktree(folder: string): Promise<void> {
+async function touchWorktree(folder: string): Promise<void> {
   const now = new Date();
   await utimes(metadataPath(folder), now, now).catch(() => undefined);
 }
