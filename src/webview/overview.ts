@@ -3917,7 +3917,7 @@ function staleGuideRow(result: Analysis, groups: readonly GuideGroup[]): HTMLEle
   ].filter(Boolean).join('. ') + '.';
   const row = el('div', 'row range-note stale-guide');
   row.append(icon(icons.warning), el('span', 'gap wait', facts));
-  const rebuild = button(current?.analysis.running ? 'Rebuilding…' : 'Rebuild guide', () => { $('error').textContent = ''; post({ action: 'analyze' }); }, 'claude small');
+  const rebuild = button(current?.analysis.running ? 'Rebuilding…' : 'Rebuild guide', () => { $('error').textContent = ''; post({ action: 'analyze' }); }, 'agent small');
   rebuild.disabled = current?.analysis.running === true;
   row.append(rebuild);
   return row;
