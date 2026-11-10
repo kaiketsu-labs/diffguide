@@ -27,7 +27,7 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       # release-please adds each release below "## Unreleased"; move the written notes into it.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.pr }}
         with:
           ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
@@ -43,7 +43,7 @@ jobs:
             git push
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.release_created || inputs.tag }}
         with:
           ref: ${{ inputs.tag }}
