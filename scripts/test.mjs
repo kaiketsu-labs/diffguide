@@ -3,7 +3,14 @@ import { readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
-const tests = (await readdir('test')).filter(name => name.endsWith('.test.ts'));
+const filters = process.argv.slice(2);
+const tests = (await readdir('test'))
+  .filter(name => name.endsWith('.test.ts'))
+  .filter(name => filters.length === 0 || filters.some(filter => name.includes(filter)));
+if (tests.length === 0) {
+  console.error(`No test file matches: ${filters.join(', ')}`);
+  process.exit(1);
+}
 await build({
   entryPoints: tests.map(name => `test/${name}`),
   alias: { vscode: resolve('test/fakes/vscode.ts') },
