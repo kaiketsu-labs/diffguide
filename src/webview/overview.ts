@@ -1,7 +1,7 @@
 import type { ClaudeProgress, ClaudeStep } from '../claudeRunner.js';
 import type { ClaudeConversation } from '../claudeSessions.js';
 import { reviewers, type Finding, type Reviewer, type ReviewIntent } from '../contracts.js';
-import { reviewerInfo, type DropReason } from '../review.js';
+import { reviewerInfo, reviewStages, type DropReason, type ReviewLane, type ReviewLaneItem, type ReviewLive, type ReviewStage, type ReviewUsage } from '../review.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type Analysis, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
@@ -313,8 +313,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
-const elapsed = (since: number): string => {
-  const seconds = Math.max(0, Math.floor((Date.now() - since) / 1000));
+const elapsed = (since: number, until = Date.now()): string => {
+  const seconds = Math.max(0, Math.floor((until - since) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
@@ -345,12 +345,12 @@ const waitMotion = (id: string): StepPick => ({ verb }) => {
 };
 
 /** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb, the run's time and `stop` on the current one. */
-function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)]): HTMLElement {
+function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)], orb = true): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
     const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
-    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orbCanvas('step', ...pick(step)));
+    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orb ? orbCanvas('step', ...pick(step)) : stateIcon('active', 'agent'));
     const title = el('span', 'step-call');
     title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
     row.append(title);
@@ -4058,7 +4058,11 @@ function threadKind(thread: Thread): ThreadKind {
 
 /** A tag per code review agent that raised a finding. */
 function agentTags(names: readonly Reviewer[]): HTMLElement[] {
-  return names.map((name) => el('span', 'agent-tag', reviewerInfo[name].label));
+  return names.map((name) => {
+    const tag = el('span', 'agent-tag');
+    tag.append(icon(icons[name]), reviewerInfo[name].label);
+    return tag;
+  });
 }
 
 const findingSeverityLabels: Record<Finding['severity'], string> = { high: 'High', medium: 'Medium', low: 'Low' };
@@ -4074,6 +4078,16 @@ function findingMarks({ severity, evidence }: Pick<Finding, 'severity' | 'eviden
   return [el('span', 'sev ' + severity, findingSeverityLabels[severity]), titled(el('span', 'ev ' + evidence, label), tip)];
 }
 
+/** A finding's place; a narrow card moves it to its own line, where the folders give way first. */
+function findingWhere(path: string, line: number): HTMLElement {
+  const node = titled(el('span', 'finding-where'), path + ':' + line);
+  const cut = path.lastIndexOf('/') + 1;
+  const folder = el('span', 'finding-folder');
+  folder.append(el('bdi', '', path.slice(0, cut)));
+  node.append(folder, el('span', 'finding-file', path.slice(cut) + ':' + line));
+  return node;
+}
+
 const dropLabels: Record<DropReason, [string, string]> = {
   'over-cap': ['Over cap', 'Proven, ranked below the top 10'],
   refuted: ['Refuted', 'Verification disproved it'],
@@ -4086,16 +4100,22 @@ const dropLabels: Record<DropReason, [string, string]> = {
 /** The code review's summary above the files: findings by rank, who ran, and every dropped candidate with its reason. */
 function renderReviewCard(): void {
   const card = $('review-card');
-  const result = current?.review?.result;
-  card.hidden = result === undefined;
-  if (result === undefined) { card.replaceChildren(); return; }
+  const review = current?.review;
+  const result = review?.result;
+  const live = review?.running || review?.error !== undefined ? review?.live : undefined;
+  card.hidden = result === undefined && live === undefined;
+  if (card.hidden) { card.replaceChildren(); return; }
+  const cards = live === undefined || review === undefined ? [] : [reviewLiveCard(live, review.running, review.error)];
+  if (result === undefined || review?.running) { card.replaceChildren(...cards); return; }
   const box = el('details', 'thread review review-card');
   box.open = collapsed.get('review-card') !== true;
   box.addEventListener('toggle', () => { collapsed.set('review-card', !box.open); save(); });
   const count = result.findings.length;
   box.append(strip('summary', 'review', 'Claude\'s code review of these changes.', [], `${result.candidates} candidates · ${result.dropped.length} dropped`,
     count === 0 ? 'No findings' : count + (count === 1 ? ' finding' : ' findings')));
-  box.querySelector('summary')?.append(...timeLabel(result.createdAt));
+  const usage = result.usage === undefined ? undefined : usageChip(result.usage);
+  box.querySelector('summary')?.append(...timeLabel(result.createdAt), ...usage ? [usage.chip] : []);
+  if (usage) box.append(usage.popover);
   const ran = el('div', 'review-ran muted', result.ran.length === 0 ? 'No reviewer ran.' : 'Ran ' + result.ran.map((name) => reviewerInfo[name].label).join(', '));
   for (const { reviewer, reason } of result.skipped) ran.append(el('span', '', ' · Skipped ' + reviewerInfo[reviewer].label + (reason ? ': ' + reason : '')));
   box.append(ran);
@@ -4109,7 +4129,7 @@ function renderReviewCard(): void {
       if (thread === undefined) title.title = 'The thread is resolved or gone.';
       title.addEventListener('click', () => { if (thread !== undefined) jump(thread); });
       const item = el('li');
-      item.append(el('span', 'sev ' + finding.severity, findingSeverityLabels[finding.severity]), title, el('span', 'finding-agents'), ...findingMarks(finding).slice(1), el('span', 'finding-where', finding.path + ':' + finding.startLine));
+      item.append(el('span', 'sev ' + finding.severity, findingSeverityLabels[finding.severity]), title, el('span', 'finding-agents'), ...findingMarks(finding).slice(1), findingWhere(finding.path, finding.startLine));
       item.querySelector('.finding-agents')?.append(...agentTags(finding.reviewers));
       list.append(item);
     }
@@ -4139,7 +4159,150 @@ function renderReviewCard(): void {
     }
     box.append(dropped);
   }
-  card.replaceChildren(box);
+  card.replaceChildren(...cards, box);
+}
+
+const usageDuration = (ms: number): string => {
+  const seconds = Math.round(ms / 1000);
+  return seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m` : seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
+};
+const usageCost = (cost: number): string => cost > 0 && cost < 0.01 ? '<$0.01' : '$' + cost.toFixed(2);
+
+/** A review's duration and cost as a chip that opens a popover with turns, list-price cost and tokens per model. */
+function usageChip(usage: ReviewUsage): { chip: HTMLButtonElement; popover: HTMLElement } {
+  const popover = el('div', 'usage-popover');
+  popover.popover = 'auto';
+  const summary = el('dl', 'usage-summary');
+  for (const [label, value, tip] of [['Duration', usageDuration(usage.durationMs), ''], ['Turns', String(usage.turns), ''], ['Cost', usageCost(usage.cost), 'API list price, not what a subscription bills']] as const) {
+    summary.append(el('dt', '', label), titled(el('dd', '', value), tip));
+  }
+  popover.append(summary, el('div', 'usage-note muted', 'Cost is the API list price.'));
+  if (usage.models.length > 0) {
+    const table = el('table', 'usage-table');
+    const head = el('tr');
+    for (const label of ['Model', 'Input', 'Output', 'Cache read', 'Cache write', 'Cost']) head.append(el('th', '', label));
+    table.append(head);
+    for (const row of usage.models) {
+      const line = el('tr');
+      line.append(el('td', 'usage-model', row.model));
+      for (const tokens of [row.input, row.output, row.cacheRead, row.cacheWrite]) line.append(titled(el('td', '', tokenCount(tokens)), tokens.toLocaleString()));
+      line.append(el('td', '', usageCost(row.cost)));
+      table.append(line);
+    }
+    popover.append(table);
+  }
+  const chip = el('button', 'usage-chip', `${usageDuration(usage.durationMs)} · ${usageCost(usage.cost)}`);
+  chip.type = 'button';
+  titled(chip, 'Time and cost of this review');
+  chip.addEventListener('click', (event) => {
+    // Inside a card's summary a click would also fold the card.
+    event.preventDefault();
+    event.stopPropagation();
+    if (popover.matches(':popover-open')) { popover.hidePopover(); return; }
+    const box = chip.getBoundingClientRect();
+    popover.style.top = box.bottom + 4 + 'px';
+    popover.style.right = Math.max(8, window.innerWidth - box.right) + 'px';
+    popover.showPopover();
+  });
+  return { chip, popover };
+}
+
+const stageLabels: Record<ReviewStage, [string, string]> = {
+  triage: ['Triage', 'Claude reads the changes and briefs the reviewers.'],
+  candidates: ['Candidates', 'Each reviewer looks for defects.'],
+  select: ['Select', 'Claude merges and ranks the candidates.'],
+  verify: ['Verify', 'Reviewers prove or refute the top candidates in their own worktrees.'],
+  report: ['Report', 'Claude writes up the proven findings.'],
+};
+const verdictLabels: Record<NonNullable<ReviewLaneItem['verdict']>, string> = { confirmed: 'Confirmed', refuted: 'Refuted', unconfirmed: 'Unconfirmed' };
+
+/** A running or failed review: its stage, the orchestrator's steps and a lane per review agent. */
+function reviewLiveCard(live: ReviewLive, running: boolean, error: string | undefined): HTMLElement {
+  const box = el('section', 'thread review review-card review-live');
+  const head = strip('div', 'review', 'Claude\'s code review of these changes.', [], '', running ? 'Reviewing' : error === 'Stopped.' ? 'Review stopped' : 'Review failed');
+  const time = el('span', 'time', elapsed(live.startedAt, live.endedAt));
+  if (running) time.dataset.since = String(live.startedAt);
+  head.append(time);
+  const usage = live.usage === undefined ? undefined : usageChip(live.usage);
+  if (usage) head.append(usage.chip);
+  if (running) {
+    const stop = button('', () => post({ action: 'review-stop' }), 'icon-button');
+    stop.append(icon(icons.stop));
+    setTip(stop, 'Stop the review');
+    head.append(stop);
+  }
+  box.append(head, ...usage ? [usage.popover] : [], reviewStageBar(live.stage, running));
+  if (!running && error !== undefined && error !== 'Stopped.') box.append(el('div', 'review-error', error));
+  const lanes = el('div', 'review-lanes');
+  const working = live.lanes.filter((lane) => lane.endedAt === undefined).length;
+  lanes.append(reviewLane(el('span', 'lane-name', 'Orchestrator'), !running ? 'Stopped' : working > 0 ? `Waiting on ${working} ${working === 1 ? 'reviewer' : 'reviewers'}` : '', running, live.orchestrator, running ? live.startedAt : undefined, running ? 'active' : error === undefined || error === 'Stopped.' ? 'idle' : 'failed'));
+  for (const reviewer of live.reviewers) {
+    const lane = live.lanes.find((candidate) => candidate.reviewer === reviewer);
+    const [tag] = agentTags([reviewer]);
+    if (tag === undefined) continue;
+    if (lane === undefined) {
+      const later = reviewStages.indexOf(live.stage) > reviewStages.indexOf('candidates');
+      lanes.append(reviewLane(tag, later || !running ? 'Did not run' : 'Waiting', false, [], undefined, 'idle'));
+      continue;
+    }
+    const busy = running && lane.endedAt === undefined;
+    const node = reviewLane(tag, laneStatus(lane, busy), busy, lane.steps, busy ? lane.startedAt : undefined, busy ? 'active' : lane.failed ? 'failed' : lane.endedAt === undefined ? 'idle' : 'done', lane);
+    lanes.append(node);
+  }
+  box.append(lanes);
+  return box;
+}
+
+const stageIcons: Record<ReviewStage, string> = { triage: icons.triage, candidates: icons.candidates, select: icons.rank, verify: icons.verify, report: icons.report };
+
+function reviewStageBar(stage: ReviewStage, running: boolean): HTMLElement {
+  const bar = el('ol', 'review-stages');
+  const at = reviewStages.indexOf(stage);
+  reviewStages.forEach((name, index) => {
+    const [label, tip] = stageLabels[name];
+    const state = index < at ? 'done' : index === at ? (running ? 'now' : 'stopped') : 'next';
+    const item = titled(el('li', state), tip);
+    const mark = el('span', 'stage-icon');
+    mark.append(icon(stageIcons[name]));
+    item.append(mark, label);
+    bar.append(item);
+  });
+  return bar;
+}
+
+function laneStatus(lane: ReviewLane, busy: boolean): string {
+  const items = lane.items ?? [];
+  if (busy) return lane.phase === 'verification' ? 'Verifying' : 'Finding candidates';
+  if (lane.failed) return 'Failed';
+  if (lane.phase === 'candidates') return items.length === 0 ? 'No candidates' : items.length + (items.length === 1 ? ' candidate' : ' candidates');
+  const count = (verdict: NonNullable<ReviewLaneItem['verdict']>): number => items.filter((item) => item.verdict === verdict).length;
+  return `${count('confirmed')} confirmed · ${count('refuted')} refuted` + (count('unconfirmed') ? ` · ${count('unconfirmed')} unconfirmed` : '');
+}
+
+/** One lane: who, what it is doing, its latest steps while it works, and what it handed back once done. */
+function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: readonly ClaudeStep[], since: number | undefined, state: 'active' | 'done' | 'failed' | 'idle', lane?: ReviewLane): HTMLElement {
+  const node = el('div', 'review-lane ' + state);
+  const head = el('div', 'lane-head');
+  // The running step below carries the orb; the empty icon keeps the lane names aligned.
+  const mark = state === 'active' ? el('span', 'state-icon') : stateIcon(state === 'done' ? 'done' : state === 'failed' ? 'failed' : 'idle', state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'muted');
+  head.append(mark, name);
+  if (lane !== undefined) head.append(el('span', 'lane-phase muted', lane.phase === 'verification' ? 'verification' : 'candidates'));
+  head.append(el('span', 'gap'), el('span', 'lane-status muted', status));
+  if (lane?.endedAt !== undefined) head.append(el('span', 'time', elapsed(lane.startedAt, lane.endedAt)));
+  node.append(head);
+  if (busy || (state === 'failed' && steps.length > 0)) node.append(stepLog(steps, since));
+  if (lane?.items?.length) {
+    const items = el('ul', 'lane-items');
+    for (const item of lane.items) {
+      const row = el('li');
+      if (item.verdict !== undefined) row.append(el('span', 'verdict ' + item.verdict, verdictLabels[item.verdict]));
+      if (item.severity !== undefined) row.append(el('span', 'sev ' + item.severity, findingSeverityLabels[item.severity]));
+      row.append(el('span', 'lane-item', item.title));
+      items.append(row);
+    }
+    node.append(items);
+  }
+  return node;
 }
 
 /** Reviewers picked for the next review; the page updates them before the extension confirms. */
@@ -4154,7 +4317,7 @@ function showReview(): void {
   const start = $<HTMLButtonElement>('review');
   start.replaceChildren(icon(review.running ? icons.stop : icons.agentReview), review.running ? 'Stop review' : review.result ? 'Rerun review' : 'Review');
   const status = $('review-status');
-  status.textContent = review.running ? 'Review · ' + (review.step ?? 'Working') : review.error ? 'Review failed' : '';
+  status.textContent = review.running ? 'Review · ' + stageLabels[review.live?.stage ?? 'triage'][0] : review.error ? 'Review failed' : '';
   status.title = review.error ?? '';
   status.className = review.running ? 'chip agent working' : review.error ? 'chip bad' : '';
   status.hidden = !review.running && !review.error;

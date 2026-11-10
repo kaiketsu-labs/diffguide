@@ -2,23 +2,120 @@ import type { spawn as spawnProcess } from 'node:child_process';
 import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import * as vscode from 'vscode';
-import { untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { contentBlocks, StepLog, untrustedCheckoutFlags, type ClaudeRunnerOptions, type StreamMessage } from './claudeRunner.js';
 import { reviewers, type CodeAnchor, type Reviewer, type ReviewStore } from './contracts.js';
 import type { ReviewView } from './pullRequestOverview.js';
 import { worktreeFolder } from './editGuard.js';
 import { runStructuredClaude, type StructuredRun } from './prAnalysisRunner.js';
 import { writePrivateJson } from './privateFiles.js';
-import { findingText, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt, reviewSchema, type CodeReviewResult, type DroppedCandidate } from './review.js';
+import { findingText, handbackItems, parseReviewOutput, parseReviewUsage, readStoredReview, reviewAgents, reviewPrompt, reviewSchema, type CodeReviewResult, type DroppedCandidate, type ReviewLane, type ReviewLaneItem, type ReviewLive, type ReviewStage, type ReviewUsage } from './review.js';
 import { quotePosix, stopProcess } from './shell.js';
 import type { FileDiff } from './unifiedDiff.js';
 import { excludeFromGit, git } from './worktrees.js';
 
-/** What the code review is doing right now. */
+/** What the code review is doing right now; a failed run keeps its last live state. */
 export interface CodeReviewActivity {
   readonly running: boolean;
-  readonly step?: string;
-  readonly progress?: ClaudeProgress;
+  readonly live?: ReviewLive;
   readonly error?: string;
+}
+
+interface AgentCall {
+  readonly reviewer: Reviewer;
+  readonly phase: ReviewLane['phase'];
+  readonly startedAt: number;
+  readonly log: StepLog;
+  endedAt?: number;
+  failed?: boolean;
+  items?: ReviewLaneItem[];
+}
+
+/** Splits a review run's stream into the orchestrator and one lane per review agent call, by each message's parent tool call. */
+export class ReviewTracker {
+  readonly #orchestrator: StepLog;
+  readonly #calls = new Map<unknown, AgentCall>();
+  #reporting = false;
+  #endedAt: number | undefined;
+  #usage: ReviewUsage | undefined;
+
+  constructor(
+    private readonly cwd: string,
+    private readonly reviewers: readonly Reviewer[],
+    private readonly worktrees: ReadonlyMap<Reviewer, string>,
+    private readonly startedAt: number,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.#orchestrator = new StepLog(cwd);
+  }
+
+  /** Take one stream message; true when the live state changed. */
+  read(message: StreamMessage): boolean {
+    if (message.type === 'result') {
+      // A result holds session totals, so the last one stands; wall time runs to the result.
+      const usage = parseReviewUsage(message, this.now() - this.startedAt);
+      if (usage !== undefined) { this.#usage = usage; return true; }
+    }
+    const parent = message.parent_tool_use_id;
+    if (parent !== undefined && parent !== null) {
+      const call = this.#calls.get(parent);
+      if (call === undefined) return false;
+      for (const block of contentBlocks(message)) {
+        const input = block.input as Record<string, unknown> | undefined;
+        if (message.type === 'assistant' && block.type === 'tool_use' && block.name === 'SubagentHandback' && typeof input?.['message'] === 'string') call.items = handbackItems(input['message']);
+      }
+      return call.log.read(message);
+    }
+    let changed = this.#orchestrator.read(message);
+    for (const block of contentBlocks(message)) {
+      const input = typeof block.input === 'object' && block.input !== null ? block.input as Record<string, unknown> : {};
+      if (message.type === 'assistant' && block.type === 'tool_use' && (block.name === 'Agent' || block.name === 'Task')) {
+        const reviewer = this.reviewers.find((name) => input['subagent_type'] === `${name}-reviewer`);
+        if (reviewer === undefined) continue;
+        // The prompt has each reviewer called once for candidates, then again to verify them.
+        const phase = [...this.#calls.values()].some((call) => call.reviewer === reviewer) ? 'verification' : 'candidates';
+        this.#calls.set(block.id, { reviewer, phase, startedAt: this.now(), log: new StepLog(this.worktrees.get(reviewer) ?? this.cwd) });
+        changed = true;
+      } else if (message.type === 'assistant' && block.type === 'tool_use' && block.name === 'StructuredOutput') {
+        this.#reporting = true;
+        changed = true;
+      } else if (message.type === 'user' && block.type === 'tool_result') {
+        const call = this.#calls.get(block.tool_use_id);
+        if (call === undefined || call.endedAt !== undefined) continue;
+        call.endedAt = this.now();
+        if (block.is_error === true) call.failed = true;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Mark the run as over, so timers stop. */
+  end(): void {
+    this.#endedAt ??= this.now();
+  }
+
+  get live(): ReviewLive {
+    const latest = new Map<Reviewer, AgentCall>();
+    for (const call of this.#calls.values()) latest.set(call.reviewer, call);
+    const calls = [...latest.values()];
+    const lanes = calls.map((call): ReviewLane => ({
+      reviewer: call.reviewer, phase: call.phase, startedAt: call.startedAt, steps: call.log.steps,
+      ...(call.endedAt === undefined ? {} : { endedAt: call.endedAt }), ...(call.failed ? { failed: true } : {}), ...(call.items === undefined ? {} : { items: call.items }),
+    }));
+    return {
+      reviewers: this.reviewers, stage: this.#stage(calls), startedAt: this.startedAt, orchestrator: this.#orchestrator.steps, lanes,
+      ...(this.#endedAt === undefined ? {} : { endedAt: this.#endedAt }), ...(this.#usage === undefined ? {} : { usage: this.#usage }),
+    };
+  }
+
+  #stage(calls: readonly AgentCall[]): ReviewStage {
+    if (this.#reporting) return 'report';
+    const running = calls.filter((call) => call.endedAt === undefined);
+    if (running.some((call) => call.phase === 'verification')) return 'verify';
+    if (running.length > 0) return 'candidates';
+    if (calls.length === 0) return 'triage';
+    return calls.some((call) => call.phase === 'verification') ? 'report' : 'select';
+  }
 }
 
 export interface CodeReviewOptions {
@@ -44,7 +141,8 @@ export interface CodeReviewInput {
   readonly anchor: (range: { readonly path: string; readonly side: 'new'; readonly startLine: number; readonly endLine: number }) => Promise<CodeAnchor>;
 }
 
-const reviewFile = (dataPath: string): string => join(dataPath, 'review.json');
+// Not review.json: the thread store owns that name in the same folder.
+const reviewFile = (dataPath: string): string => join(dataPath, 'code-review.json');
 const runsFolder = (cwd: string): string => join(cwd, worktreeFolder, 'review');
 /** A run folder this old is left over from a crash or a closed window. */
 const staleRunMs = 24 * 60 * 60 * 1000;
@@ -94,6 +192,7 @@ export class CodeReview implements vscode.Disposable {
   #activity: CodeReviewActivity = { running: false };
   #result: Promise<CodeReviewResult | undefined> | undefined;
   #child: ReturnType<typeof spawnProcess> | undefined;
+  #tracker: ReviewTracker | undefined;
   #stopped = false;
   #disposed = false;
 
@@ -115,13 +214,16 @@ export class CodeReview implements vscode.Disposable {
   start(input: CodeReviewInput): void {
     if (this.#activity.running || this.#disposed) return;
     this.#stopped = false;
-    this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() } });
+    this.#tracker = undefined;
+    this.#set({ running: true });
     void this.#run(input).then(
       () => { this.#set({ running: false }); },
       (failure: unknown) => {
         const error = this.#stopped ? 'Stopped.' : failure instanceof Error ? failure.message : String(failure);
         this.options.log(`Review failed: ${error}`);
-        this.#set({ running: false, error });
+        this.#tracker?.end();
+        const live = this.#tracker?.live;
+        this.#set({ running: false, error, ...(live === undefined ? {} : { live }) });
       },
     );
   }
@@ -150,12 +252,14 @@ export class CodeReview implements vscode.Disposable {
     const root = join(runsFolder(cwd), Date.now().toString(36));
     let output: unknown;
     try {
-      this.#set({ ...this.#activity, step: 'Preparing worktrees' });
       const worktrees = await createWorktrees(cwd, root, input.reviewers);
       if (this.#stopped) throw new Error('Stopped.');
       const agentsPath = join(dataPath, 'review-agents.json');
       await writePrivateJson(agentsPath, reviewAgents(worktrees));
       this.options.log(`Reviewing with ${input.reviewers.join(', ')}`);
+      const tracker = new ReviewTracker(cwd, input.reviewers, worktrees, Date.now());
+      this.#tracker = tracker;
+      this.#set({ ...this.#activity, live: tracker.live });
       output = await runStructuredClaude({
         ...this.options, prompt: reviewPrompt(files, input.about, worktrees), schema: reviewSchema, missing: 'Claude returned no review.',
         args: [
@@ -163,17 +267,23 @@ export class CodeReview implements vscode.Disposable {
           '--allowedTools', 'Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'Agent', 'Task',
           ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
         ],
-        // On someone else's PR, Git hooks stay off, since the PR's author controls the checkout.
-        ...this.options.role === 'reviewer' ? { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } } : {},
-        startedAt: this.#activity.progress?.startedAt ?? Date.now(),
+        env: {
+          // The CLI may launch agents as background tasks; the orchestrator then ends its turn before they report, and the review comes back empty.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+          // On someone else's PR, Git hooks stay off, since the PR's author controls the checkout.
+          ...this.options.role === 'reviewer' ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } : {},
+        },
+        startedAt: tracker.live.startedAt,
         stopped: () => this.#stopped,
         onChild: (child) => { this.#child = child; },
-        onStep: (step) => { this.#set({ ...this.#activity, step }); },
-        onProgress: (progress) => { this.#set({ ...this.#activity, progress }); },
+        onStep: () => undefined,
+        onProgress: () => undefined,
+        onMessage: (message) => { if (tracker.read(message)) this.#set({ ...this.#activity, live: tracker.live }); },
       });
     } finally {
       await removeRun(cwd, root);
     }
+    const usage = this.#tracker?.live.usage;
     const parsed = parseReviewOutput(output, input.reviewers, files);
     const anchors = await Promise.all(parsed.findings.map((finding) => input.anchor({ path: finding.path, side: 'new', startLine: finding.startLine, endLine: finding.endLine }).catch(() => undefined)));
     const placed = parsed.findings.flatMap((finding, index) => {
@@ -194,6 +304,7 @@ export class CodeReview implements vscode.Disposable {
         return threadId === undefined ? [] : [{ threadId, title: finding.title, severity: finding.severity, evidence: finding.evidence, reviewers: finding.reviewers, path: finding.path, startLine: finding.startLine }];
       }),
       dropped: [...parsed.dropped, ...unplaced],
+      ...usage === undefined ? {} : { usage },
     };
     await writePrivateJson(reviewFile(dataPath), saved);
     this.#result = Promise.resolve(saved);
@@ -227,9 +338,6 @@ export async function savePicks(state: vscode.Memento, repository: string, picks
 /** The page's view of a code review. */
 export async function reviewView(review: CodeReview, picked: readonly Reviewer[]): Promise<ReviewView> {
   const result = await review.result();
-  const { running, step, progress, error } = review.activity;
-  return {
-    running, picked, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
-    ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }),
-  };
+  const { running, live, error } = review.activity;
+  return { running, picked, ...(live === undefined ? {} : { live }), ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }) };
 }

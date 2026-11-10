@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import * as vscode from 'vscode';
-import { contentBlocks, describeTool, parseLine, StepLog, untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { contentBlocks, describeTool, parseLine, StepLog, untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions, type StreamMessage } from './claudeRunner.js';
 import type { CodeAnchor, ReviewStore } from './contracts.js';
 import { analysisPrompt, analysisSchema, changeBlocks, parseClaudeAnalysis, readStoredAnalysis, type Analysis, type ChangeBlock } from './prAnalysis.js';
 import { writePrivateJson } from './privateFiles.js';
@@ -171,6 +171,8 @@ export interface StructuredRun {
   readonly onChild: (child: ReturnType<typeof spawnProcess> | undefined) => void;
   readonly onStep: (step: string) => void;
   readonly onProgress: (progress: ClaudeProgress) => void;
+  /** Every parsed stream message, for callers that track more than the step log. */
+  readonly onMessage?: (message: StreamMessage) => void;
 }
 
 /** Run Claude once and resolve with its structured output; streams each tool call as a step. */
@@ -189,6 +191,7 @@ export async function runStructuredClaude(run: StructuredRun): Promise<unknown> 
   const steps = new StepLog(run.cwd);
   createInterface({ input: child.stdout! }).on('line', (line) => {
     const message = parseLine(line);
+    if (message !== undefined) run.onMessage?.(message);
     if (message !== undefined && steps.read(message)) run.onProgress({ steps: steps.steps, startedAt: run.startedAt });
     if (message?.type === 'assistant') {
       for (const block of contentBlocks(message)) {
@@ -201,7 +204,8 @@ export async function runStructuredClaude(run: StructuredRun): Promise<unknown> 
     }
     if (message?.type === 'result') {
       if (message.is_error === true) error = typeof message.result === 'string' ? message.result.slice(0, 200) : 'Claude reported an error.';
-      else output = message.structured_output;
+      // A turn started by a background task's notification ends with a result that has no structured output; it must not clear the report.
+      else if (message.structured_output !== undefined) output = message.structured_output;
     }
   });
   const code = await new Promise<number | null>((resolveExit, rejectExit) => {

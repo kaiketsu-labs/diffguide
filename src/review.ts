@@ -1,5 +1,6 @@
 import { reviewers, type FindingEvidence, type FindingSeverity, type Reviewer } from './contracts.js';
 import { lineText } from './prAnalysis.js';
+import type { ClaudeStep } from './claudeRunner.js';
 import type { DiffLine, FileDiff } from './unifiedDiff.js';
 
 /** The picker's name and one-line description for each reviewer. */
@@ -66,6 +67,54 @@ export interface CodeReviewResult {
     readonly startLine: number;
   }[];
   readonly dropped: readonly DroppedCandidate[];
+  readonly usage?: ReviewUsage;
+}
+
+/** One model's share of a review run's tokens and cost. */
+export interface ReviewModelUsage {
+  readonly model: string;
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly cost: number;
+}
+
+/** What a review run used: wall time, turns, API list price and tokens per model, subagents included. */
+export interface ReviewUsage {
+  readonly durationMs: number;
+  readonly cost: number;
+  readonly turns: number;
+  readonly models: readonly ReviewModelUsage[];
+}
+
+const maximumUsageModels = 20;
+const count = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+const money = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+function readUsageModels(value: unknown, fields: { readonly input: string; readonly output: string; readonly cacheRead: string; readonly cacheWrite: string; readonly cost: string }): ReviewModelUsage[] {
+  const list = Array.isArray(value) ? value : typeof value === 'object' && value !== null ? Object.entries(value).map(([model, row]) => ({ ...(typeof row === 'object' && row !== null ? row : {}), model })) : [];
+  return records(list).flatMap((row) => {
+    const model = cleanText(row['model'], 100);
+    return model === undefined ? [] : [{ model, input: count(row[fields.input]), output: count(row[fields.output]), cacheRead: count(row[fields.cacheRead]), cacheWrite: count(row[fields.cacheWrite]), cost: money(row[fields.cost]) ?? 0 }];
+  }).slice(0, maximumUsageModels);
+}
+
+/** Usage from a CLI result message, whose figures are session totals; undefined for any other message or one without a cost. */
+export function parseReviewUsage(message: unknown, durationMs: number): ReviewUsage | undefined {
+  const record = typeof message === 'object' && message !== null ? message as Record<string, unknown> : {};
+  const cost = money(record['total_cost_usd']);
+  if (record['type'] !== 'result' || cost === undefined) return undefined;
+  const models = readUsageModels(record['modelUsage'], { input: 'inputTokens', output: 'outputTokens', cacheRead: 'cacheReadInputTokens', cacheWrite: 'cacheCreationInputTokens', cost: 'costUSD' });
+  return { durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0, cost, turns: count(record['num_turns']), models };
+}
+
+/** Usage as saved; undefined when a file has none or it is malformed. */
+export function readStoredUsage(raw: unknown): ReviewUsage | undefined {
+  const record = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
+  const cost = money(record['cost']);
+  if (cost === undefined) return undefined;
+  return { durationMs: count(record['durationMs']), cost, turns: count(record['turns']), models: readUsageModels(record['models'], { input: 'input', output: 'output', cacheRead: 'cacheRead', cacheWrite: 'cacheWrite', cost: 'cost' }) };
 }
 
 const reviewerList = { type: 'array', items: { type: 'string', enum: reviewers } } as const;
@@ -258,5 +307,61 @@ export function readStoredReview(raw: unknown): CodeReviewResult | undefined {
       ? [] : [{ threadId, title, severity, evidence, reviewers: readReviewers(item['reviewers'], reviewers), path, startLine }];
   });
   const candidates = typeof record['candidates'] === 'number' && Number.isInteger(record['candidates']) && record['candidates'] >= 0 ? record['candidates'] : 0;
-  return { createdAt: record['createdAt'], ran, skipped, candidates, findings, dropped: readDropped(record['dropped'], reviewers) };
+  const usage = readStoredUsage(record['usage']);
+  return { createdAt: record['createdAt'], ran, skipped, candidates, findings, dropped: readDropped(record['dropped'], reviewers), ...usage === undefined ? {} : { usage } };
+}
+
+/** Where a review run is, following the orchestrator's process. */
+export type ReviewStage = 'triage' | 'candidates' | 'select' | 'verify' | 'report';
+export const reviewStages: readonly ReviewStage[] = ['triage', 'candidates', 'select', 'verify', 'report'];
+
+/** One item a review agent handed back: a candidate with its severity, or a verdict on one. */
+export interface ReviewLaneItem {
+  readonly title: string;
+  readonly severity?: FindingSeverity;
+  readonly verdict?: 'confirmed' | 'refuted' | 'unconfirmed';
+}
+
+/** One review agent's latest call. */
+export interface ReviewLane {
+  readonly reviewer: Reviewer;
+  readonly phase: 'candidates' | 'verification';
+  readonly startedAt: number;
+  readonly endedAt?: number;
+  readonly failed?: boolean;
+  readonly steps: readonly ClaudeStep[];
+  readonly items?: readonly ReviewLaneItem[];
+}
+
+/** A review run as the page shows it: the stage, the orchestrator's steps and a lane per agent it called. */
+export interface ReviewLive {
+  readonly reviewers: readonly Reviewer[];
+  readonly stage: ReviewStage;
+  readonly startedAt: number;
+  readonly endedAt?: number;
+  readonly orchestrator: readonly ClaudeStep[];
+  readonly lanes: readonly ReviewLane[];
+  readonly usage?: ReviewUsage;
+}
+
+const verdicts = ['confirmed', 'refuted', 'unconfirmed'] as const;
+const maximumLaneItems = 10;
+
+/** The items in an agent's handback: the first JSON array in it, as the agent prompt asks for. */
+export function handbackItems(text: string): ReviewLaneItem[] {
+  const fenced = /```json\s*([\s\S]*?)```/u.exec(text)?.[1];
+  const start = text.indexOf('[');
+  const json = fenced ?? (start === -1 ? undefined : text.slice(start, text.lastIndexOf(']') + 1));
+  let value: unknown;
+  try { value = json === undefined ? undefined : JSON.parse(json); } catch { return []; }
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown): ReviewLaneItem[] => {
+    if (typeof item !== 'object' || item === null) return [];
+    const record = item as Record<string, unknown>;
+    const title = cleanText(record['title'], 160);
+    if (title === undefined) return [];
+    const severity = severities.find((option) => option === record['severity']);
+    const verdict = verdicts.find((option) => option === record['verdict']);
+    return [{ title, ...(severity === undefined ? {} : { severity }), ...(verdict === undefined ? {} : { verdict }) }];
+  }).slice(0, maximumLaneItems);
 }

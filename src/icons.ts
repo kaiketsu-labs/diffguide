@@ -103,6 +103,16 @@ export const icons = {
   repository: line('<path d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3l1.5 1.75H13A1.5 1.5 0 0 1 14.5 5.75V12A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"/><path d="M6.25 7.25L4.75 8.75l1.5 1.5M9.75 7.25l1.5 1.5-1.5 1.5"/>'),
   bookmark: line(`<path d="${bookmark}"/>`),
   bookmarkFilled: line(`<path fill="currentColor" d="${bookmark}"/>`),
+
+  correctness: line('<path d="M4.5 2.5c-1.5 0-2 .6-2 1.75v1.5C2.5 7 2 8 1.25 8c.75 0 1.25 1 1.25 2.25v1.5c0 1.15.5 1.75 2 1.75M11.5 2.5c1.5 0 2 .6 2 1.75v1.5c0 1.25.5 2.25 1.25 2.25-.75 0-1.25 1-1.25 2.25v1.5c0 1.15-.5 1.75-2 1.75M5.75 8.25l1.5 1.5 3-3.25"/>'),
+  design: line('<circle cx="4.75" cy="11.25" r="3"/><rect x="9.25" y="8.75" width="5" height="5" rx=".5"/><path d="M11.75 1.75l3 5h-6z"/>'),
+  security: line(`<path d="M8 1.5l5.5 2v4.25c0 3.4-2.3 5.9-5.5 6.75-3.2-.85-5.5-3.35-5.5-6.75V3.5z"/><path ${solid} d="M8 1.5v13c3.2-.85 5.5-3.35 5.5-6.75V3.5z"/>`),
+  performance: line('<path d="M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z"/>'),
+  triage: line('<rect x="3" y="2.5" width="10" height="12" rx="1.5"/><path d="M6 1.5h4v2H6zM5.5 7h5M5.5 9.5h5M5.5 12h3"/>'),
+  candidates: line('<path d="M1.5 4h7M1.5 8h7M1.5 12h4.5M10.75 8.5a1.6 1.6 0 1 1 2.25 1.45c-.45.2-.75.55-.75 1v.3M12.25 13.75v.01"/>'),
+  rank: line('<path d="M2 4h12M2 8h8.5M2 12h5"/>'),
+  verify: line('<path d="M6 1.5h4M6.75 1.5V6L2.9 12.9a1 1 0 0 0 .87 1.6h8.46a1 1 0 0 0 .87-1.6L9.25 6V1.5M4.6 10h6.8"/>'),
+  report: line('<path d="M3.5 14.5V1.75M3.5 2.5h9l-2 3 2 3h-9"/>'),
 } as const;
 
 export type IconName = keyof typeof icons;

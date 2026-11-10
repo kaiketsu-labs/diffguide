@@ -5,7 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import type { CodeAnchor, Finding } from '../src/contracts.js';
-import { maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/review.js';
+import { handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/review.js';
+import { ReviewTracker } from '../src/reviewRunner.js';
 import { createReviewStore } from '../src/store.js';
 import { parseUnifiedDiff } from '../src/unifiedDiff.js';
 
@@ -189,4 +190,45 @@ test('lists only the picked reviewers in the prompt and numbers added lines on t
   assert.match(prompt, /^ {4}2 \+const b = 3;$/mu);
   assert.match(prompt, /^ {4}3 \+const c = 4;$/mu);
   assert.match(prompt, /^ {4}1 {2}const a = 1;$/mu);
+});
+
+test('reads candidates and verdicts from an agent handback, skipping what does not parse', () => {
+  assert.deepEqual(handbackItems('Found these.\n```json\n[{"title":"Off by one","severity":"high"},{"severity":"low"},{"title":"Bad","severity":"urgent"}]\n```'),
+    [{ title: 'Off by one', severity: 'high' }, { title: 'Bad' }]);
+  assert.deepEqual(handbackItems('Note first.\n[{"title":"Off by one","verdict":"refuted","evidence":"tested"}]'), [{ title: 'Off by one', verdict: 'refuted' }]);
+  assert.deepEqual(handbackItems('Nothing provable.'), []);
+  assert.deepEqual(handbackItems('```json\n[{"title": \n```'), []);
+});
+
+test('tracks the orchestrator and one lane per review agent through each stage', () => {
+  let now = 1000;
+  const tracker = new ReviewTracker('/repo', ['design', 'security'], new Map([['design', '/repo/wt/design'], ['security', '/repo/wt/security']]), now, () => now);
+  const agent = (id: string, reviewer: string) => ({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id, name: 'Agent', input: { subagent_type: `${reviewer}-reviewer`, prompt: 'Brief.' } }] } });
+  const done = (id: string) => ({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'Delivered.' }] } });
+  const handback = (parent: string, text: string) => ({ type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'tool_use', id: parent + '-h', name: 'SubagentHandback', input: { message: text } }] } });
+  assert.equal(tracker.live.stage, 'triage');
+  assert.ok(tracker.read(agent('a1', 'design')));
+  tracker.read(agent('a2', 'security'));
+  assert.equal(tracker.live.stage, 'candidates');
+  assert.ok(tracker.read({ type: 'assistant', parent_tool_use_id: 'a1', message: { content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: '/repo/wt/design/src/a.ts' } }] } }));
+  assert.deepEqual(tracker.live.lanes.find((lane) => lane.reviewer === 'design')?.steps.map((step) => [step.verb, step.target]), [['Read', 'src/a.ts']]);
+  assert.deepEqual(tracker.live.orchestrator.map((step) => step.verb), ['Agent', 'Agent']);
+  assert.equal(tracker.read({ type: 'assistant', parent_tool_use_id: 'unknown', message: { content: [] } }), false);
+  tracker.read(handback('a1', '```json\n[{"title":"Duplicated helper","severity":"low"}]\n```'));
+  now = 4000;
+  tracker.read(done('a1'));
+  tracker.read(done('a2'));
+  assert.equal(tracker.live.stage, 'select');
+  assert.deepEqual(tracker.live.lanes.map((lane) => [lane.reviewer, lane.phase, lane.endedAt, lane.items?.length ?? 0]), [['design', 'candidates', 4000, 1], ['security', 'candidates', 4000, 0]]);
+  tracker.read(agent('a3', 'design'));
+  assert.equal(tracker.live.stage, 'verify');
+  assert.deepEqual(tracker.live.lanes.map((lane) => [lane.reviewer, lane.phase]), [['design', 'verification'], ['security', 'candidates']]);
+  tracker.read(handback('a3', '[{"title":"Duplicated helper","verdict":"confirmed"}]'));
+  tracker.read(done('a3'));
+  assert.equal(tracker.live.stage, 'report');
+  assert.deepEqual(tracker.live.lanes[0]?.items, [{ title: 'Duplicated helper', verdict: 'confirmed' }]);
+  assert.equal(tracker.live.endedAt, undefined);
+  now = 9000;
+  tracker.end();
+  assert.equal(tracker.live.endedAt, 9000);
 });
