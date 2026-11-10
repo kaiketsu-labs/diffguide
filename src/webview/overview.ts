@@ -345,12 +345,13 @@ const waitMotion = (id: string): StepPick => ({ verb }) => {
 };
 
 /** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb, the run's time and `stop` on the current one. */
-function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)], orb = true): HTMLElement {
+function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)], orb = true, phase = 0): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
     const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
-    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orb ? orbCanvas('step', ...pick(step)) : stateIcon('active', 'agent'));
+    const [motion, since] = pick(step);
+    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orb ? orbCanvas('step', motion, since, phase) : stateIcon('active', 'agent'));
     const title = el('span', 'step-call');
     title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
     row.append(title);
@@ -4235,8 +4236,12 @@ function reviewLiveCard(live: ReviewLive, running: boolean, error: string | unde
   if (!running && error !== undefined && error !== 'Stopped.') box.append(el('div', 'review-error', error));
   const lanes = el('div', 'review-lanes');
   const working = live.lanes.filter((lane) => lane.endedAt === undefined).length;
-  lanes.append(reviewLane(el('span', 'lane-name', 'Orchestrator'), !running ? 'Stopped' : working > 0 ? `Waiting on ${working} ${working === 1 ? 'reviewer' : 'reviewers'}` : '', running, live.orchestrator, running ? live.startedAt : undefined, running ? 'active' : error === undefined || error === 'Stopped.' ? 'idle' : 'failed'));
-  for (const reviewer of live.reviewers) {
+  // Agent calls already show as lanes, and while agents work the orchestrator only waits for them.
+  const orchestratorSteps = live.orchestrator.filter((step) => step.verb !== 'Agent' && step.verb !== 'Task');
+  const orchestrator = reviewLane(el('span', 'lane-name', 'Orchestrator'), !running ? 'Stopped' : working > 0 ? `Waiting on ${working} ${working === 1 ? 'reviewer' : 'reviewers'}` : '', running && working === 0, orchestratorSteps, running ? live.startedAt : undefined, running ? 'active' : error === undefined || error === 'Stopped.' ? 'idle' : 'failed');
+  orchestrator.classList.add('orchestrator');
+  lanes.append(orchestrator);
+  for (const [index, reviewer] of live.reviewers.entries()) {
     const lane = live.lanes.find((candidate) => candidate.reviewer === reviewer);
     const [tag] = agentTags([reviewer]);
     if (tag === undefined) continue;
@@ -4246,7 +4251,7 @@ function reviewLiveCard(live: ReviewLive, running: boolean, error: string | unde
       continue;
     }
     const busy = running && lane.endedAt === undefined;
-    const node = reviewLane(tag, laneStatus(lane, busy), busy, lane.steps, busy ? lane.startedAt : undefined, busy ? 'active' : lane.failed ? 'failed' : lane.endedAt === undefined ? 'idle' : 'done', lane);
+    const node = reviewLane(tag, laneStatus(lane, busy), busy, lane.steps, busy ? lane.startedAt : undefined, busy ? 'active' : lane.failed ? 'failed' : lane.endedAt === undefined ? 'idle' : 'done', lane, (index + 1) * orbPhaseMs);
     lanes.append(node);
   }
   box.append(lanes);
@@ -4280,7 +4285,10 @@ function laneStatus(lane: ReviewLane, busy: boolean): string {
 }
 
 /** One lane: who, what it is doing, its latest steps while it works, and what it handed back once done. */
-function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: readonly ClaudeStep[], since: number | undefined, state: 'active' | 'done' | 'failed' | 'idle', lane?: ReviewLane): HTMLElement {
+/** Offsets each lane's orb so side-by-side orbs don't move in lockstep. */
+const orbPhaseMs = 1370;
+
+function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: readonly ClaudeStep[], since: number | undefined, state: 'active' | 'done' | 'failed' | 'idle', lane?: ReviewLane, phase = 0): HTMLElement {
   const node = el('div', 'review-lane ' + state);
   const head = el('div', 'lane-head');
   // The running step below carries the orb; the empty icon keeps the lane names aligned.
@@ -4290,7 +4298,7 @@ function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: rea
   head.append(el('span', 'gap'), el('span', 'lane-status muted', status));
   if (lane?.endedAt !== undefined) head.append(el('span', 'time', elapsed(lane.startedAt, lane.endedAt)));
   node.append(head);
-  if (busy || (state === 'failed' && steps.length > 0)) node.append(stepLog(steps, since));
+  if (busy || (state === 'failed' && steps.length > 0)) node.append(stepLog(steps, since, undefined, undefined, true, phase));
   if (lane?.items?.length) {
     const items = el('ul', 'lane-items');
     for (const item of lane.items) {
