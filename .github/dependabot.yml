@@ -10,6 +10,12 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      # vsce requires @types/vscode to stay at or below engines.vscode; raise both together.
+      - dependency-name: "@types/vscode"
+      # Match the Node major CI and VS Code run on.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         applies-to: version-updates
