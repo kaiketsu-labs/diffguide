@@ -22,7 +22,7 @@ interface Pose {
   sparks: Spot[]; trail: (Spot & { readonly r: number })[]; lines: (Spot & { readonly w: number })[]; glyphs: (Spot & { readonly ch: keyof typeof glyphs })[];
 }
 const pose = (extra: Partial<Pose> = {}): Pose => ({ x: X, y: Y, sq: 1, alpha: 1, eyes: 'open', look: [0, 0], sparks: [], trail: [], lines: [], glyphs: [], ...extra });
-const glyphs = { z: ['##.', '.#.', '.##'], Z: ['####', '..#.', '.#..', '####'] } as const;
+const glyphs = { z: ['##.', '.#.', '.##'], Z: ['####', '..#.', '.#..', '####'], '?': ['##.', '..#', '.#.', '...', '.#.'] } as const;
 
 function sleeping(t: number): Pose {
   const p = phase(t, 3200), b = Math.sin(TAU * p);
@@ -38,13 +38,49 @@ function searching(t: number): Pose {
   return now;
 }
 
-const motions: Readonly<Record<OrbMotion, (t: number) => Pose>> = {
-  rest: () => pose(),
-  think: (t) => {
+/** Ways the orb thinks, taken in turn so a long step doesn't loop one motion. */
+const thoughts: readonly ((t: number) => Pose)[] = [
+  (t) => {
     const p = phase(t, 1900);
     const sparks = [0, 1, 2].map((k) => { const a = TAU * p + k * TAU / 3; return { x: X + Math.cos(a) * (R + 3.5), y: Y + Math.sin(a) * (R * .5 + 1.5), a: .55 + .45 * Math.sin(a) }; });
     return pose({ y: Y + Math.sin(TAU * p) * .5, look: [1, -1], sparks });
   },
+  (t) => {
+    const p = phase(t, 4200), q = clamp((p - .55) / .4, 0, 1);
+    const mark: Pose['glyphs'] = p > .55 ? [{ ch: '?', x: X + R - 1, y: Y - R - 3 - q * 1.5, a: q < .2 ? q / .2 : 1 - Math.max(0, q - .7) / .3 }] : [];
+    return pose({ x: X + Math.sin(TAU * p) * 1.2, y: Y + .5, look: p < .4 ? [-1, -1] : p < .45 ? [0, -1] : [1, -1], eyes: blinking(p, .2) ? 'closed' : 'open', glyphs: mark });
+  },
+  (t) => {
+    const p = phase(t, 1500);
+    const sparks = [0, 1, 2].map((k) => { const q = frac(p + k / 3); return { x: lerp(X - 5, X + 5, q), y: Y - R - 1 - Math.sin(Math.PI * q) * 3, a: .9 }; });
+    const top = sparks.reduce((a, b) => b.y < a.y ? b : a);
+    return pose({ y: Y + 1 + Math.abs(Math.sin(TAU * p * 1.5)) * .6, look: [sign(top.x - X, 1.5), -1], sparks });
+  },
+  (t) => {
+    const p = phase(t, 1350);
+    const sparks = [0, 1, 2].map((k) => { const on = clamp(1 - Math.abs(p * 4 - k - .5) / 1.2, 0, 1); return { x: X + R + 3 + k * 2, y: Y - 1 - on, a: .3 + .7 * on }; });
+    return pose({ x: X - 4, look: [1, 0], sparks });
+  },
+  (t) => {
+    const p = phase(t, 2200), b = Math.sin(TAU * p), k = frac(p * 2), r = R + 1 + k * 7;
+    const sparks = Array.from({ length: 12 }, (_, i) => ({ x: X + Math.cos(i * TAU / 12) * r, y: Y + Math.sin(i * TAU / 12) * r * .6, a: (1 - k) * .8 }));
+    return pose({ sq: 1 - (b + 1) * .03, eyes: b > .6 ? 'closed' : 'open', sparks });
+  },
+  (t) => {
+    const a = TAU * phase(t, 1800);
+    return pose({ x: X + Math.cos(a) * 1.5, y: Y + Math.sin(a) * .6, look: [Math.round(Math.cos(a) * 1.2), Math.round(Math.sin(a) * 1.2)] });
+  },
+  (t) => {
+    const h = Math.max(0, Math.sin(TAU * phase(t, 950)));
+    return pose({ y: Y + 1 - h * 3, sq: h < .15 ? .9 : 1 + h * .03, eyes: h < .15 ? 'closed' : 'open', look: [0, -1] });
+  },
+];
+const thoughtMs = 6000;
+
+const motions: Readonly<Record<OrbMotion, (t: number) => Pose>> = {
+  rest: () => pose(),
+  // Keyed to the page clock, so every thinking orb switches together and a redraw keeps its place.
+  think: (t) => (thoughts[Math.floor(t / thoughtMs) % thoughts.length] ?? motions.rest)(t),
   search: searching,
   lead: (t) => {
     const p = phase(t, 4600), xl = R + 2, xm = X, xr = W - R - 2;

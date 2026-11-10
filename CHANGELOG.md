@@ -11,6 +11,7 @@
 - A merged or closed PR shows **Merged** or **Closed** at the top of the review page.
 - PDF and HTML previews keep a fixed height and scroll inside.
 - The orb reacts in step logs. It wakes when a run starts, dozes off and sleeps on a comment that waits while Claude is not receiving comments, nods once Claude picks the comment up, and leads the way while the guide is built. With reduced motion it shows where each reaction ends.
+- The thinking orb changes what it does every 6 seconds: it circles sparks, ponders a "?", juggles, shows typing dots, sends out ripples, rolls its eyes or hops.
 - ⌘/Ctrl+F opens VS Code's find bar on the review page. It finds text on the page only, so folded files and hunks and PDF pages are not searched.
 - Each comment you send shows whether it went with **Ask** or **Implement**.
 - **Stop** sits next to the running step's time.
