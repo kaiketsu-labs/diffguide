@@ -1488,7 +1488,7 @@ function openViewMenu(): void {
     ...view === 'files' ? [menuRow(['Hide whitespace changes'], whitespace, (on) => { closeToolbarMenu(); requestFiles(diffRange, on); }, false, icons.whitespace)] : [],
     ...view === 'files' ? [menuRow(['Group files by folder'], folders, (on) => { folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
     ...view === 'files' ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], allFiles, (on) => { allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
-    ...view === 'files' ? [menuRow(['Show guide comments', el('span', 'muted', String(notes))], guideInFiles, (on) => { guideInFiles = on; save(); renderFiles(); }, false, icons.agentGuide)] : [],
+    ...view === 'files' ? [menuRow(['Show guide comments', el('span', 'muted', String(notes))], guideInFiles, (on) => { guideInFiles = on; save(); renderFiles(); renderNavThreads(); }, false, icons.agentGuide)] : [],
     menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
     menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }, false, icons.margin),
   ];
@@ -3910,15 +3910,22 @@ function guideIntro(): HTMLElement {
   const card = el('section', 'card guide-intro');
   card.append(el('h3', '', 'Guide'), el('p', '', 'Claude reads the changes, groups them by severity, puts them in reading order and explains each step. '
     + 'Each note is a thread you can reply to. Every change lands in exactly one step, so once every step is Viewed, the whole PR is.'));
+  if (analysis?.running && analysis.progress !== undefined) {
+    const controls = el('span', 'step-actions');
+    const stop = button('', () => post({ action: 'analysis-stop' }), 'icon-button');
+    stop.append(icon(icons.stop));
+    setTip(stop, 'Stop building the guide');
+    controls.append(stop);
+    card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt, controls, () => ['lead']));
+    return card;
+  }
   const row = el('div', 'row');
   const start = button(analysis?.running ? 'Stop' : 'Build guide', () => post({ action: analysis?.running ? 'analysis-stop' : 'analyze' }), analysis?.running ? '' : 'primary');
   row.append(start);
-  if (analysis?.running && analysis.progress === undefined) row.append(el('span', 'chip agent working', 'Guide · ' + (analysis.step ?? 'Working')));
-  else if (analysis?.running) row.append(el('span', 'muted', 'Building the guide'));
+  if (analysis?.running) row.append(el('span', 'chip agent working', 'Guide · ' + (analysis.step ?? 'Working')));
   else if (analysis?.error) row.append(el('span', 'bad', 'Guide failed: ' + analysis.error));
   else row.append(el('span', 'muted', 'Runs Claude read-only on this PR. Large PRs take a few minutes.'));
   card.append(row);
-  if (analysis?.running && analysis.progress !== undefined) card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt, undefined, () => ['lead']));
   return card;
 }
 
@@ -3993,7 +4000,7 @@ function renderNavThreads(): void {
   const pageFiles = files ?? [];
   const order = new Map(pageFiles.map((file, index) => [file.path, index]));
   const shown = new Set(filteredFiles(pageFiles).map((file) => file.path));
-  const threads = allThreads().filter((thread) => !thread.resolved && standalone(thread) && (shown.has(thread.path) || (!order.has(thread.path) && !filtersOn())));
+  const threads = allThreads().filter((thread) => !thread.resolved && standalone(thread) && (view !== 'files' || inFiles(thread)) && (shown.has(thread.path) || (!order.has(thread.path) && !filtersOn())));
   const byFile = new Map<string, Thread[]>();
   for (const thread of threads) byFile.set(thread.path, [...byFile.get(thread.path) ?? [], thread]);
   const paths = [...byFile.keys()].sort((left, right) => (order.get(left) ?? Infinity) - (order.get(right) ?? Infinity) || left.localeCompare(right));
@@ -4597,6 +4604,7 @@ function setView(next: View): void {
   if (next === 'guide' && (diffRange.kind !== 'all' || whitespace)) requestFiles({ kind: 'all' }, false);
   save();
   renderFiles();
+  renderNavThreads();
   const bar = $('files-bar');
   const panelTop = (next === 'overview' ? $('panel-overview') : $('panel-files')).getBoundingClientRect().top + window.scrollY - bar.offsetHeight;
   if (window.scrollY > panelTop) window.scrollTo(0, panelTop);
