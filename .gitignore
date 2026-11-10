@@ -4,3 +4,4 @@ dist/
 *.vsix
 .claude/worktrees/
 .diffguide-sketches/
+.render/

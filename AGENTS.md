@@ -22,7 +22,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 
 - Type both directions of the page protocol with `PageMessage` and `ExtensionMessage`. The extension still validates every page message.
 - `frameMain` runs inside the HTML preview frame from its source text, so it must not use anything outside its own body.
-- The CSS lives in a template string: no backticks or `${` in it.
+- The CSS lives in a template string: no backticks or `${` in it. Its rules sit on long lines; change them with Edit on a unique selector, not scripted rewrites.
 - Redraw only what changed. `renderFiles([paths])` rebuilds those files' boxes; `renderFiles('state')` rebuilds files whose state changed. A full `renderFiles()` is for global changes such as layout, and costs about 100 ms on a 40-file PR.
 - Update the page right away for the user's own toggles (Viewed, read marks) and let the extension's next state confirm them. A round trip waits for a 150 ms debounce and a state re-read.
 
@@ -33,7 +33,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - Page controls use the page's own menus (`.picker`, as on Labels and the Files filter) for choices, not native `<select>` or VS Code quick picks. Text fields keep the shared thin inset focus line from `webviewStyles`.
 - Use our own page widgets wherever a page can host them: confirm in place (`askInline` row, or `askInMenu` under a button with no row), edit text in an inline form, pick from a `.picker` menu, report results in the page notice. A button that opens a form becomes that form's confirm button, as Merge does. Use VS Code modals, input boxes, quick picks and toasts only where no page is open, such as the sidebar, editor commands and setup, and for errors that must reach a closed page.
 - Draw every new icon ourselves in `src/icons.ts`, following [docs/ICONS.md](docs/ICONS.md): 1.25 px line icons, pixels only for the orb and the DiffGuide mark. Don't copy codicons or other icon sets. Native surfaces use the font `npm run icons` builds from the same file.
-- Use clear system sans-serif fonts for extension UI and monospace fonts for code. Never use Comic Sans or handwritten novelty fonts.
+- Use clear system sans-serif fonts for extension UI and monospace fonts for code.
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.
 - Name controls after existing ones that do the same thing; a checkbox that marks lines reviewed is "Viewed", like the file's.
 - Give each action a distinct weight: one filled button per row (`agent` when it sends to the agent, `primary` otherwise), secondary buttons, text-only Cancel. Don't show hints for standard shortcuts such as ⌘/Ctrl+Enter. Put status text left and buttons right, Cancel first and the filled button last. Align controls on one row height.
@@ -59,18 +59,19 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 ## Commands
 
 - `npm ci --ignore-scripts` installs dependencies, `npm run build` bundles, and `npm run package` builds the installable VSIX.
-- `npm run typecheck` and `npm test` check types and run the tests. Ask before running lint, type checks or tests in approval-gated sessions. Builds and packaging are separate operations.
+- `npm run typecheck` (under a second) and `npm test` (about 12 s) check types and run the tests. Run them without asking. A project Stop hook runs the type check when a turn changed TypeScript.
+- `npm run render` screenshots the review page in the user's theme (the `render` skill). `make install` packages and installs the VSIX (the `install` skill).
 - Use Python through `uv run` if a supporting media task requires it.
 
 ## Verification
 
 - The user tries changes in the installed extension, not the debug host. Reloading the window loads nothing new until you run `npm run package` and `code --install-extension diffguide-<version>.vsix --force`. An install also swaps `dist/overview.js` under open windows, so pages opened before a reload pair old HTML with the new script and break; after every install, tell the user to reload all windows.
-- Before handing over a webview change, render the page in headless Chromium with the user's theme colors (VS Code theme keys as `--vscode-*` variables) and look at a screenshot of the exact build you install. Default colors hide border and contrast problems; the screenshot also catches script errors.
+- Before handing over a webview change, run `npm run render` and look at the screenshots of the exact build you install. Add a scene to `test/render/fixtures.ts` when none shows the change. Default colors hide border and contrast problems; the screenshot also catches script errors.
 - Measure latency claims on a large sample diff, before and after, instead of estimating.
 - Verify user-facing flows with end-to-end clicks in VS Code and controlled agent simulation, including the actual failure scenario.
 - Distinguish automated logic, process simulation, observed native UI and authenticated Claude evidence. Keep unverified flows pending; do not claim completion from unit tests or a simulated walkthrough alone.
 
 ## Tracking
 
-- Record user-visible changes as lines under `## Unreleased` in `CHANGELOG.md`. The release workflow moves them into the release as `### Notes`. Keep installation, publishing, review findings and known limitations current in `README.md` and `docs/`.
+- Record user-visible changes as lines under `## Unreleased` in `CHANGELOG.md`. The release workflow moves them into the release as `### Notes`. Keep installation, publishing, review findings and known limitations current in `README.md` and `docs/`. `CHANGELOG.md` is large; read only its top.
 - Commit messages use `<type>(<scope>): <lowercase subject>` with `!` before the colon for breaking changes.

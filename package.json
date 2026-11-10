@@ -62,6 +62,8 @@
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
     "test": "node scripts/test.mjs",
+    "prerender": "npm run build",
+    "render": "node scripts/render.mjs",
     "package": "node scripts/package.mjs"
   },
   "dependencies": {
@@ -79,6 +81,7 @@
     "@types/vscode": "1.100.0",
     "@vscode/vsce": "4.1.0",
     "esbuild": "0.28.2",
+    "playwright-core": "1.64.1",
     "typescript": "7.0.2"
   },
   "contributes": {
