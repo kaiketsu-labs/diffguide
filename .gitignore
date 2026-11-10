@@ -5,3 +5,4 @@ dist/
 .claude/worktrees/
 .diffguide-sketches/
 .render/
+.vscode-test/
