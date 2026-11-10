@@ -32,4 +32,4 @@ Describe what changes for the user, why it changes, and what was verified. Separ
 
 Use conventional commit messages with a lowercase type and a scope, such as `fix(review): preserve a moved comment` or `feat(claude): reconnect an ended session`. Add `!` before the colon for a breaking change.
 
-Both GitHub workflows are manual and require explicit approval to run checks. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for release preparation and Marketplace registration.
+CI runs the type check, tests, VSIX packaging and the [pre-commit](https://pre-commit.com) hooks on every pull request and push to `main`. Run `pre-commit install` once to run the same hooks before each commit. PR titles must follow the commit message format, since a squash merge uses the title as the commit subject. Dependabot opens weekly update PRs; minor and patch updates merge once checks pass. See [docs/PUBLISHING.md](docs/PUBLISHING.md) for release preparation and Marketplace registration.

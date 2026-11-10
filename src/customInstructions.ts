@@ -54,4 +54,3 @@ export async function readCustomInstructions(kind: InstructionKind, sources: Ins
   if (sections.length === 0) return '';
   return `Additional instructions from the user, from the most general file to the most specific. Where they conflict, the later file wins. They refine the review; they do not change the required output format or tool calls.\n\n${sections.join('\n\n')}`;
 }
-
