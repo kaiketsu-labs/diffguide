@@ -37,8 +37,8 @@ export interface ReviewMessage {
 export type Reviewer = 'correctness' | 'design' | 'security' | 'performance';
 export const reviewers: readonly Reviewer[] = ['correctness', 'design', 'security', 'performance'];
 
-/** How a code review's finding was proven: by a test that ran, a trace through the code, or a quoted rule or precedent. */
-export type FindingEvidence = 'tested' | 'traced' | 'cited';
+/** How a code review's finding was proven: by a test that ran, a simpler rewrite that passes the tests, a trace through the code, or a quoted rule or precedent. */
+export type FindingEvidence = 'tested' | 'rewritten' | 'traced' | 'cited';
 export type FindingSeverity = 'high' | 'medium' | 'low';
 
 /** What a code review thread found, and which agents raised it. */

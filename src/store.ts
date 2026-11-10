@@ -455,7 +455,7 @@ function readFinding(value: unknown): Finding {
   }
   const { severity, evidence } = record;
   if (severity !== 'high' && severity !== 'medium' && severity !== 'low') throw new ReviewStoreError('Invalid finding severity.');
-  if (evidence !== 'tested' && evidence !== 'traced' && evidence !== 'cited') throw new ReviewStoreError('Invalid finding evidence.');
+  if (evidence !== 'tested' && evidence !== 'rewritten' && evidence !== 'traced' && evidence !== 'cited') throw new ReviewStoreError('Invalid finding evidence.');
   return { reviewers: agents as Reviewer[], severity, evidence };
 }
 

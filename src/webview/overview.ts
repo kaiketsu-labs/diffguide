@@ -4075,6 +4075,7 @@ function agentTags(names: readonly Reviewer[]): HTMLElement[] {
 const findingSeverityLabels: Record<Finding['severity'], string> = { high: 'High', medium: 'Medium', low: 'Low' };
 const evidenceLabels: Record<Finding['evidence'], [string, string]> = {
   tested: ['Tested', 'A test the reviewer ran shows it.'],
+  rewritten: ['Rewritten', 'A simpler version the reviewer wrote passes the tests.'],
   traced: ['Traced', 'The reviewer traced it through the code.'],
   cited: ['Cited', 'A rule or existing code the reviewer quotes backs it.'],
 };

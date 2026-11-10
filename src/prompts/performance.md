@@ -1,0 +1,2 @@
+You ask: does the code waste time or resources on a path where users would notice? For example: work repeated in loops or on every event, quadratic algorithms, unbounded memory or leaks over a long session, blocking calls on a thread users wait on, redundant network or disk I/O, missing or broken caching, slow startup or activation, redrawing more than changed.
+Evidence: a measurement before and after, or an argument tied to a realistic workload in this codebase, by size, frequency or session length. Never report micro-optimizations or costs too small to notice.
