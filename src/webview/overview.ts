@@ -4135,7 +4135,8 @@ function renderReviewCard(): void {
       title.disabled = thread === undefined;
       if (thread === undefined) title.title = 'The thread is resolved or gone.';
       title.addEventListener('click', () => { if (thread !== undefined) jump(thread); });
-      const item = el('li');
+      const item = el('li', thread?.resolved ? 'resolved' : '');
+      if (thread?.resolved) title.prepend(stateIcon('done', 'mark', 'Resolved'));
       item.append(el('span', 'sev ' + finding.severity, findingSeverityLabels[finding.severity]), title, el('span', 'finding-agents'), ...findingMarks(finding).slice(1), findingWhere(finding.path, finding.startLine));
       item.querySelector('.finding-agents')?.append(...agentTags(finding.reviewers));
       list.append(item);
