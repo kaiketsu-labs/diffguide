@@ -1389,7 +1389,8 @@ function openRangeMenu(): void {
     const range: DiffRange = { kind: 'commits', from: firstLocal.oid, to: lastLocal.oid };
     rows.push(rangeRow([el('span', 'text', 'Not pushed'), el('span', 'muted', unpushed.length === 1 ? '1 commit' : unpushed.length + ' commits')], sameRange(diffRange, range), () => pick(range)));
   }
-  commits.forEach((commit, at) => {
+  // Newest first; `at` stays the oldest-first index the Shift-click range uses.
+  commits.map((commit, at) => [commit, at] as const).reverse().forEach(([commit, at]) => {
     const local = isUnpushed(commit.oid);
     const row = rangeRow([hashChip(commit.oid), el('span', 'text', commit.headline), ...cell(local ? [el('span', 'chip', 'Not pushed')] : checkMark(commit)), ...commitStats(commit), el('span', 'muted', commit.author), ...cell(timeLabel(commit.createdAt))],
       low >= 0 && at >= low && at <= high, (shift) => {
@@ -1493,7 +1494,12 @@ function openViewMenu(): void {
     ...view === 'files' ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], allFiles, (on) => { allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
     ...view === 'files' ? [menuRow(['Show guide comments', el('span', 'muted', String(notes))], guideInFiles, (on) => { guideInFiles = on; save(); renderFiles(); renderNavThreads(); }, false, icons.agentGuide)] : [],
     menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
-    menuRow(['Collapsed comments in the margin'], marginThreads, (on) => { marginThreads = on; save(); renderFiles(); }, false, icons.margin),
+    menuRow(['Collapsed comments in the margin'], marginThreads, (on) => {
+      marginThreads = on;
+      if (on) for (const [id, open] of threadOpen) if (open) threadOpen.delete(id);
+      save();
+      renderFiles();
+    }, false, icons.margin),
   ];
   openToolbarMenu('view-menu', rows);
 }
@@ -2568,8 +2574,10 @@ function threadBox(thread: Thread): HTMLElement {
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
   box.addEventListener('toggle', () => {
-    if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open);
-    if (marginThreads && !box.open && box.parentElement?.closest('details.thread') === null && box.closest('tr.inline') !== null) renderFiles([thread.path]);
+    // With comments in the margin a diff thread starts as a mark, so its open state is always kept.
+    const inMargin = marginThreads && box.parentElement?.closest('details.thread') === null && box.closest('tr.inline') !== null;
+    if (!inMargin && box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open);
+    if (inMargin && !box.open) renderFiles([thread.path]);
   });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
     : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
@@ -2604,7 +2612,9 @@ function threadBox(thread: Thread): HTMLElement {
         if (!threadUnfolded.delete(thread.id)) threadUnfolded.add(thread.id);
         for (const each of foldedItems) each.hidden = !threadUnfolded.has(thread.id);
         toggle.replaceChildren(icon(icons.earlier), label());
+        toggle.classList.toggle('shown', threadUnfolded.has(thread.id));
       }, 'quiet unfold');
+      toggle.classList.toggle('shown', threadUnfolded.has(thread.id));
       box.append(toggle);
     }
     const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
@@ -2972,10 +2982,6 @@ function selectedText(path: string, start: number, end: number): string | undefi
     lines.push(holder.textContent ?? '');
   }
   return lines.join('\n');
-}
-
-function threadIsOpen(thread: Thread): boolean {
-  return threadOpen.get(thread.id) ?? !thread.resolved;
 }
 
 /** A collapsed thread as a dot in its line's number cell; clicking it opens the thread in the diff. */
@@ -3397,7 +3403,7 @@ function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, 
       for (const thread of threads) {
         if (placed.has(thread.id) || thread.outdated || thread.side !== side || thread.endLine !== line || !linesFit(side)) continue;
         placed.add(thread.id);
-        if (marginThreads && !hidden && !threadIsOpen(thread)) marginMark(row, side, thread);
+        if (marginThreads && !hidden && threadOpen.get(thread.id) !== true) marginMark(row, side, thread);
         else node.append(inline(threadBox(thread), widths.length));
       }
       if (side === 'new' && !hidden) {

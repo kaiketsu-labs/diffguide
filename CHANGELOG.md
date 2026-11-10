@@ -7,6 +7,10 @@
 - A commit Claude makes for a comment shows under its reply to that comment, not at the end of the thread. Commits recorded before this update still show at the end.
 - **Close all** on the review page closes every opened file without a visible comment, including files that only hold hidden guide notes or archived threads. A closed file comes back when you open it again or a comment you can see lands on it.
 - The review page's tab shows the PR's icon in its theme color: open, draft, awaiting review, the review verdict, merged or closed. The Pull Requests view draws these icons in DiffGuide's own style.
+- With **Collapsed comments in the margin** on, every thread in the diff starts as a mark in the margin. Click a mark to open the thread; collapse it to send it back.
+- The commit range menu lists the newest commit first.
+- A pinned thread header on the **Overview** tab no longer lets the thread's text show above it.
+- **Show earlier messages** centers its icon with its label, and **Hide earlier messages** points its arrows the other way.
 - **All open** in the Pull Requests view shows how many PRs are open. The count can be higher than the rows, which stop at 50.
 - Requesting, removing or re-requesting a reviewer on the review page refreshes the Pull Requests view.
 - A reviewer who only left a comment stays in the reviewer list with **Re-request review**. A re-requested reviewer reads "Approved · Re-requested" (or their earlier verdict), is ticked in the Reviewers menu, and loses the button until they review again.
