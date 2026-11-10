@@ -2549,7 +2549,9 @@ function threadBox(thread: Thread): HTMLElement {
     const progress = thread.source === 'local' ? thread.progress : undefined;
     const controls = el('span', 'step-actions');
     const takeBack = thread.source === 'local' && thread.linkedTo === undefined && thread.scope !== 'pullRequest' && thread.messages.at(-1)?.author === 'human';
-    controls.append(takeBack ? withdrawButton(thread) : stopButton());
+    // Local mode has no run of its own to stop, so its Stop only takes the comment back.
+    if (takeBack) controls.append(withdrawButton(thread));
+    else if (!current?.localMode) controls.append(stopButton());
     live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, controls) : stepLog(progress.steps, progress.startedAt, controls));
     box.append(live);
   }
