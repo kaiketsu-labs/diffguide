@@ -7,7 +7,7 @@
 - A reviewer who only left a comment stays in the reviewer list with **Re-request review**. A re-requested reviewer reads "Approved · Re-requested" (or their earlier verdict), is ticked in the Reviewers menu, and loses the button until they review again.
 - **Show on review page** in the Explorer's context menu is now **Show in DiffGuide**.
 - Tables in the PR description have borders, and Markdown tables in comments render without outer pipes too. The description shows at full length instead of scrolling in its own box.
-- Inline code in comments, replies, the description and Markdown previews has its own color, `diffGuide.inlineCodeForeground`.
+- Inline code in comments, replies, the description and Markdown previews takes the theme's ANSI cyan, overridable as `diffGuide.inlineCodeForeground`.
 - A merged or closed PR shows **Merged** or **Closed** at the top of the review page.
 - PDF and HTML previews keep a fixed height and scroll inside.
 - ⌘/Ctrl+F opens VS Code's find bar on the review page. It finds text on the page only, so folded files and hunks and PDF pages are not searched.

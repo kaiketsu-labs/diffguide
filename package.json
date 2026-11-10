@@ -107,10 +107,10 @@
         "id": "diffGuide.inlineCodeForeground",
         "description": "Text color of inline code in comments, replies and PR descriptions.",
         "defaults": {
-          "dark": "#EB9BC9",
-          "light": "#B0306F",
-          "highContrast": "#EB9BC9",
-          "highContrastLight": "#B0306F"
+          "dark": "terminal.ansiCyan",
+          "light": "terminal.ansiCyan",
+          "highContrast": "terminal.ansiCyan",
+          "highContrastLight": "terminal.ansiCyan"
         }
       }
     ],

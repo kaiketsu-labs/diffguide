@@ -33,7 +33,7 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
   // Our own color contributions in package.json, so users can override them; keep their defaults in sync.
   'brand-soft': { vscode: 'diffGuide-selectionBackground', dark: '#ffffff1a', light: '#0000000f' },
   'brand-line': { vscode: 'diffGuide-selectionBorder', dark: '#ffffff66', light: '#00000059' },
-  'code-ink': { vscode: 'diffGuide-inlineCodeForeground', dark: '#eb9bc9', light: '#b0306f' },
+  'code-ink': { vscode: 'diffGuide-inlineCodeForeground', dark: '#11a8cd', light: '#0598bc' },
 };
 
 const brandTokens: Readonly<Record<string, BrandToken>> = {
