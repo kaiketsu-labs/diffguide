@@ -175,6 +175,8 @@ test('restores PR reviews created from this checkout and ignores other checkouts
     path: 'feature.ts', startLine: 1, endLine: 1, selectedText: 'export const feature = 1;',
     contextBefore: '', contextAfter: '', documentHash: 'a'.repeat(64), side: 'working', baseRevision: 'b'.repeat(40),
   }, 'Keep this', 'ask');
+  // The comment starts a background run that writes and removes a worktree lock; let it end before the folder goes.
+  await opened.runner.stop();
   await first.close('acme/app', 5);
   first.dispose();
 
@@ -188,4 +190,5 @@ test('restores PR reviews created from this checkout and ignores other checkouts
   await restored.restore();
   assert.equal(restored.sessions.length, 1);
   assert.equal(restored.sessions[0]?.store.threads[0]?.messages[0]?.text, 'Keep this');
+  await restored.opened[0]?.runner.stop();
 });
