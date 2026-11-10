@@ -6,6 +6,7 @@
 - **Draft reply** in a thread's Reply form has Claude write the GitHub comment from what you typed: notes on what to say, or a draft to revise. On a GitHub thread the draft replaces your text; on a Local thread it opens the Publish form, whose own **Draft reply** revises it. A GitHub thread's Reply form now lists Implement before Ask, as a Local thread's does.
 - A commit Claude makes for a comment shows under its reply to that comment, not at the end of the thread. Commits recorded before this update still show at the end.
 - **Close all** on the review page closes every opened file without a visible comment, including files that only hold hidden guide notes or archived threads. A closed file comes back when you open it again or a comment you can see lands on it.
+- The review page's tab shows the PR's icon in its theme color: open, draft, awaiting review, the review verdict, merged or closed. The Pull Requests view draws these icons in DiffGuide's own style.
 - **All open** in the Pull Requests view shows how many PRs are open. The count can be higher than the rows, which stop at 50.
 - Requesting, removing or re-requesting a reviewer on the review page refreshes the Pull Requests view.
 - A reviewer who only left a comment stays in the reviewer list with **Re-request review**. A re-requested reviewer reads "Approved · Re-requested" (or their earlier verdict), is ticked in the Reviewers menu, and loses the button until they review again.

@@ -64,6 +64,8 @@ export const icons = {
   send: line('<path d="M2 8h9.5M8 4.5L11.5 8 8 11.5M14 3v10"/>'),
   requestChanges: line('<path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M3 13.5h10"/>'),
   ready: line(ring + '<path d="M5.25 8.25l2 2 3.5-4"/>'),
+  pullRequest: line('<circle cx="4" cy="3.5" r="1.75"/><circle cx="4" cy="12.5" r="1.75"/><circle cx="12" cy="12.5" r="1.75"/><path d="M4 5.25v5.5M12 10.75V6a2.5 2.5 0 0 0-2.5-2.5H7M8.75 1.75L7 3.5l1.75 1.75"/>'),
+  draftPullRequest: line('<circle cx="4" cy="3.5" r="1.75"/><circle cx="4" cy="12.5" r="1.75"/><circle cx="12" cy="12.5" r="1.75"/><path d="M4 5.25v5.5"/><path stroke-dasharray="1.5 2" d="M12 10.75V6a2.5 2.5 0 0 0-2.5-2.5H7"/>'),
   closePullRequest: line('<circle cx="4" cy="3.5" r="1.75"/><circle cx="4" cy="12.5" r="1.75"/><path d="M4 5.25v5.5M10 2.5l4 4M14 2.5l-4 4M12 9v1.75"/><circle cx="12" cy="12.5" r="1.75"/>'),
   merge: line('<circle cx="4" cy="3.5" r="1.75"/><circle cx="4" cy="12.5" r="1.75"/><circle cx="12" cy="8.5" r="1.75"/><path d="M4 5.25v5.5M4 5.25c0 2.5 2 3.25 6.25 3.25"/>'),
   push: line('<path d="M8 13.5V3M4 7l4-4 4 4M3 14.5h10"/>'),

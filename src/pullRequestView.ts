@@ -93,23 +93,26 @@ const parallelListings = 4;
 
 /** Sidebar icon and label for each review verdict. */
 const verdicts: Record<ReviewVerdict, { readonly icon: string; readonly color: string; readonly label: string }> = {
-  approved: { icon: 'pass', color: 'testing.iconPassed', label: 'Approved' },
-  changes: { icon: 'request-changes', color: 'testing.iconFailed', label: 'Changes requested' },
-  commented: { icon: 'comment-discussion', color: 'descriptionForeground', label: 'Commented' },
+  approved: { icon: 'diffguide-ready', color: 'testing.iconPassed', label: 'Approved' },
+  changes: { icon: 'diffguide-request-changes', color: 'testing.iconFailed', label: 'Changes requested' },
+  commented: { icon: 'diffguide-comment', color: 'descriptionForeground', label: 'Commented' },
 };
 
 const repositoryIcon = new vscode.ThemeIcon('diffguide-repository', new vscode.ThemeColor('charts.purple'));
 
-const mergedIcon = new vscode.ThemeIcon('git-merge', new vscode.ThemeColor('charts.purple'));
+export const mergedIcon = new vscode.ThemeIcon('diffguide-merge', new vscode.ThemeColor('charts.purple'));
 
-const awaitingReviewIcon = new vscode.ThemeIcon('eye', new vscode.ThemeColor('charts.yellow'));
+export const closedIcon = new vscode.ThemeIcon('diffguide-close-pull-request', new vscode.ThemeColor('charts.red'));
 
-function pullRequestIcon(draft: boolean, review?: ReviewVerdict, awaitingReview = false): vscode.ThemeIcon {
+const awaitingReviewIcon = new vscode.ThemeIcon('diffguide-show', new vscode.ThemeColor('charts.yellow'));
+
+/** A PR row's icon: its review verdict, else awaiting review, else open or draft. */
+export function pullRequestIcon(draft: boolean, review?: ReviewVerdict, awaitingReview = false): vscode.ThemeIcon {
   if (review !== undefined) return new vscode.ThemeIcon(verdicts[review].icon, new vscode.ThemeColor(verdicts[review].color));
   if (awaitingReview && !draft) return awaitingReviewIcon;
   return draft
-    ? new vscode.ThemeIcon('git-pull-request-draft', new vscode.ThemeColor('descriptionForeground'))
-    : new vscode.ThemeIcon('git-pull-request', new vscode.ThemeColor('charts.green'));
+    ? new vscode.ThemeIcon('diffguide-draft-pull-request', new vscode.ThemeColor('descriptionForeground'))
+    : new vscode.ThemeIcon('diffguide-pull-request', new vscode.ThemeColor('charts.green'));
 }
 
 /** Key to the Pull Requests icons and badge, drawn with the same icons as the rows. */

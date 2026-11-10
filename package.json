@@ -561,99 +561,155 @@
       "diffguide-orb": {
         "description": "DiffGuide orb",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E000"
         }
       },
       "diffguide-orb-asleep": {
         "description": "DiffGuide orb asleep",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E001"
         }
       },
       "diffguide-orb-away": {
         "description": "DiffGuide orb away",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E002"
         }
       },
       "diffguide-mark": {
         "description": "DiffGuide mark",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E003"
         }
       },
       "diffguide-inbox": {
         "description": "DiffGuide inbox",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E004"
         }
       },
       "diffguide-outbox": {
         "description": "DiffGuide outbox",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E005"
         }
       },
       "diffguide-stack": {
         "description": "DiffGuide stack",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E006"
         }
       },
       "diffguide-repository": {
         "description": "DiffGuide repository",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E007"
         }
       },
       "diffguide-bookmark": {
         "description": "DiffGuide bookmark",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E008"
         }
       },
       "diffguide-bookmark-filled": {
         "description": "DiffGuide bookmark filled",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E009"
         }
       },
       "diffguide-search": {
         "description": "DiffGuide search",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E00A"
         }
       },
       "diffguide-filter": {
         "description": "DiffGuide filter",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E00B"
         }
       },
       "diffguide-filter-active": {
         "description": "DiffGuide filter active",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E00C"
         }
       },
       "diffguide-refresh": {
         "description": "DiffGuide refresh",
         "default": {
-          "fontPath": "./resources/diffguide-icons-d643ab6e.woff",
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
           "fontCharacter": "\\E00D"
+        }
+      },
+      "diffguide-pull-request": {
+        "description": "DiffGuide pull request",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E00E"
+        }
+      },
+      "diffguide-draft-pull-request": {
+        "description": "DiffGuide draft pull request",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E00F"
+        }
+      },
+      "diffguide-merge": {
+        "description": "DiffGuide merge",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E010"
+        }
+      },
+      "diffguide-close-pull-request": {
+        "description": "DiffGuide close pull request",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E011"
+        }
+      },
+      "diffguide-ready": {
+        "description": "DiffGuide ready",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E012"
+        }
+      },
+      "diffguide-request-changes": {
+        "description": "DiffGuide request changes",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E013"
+        }
+      },
+      "diffguide-comment": {
+        "description": "DiffGuide comment",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E014"
+        }
+      },
+      "diffguide-show": {
+        "description": "DiffGuide show",
+        "default": {
+          "fontPath": "./resources/diffguide-icons-df9db5b4.woff",
+          "fontCharacter": "\\E015"
         }
       }
     }

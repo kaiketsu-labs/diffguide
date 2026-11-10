@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { build } from 'esbuild';
 
 /** Icons VS Code draws itself, as `$(diffguide-<name>)`. Each keeps its code point once shipped, so add new ones at the end. */
-const native = ['orb', 'orbAsleep', 'orbAway', 'mark', 'inbox', 'outbox', 'stack', 'repository', 'bookmark', 'bookmarkFilled', 'search', 'filter', 'filterActive', 'refresh'];
+const native = ['orb', 'orbAsleep', 'orbAway', 'mark', 'inbox', 'outbox', 'stack', 'repository', 'bookmark', 'bookmarkFilled', 'search', 'filter', 'filterActive', 'refresh',
+  'pullRequest', 'draftPullRequest', 'merge', 'closePullRequest', 'ready', 'requestChanges', 'comment', 'show'];
 
 const bundle = await build({ entryPoints: ['src/icons.ts'], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'warning' });
 const module = { exports: {} };

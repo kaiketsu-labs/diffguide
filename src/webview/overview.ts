@@ -5201,3 +5201,20 @@ new ResizeObserver(([entry]) => {
   if (entry) document.body.style.setProperty('--bar-height', (entry.target as HTMLElement).offsetHeight + 'px');
 }).observe($('files-bar'));
 post({ action: 'ready' });
+
+/** Colors of the PR icons in the sidebar; the extension draws the tab icon in the theme's values, since tabs drop a theme icon's color. */
+const tabIconColors = ['charts.green', 'charts.purple', 'charts.red', 'charts.yellow', 'testing.iconPassed', 'testing.iconFailed', 'descriptionForeground'];
+let sentColors = '';
+function sendThemeColors(): void {
+  const style = getComputedStyle(document.documentElement);
+  const colors = Object.fromEntries(tabIconColors.map((id) => [id, style.getPropertyValue('--vscode-' + id.replaceAll('.', '-')).trim()]).filter(([, value]) => value));
+  const key = JSON.stringify(colors);
+  if (key === sentColors) return;
+  sentColors = key;
+  post({ action: 'theme-colors', colors });
+}
+sendThemeColors();
+// VS Code rewrites the page's theme variables and body class when the theme changes.
+const themeWatch = new MutationObserver(sendThemeColors);
+themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+themeWatch.observe(document.body, { attributes: true, attributeFilter: ['class'] });

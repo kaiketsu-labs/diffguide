@@ -1,5 +1,8 @@
 import type { FileIcons } from './fileIcons.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { pollWhileFocused } from './autoSync.js';
 import { claudeStatus } from './claudeStatus.js';
@@ -26,6 +29,7 @@ import type { MediaPreview } from './media.js';
 import type { ClaudeConversation } from './claudeSessions.js';
 import type { ClaudeChoice } from './setup.js';
 import { isSessionId } from './sessionBinding.js';
+import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestView.js';
 
 /** Everything the review page shows for one PR, apart from the diff itself. */
 export interface OverviewState {
@@ -379,6 +383,7 @@ export type PageMessage =
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor' | 'open-file'; readonly path: string }
   | { readonly action: 'close-files'; readonly paths: readonly string[] }
+  | { readonly action: 'theme-colors'; readonly colors: Readonly<Record<string, string>> }
   | { readonly action: 'linked-open' | 'linked-push' | 'linked-draft' | 'unlink'; readonly key: string }
   | { readonly action: 'link'; readonly link: string }
   | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
@@ -545,6 +550,41 @@ export function revealOpenPage(key: string, reveal?: OverviewReveal): boolean {
  * Show a review page, reusing it when already open, and redraw it whenever `onDidChange` fires.
  * `onDidChangeFiles` reads the files again, for a page whose files change without a commit.
  */
+/** The tab's icon, the PR's sidebar icon; none on the local review page. */
+function tabIcon(state: OverviewState): vscode.ThemeIcon | undefined {
+  const details = state.details;
+  if (details === undefined) return undefined;
+  if (details.merged) return mergedIcon;
+  if (!details.open) return closedIcon;
+  const states = details.reviewers.map((reviewer) => reviewer.state);
+  const review = states.includes('changes') ? 'changes' : states.includes('approved') ? 'approved' : states.includes('commented') ? 'commented' : undefined;
+  const awaitingReview = details.viewerIsAuthor && details.reviewers.some((reviewer) => reviewer.state === 'requested' || reviewer.rerequested === true);
+  return pullRequestIcon(details.draft, review, awaitingReview);
+}
+
+const colorValue = /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., %]+\))$/;
+
+/** Theme colors the page read from its CSS variables, keyed by color id; invalid entries are dropped. */
+function themeColors(value: unknown): Map<string, string> {
+  const colors = new Map<string, string>();
+  if (typeof value !== 'object' || value === null) return colors;
+  for (const [id, color] of Object.entries(value).slice(0, 20)) if (/^[a-zA-Z.]{1,60}$/.test(id) && typeof color === 'string' && colorValue.test(color)) colors.set(id, color);
+  return colors;
+}
+
+/** The icon drawn in `color` as an SVG file; content-named, so a file is never rewritten with other content. */
+async function coloredIcon(id: string, color: string): Promise<vscode.Uri | undefined> {
+  const name = id.replace(/^diffguide-/, '').replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+  const svg = (icons as Record<string, string>)[name];
+  if (svg === undefined) return undefined;
+  const text = svg.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" ').replaceAll('currentColor', color);
+  const folder = join(tmpdir(), 'diffguide-tab-icons');
+  const file = join(folder, name + '-' + createHash('sha256').update(text).digest('hex').slice(0, 12) + '.svg');
+  await mkdir(folder, { recursive: true });
+  await writeFile(file, text);
+  return vscode.Uri.file(file);
+}
+
 export async function showPullRequestOverview(
   key: string, read: () => Promise<OverviewState>, onDidChange: vscode.Event<unknown>, actions: OverviewActions, extensionUri: vscode.Uri, revealAt?: OverviewReveal,
   onDidChangeFiles?: vscode.Event<unknown>,
@@ -560,6 +600,19 @@ export async function showPullRequestOverview(
     { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true, enableFindWidget: true });
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
   panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
+  let colors = new Map<string, string>();
+  let iconWrites = 0;
+  /** Webview tabs show a theme icon's shape but drop its color, so once the page sends the theme's colors the tab gets an SVG drawn in them. */
+  const updateTabIcon = (): void => {
+    const icon = tabIcon(state);
+    if (icon === undefined) return;
+    const write = ++iconWrites;
+    const color = icon.color instanceof vscode.ThemeColor ? colors.get(icon.color.id) : undefined;
+    // The API types allow only image files, but VS Code also shows a theme icon in a webview tab.
+    if (color === undefined) { (panel as { iconPath?: unknown }).iconPath = icon; return; }
+    void coloredIcon(icon.id, color).then((uri) => { if (uri !== undefined && write === iconWrites) panel.iconPath = uri; }, () => undefined);
+  };
+  updateTabIcon();
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (select?: DiffSelection): void => {
     void actions.readFiles(select).then(({ files, selection, atHead, icons, repositoryFiles }) => {
@@ -591,6 +644,7 @@ export async function showPullRequestOverview(
         const claudeStopped = state.claude.running && !next.claude.running;
         state = next;
         panel.title = next.title;
+        updateTabIcon();
         post({ state: next });
         if (claudeStopped) sendFiles();
       }, () => undefined);
@@ -611,6 +665,7 @@ export async function showPullRequestOverview(
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') sendFiles();
+        else if (action === 'theme-colors') { colors = themeColors((value as Record<string, unknown>)['colors']); updateTabIcon(); }
         else if (action === 'comment' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
           && startLine <= endLine && isText(text) && commentIntents.includes(intent)) {
           await actions.comment({ path, side, startLine, endLine, text: text.trim(), intent: intent as CommentIntent });
