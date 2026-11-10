@@ -2548,8 +2548,8 @@ function threadBox(thread: Thread): HTMLElement {
     live.dataset.thread = thread.id;
     const progress = thread.source === 'local' ? thread.progress : undefined;
     const controls = el('span', 'step-actions');
-    if (thread.source === 'local' && thread.linkedTo === undefined && thread.messages.at(-1)?.author === 'human') controls.append(withdrawButton(thread));
-    controls.append(stopButton());
+    const takeBack = thread.source === 'local' && thread.linkedTo === undefined && thread.scope !== 'pullRequest' && thread.messages.at(-1)?.author === 'human';
+    controls.append(takeBack ? withdrawButton(thread) : stopButton());
     live.append(progress === undefined ? stepLog([{ verb: working, done: false }], undefined, controls) : stepLog(progress.steps, progress.startedAt, controls));
     box.append(live);
   }
@@ -2644,19 +2644,19 @@ function stopButton(): HTMLButtonElement {
   return stop;
 }
 
-/** Stop Claude's work on the thread's latest comment and put the comment back in a box to edit. */
+/** Stop beside a thread's live log that stops the run answering the thread's latest comment and puts the comment back in a box to edit. */
 function withdrawButton(thread: Thread): HTMLButtonElement {
   const key = 'withdraw:' + thread.id;
-  const edit = button('', () => {
+  const stop = button('', () => {
     sending.add(key);
     $('error').textContent = '';
     renderFiles([thread.path]);
     post({ action: 'withdraw', form: key, id: thread.id });
   }, 'icon-button');
-  edit.append(icon(icons.edit));
-  setTip(edit, current?.localMode ? 'Take this comment back to edit it' : 'Stop and edit this comment');
-  edit.disabled = sending.has(key);
-  return edit;
+  stop.append(icon(icons.stop));
+  setTip(stop, current?.localMode ? 'Take this comment back to edit it' : 'Stop and take this comment back to edit it');
+  stop.disabled = sending.has(key);
+  return stop;
 }
 
 /** Put a comment taken back into its thread's reply box, or into a new comment box where it was. */
