@@ -1058,7 +1058,8 @@ let conversationStamp = '';
 function renderConversation(state: OverviewState, force = false): void {
   const pullRequestThreads = state.threads.filter((thread) => thread.scope === 'pullRequest');
   const stamp = JSON.stringify([asking?.key, conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:') || key.startsWith('comment-ask:')),
-    pullRequestThreads, showArchived, [...commentAsks.keys()], pullRequestThreads.map((thread) => [replies.get(thread.id), publishing.get(thread.id), archiving.get(thread.id)]), state.claude.running]);
+    pullRequestThreads, showArchived, [...commentAsks.keys()], pullRequestThreads.map((thread) => [replies.get(thread.id), publishing.get(thread.id), archiving.get(thread.id)]), state.claude.running,
+    (state.github ?? []).map((thread) => [thread.id, thread.location, thread.messages.map((entry) => [entry.id, entry.body])])]);
   if (!force && stamp === conversationStamp) return;
   conversationStamp = stamp;
   const timeline = $('timeline');
@@ -1085,7 +1086,7 @@ function renderConversation(state: OverviewState, force = false): void {
     const flush = (): void => { if (commits.length) nodes.push(commitGroup(commits)); commits = []; };
     for (const item of data.timeline) {
       if (item.kind === 'commit') { commits.push(item); continue; }
-      if (item.kind === 'review' && (item.state === 'pending' || (!item.bodyHtml.trim() && item.state === 'commented'))) continue;
+      if (item.kind === 'review' && (item.state === 'pending' || (!item.bodyHtml.trim() && item.state === 'commented' && !reviewComments(item).length))) continue;
       flush();
       if (item.kind === 'event') nodes.push(eventItem(item));
       else nodes.push(commentItem(item, place(item)));
@@ -1119,6 +1120,12 @@ function renderConversationForm(): void {
   $('conversation-form').replaceChildren(field, row);
 }
 
+/** A review's diff comments, found in the page's GitHub threads and in page order. */
+function reviewComments(review: Extract<TimelineItem, { kind: 'review' }>): { thread: GitHubThreadView; message: GitHubMessageView }[] {
+  const ids = new Set(review.comments);
+  return (current?.github ?? []).flatMap((thread) => thread.messages.filter((entry) => ids.has(entry.id)).map((entry) => ({ thread, message: entry })));
+}
+
 function commentItem(item: Extract<TimelineItem, { kind: 'comment' | 'review' }>, place: CommentPlace): HTMLElement {
   const node = el('div', 'timeline-item comment');
   node.id = 'comment-' + item.id;
@@ -1126,7 +1133,16 @@ function commentItem(item: Extract<TimelineItem, { kind: 'comment' | 'review' }>
   const head = el('div', 'msg-head');
   const verb = item.kind === 'review' ? reviewVerbs[item.state] : 'commented';
   head.append(el('b', '', item.author), el('span', 'verb', verb), ...timeLabel(item.createdAt), ...item.edited ? [el('span', 'edited', '· edited')] : [], commentTools(item, place));
-  main.append(head, ...commentBody(item, place));
+  main.append(head);
+  if (item.bodyHtml.trim() || item.kind !== 'review') main.append(...commentBody(item, place));
+  if (item.kind === 'review') {
+    const comments = reviewComments(item);
+    if (comments.length) {
+      const list = el('ul', 'review-comments');
+      list.append(...comments.map(({ thread, message: entry }) => threadRow({ ...thread, source: 'github', text: entry.body, messages: [entry] }, 'github')));
+      main.append(list);
+    }
+  }
   if (commentAsks.has(item.id)) main.append(commentAskBox(item, place));
   main.append(...commentThreads(item.id).map(threadBox));
   node.append(personAvatar(item.avatarUrl, item.authorName ?? item.author, item.author), main);

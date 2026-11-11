@@ -136,6 +136,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   hoverCard: scene(pullRequest, [{ hover: '.card-thread', wait: 600, shot: 'hover-card.png' }], { saved: { view: 'overview' } }),
   get pending() { return reviewingScenes['pending']!; },
   get since() { return reviewingScenes['since']!; },
+  get submitted() { return reviewingScenes['submitted']!; },
 };
 
 const pendingMessage = (id: string, body: string): GitHubMessage => ({
@@ -174,7 +175,20 @@ export const reviewing: OverviewState = {
   unpushed: [],
 };
 
+/** The same PR right after the reviewer submitted its two comments as a review without a summary. */
+const submitted: OverviewState = {
+  ...reviewing,
+  github: reviewing.github!.map((thread) => ({ ...thread, status: 'Open', pending: false, messages: thread.messages.map((entry) => ({ ...entry, pending: false })) })),
+  details: { ...reviewing.details!, pendingComments: 0 },
+  conversation: {
+    ...reviewing.conversation!,
+    timeline: [...reviewing.conversation!.timeline, { kind: 'review', id: 'r1', author: 'alice', avatarUrl: '', createdAt: ago(1), bodyHtml: '', body: '', state: 'commented', comments: ['m1', 'm2'],
+      canEdit: true, canDelete: false, canHide: false, canReact: true, edited: false, reactions: [] }],
+  },
+};
+
 export const reviewingScenes: Readonly<Record<string, Scene>> = {
+  submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   pending: { state: reviewing, messages: [{ state: reviewing }, filesMessage], steps: [{ shot: 'pending.png', full: true }], saved: { view: 'overview' } },
   since: { state: reviewing, messages: [{ state: reviewing }, { ...filesMessage, selection: { range: { kind: 'since' }, whitespace: false } }], steps: [{ shot: 'since.png' }], saved: { view: 'files' } },
 };

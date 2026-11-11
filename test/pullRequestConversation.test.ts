@@ -23,7 +23,8 @@ test('reads the Conversation tab: comments, reviews, pushes and events, and the 
     { __typename: 'IssueComment', id: 'IC2', body: 'spam', bodyHTML: '<p>spam</p>', createdAt: '2026-01-01T01:00:00Z', isMinimized: true, minimizedReason: 'OFF_TOPIC', author: null, reactionGroups: [] },
     { __typename: 'PullRequestCommit', id: 'PC1', pushed: { oid: oid('a'), messageHeadline: 'Add feature', messageBody: 'Details', committedDate: '2026-01-01T02:00:00Z', additions: 12, deletions: 3, changedFilesIfAvailable: null, statusCheckRollup: { state: 'FAILURE' }, author: { name: 'Bob B', avatarUrl: '', user: { login: 'bob' } } } },
     { __typename: 'PullRequestCommit', id: 'PC2', pushed: { oid: 'not-an-oid', messageHeadline: 'Broken' } },
-    { __typename: 'PullRequestReview', id: 'R1', body: '', bodyHTML: '', state: 'APPROVED', createdAt: '2026-01-01T03:00:00Z', submittedAt: '2026-01-01T03:05:00Z', commit: { oid: oid('a') }, author: author('viewer'), reactionGroups: [] },
+    { __typename: 'PullRequestReview', id: 'R1', body: '', bodyHTML: '', state: 'APPROVED', createdAt: '2026-01-01T03:00:00Z', submittedAt: '2026-01-01T03:05:00Z', commit: { oid: oid('a') }, author: author('viewer'), reactionGroups: [],
+      comments: { nodes: [{ id: 'RC1' }, { id: 'RC2' }, {}] } },
     { __typename: 'PullRequestReview', id: 'R2', body: 'later', bodyHTML: '<p>later</p>', state: 'PENDING', createdAt: '2026-01-01T04:00:00Z', commit: { oid: oid('b') }, author: author('viewer'), reactionGroups: [] },
     { __typename: 'HeadRefForcePushedEvent', id: 'E1', createdAt: '2026-01-01T05:00:00Z', actor: author('bob'), beforeCommit: { abbreviatedOid: 'aaaaaaa' }, afterCommit: { abbreviatedOid: 'bbbbbbb' } },
     { __typename: 'LabeledEvent', id: 'E2', createdAt: '2026-01-01T06:00:00Z', actor: author('alice'), label: { name: 'bug' } },
@@ -59,6 +60,8 @@ test('reads the Conversation tab: comments, reviews, pushes and events, and the 
   assert.equal(hidden?.kind === 'comment' && hidden.hidden, 'off topic');
   assert.deepEqual(commit, { kind: 'commit', id: 'PC1', oid: oid('a'), headline: 'Add feature', message: 'Details', author: 'bob', avatarUrl: '', createdAt: '2026-01-01T02:00:00Z', checks: 'failure', additions: 12, deletions: 3 });
   assert.equal(review?.kind === 'review' && review.createdAt, '2026-01-01T03:05:00Z');
+  assert.deepEqual(review?.kind === 'review' && review.comments, ['RC1', 'RC2']);
+  assert.deepEqual(conversation.timeline[4]?.kind === 'review' && conversation.timeline[4].comments, [], 'a review without a comments field has none');
   assert.deepEqual(conversation.timeline.slice(5).map((item) => item.kind === 'event' ? item.text : ''), [
     'force-pushed the branch from aaaaaaa to bbbbbbb', 'added the bug label', 'mentioned this in acme/app#12 Crash on start',
   ]);
