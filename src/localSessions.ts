@@ -99,8 +99,9 @@ export class LocalSessions implements vscode.Disposable {
     return session;
   }
 
-  #watch({ root, store, bridge }: LocalSession): void {
-    this.#disposables.push(toDisposable(store.onChange(() => { this.#changed.fire(root); })), toDisposable(bridge.onChange(() => { this.#changed.fire(root); })));
+  #watch({ root, store, bridge, review }: LocalSession): void {
+    this.#disposables.push(toDisposable(store.onChange(() => { this.#changed.fire(root); })), toDisposable(bridge.onChange(() => { this.#changed.fire(root); })),
+      review.onDidChangeReview(() => { this.#changed.fire(root); }));
   }
 
   /** Save every session's comments before the window closes. */

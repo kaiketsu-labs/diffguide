@@ -34,6 +34,8 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
     private readonly listCheckouts: () => Promise<readonly LocalCheckout[]>,
     /** A checkout's threads, or none while its review has not started. */
     private readonly threads: (checkout: LocalCheckout) => Promise<readonly ReviewThread[]>,
+    /** What runs in the background for a checkout, such as "Reviewing", or undefined. */
+    private readonly busy: (checkout: LocalCheckout) => Promise<string | undefined> = async () => undefined,
   ) {}
 
   /** List the checkouts and count their changes again, after files or worktrees changed. */
@@ -100,12 +102,12 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
       return item;
     }
     const { checkout } = node;
-    const [changed, threads] = await Promise.all([this.#count(checkout), this.threads(checkout)]);
+    const [changed, threads, busy] = await Promise.all([this.#count(checkout), this.threads(checkout), this.busy(checkout).catch(() => undefined)]);
     const open = threads.filter((thread) => !thread.resolved).length;
     const item = new vscode.TreeItem(checkoutLabel(checkout), vscode.TreeItemCollapsibleState.None);
     item.id = `checkout:${checkout.root}`;
     item.iconPath = new vscode.ThemeIcon(checkoutIcons[checkout.kind]);
-    item.description = [checkoutNotes[checkout.kind], changed > 0 ? `${changed} changed` : '', open === 0 ? '' : open === 1 ? '1 comment' : `${open} comments`].filter(Boolean).join(' · ');
+    item.description = [checkoutNotes[checkout.kind], changed > 0 ? `${changed} changed` : '', open === 0 ? '' : open === 1 ? '1 comment' : `${open} comments`, busy].filter(Boolean).join(' · ');
     item.tooltip = checkout.root;
     item.contextValue = 'diffGuide.checkout';
     item.command = { command: 'diffGuide.openLocalReview', title: 'Review local changes', arguments: [node] };

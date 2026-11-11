@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { claudeStatus } from '../src/claudeStatus.js';
+import { backgroundStatus, claudeStatus } from '../src/claudeStatus.js';
 
 const idle = { running: false, threads: new Set<string>(), skipped: 0 };
 
@@ -18,4 +18,10 @@ test('offers a retry after a failure or skipped comments, and is idle otherwise'
 test('says Claude stopped after the user stops it, offering a retry for the comments it left', () => {
   assert.deepEqual(claudeStatus({ ...idle, stopped: true, skipped: 1 }), { text: 'Claude stopped', icon: 'debug-stop', retry: true });
   assert.equal(claudeStatus({ ...idle, stopped: true }).retry, false);
+});
+
+test('names a running guide build and code review for the sidebar', () => {
+  assert.equal(backgroundStatus(false, false), undefined);
+  assert.equal(backgroundStatus(true, false), 'Building guide');
+  assert.equal(backgroundStatus(true, true), 'Building guide · Reviewing');
 });
