@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import * as vscode from 'vscode';
-import { contentBlocks, describeTool, parseLine, StepLog, untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions } from './claudeRunner.js';
+import { contentBlocks, describeTool, parseLine, StepLog, untrustedCheckoutFlags, type ClaudeProgress, type ClaudeRunnerOptions, type StreamMessage } from './claudeRunner.js';
 import type { CodeAnchor, ReviewStore } from './contracts.js';
 import { analysisPrompt, analysisSchema, changeBlocks, parseClaudeAnalysis, readStoredAnalysis, type Analysis, type ChangeBlock } from './prAnalysis.js';
 import { writePrivateJson } from './privateFiles.js';
@@ -43,7 +43,7 @@ export interface AnalysisInput {
 const analysisFile = (dataPath: string): string => join(dataPath, 'analysis.json');
 
 /** The analysis saved in a PR's review data folder, if any. */
-export function readSavedAnalysis(dataPath: string): Promise<Analysis | undefined> {
+function readSavedAnalysis(dataPath: string): Promise<Analysis | undefined> {
   return readFile(analysisFile(dataPath), 'utf8').then((text) => readStoredAnalysis(JSON.parse(text)), () => undefined);
 }
 
@@ -140,56 +140,84 @@ export class PullRequestAnalysis implements vscode.Disposable {
 
   /** Run Claude and resolve with its structured output. */
   async #spawn(prompt: string): Promise<unknown> {
-    const { executable, shell } = await this.options.resolve();
-    if (this.#stopped) throw new Error('Stopped.');
-    const args = [
-      '-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--json-schema', JSON.stringify(analysisSchema),
-      '--allowedTools', 'Read', 'Grep', 'Glob', '--disallowedTools', ...blockedTools,
-      ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : []),
-    ];
     this.options.log('Building the PR guide');
-    const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
-    const child = (this.options.spawn ?? spawnProcess)(command, commandArgs, { cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
-    this.#child = child;
-    child.stdin?.end(prompt);
-    let stderr = '';
-    child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
-    let output: unknown;
-    let error: string | undefined;
-    const steps = new StepLog(this.options.cwd);
-    let progress = this.#activity.progress;
-    const startedAt = progress?.startedAt ?? Date.now();
-    createInterface({ input: child.stdout! }).on('line', (line) => {
-      const message = parseLine(line);
-      if (message !== undefined && steps.read(message)) {
-        progress = { steps: steps.steps, startedAt };
-        this.#set({ ...this.#activity, progress });
-      }
-      if (message?.type === 'assistant') {
-        for (const block of contentBlocks(message)) {
-          if (block.type === 'tool_use' && typeof block.name === 'string') {
-            const step = describeTool(block.name, block.input, this.options.cwd);
-            this.options.log(`→ ${step}`);
-            this.#set({ ...this.#activity, step });
-          } else if (block.type === 'thinking') this.#set({ ...this.#activity, step: 'Thinking' });
-        }
-      }
-      if (message?.type === 'result') {
-        if (message.is_error === true) error = typeof message.result === 'string' ? message.result.slice(0, 200) : 'Claude reported an error.';
-        else output = message.structured_output;
-      }
+    return await runStructuredClaude({
+      ...this.options, prompt, schema: analysisSchema, missing: 'Claude returned no guide.',
+      args: ['--allowedTools', 'Read', 'Grep', 'Glob', '--disallowedTools', ...blockedTools, ...(this.options.role === 'reviewer' ? untrustedCheckoutFlags : [])],
+      startedAt: this.#activity.progress?.startedAt ?? Date.now(),
+      stopped: () => this.#stopped,
+      onChild: (child) => { this.#child = child; },
+      onStep: (step) => { this.#set({ ...this.#activity, step }); },
+      onProgress: (progress) => { this.#set({ ...this.#activity, progress }); },
     });
-    const code = await new Promise<number | null>((resolveExit, rejectExit) => {
-      child.once('error', rejectExit);
-      child.once('close', resolveExit);
-    });
-    this.#child = undefined;
-    if (this.#stopped) throw new Error('Stopped.');
-    if (error !== undefined) throw new Error(error);
-    if (output === undefined) {
-      const reason = stderr.trim().split('\n').at(-1);
-      throw new Error(code === 0 ? 'Claude returned no guide.' : `Claude exited with code ${code ?? 'unknown'}${reason ? `: ${reason.slice(0, 200)}` : ''}`);
-    }
-    return output;
   }
+}
+
+/** One headless Claude run that must return structured output matching `schema`. */
+export interface StructuredRun {
+  readonly resolve: () => Promise<{ readonly executable: string; readonly shell?: string }>;
+  readonly cwd: string;
+  readonly log: (line: string) => void;
+  readonly spawn?: typeof spawnProcess;
+  readonly prompt: string;
+  readonly schema: object;
+  /** Flags after the output flags, such as tool permissions. */
+  readonly args: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  /** The error when Claude finished without structured output. */
+  readonly missing: string;
+  readonly startedAt: number;
+  readonly stopped: () => boolean;
+  readonly onChild: (child: ReturnType<typeof spawnProcess> | undefined) => void;
+  readonly onStep: (step: string) => void;
+  readonly onProgress: (progress: ClaudeProgress) => void;
+  /** Every parsed stream message, for callers that track more than the step log. */
+  readonly onMessage?: (message: StreamMessage) => void;
+}
+
+/** Run Claude once and resolve with its structured output; streams each tool call as a step. */
+export async function runStructuredClaude(run: StructuredRun): Promise<unknown> {
+  const { executable, shell } = await run.resolve();
+  if (run.stopped()) throw new Error('Stopped.');
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--json-schema', JSON.stringify(run.schema), ...run.args];
+  const [command, commandArgs] = shell === undefined ? [executable, args] : [shell, ['-l', '-i', '-c', '"$0" "$@"', executable, ...args]];
+  const child = (run.spawn ?? spawnProcess)(command, commandArgs, { cwd: run.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true, ...run.env === undefined ? {} : { env: { ...process.env, ...run.env } } });
+  run.onChild(child);
+  child.stdin?.end(run.prompt);
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
+  let output: unknown;
+  let error: string | undefined;
+  const steps = new StepLog(run.cwd);
+  createInterface({ input: child.stdout! }).on('line', (line) => {
+    const message = parseLine(line);
+    if (message !== undefined) run.onMessage?.(message);
+    if (message !== undefined && steps.read(message)) run.onProgress({ steps: steps.steps, startedAt: run.startedAt });
+    if (message?.type === 'assistant') {
+      for (const block of contentBlocks(message)) {
+        if (block.type === 'tool_use' && typeof block.name === 'string') {
+          const step = describeTool(block.name, block.input, run.cwd);
+          run.log(`→ ${step}`);
+          run.onStep(step);
+        } else if (block.type === 'thinking') run.onStep('Thinking');
+      }
+    }
+    if (message?.type === 'result') {
+      if (message.is_error === true) error = typeof message.result === 'string' ? message.result.slice(0, 200) : 'Claude reported an error.';
+      // A turn started by a background task's notification ends with a result that has no structured output; it must not clear the report.
+      else if (message.structured_output !== undefined) output = message.structured_output;
+    }
+  });
+  const code = await new Promise<number | null>((resolveExit, rejectExit) => {
+    child.once('error', rejectExit);
+    child.once('close', resolveExit);
+  });
+  run.onChild(undefined);
+  if (run.stopped()) throw new Error('Stopped.');
+  if (error !== undefined) throw new Error(error);
+  if (output === undefined) {
+    const reason = stderr.trim().split('\n').at(-1);
+    throw new Error(code === 0 ? run.missing : `Claude exited with code ${code ?? 'unknown'}${reason ? `: ${reason.slice(0, 200)}` : ''}`);
+  }
+  return output;
 }

@@ -14,6 +14,7 @@ if (tests.length === 0) {
 await build({
   entryPoints: tests.map(name => `test/${name}`),
   alias: { vscode: resolve('test/fakes/vscode.ts') },
+  loader: { '.md': 'text' },
   outdir: '.test-dist', bundle: true, platform: 'node', target: 'node20', format: 'cjs', logLevel: 'warning'
 });
 const child = spawn(process.execPath, ['--test', ...tests.map(name => `.test-dist/${name.replace(/\.ts$/, '.js')}`)], { stdio: 'inherit' });

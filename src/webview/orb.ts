@@ -205,8 +205,8 @@ function compose(f: Pose, t: number, T: Tones): readonly Layer[] {
 
 const size = { step: [W, H], avatar: [16, 16] } as const;
 
-/** A canvas showing the orb; `step` runs a working animation, `avatar` shows it resting in Claude's avatar. A one-shot motion plays from `since` on the page clock. */
-export function orbCanvas(kind: keyof typeof size, motion: OrbMotion = 'rest', since = performance.now()): HTMLCanvasElement {
+/** A canvas showing the orb; `step` runs a working animation, `avatar` shows it resting in Claude's avatar. A one-shot motion plays from `since` on the page clock; `phase` shifts a looping motion by that many ms. */
+export function orbCanvas(kind: keyof typeof size, motion: OrbMotion = 'rest', since = performance.now(), phase = 0): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   const [width, height] = size[kind];
   const dpr = Math.max(1, Math.round(devicePixelRatio || 1));
@@ -217,6 +217,7 @@ export function orbCanvas(kind: keyof typeof size, motion: OrbMotion = 'rest', s
   canvas.style.height = height + 'px';
   canvas.dataset.motion = motion;
   if (once[motion] !== undefined) canvas.dataset.from = String(since);
+  if (phase !== 0) canvas.dataset.phase = String(phase);
   canvas.setAttribute('aria-hidden', 'true');
   return canvas;
 }
@@ -225,26 +226,27 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const squash = { crouch: .86, air: 1.06 } as const;
 
 /** Draw one orb canvas at time `t`. An avatar's `data-pose` squashes it for the hop into a reply. */
-export function paintOrb(canvas: HTMLCanvasElement, t: number): void {
+function paintOrb(canvas: HTMLCanvasElement, t: number): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const avatar = canvas.classList.contains('avatar');
   let name = (canvas.dataset.motion ?? 'rest') as OrbMotion;
-  let local = t;
+  const shifted = t + Number(canvas.dataset.phase ?? 0);
+  let local = shifted;
   const shot = once[name];
   if (shot !== undefined) {
     local = t - Number(canvas.dataset.from ?? 0);
     // Reduced motion skips straight to the pose the one-shot ends in.
     if (local >= shot.ms || reducedMotion.matches) name = shot.then;
   }
-  const frame = (motions[name] ?? motions.rest)(name === canvas.dataset.motion ? local : t);
+  const frame = (motions[name] ?? motions.rest)(name === canvas.dataset.motion ? local : shifted);
   const squashed = canvas.dataset.pose === 'crouch' || canvas.dataset.pose === 'air' ? squash[canvas.dataset.pose] : undefined;
   if (squashed !== undefined) frame.sq = squashed;
   const scale = canvas.width / (avatar ? 16 : W);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(scale, 0, 0, scale, avatar ? -(X - 8) * scale : 0, avatar ? -(Y - 8) * scale : 0);
-  for (const layer of compose(frame, avatar ? 0 : t, currentTones())) {
+  for (const layer of compose(frame, avatar ? 0 : shifted, currentTones())) {
     for (const cell of layer.values()) { ctx.globalAlpha = clamp(cell.a, 0, 1); ctx.fillStyle = cell.c; ctx.fillRect(cell.i, cell.j, 1, 1); }
   }
   ctx.globalAlpha = 1;

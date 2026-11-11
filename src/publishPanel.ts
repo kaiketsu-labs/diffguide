@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import { blockBrowserShortcutsScript } from './browserShortcuts.js';
+import { escapeCode } from './codePreview.js';
 import { webviewStyles } from './webviewStyles.js';
 
 /** A thread's comment as it will be posted, before the user edits it. */
@@ -41,7 +42,7 @@ export function showPublishPanel(draft: PublishDraft, submit: (body: string, pen
 }
 
 /** Editable comment with the two ways to post it. */
-export function publishHtml(draft: PublishDraft): string {
+function publishHtml(draft: PublishDraft): string {
   const nonce = randomUUID().replaceAll('-', '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -55,9 +56,9 @@ textarea{width:100%;height:45vh;min-height:180px;max-height:none;field-sizing:fi
 .actions{display:flex;justify-content:flex-end;gap:var(--space-8);flex-wrap:wrap;margin:var(--space-12) 0}
 #status{min-height:20px;white-space:pre-wrap}.error{color:var(--danger)}
 </style></head><body>
-<h1>${escapeHtml(draft.title)}</h1>
-<p class="muted">${escapeHtml(draft.placement)} · Markdown</p>
-<textarea id="body" spellcheck="true" aria-label="Comment">${escapeHtml(draft.body)}</textarea>
+<h1>${escapeCode(draft.title)}</h1>
+<p class="muted">${escapeCode(draft.placement)} · Markdown</p>
+<textarea id="body" spellcheck="true" aria-label="Comment">${escapeCode(draft.body)}</textarea>
 ${draft.reply === true
     ? '<div class="actions"><button id="direct" class="primary">Reply on GitHub</button></div>\n<p id="status" class="muted" role="status" aria-live="polite">Everyone on the PR sees the reply.</p>'
     : '<div class="actions"><button id="direct">Comment now</button><button id="pending" class="primary">Add to pending review</button></div>\n<p id="status" class="muted" role="status" aria-live="polite">A pending comment stays private until you submit your review on GitHub.</p>'}
@@ -77,9 +78,4 @@ body.addEventListener('input',()=>update(false));
 window.addEventListener('message',(event)=>{status.className='error';status.textContent=String(event.data.error);update(false);});
 update(false);
 </script></body></html>`;
-}
-
-/** Escape untrusted review content before placing it in a webview document. */
-function escapeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }

@@ -70,6 +70,21 @@ Connection files and submitted threads live in VS Code's workspace storage. The 
 
 A comment captures its code when you send it. Replies keep the thread's original context. A thread whose code is gone shows above its file's diff as a comment on lines the diff does not show.
 
+## Code review
+
+**Review** in the files toolbar has Claude review the changes with review agents, on a PR's page and on a local page. The arrow beside it picks the agents; DiffGuide remembers the choice per repository.
+
+| Agent | Reports | Evidence it needs |
+|---|---|---|
+| Correctness | Wrong behavior and regressions in code the change did not touch | An input that fails, best a failing test |
+| Design | Code that duplicates a helper, sits in the wrong layer or breaks the codebase's patterns | Existing code or a rule in the repository's `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` or lint config |
+| Security | Untrusted input reaching paths, commands, queries or HTML; mishandled secrets | A trace from input to harm |
+| Performance | Cost that grows with input on a path users wait on | A measurement or a complexity argument at a real size |
+
+Claude briefs the agents, skips one the change gives nothing to check, collects their candidates, keeps the 10 strongest at most and sends them back to be proven. Each agent proves its candidates in its own worktree under `.claude/worktrees/diffguide/review/`, a copy of the checkout with your uncommitted changes, where it may install dependencies, write tests and run them. DiffGuide removes these worktrees when the review ends. On someone else's PR this runs the PR's code on your machine.
+
+Proven findings open as **Review** threads with the agents that raised them, the severity and how they were proven: **Tested**, **Traced** or **Cited**. The summary card above the files lists them, which agents ran, and under **Dropped** every candidate that was not posted, with its reason. A new review replaces findings nobody replied to or resolved.
+
 ## Your own instructions for Claude
 
 Add Markdown files to steer Claude: `guide.md` for **Build guide** on the review page, `comments.md` for Claude's work on your review comments, both answers and changes. Claude gets them after the built-in instructions, which still decide the output format and tools. DiffGuide reads them on every run, from the most general to the most specific; on conflict the later file wins:

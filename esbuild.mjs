@@ -10,6 +10,7 @@ await build({
   target: 'node20',
   format: 'cjs',
   external: ['vscode'],
+  loader: { '.md': 'text' },
   sourcemap: true,
   logLevel: 'info'
 });
@@ -21,6 +22,7 @@ await build({
   platform: 'browser',
   target: 'chrome120',
   format: 'iife',
+  loader: { '.md': 'text' },
   sourcemap: true,
   logLevel: 'info'
 });
@@ -30,6 +32,7 @@ await build({
   outdir: 'dist',
   bundle: true,
   minify: true,
+  loader: { '.md': 'text' },
   platform: 'browser',
   target: 'chrome120',
   format: 'iife',

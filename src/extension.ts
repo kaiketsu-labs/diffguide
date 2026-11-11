@@ -42,6 +42,7 @@ import { type BranchPullRequests, implementThreadRequest, listRepositoryFiles, L
 import { LocalFilesView } from './localFilesView.js';
 import { listLocalCheckouts, type LocalCheckout } from './localCheckouts.js';
 import { LocalSessions, type LocalSession } from './localSessions.js';
+import { readPicks, reviewView, savePicks } from './reviewRunner.js';
 
 let activeStore: ReviewStore | undefined;
 let activeLocalSessions: LocalSessions | undefined;
@@ -288,14 +289,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           fileReviews.reviewed(provider, repository, pullRequest.number, all),
           readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
         ]);
-        const [readDetails, readThreads, analysis, loadedConversation] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis(), conversation ?? loadConversation()]);
+        const [readDetails, readThreads, analysis, loadedConversation, review] = await Promise.all([details ?? loadDetails(), remote ?? loadThreads(), readAnalysis(), conversation ?? loadConversation(), reviewView(opened.review, readPicks(context.globalState, repository))]);
         const loadedDetails = readDetails instanceof Error ? readDetails : {
           ...readDetails, title: written.apply('title', readDetails.title), draft: written.apply('draft', readDetails.draft), open: written.apply('open', readDetails.open),
         };
         const loadedThreads = readThreads instanceof Error ? readThreads : readThreads.map((thread) => ({ ...thread, resolved: written.apply(`resolved:${thread.id}`, thread.resolved) }));
         await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
         const summary = loadedDetails instanceof Error ? current() : { ...current(), title: loadedDetails.title, draft: loadedDetails.draft };
-        const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation, await opened.runner.context());
+        const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation, await opened.runner.context(), review);
         const answers = new Map(latestAnswers([{ key: opened.session.key, number: pullRequest.number, threads: opened.session.store.threads }], Infinity).filter((answer) => seenAnswers.isNew(answer)).map((answer) => [answer.threadId, answer.createdAt]));
         const threads = state.threads.map((thread) => {
           const done = applied.get(thread.id);
@@ -706,6 +707,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           });
         },
         stopAnalysis: () => { opened.analysis.stop(); },
+        review: async (picks) => {
+          await savePicks(context.globalState, repository, picks);
+          const files = await readPullRequestDiff(folder, await readBase());
+          opened.review.start({
+            files, reviewers: picks,
+            about: `#${pullRequest.number} ${pullRequest.title} (${pullRequest.headBranch} into ${pullRequest.baseBranch})`,
+            anchor: async (range) => (await pageAnchor(range)).anchor,
+          });
+        },
+        stopReview: () => { opened.review.stop(); },
+        pickReviewers: async (picks) => { await savePicks(context.globalState, repository, picks); detailsChanged.fire(); },
       }, context.extensionUri, reveal, undefined, onCheckout?.review.key);
     };
     const worktreesOf = (checkout: Checkout): PullRequestWorktrees => {

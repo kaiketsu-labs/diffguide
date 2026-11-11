@@ -1,3 +1,4 @@
+import { record } from './connection.js';
 import { endpointsFor, githubPoll, githubRequest, type Polled } from './githubApi.js';
 import { git } from './worktrees.js';
 
@@ -31,7 +32,7 @@ export interface RequestedReviewer { readonly name: string; readonly team: boole
 export type ReviewVerdict = 'approved' | 'changes' | 'commented';
 
 /** Changes requested outweighs approval, which outweighs plain comments. */
-export function strongestVerdict(states: readonly string[]): ReviewVerdict | undefined {
+function strongestVerdict(states: readonly string[]): ReviewVerdict | undefined {
   if (states.includes('CHANGES_REQUESTED')) return 'changes';
   if (states.includes('APPROVED')) return 'approved';
   if (states.includes('COMMENTED')) return 'commented';
@@ -1099,7 +1100,7 @@ export function parsePullRequestList(value: unknown): readonly PullRequestSummar
 
 /** Pending reviewers from a `reviewRequests` connection, skipping entries GitHub left incomplete. */
 function requestedReviewersOf(value: unknown): readonly RequestedReviewer[] {
-  const nodes = typeof value === 'object' && value !== null ? (value as { nodes?: unknown }).nodes : undefined;
+  const nodes = record(value)?.['nodes'];
   if (!Array.isArray(nodes)) return [];
   return (nodes as readonly unknown[]).flatMap((node): RequestedReviewer[] => {
     const reviewer = typeof node === 'object' && node !== null ? (node as { requestedReviewer?: unknown }).requestedReviewer : undefined;
@@ -1233,7 +1234,7 @@ function parseReactions(groups: unknown): readonly ReactionCount[] {
 }
 
 /** A comment, review or review comment as GitHub sent it; a deleted user shows as ghost. */
-export function parseComment(comment: Record<string, unknown>): GitHubComment {
+function parseComment(comment: Record<string, unknown>): GitHubComment {
   const author = comment['author'] === null || comment['author'] === undefined ? {} : object(comment['author']);
   const url = typeof comment['url'] === 'string' ? optionalHttpsUrl(comment['url']) : '';
   const reason = comment['minimizedReason'];
@@ -1261,14 +1262,15 @@ const reviewTimelineStates: Record<string, Extract<TimelineItem, { kind: 'review
 };
 
 function login(value: unknown): string {
-  return typeof value === 'object' && value !== null && typeof (value as { login?: unknown }).login === 'string' ? (value as { login: string }).login : 'ghost';
+  const name = record(value)?.['login'];
+  return typeof name === 'string' ? name : 'ghost';
 }
 
 /** What a timeline event says, in GitHub's words without the actor; undefined for events the page leaves out. */
 function eventText(node: Record<string, unknown>): string | undefined {
   const name = (value: unknown): string => {
-    const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
-    return typeof record['login'] === 'string' ? record['login'] : typeof record['name'] === 'string' ? record['name'] : 'someone';
+    const actor = record(value) ?? {};
+    return typeof actor['login'] === 'string' ? actor['login'] : typeof actor['name'] === 'string' ? actor['name'] : 'someone';
   };
   const field = (key: string): string => typeof node[key] === 'string' ? node[key] : '';
   const label = (): string => typeof node['label'] === 'object' && node['label'] !== null ? String((node['label'] as { name?: unknown }).name ?? '') : '';
@@ -1306,7 +1308,7 @@ function eventText(node: Record<string, unknown>): string | undefined {
 }
 
 /** Timeline entries the page shows, skipping kinds it does not know and entries GitHub sent incomplete. */
-export function parseTimeline(nodes: readonly unknown[]): readonly TimelineItem[] {
+function parseTimeline(nodes: readonly unknown[]): readonly TimelineItem[] {
   const items: TimelineItem[] = [];
   for (const entry of nodes) {
     if (typeof entry !== 'object' || entry === null || typeof (entry as { id?: unknown }).id !== 'string') continue;
@@ -1360,7 +1362,7 @@ const mergeMethodNames: Record<string, MergeMethod> = { MERGE: 'merge', SQUASH: 
 const annotationLevels: Record<string, Annotation['level']> = { FAILURE: 'failure', WARNING: 'warning', NOTICE: 'notice' };
 
 /** Whether a repository role may push, dismiss reviews and re-run workflows. */
-export function canWrite(permission: RepositoryPermission): boolean {
+function canWrite(permission: RepositoryPermission): boolean {
   return permission === 'admin' || permission === 'maintain' || permission === 'write';
 }
 
@@ -1456,7 +1458,7 @@ function parseLabels(connection: unknown): readonly Label[] {
 }
 
 /** A linked PR's state from a `pullRequest` node. */
-export function parseLinkedState(pr: Record<string, unknown>): LinkedPullRequestState {
+function parseLinkedState(pr: Record<string, unknown>): LinkedPullRequestState {
   const rollup = object(object(object(list(object(pr['commits'])['nodes'])[0])['commit'])['statusCheckRollup'])['state'];
   const checks = rollup === 'SUCCESS' ? 'success' : rollup === 'FAILURE' || rollup === 'ERROR' ? 'failure' : rollup === 'PENDING' || rollup === 'EXPECTED' ? 'pending' : undefined;
   const decision = pr['reviewDecision'];

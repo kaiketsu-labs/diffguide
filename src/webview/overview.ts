@@ -1,6 +1,7 @@
 import type { ClaudeProgress, ClaudeStep } from '../claudeRunner.js';
 import type { ClaudeConversation } from '../claudeSessions.js';
-import type { ReviewIntent } from '../contracts.js';
+import { reviewers, type Finding, type Reviewer, type ReviewIntent } from '../contracts.js';
+import { reviewerInfo, reviewStages, type DropReason, type ReviewLane, type ReviewLaneItem, type ReviewLive, type ReviewStage, type ReviewUsage } from '../review.js';
 import type { DefinitionPeek } from '../definitions.js';
 import { buildGuide, groupReadMarks, stepViewed as isStepViewed, type Analysis, type GuideGroup, type GuideStep, type Severity } from '../prAnalysis.js';
 import type { DefinitionTarget, DiffRange, DiffSide, ExtensionMessage, FilePreview, GitHubMessageView, GitHubThreadView, OverviewState, PageMessage, PickedSuggestion, PickTarget } from '../pullRequestOverview.js';
@@ -312,8 +313,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
-const elapsed = (since: number): string => {
-  const seconds = Math.max(0, Math.floor((Date.now() - since) / 1000));
+const elapsed = (since: number, until = Date.now()): string => {
+  const seconds = Math.max(0, Math.floor((until - since) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
@@ -344,12 +345,13 @@ const waitMotion = (id: string): StepPick => ({ verb }) => {
 };
 
 /** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb, the run's time and `stop` on the current one. */
-function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)]): HTMLElement {
+function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)], orb = true, phase = 0): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {
     const row = el('div', 'step' + (step.done ? ' done' : '') + (step.failed ? ' failed' : ''));
-    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orbCanvas('step', ...pick(step)));
+    const [motion, since] = pick(step);
+    row.append(step.done ? stateIcon(step.failed ? 'failed' : 'done', 'mark') : orb ? orbCanvas('step', motion, since, phase) : stateIcon('active', 'agent'));
     const title = el('span', 'step-call');
     title.append(el('b', '', step.verb), step.target === undefined ? '' : `(${step.target})`);
     row.append(title);
@@ -2186,6 +2188,7 @@ function render(state: OverviewState): void {
   analysisStatus.title = analysis.error ?? '';
   analysisStatus.className = analysis.running ? 'chip agent working' : analysis.error ? 'chip bad' : '';
   analysisStatus.hidden = !analysis.running && !analysis.error;
+  showReview();
   const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.behind, analysis.result ? analysis.stale && analysis.running : [analysis.running, analysis.error]]);
   if (stamp !== guideStamp) {
     guideStamp = stamp;
@@ -2543,10 +2546,10 @@ function intentChip(intent: ReviewIntent): HTMLElement {
 }
 
 /** Who can see a thread: Local stays with you and Claude, On GitHub is on the PR, Guide is Claude's note from its guide. */
-const kindMarks: Record<'github' | 'local' | 'analysis', string> = { github: icons.github, local: icons.local, analysis: icons.agentGuide };
-const kindLabels: Record<'github' | 'local' | 'analysis', string> = { github: 'On GitHub', local: 'Local', analysis: 'Guide' };
+const kindMarks: Record<ThreadKind, string> = { github: icons.github, local: icons.local, analysis: icons.agentGuide, review: icons.agentReview };
+const kindLabels: Record<ThreadKind, string> = { github: 'On GitHub', local: 'Local', analysis: 'Guide', review: 'Review' };
 
-function kindLabel(kind: 'github' | 'local' | 'analysis'): HTMLElement {
+function kindLabel(kind: ThreadKind): HTMLElement {
   const label = el('span', 'source');
   label.append(icon(kindMarks[kind]), kindLabels[kind]);
   return label;
@@ -2559,7 +2562,7 @@ function keepInView(box: HTMLElement, summary: HTMLElement): void {
   box.addEventListener('toggle', () => { window.scrollBy(0, box.getBoundingClientRect().top - before); }, { once: true });
 }
 
-function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | 'local' | 'analysis', note: string, status: readonly string[], right: string, title?: string): HTMLElementTagNameMap[K] {
+function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: ThreadKind, note: string, status: readonly string[], right: string, title?: string): HTMLElementTagNameMap[K] {
   const node = el(tag, 'strip');
   const name = kindLabel(kind);
   name.title = note;
@@ -2570,7 +2573,9 @@ function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: 'github' | '
 function threadBox(thread: Thread): HTMLElement {
   const github = thread.source === 'github';
   const fromAnalysis = thread.source === 'local' && thread.origin === 'analysis';
-  const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : ''));
+  const finding = thread.source === 'local' && thread.origin === 'review' ? thread.finding : undefined;
+  const fromClaude = fromAnalysis || (thread.source === 'local' && thread.origin === 'review');
+  const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : '') + (thread.source === 'local' && thread.origin === 'review' ? ' review' : ''));
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
   box.addEventListener('toggle', () => {
@@ -2580,11 +2585,15 @@ function threadBox(thread: Thread): HTMLElement {
     if (inMargin && !box.open) renderFiles([thread.path]);
   });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
-    : thread.status.split(' · ').filter((part) => !fromAnalysis || part !== 'Answered');
-  const summary = strip('summary', github ? 'github' : fromAnalysis ? 'analysis' : 'local',
-    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : 'Only you and Claude see it.',
+    : thread.status.split(' · ').filter((part) => !fromClaude || part !== 'Answered');
+  const summary = strip('summary', threadKind(thread),
+    github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : fromClaude ? 'From Claude\'s code review. Reply to ask about it.' : 'Only you and Claude see it.',
     status, thread.scope === 'pullRequest' ? 'Whole PR' : thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
+  if (finding !== undefined) {
+    summary.querySelector('.source')?.after(...agentTags(finding.reviewers));
+    summary.querySelector('.gap')?.after(...findingMarks(finding));
+  }
   if (thread.url) {
     const open = el('button', 'icon-button');
     open.append(icon(icons.github));
@@ -2618,7 +2627,13 @@ function threadBox(thread: Thread): HTMLElement {
       box.append(toggle);
     }
     const suggestions = 'suggestions' in entry ? entry.suggestions : undefined;
-    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) item.querySelector('.msg-main')?.append(suggestionCard(thread, index, suggestions));
+    if (thread.source === 'local' && thread.side === 'new' && suggestions?.length) {
+      const main = item.querySelector('.msg-main');
+      main?.append(suggestionCard(thread, index, suggestions));
+      // A finding's evidence comes after its fix.
+      const evidence = main?.querySelector('.msg-text > details.md-details:last-child');
+      if (evidence) { const tail = el('div', 'msg-text'); tail.append(evidence); main?.append(tail); }
+    }
     box.append(item);
     const made = thread.source === 'local' ? thread.commits?.filter((commit) => commit.after === index) : undefined;
     if (made?.length) {
@@ -4041,11 +4056,308 @@ function staleGuideRow(result: Analysis, groups: readonly GuideGroup[]): HTMLEle
   return row;
 }
 
-type ThreadKind = 'github' | 'local' | 'analysis';
-const threadKinds: readonly ThreadKind[] = ['github', 'local', 'analysis'];
+type ThreadKind = 'github' | 'local' | 'analysis' | 'review';
+const threadKinds: readonly ThreadKind[] = ['github', 'local', 'review', 'analysis'];
 
 function threadKind(thread: Thread): ThreadKind {
-  return thread.source === 'github' ? 'github' : thread.origin === 'analysis' ? 'analysis' : 'local';
+  return thread.source === 'github' ? 'github' : thread.origin ?? 'local';
+}
+
+/** A tag per code review agent that raised a finding. */
+function agentTags(names: readonly Reviewer[]): HTMLElement[] {
+  return names.map((name) => {
+    const tag = el('span', 'agent-tag');
+    tag.append(icon(icons[name]), reviewerInfo[name].label);
+    return tag;
+  });
+}
+
+const findingSeverityLabels: Record<Finding['severity'], string> = { high: 'High', medium: 'Medium', low: 'Low' };
+const evidenceLabels: Record<Finding['evidence'], [string, string]> = {
+  tested: ['Tested', 'A test the reviewer ran shows it.'],
+  rewritten: ['Rewritten', 'A simpler version the reviewer wrote passes the tests.'],
+  traced: ['Traced', 'The reviewer traced it through the code.'],
+  cited: ['Cited', 'A rule or existing code the reviewer quotes backs it.'],
+};
+
+/** A finding's severity and how it was proven. */
+function findingMarks({ severity, evidence }: Pick<Finding, 'severity' | 'evidence'>): HTMLElement[] {
+  const [label, tip] = evidenceLabels[evidence];
+  return [el('span', 'sev ' + severity, findingSeverityLabels[severity]), titled(el('span', 'ev ' + evidence, label), tip)];
+}
+
+/** A finding's place; a narrow card moves it to its own line, where the folders give way first. */
+function findingWhere(path: string, line: number): HTMLElement {
+  const node = titled(el('span', 'finding-where'), path + ':' + line);
+  const cut = path.lastIndexOf('/') + 1;
+  const folder = el('span', 'finding-folder');
+  folder.append(el('bdi', '', path.slice(0, cut)));
+  node.append(folder, el('span', 'finding-file', path.slice(cut) + ':' + line));
+  return node;
+}
+
+const dropLabels: Record<DropReason, [string, string]> = {
+  'over-cap': ['Over cap', 'Proven, ranked below the top 10'],
+  refuted: ['Refuted', 'Verification disproved it'],
+  unconfirmed: ['Unconfirmed', 'Verification could not prove or disprove it'],
+  duplicate: ['Duplicate', 'Merged into another finding'],
+  'out-of-scope': ['Out of scope', 'Style, speculation or preference'],
+  unplaced: ['Not placed', 'Its lines are not in the diff'],
+};
+
+/** The code review's summary above the files: findings by rank, who ran, and every dropped candidate with its reason. */
+function renderReviewCard(): void {
+  const card = $('review-card');
+  const review = current?.review;
+  const result = review?.result;
+  const live = review?.running || review?.error !== undefined ? review?.live : undefined;
+  card.hidden = result === undefined && live === undefined;
+  if (card.hidden) { card.replaceChildren(); return; }
+  const cards = live === undefined || review === undefined ? [] : [reviewLiveCard(live, review.running, review.error)];
+  if (result === undefined || review?.running) { card.replaceChildren(...cards); return; }
+  const box = el('details', 'thread review review-card');
+  box.open = collapsed.get('review-card') !== true;
+  box.addEventListener('toggle', () => { collapsed.set('review-card', !box.open); save(); });
+  const count = result.findings.length;
+  box.append(strip('summary', 'review', 'Claude\'s code review of these changes.', [], `${result.candidates} candidates · ${result.dropped.length} dropped`,
+    count === 0 ? 'No findings' : count + (count === 1 ? ' finding' : ' findings')));
+  const usage = result.usage === undefined ? undefined : usageChip(result.usage);
+  box.querySelector('summary')?.append(...timeLabel(result.createdAt), ...usage ? [usage.chip] : []);
+  if (usage) box.append(usage.popover);
+  const ran = el('div', 'review-ran muted', result.ran.length === 0 ? 'No reviewer ran.' : 'Ran ' + result.ran.map((name) => reviewerInfo[name].label).join(', '));
+  for (const { reviewer, reason } of result.skipped) ran.append(el('span', '', ' · Skipped ' + reviewerInfo[reviewer].label + (reason ? ': ' + reason : '')));
+  box.append(ran);
+  if (count > 0) {
+    const list = el('ol', 'finding-list');
+    const threads = allThreads();
+    for (const finding of result.findings) {
+      const thread = threads.find((candidate) => candidate.id === finding.threadId);
+      const title = el('button', 'finding-title', finding.title);
+      title.disabled = thread === undefined;
+      if (thread === undefined) title.title = 'The thread is resolved or gone.';
+      title.addEventListener('click', () => { if (thread !== undefined) jump(thread); });
+      const item = el('li', thread?.resolved ? 'resolved' : '');
+      if (thread?.resolved) title.prepend(stateIcon('done', 'mark', 'Resolved'));
+      item.append(el('span', 'sev ' + finding.severity, findingSeverityLabels[finding.severity]), title, el('span', 'finding-agents'), ...findingMarks(finding).slice(1), findingWhere(finding.path, finding.startLine));
+      item.querySelector('.finding-agents')?.append(...agentTags(finding.reviewers));
+      list.append(item);
+    }
+    box.append(list);
+  }
+  if (result.dropped.length > 0) {
+    const dropped = el('details', 'review-dropped');
+    dropped.open = collapsed.get('review-dropped') === false;
+    dropped.addEventListener('toggle', () => { collapsed.set('review-dropped', !dropped.open); save(); });
+    const head = el('summary');
+    head.append(icon(icons.chevronDown), 'Dropped (' + result.dropped.length + ')');
+    dropped.append(head);
+    for (const reason of Object.keys(dropLabels) as DropReason[]) {
+      const members = result.dropped.filter((item) => item.reason === reason);
+      if (members.length === 0) continue;
+      const [label, note] = dropLabels[reason];
+      const group = el('div', 'drop-group', label);
+      group.append(el('span', 'muted', note));
+      dropped.append(group);
+      for (const item of members) {
+        const row = el('div', 'drop');
+        const tags = el('span', 'finding-agents');
+        tags.append(...agentTags(item.reviewers));
+        row.append(el('span', 'drop-claim', item.claim), tags, ...item.why ? [el('span', 'drop-why muted', item.why)] : []);
+        dropped.append(row);
+      }
+    }
+    box.append(dropped);
+  }
+  card.replaceChildren(...cards, box);
+}
+
+const usageDuration = (ms: number): string => {
+  const seconds = Math.round(ms / 1000);
+  return seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m` : seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
+};
+const usageCost = (cost: number): string => cost > 0 && cost < 0.01 ? '<$0.01' : '$' + cost.toFixed(2);
+
+/** A review's duration and cost as a chip that opens a popover with turns, list-price cost and tokens per model. */
+function usageChip(usage: ReviewUsage): { chip: HTMLButtonElement; popover: HTMLElement } {
+  const popover = el('div', 'usage-popover');
+  popover.popover = 'auto';
+  const summary = el('dl', 'usage-summary');
+  for (const [label, value, tip] of [['Duration', usageDuration(usage.durationMs), ''], ['Turns', String(usage.turns), ''], ['Cost', usageCost(usage.cost), 'API list price, not what a subscription bills']] as const) {
+    summary.append(el('dt', '', label), titled(el('dd', '', value), tip));
+  }
+  popover.append(summary, el('div', 'usage-note muted', 'Cost is the API list price.'));
+  if (usage.models.length > 0) {
+    const table = el('table', 'usage-table');
+    const head = el('tr');
+    for (const label of ['Model', 'Input', 'Output', 'Cache read', 'Cache write', 'Cost']) head.append(el('th', '', label));
+    table.append(head);
+    for (const row of usage.models) {
+      const line = el('tr');
+      line.append(el('td', 'usage-model', row.model));
+      for (const tokens of [row.input, row.output, row.cacheRead, row.cacheWrite]) line.append(titled(el('td', '', tokenCount(tokens)), tokens.toLocaleString()));
+      line.append(el('td', '', usageCost(row.cost)));
+      table.append(line);
+    }
+    popover.append(table);
+  }
+  if (usage.agents.length > 0) {
+    const table = el('table', 'usage-table');
+    const head = el('tr');
+    head.append(el('th', '', 'Agent'), titled(el('th', '', 'Cost'), 'Each model\'s cost split by the agents\' share of its tokens, weighted by token price'));
+    table.append(head);
+    for (const row of usage.agents) {
+      const line = el('tr');
+      line.append(el('td', '', row.agent === 'orchestrator' ? 'Orchestrator' : reviewerInfo[row.agent].label), el('td', '', usageCost(row.cost)));
+      table.append(line);
+    }
+    popover.append(table);
+  }
+  const chip = el('button', 'usage-chip', `${usageDuration(usage.durationMs)} · ${usageCost(usage.cost)}`);
+  chip.type = 'button';
+  titled(chip, 'Time and cost of this review');
+  chip.addEventListener('click', (event) => {
+    // Inside a card's summary a click would also fold the card.
+    event.preventDefault();
+    event.stopPropagation();
+    if (popover.matches(':popover-open')) { popover.hidePopover(); return; }
+    const box = chip.getBoundingClientRect();
+    popover.style.top = box.bottom + 4 + 'px';
+    popover.style.right = Math.max(8, window.innerWidth - box.right) + 'px';
+    popover.showPopover();
+  });
+  return { chip, popover };
+}
+
+const stageLabels: Record<ReviewStage, [string, string]> = {
+  triage: ['Triage', 'Claude reads the changes and briefs the reviewers.'],
+  candidates: ['Candidates', 'Each reviewer looks for defects.'],
+  select: ['Select', 'Claude merges and ranks the candidates.'],
+  verify: ['Verify', 'Reviewers prove or refute the top candidates in their own worktrees.'],
+  report: ['Report', 'Claude writes up the proven findings.'],
+};
+const verdictLabels: Record<NonNullable<ReviewLaneItem['verdict']>, string> = { confirmed: 'Confirmed', refuted: 'Refuted', unconfirmed: 'Unconfirmed' };
+
+/** A running or failed review: its stage, the orchestrator's steps and a lane per review agent. */
+function reviewLiveCard(live: ReviewLive, running: boolean, error: string | undefined): HTMLElement {
+  const box = el('section', 'thread review review-card review-live');
+  const head = strip('div', 'review', 'Claude\'s code review of these changes.', [], '', running ? 'Reviewing' : error === 'Stopped.' ? 'Review stopped' : 'Review failed');
+  const time = el('span', 'time', elapsed(live.startedAt, live.endedAt));
+  if (running) time.dataset.since = String(live.startedAt);
+  head.append(time);
+  const usage = live.usage === undefined ? undefined : usageChip(live.usage);
+  if (usage) head.append(usage.chip);
+  if (running) {
+    const stop = button('', () => post({ action: 'review-stop' }), 'icon-button');
+    stop.append(icon(icons.stop));
+    setTip(stop, 'Stop the review');
+    head.append(stop);
+  }
+  box.append(head, ...usage ? [usage.popover] : [], reviewStageBar(live.stage, running));
+  if (!running && error !== undefined && error !== 'Stopped.') box.append(el('div', 'review-error', error));
+  const lanes = el('div', 'review-lanes');
+  const working = live.lanes.filter((lane) => lane.endedAt === undefined).length;
+  // Agent calls already show as lanes, and while agents work the orchestrator only waits for them.
+  const orchestratorSteps = live.orchestrator.filter((step) => step.verb !== 'Agent' && step.verb !== 'Task');
+  const orchestrator = reviewLane(el('span', 'lane-name', 'Orchestrator'), !running ? 'Stopped' : working > 0 ? `Waiting on ${working} ${working === 1 ? 'reviewer' : 'reviewers'}` : '', running && working === 0, orchestratorSteps, running ? live.startedAt : undefined, running ? 'active' : error === undefined || error === 'Stopped.' ? 'idle' : 'failed');
+  orchestrator.classList.add('orchestrator');
+  lanes.append(orchestrator);
+  for (const [index, reviewer] of live.reviewers.entries()) {
+    const lane = live.lanes.find((candidate) => candidate.reviewer === reviewer);
+    const [tag] = agentTags([reviewer]);
+    if (tag === undefined) continue;
+    if (lane === undefined) {
+      const later = reviewStages.indexOf(live.stage) > reviewStages.indexOf('candidates');
+      lanes.append(reviewLane(tag, later || !running ? 'Did not run' : 'Waiting', false, [], undefined, 'idle'));
+      continue;
+    }
+    const busy = running && lane.endedAt === undefined;
+    const node = reviewLane(tag, laneStatus(lane, busy), busy, lane.steps, busy ? lane.startedAt : undefined, busy ? 'active' : lane.failed ? 'failed' : lane.endedAt === undefined ? 'idle' : 'done', lane, (index + 1) * orbPhaseMs);
+    lanes.append(node);
+  }
+  box.append(lanes);
+  return box;
+}
+
+const stageIcons: Record<ReviewStage, string> = { triage: icons.triage, candidates: icons.candidates, select: icons.rank, verify: icons.verify, report: icons.report };
+
+function reviewStageBar(stage: ReviewStage, running: boolean): HTMLElement {
+  const bar = el('ol', 'review-stages');
+  const at = reviewStages.indexOf(stage);
+  reviewStages.forEach((name, index) => {
+    const [label, tip] = stageLabels[name];
+    const state = index < at ? 'done' : index === at ? (running ? 'now' : 'stopped') : 'next';
+    const item = titled(el('li', state), tip);
+    const mark = el('span', 'stage-icon');
+    mark.append(icon(stageIcons[name]));
+    item.append(mark, label);
+    bar.append(item);
+  });
+  return bar;
+}
+
+function laneStatus(lane: ReviewLane, busy: boolean): string {
+  const items = lane.items ?? [];
+  if (busy) return lane.phase === 'verification' ? 'Verifying' : 'Finding candidates';
+  if (lane.failed) return 'Failed';
+  if (lane.phase === 'candidates') return items.length === 0 ? 'No candidates' : items.length + (items.length === 1 ? ' candidate' : ' candidates');
+  const count = (verdict: NonNullable<ReviewLaneItem['verdict']>): number => items.filter((item) => item.verdict === verdict).length;
+  return `${count('confirmed')} confirmed · ${count('refuted')} refuted` + (count('unconfirmed') ? ` · ${count('unconfirmed')} unconfirmed` : '');
+}
+
+/** One lane: who, what it is doing, its latest steps while it works, and what it handed back once done. */
+/** Offsets each lane's orb so side-by-side orbs don't move in lockstep. */
+const orbPhaseMs = 1370;
+
+function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: readonly ClaudeStep[], since: number | undefined, state: 'active' | 'done' | 'failed' | 'idle', lane?: ReviewLane, phase = 0): HTMLElement {
+  const node = el('div', 'review-lane ' + state);
+  const head = el('div', 'lane-head');
+  // The running step below carries the orb; the empty icon keeps the lane names aligned.
+  const mark = state === 'active' ? el('span', 'state-icon') : stateIcon(state === 'done' ? 'done' : state === 'failed' ? 'failed' : 'idle', state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'muted');
+  head.append(mark, name);
+  if (lane !== undefined) head.append(el('span', 'lane-phase muted', lane.phase === 'verification' ? 'verification' : 'candidates'));
+  head.append(el('span', 'gap'), el('span', 'lane-status muted', status));
+  if (lane?.endedAt !== undefined) head.append(el('span', 'time', elapsed(lane.startedAt, lane.endedAt)));
+  node.append(head);
+  if (busy || (state === 'failed' && steps.length > 0)) node.append(stepLog(steps, since, undefined, undefined, true, phase));
+  if (lane?.items?.length) {
+    const items = el('ul', 'lane-items');
+    for (const item of lane.items) {
+      const row = el('li');
+      if (item.verdict !== undefined) row.append(el('span', 'verdict ' + item.verdict, verdictLabels[item.verdict]));
+      if (item.severity !== undefined) row.append(el('span', 'sev ' + item.severity, findingSeverityLabels[item.severity]));
+      row.append(el('span', 'lane-item', item.title));
+      items.append(row);
+    }
+    node.append(items);
+  }
+  return node;
+}
+
+/** Reviewers picked for the next review; the page updates them before the extension confirms. */
+let reviewPicks: readonly Reviewer[] | undefined;
+
+/** The Review button, its reviewer menu and its status chip. */
+function showReview(): void {
+  const review = current?.review;
+  $('review-tools').hidden = review === undefined;
+  if (review === undefined) return;
+  reviewPicks = review.picked;
+  const start = $<HTMLButtonElement>('review');
+  start.replaceChildren(icon(review.running ? icons.stop : icons.agentReview), review.running ? 'Stop review' : review.result ? 'Rerun review' : 'Review');
+  const status = $('review-status');
+  status.textContent = review.running ? 'Review · ' + stageLabels[review.live?.stage ?? 'triage'][0] : review.error ? 'Review failed' : '';
+  status.title = review.error ?? '';
+  status.className = review.running ? 'chip agent working' : review.error ? 'chip bad' : '';
+  status.hidden = !review.running && !review.error;
+  renderReviewCard();
+}
+
+function openReviewMenu(): void {
+  const rows = reviewers.map((name) => menuRow([reviewerInfo[name].label, el('span', 'muted', reviewerInfo[name].description)], reviewPicks?.includes(name) === true, (on) => {
+    reviewPicks = reviewers.filter((other) => other === name ? on : reviewPicks?.includes(other) === true);
+    post({ action: 'review-pick', reviewers: reviewPicks });
+  }));
+  openToolbarMenu('review-pick', [el('div', 'muted picker-note', 'Reviewers'), ...rows, el('div', 'muted picker-note', 'Remembered for this repository.')], 'review-menu');
 }
 
 /** The Threads card: one foldable group per kind, one line per thread. Guide starts folded because its notes already sit in the diff. */
@@ -4132,7 +4444,7 @@ function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElemen
   item.addEventListener('click', () => jump(thread));
   const text = el('span', 'text');
   text.append(...inlineCode((thread.source === 'local' ? thread.title : undefined) ?? thread.text));
-  const status = kind === 'analysis' ? '' : thread.status;
+  const status = kind === 'analysis' || kind === 'review' ? '' : thread.status;
   const working = thread.source === 'local' ? thread.working : undefined;
   const [name = '', line = ''] = (thread.location.split('/').pop() ?? '').split(/(?=:\d+$)/u);
   const where = el('span', 'where');
@@ -5138,6 +5450,12 @@ $('merge-cancel').addEventListener('click', closeMergeForm);
 attachMentions($<HTMLTextAreaElement>('review'), $('review-box'));
 $('view-menu').addEventListener('click', openViewMenu);
 $('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
+$('review').addEventListener('click', () => {
+  $('error').textContent = '';
+  if (current?.review?.running) post({ action: 'review-stop' });
+  else post({ action: 'review', reviewers: reviewPicks ?? reviewers });
+});
+$('review-pick').addEventListener('click', openReviewMenu);
 $('fold-all').addEventListener('click', () => {
   const value = !allFolded();
   if (view === 'guide') {

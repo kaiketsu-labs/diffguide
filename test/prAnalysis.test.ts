@@ -8,7 +8,7 @@ import test from 'node:test';
 
 import type { CodeAnchor } from '../src/contracts.js';
 import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis } from '../src/prAnalysis.js';
-import { PullRequestAnalysis, type AnalysisOptions } from '../src/prAnalysisRunner.js';
+import { PullRequestAnalysis, runStructuredClaude, type AnalysisOptions } from '../src/prAnalysisRunner.js';
 import { createReviewStore } from '../src/store.js';
 import { parseUnifiedDiff } from '../src/unifiedDiff.js';
 import { settle } from './fakes/vscode.js';
@@ -194,6 +194,20 @@ test('runs Claude read-only, saves the analysis and links each step to its note 
   assert.equal(store.threads.find((thread) => thread.id === threadId)?.messages[0]?.text, 'Changes b.');
   const saved = readStoredAnalysis(JSON.parse(await readFile(path.join(root, 'analysis.json'), 'utf8')));
   assert.deepEqual(saved, result);
+});
+
+test('keeps the structured output when a later turn ends with a result that has none', async () => {
+  let child: FakeChild | undefined;
+  const run = runStructuredClaude({
+    resolve: async () => ({ executable: '/bin/claude' }), cwd: '/worktree', log: () => undefined, prompt: 'Review.', schema: {}, args: [], missing: 'No review.',
+    startedAt: Date.now(), stopped: () => false, onChild: () => undefined, onStep: () => undefined, onProgress: () => undefined,
+    spawn: ((_command: string, args: readonly string[]) => { child = new FakeChild(args); return child; }) as unknown as NonNullable<AnalysisOptions['spawn']>,
+  });
+  await until(() => child !== undefined);
+  child?.send({ type: 'result', is_error: false, structured_output: { ran: ['design'] } });
+  child?.send({ type: 'result', is_error: false, origin: { kind: 'task-notification' }, result: '' });
+  await child?.exit(0);
+  assert.deepEqual(await run, { ran: ['design'] });
 });
 
 test('summarizes a file whose diff is too large to show in full', () => {

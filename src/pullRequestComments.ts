@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { WorktreeCommit } from './conflicts.js';
+import { record } from './connection.js';
 import type { CodeAnchor, ReviewThread } from './contracts.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 import type { PullRequestComment } from './pullRequests.js';
@@ -55,7 +56,7 @@ function publicationsPath(dataPath: string): string {
 /** Threads of a PR already posted to the code host. */
 export async function readPublications(dataPath: string): Promise<Map<string, Publication>> {
   const value = await readPrivateJson(publicationsPath(dataPath)).catch(() => undefined);
-  const threads = typeof value === 'object' && value !== null ? (value as { threads?: unknown }).threads : undefined;
+  const threads = record(value)?.['threads'];
   const found = new Map<string, Publication>();
   if (typeof threads !== 'object' || threads === null) return found;
   for (const [id, entry] of Object.entries(threads)) {
@@ -84,7 +85,7 @@ function linksPath(dataPath: string): string {
 /** Local threads opened from a GitHub thread, by local thread id. */
 export async function readGitHubLinks(dataPath: string): Promise<Map<string, GitHubLink>> {
   const value = await readPrivateJson(linksPath(dataPath)).catch(() => undefined);
-  const threads = typeof value === 'object' && value !== null ? (value as { threads?: unknown }).threads : undefined;
+  const threads = record(value)?.['threads'];
   const found = new Map<string, GitHubLink>();
   if (typeof threads !== 'object' || threads === null) return found;
   for (const [id, entry] of Object.entries(threads)) {
@@ -107,7 +108,7 @@ function commitsPath(dataPath: string): string {
 /** Commits Claude made while answering each local thread, by local thread id, oldest first. */
 export async function readClaudeCommits(dataPath: string): Promise<Map<string, readonly WorktreeCommit[]>> {
   const value = await readPrivateJson(commitsPath(dataPath)).catch(() => undefined);
-  const threads = typeof value === 'object' && value !== null ? (value as { threads?: unknown }).threads : undefined;
+  const threads = record(value)?.['threads'];
   const found = new Map<string, readonly WorktreeCommit[]>();
   if (typeof threads !== 'object' || threads === null) return found;
   for (const [id, entry] of Object.entries(threads)) {

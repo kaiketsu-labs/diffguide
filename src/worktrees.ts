@@ -63,7 +63,7 @@ async function legacyStorage(sourceRoot: string, storageRoot: string): Promise<r
 }
 
 /** Hide worktree storage from Git through the repository's local exclude file, so no `.gitignore` changes are needed. */
-async function excludeFromGit(sourceRoot: string): Promise<void> {
+export async function excludeFromGit(sourceRoot: string): Promise<void> {
   const common = await gitCommonDir(sourceRoot);
   if (common === undefined) return;
   const pattern = '/.claude/worktrees/diffguide/';
@@ -212,7 +212,7 @@ async function moveWorktree(sourceRoot: string, folder: string, target: string):
 }
 
 /** Record that a PR worktree was opened, so cleanup measures its age from now. */
-export async function touchWorktree(folder: string): Promise<void> {
+async function touchWorktree(folder: string): Promise<void> {
   const now = new Date();
   await utimes(metadataPath(folder), now, now).catch(() => undefined);
 }

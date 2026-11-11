@@ -28,7 +28,7 @@ export const orbLoader: OrbLoader = {
 };
 
 /** All frames side by side in one SVG, one run of body pixels per path segment. */
-export function spriteStrip({ width, height, frames }: OrbLoader): string {
+function spriteStrip({ width, height, frames }: OrbLoader): string {
   let path = '';
   frames.forEach(({ art, y }, index) => art.forEach((line, row) => {
     for (const run of line.matchAll(/#+/g)) path += `M${index * width + run.index} ${y + row}h${run[0].length}v1h-${run[0].length}z`;

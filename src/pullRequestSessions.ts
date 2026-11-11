@@ -11,6 +11,7 @@ import { showPublishPanel } from './publishPanel.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from './claudeRunner.js';
 import { catchUpWithPullRequest, commitsSince, discardSince, worktreeSnapshot, type WorktreeCommit } from './conflicts.js';
+import { CodeReview } from './reviewRunner.js';
 import { PullRequestAnalysis } from './prAnalysisRunner.js';
 import { requireNodeRuntime, resolveExecutable } from './executables.js';
 import { prepareConnection } from './setup.js';
@@ -33,6 +34,8 @@ export interface PullRequestSession {
   readonly runner: ClaudeRunner;
   /** Claude's guided-review analysis of the PR. */
   readonly analysis: PullRequestAnalysis;
+  /** The code review agents' run on the PR. */
+  readonly review: CodeReview;
   /** Full log of what Claude did for this PR. */
   readonly output: vscode.OutputChannel;
   /** Commits Claude made while answering a local thread, oldest first. */
@@ -107,7 +110,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
         }
         this.#ready.set(id, session);
         const fire = (): void => { this.#stateChanged.fire(session); };
-        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.runner.onDidChange(fire), session.analysis.onDidChange(fire)));
+        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.runner.onDidChange(fire), session.analysis.onDidChange(fire), session.review.onDidChange(fire)));
         this.#changed.fire();
         fire();
       }, () => { if (this.#open.get(id) === opening) this.#open.delete(id); });
@@ -174,7 +177,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       const opening = pending;
       opening.then((session) => {
         const fire = (): void => { this.#stateChanged.fire(session); };
-        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.analysis.onDidChange(fire)));
+        this.#watchers.set(id, vscode.Disposable.from(session.session.store.onChange(fire), session.analysis.onDidChange(fire), session.review.onDidChange(fire)));
       }, () => { if (this.#onCheckouts.get(id) === opening) this.#onCheckouts.delete(id); });
     }
     return pending;
@@ -331,6 +334,10 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       ...ownsBridge ? {} : { answersElsewhere: true },
     });
     const analysis = new PullRequestAnalysis({ store, cwd: worktree, dataPath, role: metadata.role, log, resolve, instructions: instructions('guide'), ...this.claude });
+    const review = new CodeReview({
+      store, cwd: worktree, dataPath, role: metadata.role, log, resolve, ...this.claude,
+      guard: async () => ({ guard: join(this.context.extensionPath, 'dist', 'edit-guard.cjs'), node: await resolveExecutable(configuration.get<string>('nodePath', 'node'), worktree) }),
+    });
     const record = async (threadId: string, url: string, pending: boolean): Promise<void> => {
       publications.set(threadId, { url, pending });
       await writePublications(dataPath, publications);
@@ -424,7 +431,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       linkedGitHubThread: (threadId) => links.get(threadId)?.id,
     };
-    const result: PullRequestSession = { session, bridge, runner, analysis, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, metadata, ownsBridge };
+    const result: PullRequestSession = { session, bridge, runner, analysis, review, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, metadata, ownsBridge };
     return result;
   }
 }
@@ -445,15 +452,16 @@ function lineLabel({ startLine, endLine }: CodeAnchor): string {
 }
 
 /** Stop a PR's Claude and its connection. */
-function release({ runner, analysis, bridge, output, ownsBridge }: PullRequestSession): void {
+function release({ runner, analysis, review, bridge, output, ownsBridge }: PullRequestSession): void {
   runner.dispose();
   analysis.dispose();
+  review.dispose();
   if (ownsBridge) bridge.dispose();
   output.dispose();
 }
 
 /** The user's login shell, when it is one Claude can be started through like in a terminal. */
-function loginShell(): string | undefined {
+export function loginShell(): string | undefined {
   const shell = process.env['SHELL'];
   return shell !== undefined && /\/(zsh|bash)$/u.test(shell) ? shell : undefined;
 }
