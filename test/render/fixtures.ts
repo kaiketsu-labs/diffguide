@@ -127,4 +127,47 @@ export const scenes: Readonly<Record<string, Scene>> = {
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
   local: scene(local, [{ shot: 'local.png' }]),
+  get pending() { return reviewingScenes['pending']!; },
+  get since() { return reviewingScenes['since']!; },
+};
+
+const pendingMessage = (id: string, body: string): GitHubMessage => ({
+  id, author: 'octo', avatarUrl: '', pending: true, html: `<p>${body}</p>`, body, canDelete: true, canEdit: true, canHide: false, canReact: false, edited: false, reactions: [], createdAt: ago(4),
+});
+type GitHubMessage = NonNullable<OverviewState['github']>[number]['messages'][number];
+
+const finding = thread('55555555-5555-5555-5555-555555555555', 'src/auth/token.ts', 9, 'Refresh skips expired tokens', 40);
+
+/** A reviewer's PR with a pending review, new commits since their last review and an open code review finding. */
+export const reviewing: OverviewState = {
+  ...pullRequest,
+  threads: [...pullRequest.threads, { ...finding, origin: 'review', finding: { reviewers: ['correctness'], severity: 'high', evidence: 'tested' } }],
+  github: [
+    { id: 'g1', location: 'src/auth/user.ts:6', text: 'Return early here?', status: 'Pending', url: '', path: 'src/auth/user.ts', side: 'new', startLine: 6, endLine: 6, outdated: false, resolved: false, pending: true,
+      messages: [pendingMessage('m1', 'Return early here instead of nesting?')] },
+    { id: 'g2', location: 'src/api/client.ts:9', text: 'Cap the retries', status: 'Pending', url: '', path: 'src/api/client.ts', side: 'new', startLine: 9, endLine: 9, outdated: false, resolved: false, pending: true,
+      messages: [pendingMessage('m2', 'Cap the retries at three so a dead server does not hang the client.')] },
+  ],
+  details: { ...pullRequest.details!, viewerIsAuthor: false, pendingComments: 2 },
+  conversation: {
+    ...pullRequest.conversation!,
+    viewerLogin: 'alice',
+    lastReviewedCommit: 'a'.repeat(40),
+    timeline: [
+      ...pullRequest.conversation!.timeline,
+      { kind: 'commit', id: 'c2', oid: 'b'.repeat(40), headline: 'fix(api): retry on timeout', message: '', author: 'octo', avatarUrl: '', createdAt: ago(90), checks: 'success' },
+      { kind: 'commit', id: 'c3', oid: 'c'.repeat(40), headline: 'test(api): cover the retry cap', message: '', author: 'octo', avatarUrl: '', createdAt: ago(30), checks: 'success' },
+    ],
+  },
+  review: {
+    running: false, picked: ['correctness'],
+    result: { createdAt: ago(40), ran: ['correctness'], skipped: [], candidates: 3, dropped: [],
+      findings: [{ threadId: finding.id, title: 'Refresh skips expired tokens', severity: 'high', evidence: 'tested', reviewers: ['correctness'], path: 'src/auth/token.ts', startLine: 9 }] },
+  },
+  unpushed: [],
+};
+
+export const reviewingScenes: Readonly<Record<string, Scene>> = {
+  pending: { state: reviewing, messages: [{ state: reviewing }, filesMessage], steps: [{ shot: 'pending.png', full: true }], saved: { view: 'overview' } },
+  since: { state: reviewing, messages: [{ state: reviewing }, { ...filesMessage, selection: { range: { kind: 'since' }, whitespace: false } }], steps: [{ shot: 'since.png' }], saved: { view: 'files' } },
 };
