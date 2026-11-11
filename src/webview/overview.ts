@@ -2152,6 +2152,7 @@ function render(state: OverviewState): void {
   $('discard-review').hidden = pendingCount === undefined;
   $('pending-note').hidden = pendingCount === undefined;
   $('pending-note').textContent = pendingCount + ' pending comment' + (pendingCount === 1 ? '' : 's');
+  renderPendingList(pendingCount !== undefined);
   const badge = $('verdict');
   badge.hidden = !details;
   if (details) {
@@ -4440,6 +4441,21 @@ function inlineCode(text: string): Node[] {
 }
 
 /** One thread as a row: where on the left, the text in a column that lines up, status on the right only when it adds something. */
+/** Your pending review's comments under Finish your review, in page order; a click jumps to the thread. */
+function renderPendingList(reviewing: boolean): void {
+  const list = $('pending-list');
+  const order = new Map((files ?? []).map((file, index) => [file.path, index]));
+  const threads = (current?.github ?? []).filter((thread) => thread.messages.some((message) => message.pending))
+    .sort((left, right) => (order.get(left.path) ?? Infinity) - (order.get(right.path) ?? Infinity) || left.path.localeCompare(right.path) || left.startLine - right.startLine);
+  list.hidden = !reviewing || threads.length === 0;
+  list.replaceChildren(...list.hidden ? [] : threads.flatMap((thread) => thread.messages.filter((message) => message.pending).map((message) => {
+    const row = threadRow({ ...thread, source: 'github', text: message.body }, 'github');
+    row.title = thread.location + '\n' + message.body;
+    row.querySelector('.state')?.replaceChildren();
+    return row;
+  })));
+}
+
 function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElement {
   const item = el('li', 'card-thread ' + kind + (nested ? ' nested' : ''));
   item.title = thread.location + '\n' + thread.text;
