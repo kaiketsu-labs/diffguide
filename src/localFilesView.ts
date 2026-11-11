@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { workingIcon } from './claudeStatus.js';
 import type { ReviewThread } from './contracts.js';
 import { checkoutLabel, groupByRepository, type LocalCheckout, matchesFilter } from './localCheckouts.js';
 import { gitPaths, listRepositoryFiles } from './localReview.js';
@@ -106,7 +107,8 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
     const open = threads.filter((thread) => !thread.resolved).length;
     const item = new vscode.TreeItem(checkoutLabel(checkout), vscode.TreeItemCollapsibleState.None);
     item.id = `checkout:${checkout.root}`;
-    item.iconPath = new vscode.ThemeIcon(checkoutIcons[checkout.kind]);
+    const working = busy !== undefined || threads.some((thread) => !thread.resolved && (thread.status === 'received' || thread.status === 'working'));
+    item.iconPath = working ? workingIcon : new vscode.ThemeIcon(checkoutIcons[checkout.kind]);
     item.description = [checkoutNotes[checkout.kind], changed > 0 ? `${changed} changed` : '', open === 0 ? '' : open === 1 ? '1 comment' : `${open} comments`, busy].filter(Boolean).join(' · ');
     item.tooltip = checkout.root;
     item.contextValue = 'diffGuide.checkout';

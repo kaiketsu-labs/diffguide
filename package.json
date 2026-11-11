@@ -90,6 +90,16 @@
   "contributes": {
     "colors": [
       {
+        "id": "diffGuide.agent",
+        "description": "The coding agent's orb in the sidebar and on the review page's tab while it works. Matches the agent token of the review page.",
+        "defaults": {
+          "dark": "#7fc0de",
+          "light": "#2f7ea6",
+          "highContrast": "#7fc0de",
+          "highContrastLight": "#2f7ea6"
+        }
+      },
+      {
         "id": "diffGuide.selectionBackground",
         "description": "Background of the pinned code selection for the active review comment.",
         "defaults": {

@@ -747,6 +747,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const background = backgroundStatus(opened.analysis.activity.running, opened.review.activity.running);
           return background === undefined ? claude : [claude === 'Claude idle' ? undefined : claude, background].filter(Boolean).join(' · ');
         },
+        working: (repository, number) => {
+          const opened = sessions.get(repository, number);
+          return opened !== undefined && (opened.runner.activity.running || opened.analysis.activity.running || opened.review.activity.running);
+        },
         localChanges: (repository, number, pushedHead) => localChanges(worktreePath(storageRoot, repository, number), pushedHead),
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
         forget: () => { fileReviews.forget(); GitHubApiProvider.forget(); checkouts.rescan(); },
@@ -855,7 +859,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (metadata === undefined) return undefined;
       const located = await checkouts.locate(metadata.repository, metadata.pullRequest.number).catch(() => undefined);
       const opened = located?.sessions.get(metadata.repository, metadata.pullRequest.number);
-      return opened === undefined ? undefined : backgroundStatus(opened.analysis.activity.running, opened.review.activity.running);
+      if (opened === undefined) return undefined;
+      return backgroundStatus(opened.analysis.activity.running, opened.review.activity.running) ?? (opened.runner.activity.running ? 'Claude working' : undefined);
     };
     const repositories = async (): Promise<readonly string[]> => {
       const folders = (vscode.workspace.workspaceFolders ?? []).filter((each) => each.uri.scheme === 'file').map((each) => each.uri.fsPath);

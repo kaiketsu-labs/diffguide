@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import type { ClaudeActivity } from './claudeRunner.js';
 
 /** What a PR's Claude is doing, in a few words. */
@@ -12,6 +13,9 @@ export interface ClaudeStatus {
 export function backgroundStatus(guide: boolean, review: boolean): string | undefined {
   return [guide ? 'Building guide' : undefined, review ? 'Reviewing' : undefined].filter(Boolean).join(' · ') || undefined;
 }
+
+/** The orb in the agent's color: the icon of a sidebar row or review page tab while Claude works there. */
+export const workingIcon = new vscode.ThemeIcon('diffguide-orb', new vscode.ThemeColor('diffGuide.agent'));
 
 /** Summarize a PR's background Claude for the sidebar and status bar. */
 export function claudeStatus(activity: ClaudeActivity): ClaudeStatus {

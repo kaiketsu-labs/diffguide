@@ -83,6 +83,7 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
     remove: async (_repository, number) => { checkedOut.delete(number); },
     showClaude: async () => undefined,
     claudeStatus: () => undefined,
+    working: () => false,
     reviewedFiles: async (_provider, _repository, _number, paths) => new Set(paths.filter((file) => reviewed.has(file))),
     showOverview: async () => undefined,
     localChanges: async () => ({ commits: 0, files: new Map() }),

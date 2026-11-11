@@ -3,6 +3,7 @@ import { parsePullRequestLink, type ListVersion, type PullRequestProvider, type 
 import type { LocalChange } from './conflicts.js';
 import type { PullRequestRole } from './worktrees.js';
 import { pollWhileFocused } from './autoSync.js';
+import { workingIcon } from './claudeStatus.js';
 import { GitHubSignInRequired } from './githubApi.js';
 
 type Listing =
@@ -88,6 +89,8 @@ export interface PullRequestWorktrees {
   showClaude(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole): Promise<void>;
   /** Claude's state for a PR with an open review, shown beside it. */
   claudeStatus(repository: string, number: number): string | undefined;
+  /** Whether Claude answers comments, builds the guide or reviews for a PR with an open review. */
+  working(repository: string, number: number): boolean;
   /** Files of a checked-out PR ticked Viewed and unchanged since, or marked Viewed on the code host. */
   reviewedFiles(provider: PullRequestProvider, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>>;
   /** Open a tab with the PR's review progress, threads and Claude activity. */
@@ -658,7 +661,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
           pr.changes === undefined ? undefined : `${size} in ${pr.changes.files} ${pr.changes.files === 1 ? 'file' : 'files'}`,
           [pr.createdAt === undefined ? undefined : `Opened ${new Date(pr.createdAt).toLocaleString()}`, pr.updatedAt === undefined ? undefined : `updated ${ago(pr.updatedAt)}`].filter(Boolean).join(', ') || undefined,
         ].filter(Boolean).join('\n');
-        item.iconPath = merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review, awaitingReview);
+        item.iconPath = checkedOut && node.listing.worktrees.working(node.listing.repository.name, pr.number) ? workingIcon : merged ? mergedIcon : pullRequestIcon(pr.draft, pr.review, awaitingReview);
         item.contextValue = `diffGuide.pullRequest${checkedOut ? '.checkedOut' : ''}${node.pinned === true ? '.pinned' : ''}`;
         item.command = { command: 'diffGuide.openPullRequest', title: 'Open changes', arguments: [node] };
         return item;
