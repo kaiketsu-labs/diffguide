@@ -160,7 +160,7 @@ test('reads GitHub review threads, using original lines for outdated ones and li
     { id: 'T1', path: 'src/a.ts', diffSide: 'RIGHT', line: 12, startLine: 10, originalLine: 3, originalStartLine: 1, isOutdated: false, isResolved: true,
       comments: { nodes: [comment('alice', 'Why?'), comment(null, 'Because.')] } },
     { id: 'T2', path: 'src/b.ts', diffSide: 'LEFT', line: null, startLine: null, originalLine: 7, originalStartLine: null, isOutdated: true, isResolved: false,
-      comments: { nodes: [comment('bob', 'Typo', undefined, 'PENDING')] } },
+      comments: { nodes: [{ ...comment('bob', 'Typo', undefined, 'PENDING'), diffHunk: '@@ -7 +7 @@\n-teh' }] } },
     { id: 'T3', path: 'README.md', diffSide: 'RIGHT', line: null, startLine: null, originalLine: null, originalStartLine: null, isOutdated: false, isResolved: false, subjectType: 'FILE',
       comments: { nodes: [comment('bob', 'Whole file')] } },
     { id: 'T5', path: 'README.md', diffSide: 'RIGHT', line: null, startLine: null, originalLine: null, originalStartLine: null, isOutdated: false, isResolved: false, subjectType: 'LINE',
@@ -169,7 +169,7 @@ test('reads GitHub review threads, using original lines for outdated ones and li
   assert.deepEqual(threads, [
     { id: 'T1', path: 'src/a.ts', side: 'RIGHT', startLine: 10, endLine: 12, outdated: false, resolved: true, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1',
       comments: [{ id: 'C-Why?', author: 'alice', authorName: 'Alice Liddell', avatarUrl: 'https://avatars.githubusercontent.com/alice', pending: false, bodyHtml: '<p>Why?</p>', canDelete: true, createdAt: '2026-01-02T03:04:05Z', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }, { id: 'C-Because.', author: 'ghost', avatarUrl: '', pending: false, bodyHtml: '<p>Because.</p>', canDelete: false, createdAt: '', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }] },
-    { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1',
+    { id: 'T2', path: 'src/b.ts', side: 'LEFT', startLine: 7, endLine: 7, outdated: true, resolved: false, pending: true, url: 'https://github.com/acme/app/pull/7#discussion_r1', diffHunk: '@@ -7 +7 @@\n-teh',
       comments: [{ id: 'C-Typo', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: true, bodyHtml: '<p>Typo</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }] },
     { id: 'T3', path: 'README.md', side: 'RIGHT', startLine: 1, endLine: 1, outdated: false, resolved: false, pending: false, url: 'https://github.com/acme/app/pull/7#discussion_r1', scope: 'file',
       comments: [{ id: 'C-Whole file', author: 'bob', avatarUrl: 'https://avatars.githubusercontent.com/bob', pending: false, bodyHtml: '<p>Whole file</p>', canDelete: false, createdAt: '2026-01-02T03:04:05Z', body: '', url: 'https://github.com/acme/app/pull/7#discussion_r1', canEdit: false, canHide: false, canReact: false, edited: false, reactions: [] }] },

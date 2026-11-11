@@ -206,6 +206,8 @@ export interface RemoteThread {
   readonly comments: readonly (GitHubComment & { readonly pending: boolean })[];
   /** Set when the thread is about the whole file; its lines are then a placeholder for line 1. */
   readonly scope?: 'file';
+  /** The diff hunk the first comment was written on, ending at its last line. */
+  readonly diffHunk?: string;
 }
 
 /** `description` is read only for the label picker. */
@@ -432,7 +434,7 @@ const reactionFields = 'reactionGroups{content viewerHasReacted reactors{totalCo
 const commentFields = `id url body bodyHTML createdAt lastEditedAt viewerCanUpdate viewerCanDelete viewerCanMinimize viewerCanReact isMinimized minimizedReason
   author{login avatarUrl(size:40) ... on User{name}} ${reactionFields}`;
 const threadsField = `reviewThreads(first:100,after:$after){nodes{id path diffSide line startLine originalLine originalStartLine isOutdated isResolved subjectType
-  comments(first:100){nodes{${commentFields} state}}} pageInfo{hasNextPage endCursor}}`;
+  comments(first:100){nodes{${commentFields} state diffHunk}}} pageInfo{hasNextPage endCursor}}`;
 const actorField = 'actor{login avatarUrl(size:40)}';
 const userLogin = '... on User{login} ... on Bot{login} ... on Mannequin{login}';
 const timelineTypes = ['ISSUE_COMMENT', 'PULL_REQUEST_REVIEW', 'PULL_REQUEST_COMMIT', 'HEAD_REF_FORCE_PUSHED_EVENT', 'LABELED_EVENT', 'UNLABELED_EVENT',
@@ -1506,6 +1508,7 @@ export function parseReviewThreads(nodes: unknown): readonly RemoteThread[] {
       url: httpsUrl(comments[0]?.['url']),
       comments: comments.map((comment) => ({ ...parseComment(comment), pending: comment['state'] === 'PENDING' })),
       ...(file ? { scope: 'file' as const } : {}),
+      ...(typeof comments[0]?.['diffHunk'] === 'string' && comments[0]['diffHunk'] !== '' ? { diffHunk: comments[0]['diffHunk'] } : {}),
     });
   }
   return threads;
