@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Submitting a review on the review page shows it and its comments in the Conversation right away.
+- **Finish your review** lists your pending comments by file and line. Click one to jump to it.
 - Ask and Implement work on a GitHub comment whose code changed since. The local thread is about the whole file and quotes the diff the comment was written on.
 - **Draft reply** turns back on in an open Reply or Publish form once Claude's run ends.
 - The Pull Requests view colors a checked-out PR by its local state: an orange title and `↑N` badge for commits not pushed to GitHub, a yellow title and `✎` for uncommitted edits only, a gray `W` when nothing is left to push. With both, the edited file count `✎N` shows in the description. A repository row counts its PRs with commits to push. The description keeps the PR number, the author on review requests, Claude while it works or needs you, and review progress; type, size, draft and idle Claude move to the hover text.
