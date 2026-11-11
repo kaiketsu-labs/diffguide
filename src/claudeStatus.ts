@@ -8,6 +8,11 @@ export interface ClaudeStatus {
   readonly retry: boolean;
 }
 
+/** "Building guide" or "Reviewing" while a guide build or code review runs, for the sidebar. */
+export function backgroundStatus(guide: boolean, review: boolean): string | undefined {
+  return [guide ? 'Building guide' : undefined, review ? 'Reviewing' : undefined].filter(Boolean).join(' · ') || undefined;
+}
+
 /** Summarize a PR's background Claude for the sidebar and status bar. */
 export function claudeStatus(activity: ClaudeActivity): ClaudeStatus {
   if (activity.running) return { text: `Claude · ${activity.step ?? 'Working'}`, icon: 'sync~spin', retry: false };

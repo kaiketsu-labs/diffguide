@@ -125,6 +125,13 @@ export class LocalReview implements vscode.Disposable {
     this.#pullRequests = pullRequests;
   }
 
+  /** Whether a code review runs on this checkout. */
+  get reviewing(): boolean {
+    return this.#codeReview.activity.running;
+  }
+
+  readonly onDidChangeReview: vscode.Event<void> = (listener, thisArgs, disposables) => this.#codeReview.onDidChange(listener, thisArgs, disposables);
+
   /** The page key, for a page that takes over this one's tab. */
   get key(): string {
     return this.pageKey;

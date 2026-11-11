@@ -25,7 +25,7 @@ import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from '
 import { linkedChanges } from './linkedController.js';
 import { checkoutDataPath, PullRequestSessions, type WorkspaceRepository, type PullRequestSession } from './pullRequestSessions.js';
 import { Checkouts, nestedRepositoryRoots, type Checkout } from './checkouts.js';
-import { claudeStatus } from './claudeStatus.js';
+import { backgroundStatus, claudeStatus } from './claudeStatus.js';
 import { isWorkspaceRelativePath, readGitBase } from './git.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from './suggestions.js';
 import { mediaType } from './media.js';
@@ -742,7 +742,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         claudeStatus: (repository, number) => {
           const opened = sessions.get(repository, number);
-          return opened === undefined ? undefined : claudeStatus(opened.runner.activity).text;
+          if (opened === undefined) return undefined;
+          const claude = claudeStatus(opened.runner.activity).text;
+          const background = backgroundStatus(opened.analysis.activity.running, opened.review.activity.running);
+          return background === undefined ? claude : [claude === 'Claude idle' ? undefined : claude, background].filter(Boolean).join(' · ');
         },
         localChanges: (repository, number, pushedHead) => localChanges(worktreePath(storageRoot, repository, number), pushedHead),
         reviewedFiles: (provider, repository, number, paths) => fileReviews.reviewed(provider, repository, number, paths),
@@ -847,13 +850,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const located = await checkouts.locate(metadata.repository, metadata.pullRequest.number).catch(() => undefined);
       return located?.sessions.get(metadata.repository, metadata.pullRequest.number)?.session.store.threads ?? [];
     };
+    const pullRequestBusy = async (local: LocalCheckout): Promise<string | undefined> => {
+      const metadata = local.pullRequest;
+      if (metadata === undefined) return undefined;
+      const located = await checkouts.locate(metadata.repository, metadata.pullRequest.number).catch(() => undefined);
+      const opened = located?.sessions.get(metadata.repository, metadata.pullRequest.number);
+      return opened === undefined ? undefined : backgroundStatus(opened.analysis.activity.running, opened.review.activity.running);
+    };
     const repositories = async (): Promise<readonly string[]> => {
       const folders = (vscode.workspace.workspaceFolders ?? []).filter((each) => each.uri.scheme === 'file').map((each) => each.uri.fsPath);
       const tops = await Promise.all(folders.map(async (folder) => await repositoryRoot(folder) === await realpath(folder).catch(() => folder) ? [folder] : []));
       const nested = await Promise.all(folders.map((folder) => nestedRepositoryRoots(folder)));
       return [...tops.flat(), ...nested.flat()];
     };
-    context.subscriptions.push(localSessions, ...registerLocalReview(context.workspaceState, localSessions, mainRoot, async () => listLocalCheckouts(await repositories()), openPullRequestCheckout, pullRequestThreads, checkouts.onDidChangeState));
+    context.subscriptions.push(localSessions, ...registerLocalReview(context.workspaceState, localSessions, mainRoot, async () => listLocalCheckouts(await repositories()), openPullRequestCheckout, pullRequestThreads, pullRequestBusy, checkouts.onDidChangeState));
     void localSessions.restore(async (folder) => stat(folder).then((info) => info.isDirectory(), () => false));
     context.subscriptions.push(bridge, launchers, vscode.commands.registerCommand('diffGuide.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
@@ -917,6 +927,7 @@ function registerLocalReview(
   listCheckouts: () => Promise<readonly LocalCheckout[]>,
   openPullRequest: (checkout: LocalCheckout, path?: string) => Promise<void>,
   pullRequestThreads: (checkout: LocalCheckout) => Promise<readonly ReviewThread[]>,
+  pullRequestBusy: (checkout: LocalCheckout) => Promise<string | undefined>,
   onDidChangePullRequests: vscode.Event<unknown>,
 ): vscode.Disposable[] {
   const report = (error: unknown): void => { void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error)); };
@@ -926,7 +937,8 @@ function registerLocalReview(
     void vscode.commands.executeCommand('setContext', 'diffGuide.localAvailable', checkouts.length > 0);
     void vscode.commands.executeCommand('setContext', 'diffGuide.localSingle', checkouts.length === 1);
     return checkouts;
-  }, async (checkout) => checkout.kind === 'pr' ? pullRequestThreads(checkout) : (await sessions.find(checkout.root))?.store.threads ?? []);
+  }, async (checkout) => checkout.kind === 'pr' ? pullRequestThreads(checkout) : (await sessions.find(checkout.root))?.store.threads ?? [],
+  async (checkout) => checkout.kind === 'pr' ? pullRequestBusy(checkout) : backgroundStatus(false, (await sessions.find(checkout.root))?.review.reviewing === true));
   /** A checkout the Local view lists, so command arguments cannot point anywhere else. */
   const listed = async (root: unknown): Promise<LocalCheckout> => {
     const checkout = typeof root === 'string' ? (await files.checkouts()).find((each) => each.root === root) : undefined;
