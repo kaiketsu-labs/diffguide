@@ -225,7 +225,7 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.deepEqual([repository?.item.label, repository?.item.description], ['app', 'acme · 1']);
   const [pr] = await level(tree, repository?.node);
   assert.equal(pr?.item.label, 'Add review sidebar');
-  assert.equal(pr?.item.description, '#7 · octo · Draft');
+  assert.equal(pr?.item.description, '#7 · octo');
   const icon = pr?.item.iconPath as vscode.ThemeIcon;
   assert.deepEqual([icon.id, icon.color?.id], ['diffguide-draft-pull-request', 'descriptionForeground']);
   const decoratePullRequest = (item: vscode.TreeItem | undefined) => window.fileDecorations.at(-1)?.provideFileDecoration(item?.resourceUri as vscode.Uri, undefined as never) as { badge?: string; color?: vscode.ThemeColor } | undefined;
@@ -244,9 +244,10 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   const legend = await level(window.trees.at(-2)?.provider as vscode.TreeDataProvider<unknown>);
   assert.deepEqual(legend.map(({ item }) => [item.label, (item.iconPath as vscode.ThemeIcon).id]), [
     ['Repository', 'diffguide-repository'], ['Open', 'diffguide-pull-request'], ['Draft', 'diffguide-draft-pull-request'], ['Merged', 'diffguide-merge'], ['Awaiting review', 'diffguide-show'],
-    ['Approved', 'diffguide-ready'], ['Changes requested', 'diffguide-request-changes'], ['Commented', 'diffguide-comment'], ['Checked out in a worktree', 'diffguide-pull-request'],
+    ['Approved', 'diffguide-ready'], ['Changes requested', 'diffguide-request-changes'], ['Commented', 'diffguide-comment'],
+    ['Commits not pushed to GitHub', 'diffguide-pull-request'], ['Uncommitted edits', 'diffguide-pull-request'], ['Checked out in a worktree', 'diffguide-pull-request'],
   ]);
-  assert.equal(decoratePullRequest(legend.at(-1)?.item)?.badge, 'W');
+  assert.deepEqual(legend.slice(-3).map(({ item }) => [decoratePullRequest(item)?.badge, decoratePullRequest(item)?.color?.id]), [['↑1', 'charts.orange'], ['✎', 'charts.yellow'], ['W', undefined]]);
 
   await commands.executeCommand('diffGuide.openPullRequestInBrowser', pr?.node);
   assert.deepEqual(env.opened.map(String), ['https://github.com/acme/app/pull/7']);
@@ -255,17 +256,17 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.equal(env.opened.length, 1);
   assert.equal(worktrees.opened.length, 1);
 
-  assert.equal(reopened?.item.description, '#7 · octo · Draft · Worktree · 0/2 reviewed');
+  assert.equal(reopened?.item.description, '#7 · octo · 0/2 reviewed');
 
   worktrees.reviewed.add('README.md');
   await commands.executeCommand('diffGuide.refreshPullRequests');
   const [progressed] = await level(tree, (await level(tree, (await level(tree))[0]?.node))[0]?.node);
-  assert.equal(progressed?.item.description, '#7 · octo · Draft · Worktree · 1/2 reviewed');
+  assert.equal(progressed?.item.description, '#7 · octo · 1/2 reviewed');
 
   await commands.executeCommand('diffGuide.markPullRequestMerged', 'acme/app#7');
   const [merged] = await level(tree, repository?.node);
   assert.equal((merged?.item.iconPath as vscode.ThemeIcon).id, 'diffguide-merge');
-  assert.equal(merged?.item.description, '#7 · octo · Merged · Worktree · 1/2 reviewed');
+  assert.equal(merged?.item.description, '#7 · octo · 1/2 reviewed');
 });
 
 test('groups changed files into folders and folds single-folder chains into one row', () => {
@@ -450,11 +451,11 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
     return (await level(tree, repository?.node)).map(({ item }) => [item.label, item.description]);
   };
 
-  assert.deepEqual(await titles(), [['Add review sidebar', '#7 · octo · Draft']]);
+  assert.deepEqual(await titles(), [['Add review sidebar', '#7']]);
   assert.equal(window.trees.at(-1)?.message, 'Updating pull requests...');
   release();
   await settle();
-  assert.deepEqual(await titles(), [['Fresh', '#8 · feat(ui) · octo · Draft']]);
+  assert.deepEqual(await titles(), [['Fresh', '#8']]);
   assert.equal(window.trees.at(-1)?.message, '');
   assert.deepEqual((workspace.get('diffGuide.pullRequestSnapshot') as Record<string, { mine: { number: number }[] }>)['app']?.mine.map((pr) => pr.number), [8]);
 
@@ -492,14 +493,14 @@ test('reads a PR\'s reviewed files once for its row, and redraws only that PR wh
   const [repository] = await level(tree);
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
-  assert.equal(pr?.item.description, '#7 · octo · Draft · Worktree · 0/2 reviewed');
+  assert.equal(pr?.item.description, '#7 · 0/2 reviewed');
   assert.deepEqual(await level(tree, pr?.node), []);
   assert.equal(reads, 1);
 
   worktrees.reviewed.add('a.ts');
   status.fire('acme/app#7');
   assert.deepEqual(redrawn, [[pr?.node]]);
-  assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · octo · Draft · Worktree · 1/2 reviewed');
+  assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · 1/2 reviewed');
   assert.equal(reads, 2);
 
   status.fire('acme/other#1');
@@ -524,11 +525,33 @@ test('shows unpushed commits and uncommitted edits on a checked-out PR row', asy
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
 
-  const [repository] = await level(tree);
-  const [section] = await level(tree, repository?.node);
-  const [pr] = await level(tree, section?.node);
-  assert.match(String(pr?.item.description), / · ↑2 · ✎1/u);
+  const decorate = (item: vscode.TreeItem | undefined) => {
+    const decoration = window.fileDecorations.at(-1)?.provideFileDecoration(item?.resourceUri as vscode.Uri, undefined as never) as { badge?: string; color?: vscode.ThemeColor } | undefined;
+    return [decoration?.badge, decoration?.color?.id];
+  };
+  const rows = async () => {
+    const [repository] = await level(tree);
+    const [section] = await level(tree, repository?.node);
+    return { repository, pr: (await level(tree, section?.node))[0] };
+  };
+
+  const { repository, pr } = await rows();
+  assert.equal(repository?.item.description, 'acme · 1 mine · 1 to push');
+  assert.equal(pr?.item.description, '#7 · ✎1 · 0/1 reviewed');
+  assert.deepEqual(decorate(pr?.item), ['↑2', 'charts.orange']);
+  assert.match(String(pr?.item.tooltip), /\n2 commits not pushed to GitHub\n1 file with uncommitted edits\nDraft$/u);
   assert.deepEqual(await level(tree, pr?.node), []);
+
+  worktrees.localChanges = async () => ({ commits: 12, files: new Map() });
+  await commands.executeCommand('diffGuide.refreshPullRequests');
+  assert.deepEqual(decorate((await rows()).pr?.item), ['↑+', 'charts.orange']);
+
+  worktrees.localChanges = async () => ({ commits: 0, files: new Map([['src/a.ts', 'edited' as const]]) });
+  await commands.executeCommand('diffGuide.refreshPullRequests');
+  const edited = await rows();
+  assert.equal(edited.repository?.item.description, 'acme · 1 mine');
+  assert.equal(edited.pr?.item.description, '#7 · 0/1 reviewed');
+  assert.deepEqual(decorate(edited.pr?.item), ['✎', 'charts.yellow']);
 });
 
 test('filters PRs by author and shows their size and dates', async (t) => {
@@ -557,13 +580,13 @@ test('filters PRs by author and shows their size and dates', async (t) => {
   };
 
   const [first] = await rows();
-  assert.equal(first?.item.description, '#7 · octo · +312 −48');
+  assert.equal(first?.item.description, '#7 · octo');
   assert.match(String(first?.item.tooltip), /\+312 −48 in 14 files\nOpened .+, updated 2h ago$/u);
 
   window.quickPickIndex = 2;
   await commands.executeCommand('diffGuide.filterByAuthor');
   assert.deepEqual(window.quickPicks.at(-1), ['$(clear-all) All authors', 'alice', 'octo']);
-  assert.deepEqual((await rows()).map(({ item }) => item.description), ['#7 · octo · +312 −48']);
+  assert.deepEqual((await rows()).map(({ item }) => item.description), ['#7 · octo']);
   assert.equal(registered?.description, 'Author: octo');
 
   window.quickPickIndex = 0;
@@ -699,10 +722,10 @@ test('marks my PRs awaiting review, filters Mine to them, tells direct from team
 
   const [review, mine] = await sections();
   const reviewRows = await level(tree, review?.node);
-  assert.deepEqual(reviewRows.map(({ item }) => item.description), ['#10 · Direct · octo · Draft', '#11 · via Core · octo · Draft']);
+  assert.deepEqual(reviewRows.map(({ item }) => item.description), ['#10 · Direct · octo', '#11 · via Core · octo']);
   assert.match(String(reviewRows[1]?.item.tooltip), /You were asked through a team/u);
   const mineRows = await level(tree, mine?.node);
-  assert.deepEqual(mineRows.map(({ item }) => [item.description, (item.iconPath as vscode.ThemeIcon).id]), [['#8 · Awaiting review · octo', 'diffguide-show'], ['#9 · octo', 'diffguide-pull-request']]);
+  assert.deepEqual(mineRows.map(({ item }) => [item.description, (item.iconPath as vscode.ThemeIcon).id]), [['#8', 'diffguide-show'], ['#9', 'diffguide-pull-request']]);
   assert.match(String(mineRows[0]?.item.tooltip), /Review requested from alice, team Core/u);
 
   await commands.executeCommand('diffGuide.showAwaitingReviewOnly');

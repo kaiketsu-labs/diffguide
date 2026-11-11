@@ -50,15 +50,33 @@ type Snapshot = Readonly<Record<string, { readonly repository: PullRequestReposi
 
 const pullRequestScheme = 'diffguide-pr';
 
-/** Address for a PR row, so the decoration can badge checked-out PRs. */
-function pullRequestRowUri(repository: string, number: number, checkedOut: boolean): vscode.Uri {
-  return vscode.Uri.from({ scheme: pullRequestScheme, path: `/${repository}/${number}`, query: checkedOut ? 'checkedOut' : '' });
+/** A PR row's local state, worst first: commits GitHub does not have, uncommitted edits only, or checked out with nothing to push. */
+type RowState = { readonly kind: 'ahead'; readonly commits: number } | { readonly kind: 'edited' } | { readonly kind: 'checkedOut' };
+
+/** Address for a PR row, so the decoration can badge and color it by its local state. */
+function pullRequestRowUri(repository: string, number: number, state: RowState | undefined): vscode.Uri {
+  const query = state === undefined ? '' : state.kind === 'ahead' ? `ahead=${state.commits}` : state.kind;
+  return vscode.Uri.from({ scheme: pullRequestScheme, path: `/${repository}/${number}`, query });
 }
 
-/** Badge checked-out PR rows. */
+/** Badge PR rows by local state, and tint the title too when something is not on GitHub. */
 const rowDecorationProvider: vscode.FileDecorationProvider = {
-  provideFileDecoration: (uri) => uri.scheme === pullRequestScheme && uri.query === 'checkedOut' ? new vscode.FileDecoration('W', 'Checked out in a worktree') : undefined,
+  provideFileDecoration: (uri) => {
+    if (uri.scheme !== pullRequestScheme) return undefined;
+    if (uri.query === 'checkedOut') return new vscode.FileDecoration('W', 'Checked out in a worktree');
+    if (uri.query === 'edited') return new vscode.FileDecoration('✎', 'Uncommitted edits in the worktree', new vscode.ThemeColor('charts.yellow'));
+    const commits = Number(/^ahead=(\d+)$/u.exec(uri.query)?.[1]);
+    // A badge holds at most two characters.
+    if (commits > 0) return new vscode.FileDecoration(commits < 10 ? `↑${commits}` : '↑+', 'Commits not pushed to GitHub', new vscode.ThemeColor('charts.orange'));
+    return undefined;
+  },
 };
+
+/** How a checked-out PR's worktree differs from GitHub. */
+function rowState(local: { readonly commits: number; readonly edited: number }): RowState {
+  if (local.commits > 0) return { kind: 'ahead', commits: local.commits };
+  return local.edited > 0 ? { kind: 'edited' } : { kind: 'checkedOut' };
+}
 
 /** Worktree operations the sidebar triggers, kept separate so the tree stays testable. */
 export interface PullRequestWorktrees {
@@ -133,7 +151,9 @@ const legendProvider: vscode.TreeDataProvider<vscode.TreeItem> = {
       row('Merged', mergedIcon),
       row('Awaiting review', awaitingReviewIcon),
       ...(['approved', 'changes', 'commented'] as const).map((review) => row(verdicts[review].label, pullRequestIcon(false, review))),
-      row('Checked out in a worktree', pullRequestIcon(false), pullRequestRowUri('legend', 0, true)),
+      row('Commits not pushed to GitHub', pullRequestIcon(false), pullRequestRowUri('legend', 0, { kind: 'ahead', commits: 1 })),
+      row('Uncommitted edits', pullRequestIcon(false), pullRequestRowUri('legend', 1, { kind: 'edited' })),
+      row('Checked out in a worktree', pullRequestIcon(false), pullRequestRowUri('legend', 2, { kind: 'checkedOut' })),
     ];
   },
 };
@@ -217,6 +237,10 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #files = new Map<string, Promise<readonly { readonly path: string }[]>>();
   /** The rows shown for each PR by placement, so a change to one PR redraws only its rows. */
   readonly #rows = new Map<string, Map<Placement, PullRequestNode>>();
+  /** The repository rows shown per repository name, so a PR's change also redraws their "to push" count. */
+  readonly #repositoryRows = new Map<string, Set<RepositoryNode>>();
+  /** Whether each PR row last showed commits to push, so only a change to that redraws its repository rows. */
+  readonly #aheadShown = new Map<string, boolean>();
   /** Each repository's open PRs, loaded once its All open group is expanded. */
   readonly #allOpen = new Map<string, Promise<readonly PullRequestSummary[]>>();
   /** Worktree and reviewed state per PR, read once per redraw. */
@@ -310,6 +334,24 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     placed.set(row.placement ?? row.role, row);
     this.#rows.set(key, placed);
     return row;
+  }
+
+  #repositoryRow(row: RepositoryNode): RepositoryNode {
+    const name = row.listing.repository.name;
+    const rows = this.#repositoryRows.get(name) ?? new Set<RepositoryNode>();
+    rows.add(row);
+    this.#repositoryRows.set(name, rows);
+    return row;
+  }
+
+  /** How many of a repository row's PRs have commits not pushed to GitHub. */
+  async #toPushOf(listing: Ready, role: PullRequestRole | undefined): Promise<number> {
+    const ahead = await Promise.all((role === undefined ? roles : [role]).flatMap((each) => this.#sectionOf(listing, each).map(async (pullRequest) => {
+      const node: PullRequestNode = { kind: 'pullRequest', listing, role: each, pullRequest };
+      if (!await this.#isCheckedOut(node).catch(() => false)) return false;
+      return ((await this.#localOf(node).catch(() => undefined))?.commits ?? 0) > 0;
+    })));
+    return ahead.filter(Boolean).length;
   }
 
   /** Whether Mine lists only PRs with pending review requests. */
@@ -441,6 +483,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     this.#done.clear();
     this.#files.clear();
     this.#rows.clear();
+    this.#repositoryRows.clear();
     this.#allOpen.clear();
     this.#forgetState();
     for (const checkout of this.#listed) checkout.worktrees.forget();
@@ -492,7 +535,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     if (node.kind === 'role') {
       return node.listings.length === 0
         ? [{ kind: 'message', text: 'No open PRs', icon: 'check' }]
-        : node.listings.map((listing) => ({ kind: 'repository', listing, role: node.role }));
+        : node.listings.map((listing) => this.#repositoryRow({ kind: 'repository', listing, role: node.role }));
     }
     if (node.kind === 'pinned') return [...node.rows];
     if (node.kind === 'repository' && node.role === undefined) {
@@ -546,8 +589,9 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
         const counts = role === undefined
           ? roles.filter((each) => this.#sectionOf(listing, each).length > 0).map((each) => `${this.#sectionOf(listing, each).length} ${each === 'author' ? 'mine' : 'review'}`).join(' · ')
           : String(this.#sectionOf(listing, role).length);
-        item.description = [owner, counts].filter(Boolean).join(' · ');
-        item.tooltip = listing.folder;
+        const toPush = await this.#toPushOf(listing, role);
+        item.description = [owner, counts, toPush === 0 ? undefined : `${toPush} to push`].filter(Boolean).join(' · ');
+        item.tooltip = [listing.folder, toPush === 0 ? undefined : `${toPush} ${toPush === 1 ? 'PR has' : 'PRs have'} commits not pushed to GitHub`].filter(Boolean).join('\n');
         item.contextValue = 'diffGuide.repository';
         return item;
       }
@@ -578,28 +622,37 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
       case 'pullRequest': {
         const pr = node.pullRequest;
         const checkedOut = await this.#isCheckedOut(node);
-        const { type, subject } = splitCommitType(pr.title);
+        const { subject } = splitCommitType(pr.title);
         const item = new vscode.TreeItem(subject, vscode.TreeItemCollapsibleState.None);
         item.id = `pullRequest:${node.placement ?? node.role}:${node.listing.folder}:${pr.number}`;
-        item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut);
         const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
         const progress = checkedOut ? await this.#progress(node) : undefined;
         const local = checkedOut ? await this.#localOf(node).catch(() => undefined) : undefined;
-        const ahead = local === undefined || local.commits === 0 ? undefined : `↑${local.commits}`;
+        const commits = local?.commits ?? 0;
         const edited = local === undefined ? 0 : [...local.files.values()].filter((change) => change !== 'unpushed').length;
+        item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut ? rowState({ commits, edited }) : undefined);
+        const shown = this.#aheadShown.get(pullRequestKey(node));
+        this.#aheadShown.set(pullRequestKey(node), commits > 0);
+        const repositoryRows = this.#repositoryRows.get(node.listing.repository.name);
+        if (shown !== undefined && shown !== commits > 0 && repositoryRows !== undefined) this.#changed.fire([...repositoryRows]);
         const merged = this.#merged.has(pullRequestKey(node));
         const verdict = pr.review === undefined || merged ? undefined : verdicts[pr.review];
         const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;
         const pinnedFrom = node.pinned === true ? [splitRepository(node.listing.repository.name).name, node.role === 'author' ? 'mine' : 'review'] : [];
         const awaitingReview = node.role === 'author' && !merged && pr.requestedReviewers !== undefined;
         const via = node.role === 'reviewer' && node.placement !== 'allOpen' ? requestedViaLabel(pr) : undefined;
-        item.description = [`#${pr.number}`, ...pinnedFrom, type, verdict?.label, awaitingReview ? 'Awaiting review' : undefined, via, pr.author, merged ? 'Merged' : pr.draft ? 'Draft' : undefined, claude ?? (checkedOut ? 'Worktree' : undefined), ahead, edited === 0 ? undefined : `✎${edited}`, progress, size].filter(Boolean).join(' · ');
+        const author = node.role === 'author' ? undefined : pr.author;
+        // The badge carries the commit count, so edits show their count here only beside unpushed commits.
+        const editedBesideCommits = commits > 0 && edited > 0 ? `✎${edited}` : undefined;
+        const busyClaude = claude === 'Claude idle' ? undefined : claude;
+        item.description = [`#${pr.number}`, ...pinnedFrom, editedBesideCommits, via, author, busyClaude, progress].filter(Boolean).join(' · ');
         item.tooltip = [
           `#${pr.number} ${pr.title}`,
           `${pr.headBranch} → ${pr.baseBranch}`,
-          ahead === undefined ? undefined : `${local?.commits} ${local?.commits === 1 ? 'commit' : 'commits'} in the worktree not pushed to GitHub`,
+          commits === 0 ? undefined : `${commits} ${commits === 1 ? 'commit' : 'commits'} not pushed to GitHub`,
           edited === 0 ? undefined : `${edited} ${edited === 1 ? 'file' : 'files'} with uncommitted edits`,
-          verdict?.label,
+          [merged ? 'Merged' : pr.draft ? 'Draft' : undefined, awaitingReview ? 'Awaiting review' : undefined, verdict?.label, claude].filter(Boolean).join(' · ') || undefined,
+          node.role === 'author' ? undefined : `By ${pr.author}`,
           pr.requestedReviewers === undefined ? undefined : `Review requested from ${reviewerNames(pr)}`,
           via === undefined ? undefined : pr.requestedVia === 'you' ? 'You were asked directly' : 'You were asked through a team',
           pr.changes === undefined ? undefined : `${size} in ${pr.changes.files} ${pr.changes.files === 1 ? 'file' : 'files'}`,
@@ -716,7 +769,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
     return [
       ...pinned,
       ...withPullRequests.length === 0 && pinned.length === 0 ? [{ kind: 'message', text: this.author === undefined ? 'No open PRs' : `No open PRs by ${this.author}`, icon: 'check' } as const] : [],
-      ...withPullRequests.map((listing): Node => ({ kind: 'repository', listing })),
+      ...withPullRequests.map((listing): Node => this.#repositoryRow({ kind: 'repository', listing })),
       ...failed,
     ];
   }
