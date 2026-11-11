@@ -1058,7 +1058,7 @@ let conversationStamp = '';
 function renderConversation(state: OverviewState, force = false): void {
   const pullRequestThreads = state.threads.filter((thread) => thread.scope === 'pullRequest');
   const stamp = JSON.stringify([asking?.key, conversationFolded, conversationAll, state.conversation, state.conversationError, !!state.details, [...edits], [...revealed], emojiFor, [...previewTabs], [...sending].filter((key) => key === 'conversation' || key.startsWith('edit:') || key.startsWith('comment-ask:')),
-    pullRequestThreads, showArchived, [...commentAsks.keys()], pullRequestThreads.map((thread) => [replies.get(thread.id), publishing.get(thread.id), archiving.get(thread.id)])]);
+    pullRequestThreads, showArchived, [...commentAsks.keys()], pullRequestThreads.map((thread) => [replies.get(thread.id), publishing.get(thread.id), archiving.get(thread.id)]), state.claude.running]);
   if (!force && stamp === conversationStamp) return;
   conversationStamp = stamp;
   const timeline = $('timeline');
@@ -3384,7 +3384,9 @@ function unmarkRead(ids: readonly string[]): void {
 /** What a file's box shows from extension state, so a state update redraws only the files it changed. */
 function fileKey(path: string, threads: readonly Thread[]): string {
   return JSON.stringify([viewed.has(path), collapsed.get(path) === true, readRanges.filter((marked) => marked.path === path), threads, current?.local?.[path] ?? null,
-    composer?.path === path ? [author, current?.details?.pendingComments] : null]);
+    composer?.path === path ? [author, current?.details?.pendingComments] : null,
+    // Draft reply disables itself while Claude runs, so an open form redraws when the run ends.
+    threads.some((thread) => replies.has(thread.id) || publishing.has(thread.id)) ? current?.claude.running === true : null]);
 }
 
 /** Ids of the read ranges covering every selected diff line, or undefined when some selected line is unread. */
