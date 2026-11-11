@@ -12,9 +12,10 @@ export interface Scene {
   readonly steps: readonly Step[];
 }
 
-/** Runs in order: click, then scroll, then wait, then shoot. `shot` names the PNG. */
+/** Runs in order: click, then scroll, then hover, then wait, then shoot. `shot` names the PNG. */
 export interface Step {
   readonly click?: string;
+  readonly hover?: string;
   readonly scroll?: number;
   readonly scrollTo?: string;
   readonly wait?: number;
@@ -127,6 +128,12 @@ export const scenes: Readonly<Record<string, Scene>> = {
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
   local: scene(local, [{ shot: 'local.png' }]),
+  hover: scene(pullRequest, [
+    { scrollTo: '#files', hover: '.nav-thread', wait: 600, shot: 'hover-nav.png' },
+    { hover: '#files', wait: 100, shot: 'hover-gone.png' },
+    { hover: '.margin-mark', wait: 600, shot: 'hover-mark.png' },
+  ], { saved: { view: 'files', marginThreads: true } }),
+  hoverCard: scene(pullRequest, [{ hover: '.card-thread', wait: 600, shot: 'hover-card.png' }], { saved: { view: 'overview' } }),
   get pending() { return reviewingScenes['pending']!; },
   get since() { return reviewingScenes['since']!; },
 };

@@ -91,6 +91,7 @@ for (const name of names) {
     if (step.click) await page.click(step.click);
     if (step.scroll !== undefined) await page.evaluate((y) => window.scrollTo(0, y), step.scroll);
     if (step.scrollTo) await page.evaluate((selector) => document.querySelector(selector)?.scrollIntoView({ block: 'start' }), step.scrollTo);
+    if (step.hover) await page.hover(step.hover);
     await page.waitForTimeout(step.wait ?? 200);
     if (step.shot) { await page.screenshot({ path: join(out, step.shot), fullPage: step.full === true }); shots.push(join(out, step.shot)); }
   }

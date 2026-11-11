@@ -3039,7 +3039,7 @@ function marginMark(row: HTMLTableRowElement, side: DiffSide, thread: Thread): v
   const kind = threadKind(thread);
   const mark = el('button', 'margin-mark ' + kind);
   const title = (thread.source === 'local' ? thread.title : undefined) ?? thread.text;
-  mark.title = kindLabels[kind] + ': ' + title;
+  hoverPreview(mark, thread);
   mark.setAttribute('aria-label', 'Open comment: ' + title);
   mark.addEventListener('mousedown', (event) => { event.stopPropagation(); });
   mark.addEventListener('click', (event) => {
@@ -4457,7 +4457,7 @@ function renderNavThreads(): void {
       const kind = threadKind(thread);
       const row = el('button', 'nav-file nav-thread ' + kind);
       row.style.setProperty('--depth', '1');
-      row.title = thread.location + '\n' + thread.text;
+      hoverPreview(row, thread);
       const mark = titled(el('span', 'nav-kind'), kindLabels[kind]);
       mark.append(icon(kindMarks[kind]));
       const lines = wholeFile(thread) ? 'File' : 'L' + thread.startLine + (thread.endLine > thread.startLine ? '–' + thread.endLine : '');
@@ -4485,8 +4485,7 @@ function renderPendingList(reviewing: boolean): void {
     .sort((left, right) => (order.get(left.path) ?? Infinity) - (order.get(right.path) ?? Infinity) || left.path.localeCompare(right.path) || left.startLine - right.startLine);
   list.hidden = !reviewing || threads.length === 0;
   list.replaceChildren(...list.hidden ? [] : threads.flatMap((thread) => thread.messages.filter((message) => message.pending).map((message) => {
-    const row = threadRow({ ...thread, source: 'github', text: message.body }, 'github');
-    row.title = thread.location + '\n' + message.body;
+    const row = threadRow({ ...thread, source: 'github', text: message.body, messages: [message] }, 'github');
     row.querySelector('.state')?.replaceChildren();
     return row;
   })));
@@ -4494,7 +4493,7 @@ function renderPendingList(reviewing: boolean): void {
 
 function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElement {
   const item = el('li', 'card-thread ' + kind + (nested ? ' nested' : ''));
-  item.title = thread.location + '\n' + thread.text;
+  hoverPreview(item, thread);
   item.addEventListener('click', () => jump(thread));
   const text = el('span', 'text');
   text.append(...inlineCode((thread.source === 'local' ? thread.title : undefined) ?? thread.text));
@@ -4514,6 +4513,65 @@ function threadRow(thread: Thread, kind: ThreadKind, nested = false): HTMLElemen
   }
   return item;
 }
+
+/** The one hover preview of a thread, shared by every item that shows it. */
+const threadHover = el('div', 'thread-hover');
+threadHover.popover = 'manual';
+document.body.append(threadHover);
+let threadHoverTimer = 0;
+let threadHoverAnchor: HTMLElement | undefined;
+
+/** Shows `thread`'s kind, status, place and latest message when the pointer rests on `node`. */
+function hoverPreview(node: HTMLElement, thread: Thread): void {
+  node.addEventListener('mouseenter', () => {
+    clearTimeout(threadHoverTimer);
+    threadHoverTimer = window.setTimeout(() => { if (node.isConnected) showThreadHover(node, thread); }, 400);
+  });
+  node.addEventListener('mouseleave', hideThreadHover);
+  node.addEventListener('mousedown', hideThreadHover);
+}
+
+function hideThreadHover(): void {
+  clearTimeout(threadHoverTimer);
+  threadHoverAnchor = undefined;
+  if (threadHover.matches(':popover-open')) threadHover.hidePopover();
+}
+
+function showThreadHover(anchor: HTMLElement, thread: Thread): void {
+  const kind = threadKind(thread);
+  const head = el('div', 'thread-hover-head');
+  const title = thread.source === 'local' ? thread.title : undefined;
+  const working = thread.source === 'local' ? thread.working : undefined;
+  head.append(kindLabel(kind), ...title === undefined ? [] : [el('span', 'title', title)], el('span', 'gap'));
+  if (working) head.append(el('span', 'chip agent working', working));
+  else if (thread.status) head.append(el('span', 'chip', thread.status));
+  threadHover.className = 'thread-hover ' + kind;
+  threadHover.replaceChildren(head, el('div', 'where', thread.location));
+  const latest = thread.messages.at(-1);
+  if (latest !== undefined) {
+    const author = 'avatarUrl' in latest ? latest.author : latest.author === 'claude' ? 'Claude' : 'You';
+    const item = el('div', 'thread-hover-msg');
+    const body = el('div', 'msg-text');
+    body.innerHTML = latest.html;
+    item.append(avatar(latest, author), body, ...timeLabel(latest.createdAt));
+    threadHover.append(item);
+  }
+  if (thread.messages.length > 1) threadHover.append(el('div', 'muted thread-hover-count', thread.messages.length + ' messages'));
+  threadHoverAnchor = anchor;
+  threadHover.showPopover();
+  const box = anchor.getBoundingClientRect();
+  const height = threadHover.offsetHeight;
+  const width = threadHover.offsetWidth;
+  const below = box.bottom + 4 + height <= window.innerHeight - 8;
+  threadHover.style.top = Math.max(8, below ? box.bottom + 4 : box.top - 4 - height) + 'px';
+  threadHover.style.left = Math.max(8, Math.min(box.left, window.innerWidth - 8 - width)) + 'px';
+}
+
+// A redraw can remove the hovered item without a mouseleave, so the preview also closes when the pointer moves off it.
+document.addEventListener('mouseover', (event) => {
+  if (threadHoverAnchor !== undefined && (!threadHoverAnchor.isConnected || !(event.target instanceof Node) || !threadHoverAnchor.contains(event.target))) hideThreadHover();
+}, { passive: true });
+document.addEventListener('scroll', hideThreadHover, { capture: true, passive: true });
 
 function groupHead(group: GuideGroup): HTMLElement {
   const head = el('div', 'guide-group sev-' + group.severity);
