@@ -1229,6 +1229,13 @@ function rangeCommits(): Extract<TimelineItem, { kind: 'commit' }>[] {
   return [...commitsOf(), ...local];
 }
 
+/** Commits after the one you last reviewed, oldest first; empty when that commit is no longer in the PR. */
+function sinceCommits(): Extract<TimelineItem, { kind: 'commit' }>[] {
+  const commits = rangeCommits();
+  const at = commits.findIndex((commit) => commit.oid === current?.conversation?.lastReviewedCommit);
+  return at < 0 ? [] : commits.slice(at + 1);
+}
+
 function isUnpushed(oid: string): boolean {
   return current?.unpushed?.some((commit) => commit.oid === oid) === true;
 }
@@ -1282,7 +1289,13 @@ function rangeCount(shown: Extract<DiffRange, { kind: 'commits' }>): number {
 /** The note's first line: the commit's copyable hash and full title, or what the range covers. */
 function rangeTitle(shown: DiffRange): (Node | string)[] {
   if (shown.kind === 'all') return ['All changes'];
-  if (shown.kind === 'since') return ['Changes since your last review'];
+  if (shown.kind === 'since') {
+    const since = sinceCommits();
+    const first = since[0];
+    if (!first) return ['Changes since your last review'];
+    if (since.length > 1) return ['Changes since your last review · ' + since.length + ' commits'];
+    return ['Changes since your last review · 1 commit', commitRef(first.oid), el('span', 'headline', first.headline)];
+  }
   if (shown.from !== shown.to) return [rangeCount(shown) + ' commits,', commitRef(shown.from), 'to', commitRef(shown.to)];
   const commit = rangeCommits().find((each) => each.oid === shown.from);
   const headline = commitHeadline(shown.from);
@@ -1297,7 +1310,7 @@ function commitRef(oid: string): HTMLButtonElement {
 function rangeFacts(shown: DiffRange): (Node | string)[] {
   const commits = rangeCommits();
   const index = (oid: string): number => commits.findIndex((commit) => commit.oid === oid);
-  const picked = shown.kind === 'commits' ? commits.slice(index(shown.from), index(shown.to) + 1) : [];
+  const picked = shown.kind === 'commits' ? commits.slice(index(shown.from), index(shown.to) + 1) : shown.kind === 'since' ? sinceCommits() : [];
   const facts: (Node | string)[] = [];
   const authors = [...new Set(picked.map((commit) => commit.author))];
   if (authors.length) facts.push(el('b', '', authors.join(', ')), picked.length === 1 ? ' committed ' : ' committed these ');
@@ -1333,6 +1346,16 @@ function renderRangeControls(): void {
     facts.append(...rangeFacts(diffRange));
     const text = el('div', 'gap');
     text.append(title, facts);
+    const since = diffRange.kind === 'since' ? sinceCommits() : [];
+    if (since.length > 1) {
+      const list = el('ul', 'range-commits');
+      for (const commit of since) {
+        const row = el('li');
+        row.append(commitRef(commit.oid), el('span', 'headline', commit.headline), el('span', 'muted', commit.author));
+        list.append(row);
+      }
+      text.append(list);
+    }
     const all = button('Show all changes', () => requestFiles({ kind: 'all' }, whitespace), 'small');
     all.title = why;
     note.replaceChildren(icon(icons.commit), text, all);
@@ -1384,7 +1407,10 @@ function openRangeMenu(): void {
   const [low, high] = diffRange.kind === 'commits' ? [index(diffRange.from), index(diffRange.to)] : [-1, -1];
   const pick = (next: DiffRange): void => { closeToolbarMenu(); requestFiles(next, whitespace); };
   const rows = [rangeRow([el('span', 'text', 'All changes'), el('span', 'muted', commits.length === 1 ? '1 commit' : commits.length + ' commits')], diffRange.kind === 'all', () => pick({ kind: 'all' }))];
-  if (current?.conversation?.lastReviewedCommit) rows.push(rangeRow([el('span', 'text', 'Since your last review')], diffRange.kind === 'since', () => pick({ kind: 'since' })));
+  if (current?.conversation?.lastReviewedCommit) {
+    const since = sinceCommits().length;
+    rows.push(rangeRow([el('span', 'text', 'Since your last review'), ...since ? [el('span', 'muted', since === 1 ? '1 commit' : since + ' commits')] : []], diffRange.kind === 'since', () => pick({ kind: 'since' })));
+  }
   const unpushed = current?.unpushed ?? [];
   const [firstLocal, lastLocal] = [unpushed[0], unpushed.at(-1)];
   if (firstLocal && lastLocal) {
