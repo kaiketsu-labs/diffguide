@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.8.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.7.0...v0.8.0) (2026-11-11)
+
+
+### Notes
+
 - Submitting a review on the review page shows it and its comments in the Conversation right away.
 - A review made only of line comments shows in the Conversation as "reviewed", with each comment's file, line and text under it. A click jumps to the comment.
 - Hovering a comment mark in the diff, a row in the Comments list or a thread row on the Overview shows a preview with the thread's status, place and latest message, instead of a plain tooltip.
@@ -24,9 +29,6 @@
 - The commit range menu lists the newest commit first.
 - A pinned thread header on the **Overview** tab no longer lets the thread's text show above it.
 - **Show earlier messages** centers its icon with its label, and **Hide earlier messages** points its arrows the other way.
-
-## [0.8.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.7.0...v0.8.0) (2026-11-11)
-
 
 ### Features
 
