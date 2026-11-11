@@ -592,13 +592,16 @@ function themeColors(value: unknown): Map<string, string> {
   return colors;
 }
 
-/** The icon drawn in `color` as an SVG file; content-named, so a file is never rewritten with other content. */
-async function coloredIcon(id: string, color: string): Promise<vscode.Uri | undefined> {
+/**
+ * The icon drawn in `color` as an SVG file; content-named, so a file is never rewritten with other content.
+ * In a browser it goes under `extensionUri`, since a proxied server such as SageMaker's may serve only extension files.
+ */
+async function coloredIcon(id: string, color: string, extensionUri: vscode.Uri): Promise<vscode.Uri | undefined> {
   const name = id.replace(/^diffguide-/, '').replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
   const svg = (icons as Record<string, string>)[name];
   if (svg === undefined) return undefined;
   const text = svg.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" ').replaceAll('currentColor', color);
-  const folder = join(tmpdir(), 'diffguide-tab-icons');
+  const folder = vscode.env.uiKind === vscode.UIKind.Web ? join(extensionUri.fsPath, 'dist', 'tab-icons') : join(tmpdir(), 'diffguide-tab-icons');
   const file = join(folder, name + '-' + createHash('sha256').update(text).digest('hex').slice(0, 12) + '.svg');
   await mkdir(folder, { recursive: true });
   await writeFile(file, text);
@@ -630,7 +633,7 @@ export async function showPullRequestOverview(
     const color = icon.color instanceof vscode.ThemeColor ? colors.get(icon.color.id) : undefined;
     // The API types allow only image files, but VS Code also shows a theme icon in a webview tab.
     if (color === undefined) { (panel as { iconPath?: unknown }).iconPath = icon; return; }
-    void coloredIcon(icon.id, color).then((uri) => { if (uri !== undefined && write === iconWrites) panel.iconPath = uri; }, () => undefined);
+    void coloredIcon(icon.id, color, extensionUri).then((uri) => { if (uri !== undefined && write === iconWrites) panel.iconPath = uri; }, () => undefined);
   };
   updateTabIcon();
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
