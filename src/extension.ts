@@ -448,12 +448,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const loaded = await (remote ?? loadThreads());
           const thread = loaded instanceof Error ? undefined : loaded.find((each) => each.id === id);
           if (thread === undefined) throw new Error('This GitHub thread no longer exists.');
-          if (thread.outdated && thread.scope !== 'file') throw new Error('The code changed since this comment, so Claude would read the wrong lines. Comment on the current lines instead.');
-          const anchor = thread.scope === 'file'
+          // An outdated thread's lines no longer hold its code, so its local thread is about the whole file.
+          const wholeFile = thread.scope === 'file' || thread.outdated;
+          const anchor = wholeFile
             ? fileAnchor(await readFile(join(folder, thread.path), 'utf8'), { path: thread.path, side: 'working', baseRevision: await readBase() })
             : (await pageAnchor({ path: thread.path, side: thread.side === 'LEFT' ? 'old' : 'new', startLine: thread.startLine, endLine: thread.endLine })).anchor;
           const comments = thread.comments.filter((comment) => comment.hidden === undefined);
-          const created = await opened.session.store.submit(anchor, githubFeedbackRequest(note, intent, comments), intent);
+          const earlier = thread.outdated && thread.scope !== 'file';
+          const source = earlier ? `GitHub thread on lines ${thread.startLine}-${thread.endLine} of an earlier version of ${thread.path}; the code changed since` : undefined;
+          const request = githubFeedbackRequest(note, intent, comments, source);
+          const hunk = earlier && thread.diffHunk !== undefined ? `\n\nThe diff the comment was written on:\n\n\`\`\`\`diff\n${thread.diffHunk}\n\`\`\`\`` : '';
+          const created = await opened.session.store.submit(anchor, request + hunk, intent);
           await opened.session.linkToGitHub?.(created.id, { id: thread.id, url: thread.url });
         },
         askAboutComment: async (id, note, intent) => {
