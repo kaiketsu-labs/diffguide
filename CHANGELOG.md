@@ -4,6 +4,7 @@
 
 - Submitting a review on the review page shows it and its comments in the Conversation right away.
 - **Finish your review** lists your pending comments by file and line. Click one to jump to it.
+- **Re-check findings** on the code review card asks Claude in each open finding's thread whether the current code fixes it, without editing. You resolve the fixed ones.
 - **Since your last review** lists the commits it covers, in the range menu, above the files and in the commit facts.
 - Ask and Implement work on a GitHub comment whose code changed since. The local thread is about the whole file and quotes the diff the comment was written on.
 - **Draft reply** turns back on in an open Reply or Publish form once Claude's run ends.

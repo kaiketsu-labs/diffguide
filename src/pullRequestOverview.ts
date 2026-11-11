@@ -9,7 +9,7 @@ import { claudeStatus } from './claudeStatus.js';
 import { orbLoaderStyles } from './orbLoader.js';
 import type { ClaudeContext, ClaudeProgress } from './claudeRunner.js';
 import { reviewers as allReviewers, type Finding, type Reviewer, type ReviewIntent, type ReviewThread, type WithdrawnComment } from './contracts.js';
-import type { CodeReviewResult, ReviewLive } from './review.js';
+import { recheckRequest, type CodeReviewResult, type ReviewLive } from './review.js';
 import type { PullRequestSession } from './pullRequestSessions.js';
 import type { Publication } from './pullRequestComments.js';
 import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestSummary, type ReactionContent, reactionContents, type RemoteThread, type ReviewEvent } from './pullRequests.js';
@@ -397,7 +397,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'review-stop' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'review-stop' | 'review-recheck' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
   | { readonly action: 'draft-reply' | 'github-draft-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'review' | 'review-pick'; readonly reviewers: readonly Reviewer[] }
@@ -845,6 +845,11 @@ export async function showPullRequestOverview(
           const picks = allReviewers.filter((name) => reviewersPicked.includes(name));
           if (action === 'review') await actions.review(picks); else await actions.pickReviewers(picks);
         } else if (action === 'review-stop') actions.stopReview();
+        else if (action === 'review-recheck') {
+          const open = state.threads.filter((thread) => thread.origin === 'review' && !thread.resolved && thread.archived !== true);
+          for (const thread of open) await actions.reply(thread.id, recheckRequest, 'ask');
+          post({ notice: { text: open.length === 1 ? 'Asked Claude to re-check 1 finding.' : `Asked Claude to re-check ${open.length} findings.` } });
+        }
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
         else if (action === 'refresh') {
           actions.refresh();
@@ -1174,7 +1179,7 @@ details.thread:not([open]){padding-bottom:0}
 .agent-tag svg{width:12px;height:12px;flex:none}.agent-tag{display:inline-flex;align-items:center;gap:var(--space-4);flex:none;height:18px;padding:0 var(--space-6);border:1px solid color-mix(in srgb,var(--agent) 55%,transparent);border-radius:var(--radius-sm);font-size:11px;font-weight:500;color:var(--agent)}
 .sev{flex:none;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:16px}.sev.high{color:var(--danger);background:var(--danger-soft)}.sev.medium{color:var(--warning);background:color-mix(in srgb,var(--warning) 14%,transparent)}.sev.low{color:var(--ink-muted);background:color-mix(in srgb,var(--ink) 8%,transparent)}
 .ev{flex:none;white-space:nowrap;font-size:11px;font-weight:400;color:var(--ink-muted)}.ev::before{content:'';display:inline-block;width:6px;height:6px;margin-right:var(--space-4);border:1px solid currentColor;border-radius:50%;vertical-align:1px}.ev.tested::before{background:currentColor}.ev.traced::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
-#review-card{margin:var(--space-12) 0}.review-card{max-width:none}.thread.review-card>summary.strip{position:static}.review-ran{margin-top:var(--space-8);font-size:12px}
+#review-card{margin:var(--space-12) 0}.review-card{max-width:none}.thread.review-card>summary.strip{position:static}.review-ran{margin-top:var(--space-8);font-size:12px}.review-recheck{margin-top:var(--space-8);font-size:12px}.review-recheck .gap{flex:1}
 .review-card+.review-card{margin-top:var(--space-12)}.review-live>.strip .time{font:12px var(--font-code);color:var(--ink-muted);font-variant-numeric:tabular-nums}.review-live>.strip .icon-button{width:20px;height:20px;min-height:20px;margin-block:-1px}.review-live>.strip .icon-button svg{width:14px;height:14px}
 .review-stages{display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-16);margin:var(--space-12) 0 0;padding:0;list-style:none;font-size:12px;color:var(--ink-muted)}.review-stages li{display:inline-flex;align-items:center;gap:var(--space-6)}
 .stage-icon{display:inline-flex;color:var(--ink-muted)}.stage-icon svg{width:14px;height:14px}.review-stages .done{color:var(--ink)}.review-stages .done .stage-icon{color:var(--success)}
