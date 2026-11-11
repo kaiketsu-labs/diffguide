@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Submitting a review on the review page shows it and its comments in the Conversation right away.
+- A review made only of line comments shows in the Conversation as "reviewed", with each comment's file, line and text under it. A click jumps to the comment.
 - Hovering a comment mark in the diff, a row in the Comments list or a thread row on the Overview shows a preview with the thread's status, place and latest message, instead of a plain tooltip.
 - **Finish your review** lists your pending comments by file and line. Click one to jump to it.
 - **Re-check findings** on the code review card asks Claude in each open finding's thread whether the current code fixes it, without editing. You resolve the fixed ones.

@@ -125,7 +125,8 @@ export interface GitHubComment {
 /** One entry of a PR's Conversation tab, oldest first. */
 export type TimelineItem =
   | (GitHubComment & { readonly kind: 'comment' })
-  | (GitHubComment & { readonly kind: 'review'; readonly state: 'approved' | 'changes' | 'commented' | 'dismissed' | 'pending'; readonly commit?: string })
+  /** `comments` holds the IDs of the review's diff comments, which the page shows from their threads. */
+  | (GitHubComment & { readonly kind: 'review'; readonly state: 'approved' | 'changes' | 'commented' | 'dismissed' | 'pending'; readonly commit?: string; readonly comments: readonly string[] })
   | { readonly kind: 'commit'; readonly id: string; readonly oid: string; readonly headline: string; readonly message: string; readonly author: string; readonly avatarUrl: string; readonly createdAt: string; readonly checks?: 'success' | 'failure' | 'pending'
     /** Lines added and removed; `files` is missing when GitHub could not count them. */
     readonly additions?: number; readonly deletions?: number; readonly files?: number }
@@ -443,7 +444,7 @@ const timelineTypes = ['ISSUE_COMMENT', 'PULL_REQUEST_REVIEW', 'PULL_REQUEST_COM
   'CROSS_REFERENCED_EVENT', 'AUTO_MERGE_ENABLED_EVENT', 'AUTO_MERGE_DISABLED_EVENT', 'MILESTONED_EVENT', 'DEMILESTONED_EVENT'].join(',');
 const timelineField = `timelineItems(first:100,after:$after,itemTypes:[${timelineTypes}]){pageInfo{hasNextPage endCursor} nodes{__typename
   ... on IssueComment{${commentFields}}
-  ... on PullRequestReview{${commentFields} state submittedAt commit{oid}}
+  ... on PullRequestReview{${commentFields} state submittedAt commit{oid} comments(first:100){nodes{id}}}
   ... on PullRequestCommit{id pushed:commit{oid messageHeadline messageBody committedDate additions deletions changedFilesIfAvailable statusCheckRollup{state} author{name avatarUrl(size:40) user{login}}}}
   ... on HeadRefForcePushedEvent{id createdAt ${actorField} beforeCommit{abbreviatedOid} afterCommit{abbreviatedOid}}
   ... on LabeledEvent{id createdAt ${actorField} label{name}}
@@ -1323,7 +1324,9 @@ function parseTimeline(nodes: readonly unknown[]): readonly TimelineItem[] {
       const commit = typeof node['commit'] === 'object' && node['commit'] !== null ? (node['commit'] as { oid?: unknown }).oid : undefined;
       const comment = parseComment(node);
       const submitted = typeof node['submittedAt'] === 'string' ? node['submittedAt'] : comment.createdAt;
-      items.push({ kind: 'review', ...comment, createdAt: submitted, state, ...typeof commit === 'string' ? { commit } : {} });
+      const nodes = typeof node['comments'] === 'object' && node['comments'] !== null ? (node['comments'] as { nodes?: unknown }).nodes : undefined;
+      const comments = (Array.isArray(nodes) ? nodes : []).map((entry: unknown) => typeof entry === 'object' && entry !== null ? (entry as { id?: unknown }).id : undefined).filter((id): id is string => typeof id === 'string');
+      items.push({ kind: 'review', ...comment, createdAt: submitted, state, comments, ...typeof commit === 'string' ? { commit } : {} });
     } else if (kind === 'PullRequestCommit') {
       const commit = object(node['pushed']);
       const oid = commit['oid'];
