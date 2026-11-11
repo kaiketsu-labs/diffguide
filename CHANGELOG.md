@@ -25,6 +25,35 @@
 - A pinned thread header on the **Overview** tab no longer lets the thread's text show above it.
 - **Show earlier messages** centers its icon with its label, and **Hide earlier messages** points its arrows the other way.
 
+## [0.8.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.7.0...v0.8.0) (2026-11-11)
+
+
+### Features
+
+* **claude:** show the conversation's token count with new conversation and compact ([aa9fccf](https://github.com/kaiketsu-labs/diffguide/commit/aa9fccf6a3a8b35e0282e9e409a90de9954b6ca2))
+* **pr:** ask about github comments on changed code ([43e6d87](https://github.com/kaiketsu-labs/diffguide/commit/43e6d87ce00505d0466a528c08741b4315805af7))
+* **pr:** color pr rows by unpushed commits and uncommitted edits ([c0b2b48](https://github.com/kaiketsu-labs/diffguide/commit/c0b2b48a53274b946103a4a739fc5c6286f3c620))
+* **pr:** list the commits since your last review ([27857b5](https://github.com/kaiketsu-labs/diffguide/commit/27857b56616a1d9522cc5e8e530d5a5795ef009f))
+* **pr:** show the pr's status icon in the review page's tab ([58e7817](https://github.com/kaiketsu-labs/diffguide/commit/58e781792a502d07df2f838e9975544bb75c93cc))
+* **review:** add a code review mode with review agents ([#49](https://github.com/kaiketsu-labs/diffguide/issues/49)) ([eb93c18](https://github.com/kaiketsu-labs/diffguide/commit/eb93c186d765fdd61b3b392c81537ef9b29b1804))
+* **review:** list pending comments under finish your review ([47bf87a](https://github.com/kaiketsu-labs/diffguide/commit/47bf87a49397fe9054ac75c4a3fc2c7f2f4c7a1e))
+* **review:** re-check open findings against the current code ([39579ed](https://github.com/kaiketsu-labs/diffguide/commit/39579ed738bbe687e436fcb6480b23406e3020bb))
+* **sidebar:** show running guide builds and code reviews ([0ab6aa6](https://github.com/kaiketsu-labs/diffguide/commit/0ab6aa6edab568f9bac3e5f9bca5b3787481308d))
+* **sidebar:** show the orb as the icon of rows and tabs where claude works ([c6f2926](https://github.com/kaiketsu-labs/diffguide/commit/c6f292673870a9c39bcf13fa9a928249b41589cc))
+* **webview:** draft github replies from the reply form's notes ([866d45d](https://github.com/kaiketsu-labs/diffguide/commit/866d45d7e34cc3249955c24b112292b08ce63f08))
+* **webview:** preview a comment's latest message on hover ([e41a125](https://github.com/kaiketsu-labs/diffguide/commit/e41a1252a7cb537464cf24862667650f08973267))
+* **webview:** show each commit under claude's reply to its comment ([29dc55e](https://github.com/kaiketsu-labs/diffguide/commit/29dc55e6c0c5970b00593b631b64f34d734d4f43))
+
+
+### Bug Fixes
+
+* **pr:** enable draft reply again once claude finishes ([2348270](https://github.com/kaiketsu-labs/diffguide/commit/23482703a079b3238bfed7371a4025eeeae6e533))
+* **review:** show a submitted review in the conversation ([3b29670](https://github.com/kaiketsu-labs/diffguide/commit/3b29670568b94b8ed29594f1e7bd580f24553079))
+* **review:** show comment-only reviews in the conversation ([4627040](https://github.com/kaiketsu-labs/diffguide/commit/46270405d0b613ee6c9baeb8e5089212c5e2b5d8))
+* **webview:** keep closed files closed when they hold only hidden threads ([2e3df1e](https://github.com/kaiketsu-labs/diffguide/commit/2e3df1ef18c201647b2ad8307bea855c4ac950ed))
+* **webview:** show colored tab icons in browser vs code ([59951ba](https://github.com/kaiketsu-labs/diffguide/commit/59951ba45ce0ec1dd94223046811c7ee5c8a702f))
+* **webview:** tidy margin comments, earlier messages and the commit menu ([a95a36b](https://github.com/kaiketsu-labs/diffguide/commit/a95a36bebff329967cd6d5a5ba3f151a09faf613))
+
 ## [0.7.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.6.0...v0.7.0) (2026-11-10)
 
 
