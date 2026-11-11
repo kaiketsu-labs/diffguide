@@ -546,6 +546,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         submitReview: async (event, body) => {
           await provider.submitReview(pullRequest.number, event, body);
           void loadDetails();
+          void loadConversation();
+          void loadThreads();
         },
         applySuggestion: async (id, message, option) => {
           const { anchor, messages } = findThread(id);
