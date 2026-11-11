@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { pollWhileFocused } from './autoSync.js';
-import { claudeStatus } from './claudeStatus.js';
+import { claudeStatus, workingIcon } from './claudeStatus.js';
 import { orbLoaderStyles } from './orbLoader.js';
 import type { ClaudeContext, ClaudeProgress } from './claudeRunner.js';
 import { reviewers as allReviewers, type Finding, type Reviewer, type ReviewIntent, type ReviewThread, type WithdrawnComment } from './contracts.js';
@@ -572,6 +572,7 @@ export function revealOpenPage(key: string, reveal?: OverviewReveal): boolean {
  */
 /** The tab's icon, the PR's sidebar icon; none on the local review page. */
 function tabIcon(state: OverviewState): vscode.ThemeIcon | undefined {
+  if (state.claude.running || state.analysis.running || state.review?.running === true || state.threads.some((thread) => thread.working !== undefined)) return workingIcon;
   const details = state.details;
   if (details === undefined) return undefined;
   if (details.merged) return mergedIcon;

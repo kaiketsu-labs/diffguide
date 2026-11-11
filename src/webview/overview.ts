@@ -5579,7 +5579,7 @@ new ResizeObserver(([entry]) => {
 post({ action: 'ready' });
 
 /** Colors of the PR icons in the sidebar; the extension draws the tab icon in the theme's values, since tabs drop a theme icon's color. */
-const tabIconColors = ['charts.green', 'charts.purple', 'charts.red', 'charts.yellow', 'testing.iconPassed', 'testing.iconFailed', 'descriptionForeground'];
+const tabIconColors = ['diffGuide.agent', 'charts.green', 'charts.purple', 'charts.red', 'charts.yellow', 'testing.iconPassed', 'testing.iconFailed', 'descriptionForeground'];
 let sentColors = '';
 function sendThemeColors(): void {
   const style = getComputedStyle(document.documentElement);
