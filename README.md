@@ -162,6 +162,8 @@ On the review page, Cmd/Ctrl-click a name to peek at its definition, or use **Op
 - [x] Unread reply navigation and direct Claude-to-thread navigation
 - [ ] VS Code Marketplace / Open VSX publication
 - [ ] Linux and Windows verification
+- [ ] GitLab merge requests
+- [ ] Coding agents besides Claude Code
 
 Planned, not built yet: reviewing changes from any source, and a companion character.
 

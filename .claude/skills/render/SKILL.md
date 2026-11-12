@@ -1,6 +1,6 @@
 ---
 name: render
-description: Screenshot the DiffGuide review page in the user's VS Code theme and catch page script errors. Use before handing over any webview change (src/webview/, src/pullRequestOverview.ts, src/webviewStyles.ts, src/designTokens.ts, src/icons.ts), or when asked to render, screenshot or check the review page.
+description: Screenshot the DiffGuide review page in the user's VS Code theme and catch page script errors. Use before handing over any webview change (src/page/: the webview, html.ts, protocol.ts, overviewState.ts, webviewStyles.ts, designTokens.ts, icons.ts), or when asked to render, screenshot or check the review page.
 ---
 
 # Render the review page

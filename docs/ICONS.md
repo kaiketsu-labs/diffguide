@@ -1,6 +1,6 @@
 # Icons
 
-DiffGuide draws its own icons. Every icon lives in [`src/icons.ts`](../src/icons.ts); don't copy codicons or other icon sets into the extension.
+DiffGuide draws its own icons. Every icon lives in [`src/page/icons.ts`](../src/page/icons.ts); don't copy codicons or other icon sets into the extension.
 
 ## Style
 
@@ -18,12 +18,12 @@ The GitHub mark is the one exception: it is GitHub's logo, kept as GitHub draws 
 ## Add an icon
 
 1. Sketch it in `.diffguide-sketches/` (ignored by git): an HTML page with two to four options next to the icons it sits beside, in both themes, at 16 px and zoomed on a pixel grid. Confirm the pick with the user before writing code.
-2. Add it to `icons` in `src/icons.ts`, with `line(...)` and the shared parts (`ring`, `bubble`, `tray`) where they fit.
+2. Add it to `icons` in `src/page/icons.ts`, with `line(...)` and the shared parts (`ring`, `bubble`, `tray`) where they fit.
 3. Use it in a webview: `icons.<name>` in page HTML (`pullRequestOverview.ts`) or `icon(icons.<name>)` in the page script (`webview/overview.ts`). Size it with CSS width and height; 16 px for buttons and tabs, 14 px in dense rows.
 
 ## Native VS Code surfaces
 
-Menus, view titles, tree rows and the status bar can't show SVG strings. They use the icon font `resources/diffguide-icons-<hash>.woff`, built from the same `src/icons.ts`. The hash changes with the icons, because VS Code caches an icon font by its path.
+Menus, view titles, tree rows and the status bar can't show SVG strings. They use the icon font `resources/diffguide-icons-<hash>.woff`, built from the same `src/page/icons.ts`. The hash changes with the icons, because VS Code caches an icon font by its path.
 
 1. Add the icon's name to the end of `native` in `scripts/icons.mjs`. Don't reorder the list: each icon keeps its code point.
 2. Run `npm run icons`. It needs `uv`. It rebuilds the font and rewrites `contributes.icons` in `package.json`.

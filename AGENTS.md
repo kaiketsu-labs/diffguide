@@ -4,12 +4,27 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 
 ## Code map
 
-- `src/extension.ts` wires everything together, including the actions the PR review page calls.
-- `src/pullRequestOverview.ts` is the PR review page's extension side: its HTML and CSS, and the messages it exchanges with the page. `src/webview/overview.ts` is the page script, bundled for the browser into `dist/overview.js`.
-- `src/localReview.ts` feeds the review page in local mode: the workspace repository's changes against HEAD, untracked files, and unchanged files shown whole. `src/localFilesView.ts` is the Local sidebar view.
-- `src/reviewedFiles.ts` stores review marks: files ticked Viewed and line ranges marked read.
-- `src/unifiedDiff.ts` parses `git diff` into highlighted hunks. `src/anchors.ts` captures and relocates code by content.
-- `src/pullRequests.ts` reads and writes PRs through `src/githubApi.ts`, which signs in with VS Code's GitHub account. `src/pullRequestView.ts` is the PR sidebar.
+`src/` has five layers. `test/layers.test.ts` fails when a file imports a layer it may not.
+
+| Layer | Holds | May import |
+|---|---|---|
+| `core/` | Domain: review store and contracts, anchors, diffs, review marks, guide model, git and worktrees. `forge.ts` and `agent.ts` define the `Forge` and agent interfaces; `events.ts` and `host.ts` replace VS Code's events and storage. | `core` |
+| `page/` | The review page, host-neutral: `protocol.ts` (both message directions and their validation), `html.ts` (HTML and CSS), `overviewState.ts` (state the page shows), page actions, previews, and `webview/` (the browser script). | `core` |
+| `forges/github/` | `Forge` for GitHub: `provider.ts` (`GitHubApiProvider`), `parse.ts` (API responses), `githubApi.ts` (requests; sign-in through the `GitHubHost` port). | `core` |
+| `agents/claude/` | Claude Code: `claudeRunner.ts` (`AgentRunner`), `reviewRunner.ts` (`AgentCodeReview`), `prAnalysisRunner.ts` (`AgentGuideAnalysis`), bridge, channel and hooks. | `core` |
+| `hosts/vscode/` | The VS Code extension: `extension.ts` wires everything, `reviewPanel.ts` hosts the page, sidebars, settings, terminals, and the `GitHubHost` implementation. | everything |
+
+- New domain logic goes in `core`, new page features in `page`. Code that names GitHub or Claude goes in `forges/github` or `agents/claude`, behind the interface in `core`. Only `hosts/vscode` imports `vscode`.
+- Hosts construct concrete forges and agents (`GitHubApiProvider`, `ClaudeRunner`) and pass them on as `Forge`, `AgentRunner`, `AgentCodeReview` and `AgentGuideAnalysis`. GitLab, other agents and a standalone host each add a folder under their layer.
+- Core types use neutral names (`ChangeRequestSummary`, `AgentActivity`). Wire formats, persisted values and UI copy keep their existing names, such as `'github'` thread sources.
+- `core/unifiedDiff.ts` parses `git diff` into highlighted hunks. `core/anchors.ts` captures and relocates code by content. `core/reviewedFiles.ts` stores Viewed files and read line ranges. `hosts/vscode/localReview.ts` feeds the page in local mode.
+
+### Page script (`src/page/webview/`)
+
+- `main.ts` is the entry (bundled to `dist/overview.js`) and holds all control wiring in page order. `messages.ts` handles extension messages. `render.ts` draws the page from state.
+- `state.ts` holds the shared state: `prefs` persists through `save()`, `received` mirrors what the extension sent, `ui` is transient. State one module uses stays in that module.
+- Feature folders: `header/` (PR state, merge, reviewers, connect menu), `conversation/`, `files/` (render, diff table, nav, filters, previews, marks, selection), `threads/`, `guide/`, `review/`. Shared helpers: `dom.ts`, `menus.ts`, `status.ts`, `transport.ts` (the only use of `acquireVsCodeApi`).
+- `dom.ts` and `transport.ts` import no page module, so they load first.
 
 ## Code
 
@@ -22,17 +37,17 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 
 - Type both directions of the page protocol with `PageMessage` and `ExtensionMessage`. The extension still validates every page message.
 - `frameMain` runs inside the HTML preview frame from its source text, so it must not use anything outside its own body.
-- The CSS lives in a template string: no backticks or `${` in it. Its rules sit on long lines; change them with Edit on a unique selector, not scripted rewrites.
+- The CSS lives in a template string in `page/html.ts`: no backticks or `${` in it. Its rules sit on long lines; change them with Edit on a unique selector, not scripted rewrites.
 - Redraw only what changed. `renderFiles([paths])` rebuilds those files' boxes; `renderFiles('state')` rebuilds files whose state changed. A full `renderFiles()` is for global changes such as layout, and costs about 100 ms on a 40-file PR.
 - Update the page right away for the user's own toggles (Viewed, read marks) and let the extension's next state confirm them. A round trip waits for a 150 ms debounce and a state re-read.
 
 ## UI
 
-- Webview colors, type sizes, spacing and corners come from `src/designTokens.ts` as CSS custom properties (`--brand`, `--ink`, `--radius-md`). Use only those properties in webview CSS; change a value there, not at the use site. `src/webviewStyles.ts` holds the shared buttons (`primary`, `agent`, `quiet`, `small`), inputs, key caps and chips.
+- Webview colors, type sizes, spacing and corners come from `src/page/designTokens.ts` as CSS custom properties (`--brand`, `--ink`, `--radius-md`). Use only those properties in webview CSS; change a value there, not at the use site. `src/page/webviewStyles.ts` holds the shared buttons (`primary`, `agent`, `quiet`, `small`), inputs, key caps and chips.
 - Color names who is involved: `brand` is you and stays neutral (the theme's text color), `agent` slate is the coding agent and its orb, `github` blue is GitHub. Everything else follows the VS Code theme.
 - Page controls use the page's own menus (`.picker`, as on Labels and the Files filter) for choices, not native `<select>` or VS Code quick picks. Text fields keep the shared thin inset focus line from `webviewStyles`.
 - Use our own page widgets wherever a page can host them: confirm in place (`askInline` row, or `askInMenu` under a button with no row), edit text in an inline form, pick from a `.picker` menu, report results in the page notice. A button that opens a form becomes that form's confirm button, as Merge does. Use VS Code modals, input boxes, quick picks and toasts only where no page is open, such as the sidebar, editor commands and setup, and for errors that must reach a closed page.
-- Draw every new icon ourselves in `src/icons.ts`, following [docs/ICONS.md](docs/ICONS.md): 1.25 px line icons, pixels only for the orb and the DiffGuide mark. Don't copy codicons or other icon sets. Native surfaces use the font `npm run icons` builds from the same file.
+- Draw every new icon ourselves in `src/page/icons.ts`, following [docs/ICONS.md](docs/ICONS.md): 1.25 px line icons, pixels only for the orb and the DiffGuide mark. Don't copy codicons or other icon sets. Native surfaces use the font `npm run icons` builds from the same file.
 - Use clear system sans-serif fonts for extension UI and monospace fonts for code.
 - Keep UI copy short, in English, and actions self-explanatory. Leave existing German strings until asked.
 - Name controls after existing ones that do the same thing; a checkbox that marks lines reviewed is "Viewed", like the file's.
