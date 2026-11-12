@@ -1,7 +1,7 @@
 # DiffGuide
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/banner.png" alt="DiffGuide: Your guide through code changes." width="100%">
+  <img src="docs/media/banner.png" alt="DiffGuide: Your guide through code changes." width="100%">
 </p>
 
 <p align="center">
@@ -24,17 +24,17 @@ DiffGuide is a review page in VS Code for your local changes and your GitHub pul
 
 | | |
 | --- | --- |
-| <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/icons/comment.png" width="36" alt=""> | **Comment at the line.** Click a line on the review page, choose **Ask** to discuss it or **Implement** to change it. Claude replies in the thread; you resolve it. |
-| <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/icons/guide.png" width="36" alt=""> | **Guided PR review.** Claude orders a PR's changes into steps by severity and explains each one. Tick **Viewed** on every step and you have covered the whole PR. |
-| <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/icons/review.png" width="36" alt=""> | **Code review agents.** **Review** runs correctness, design, security, performance and test agents. Findings arrive as threads, and Claude can re-check them against the current code. |
-| <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/icons/pr.png" width="36" alt=""> | **The whole GitHub PR.** Conversation, commits since your last review, checks and the merge box on one page. Claude drafts your replies to GitHub comments. |
-| <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/icons/sidebar.png" width="36" alt=""> | **Pull Requests sidebar.** Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The orb marks rows where Claude is working. |
-| <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/icons/linked.png" width="36" alt=""> | **Linked changes.** A PR that needs changes in other repositories lists them, with the branch Claude made and **Push and open draft PR**. |
+| <img src="docs/media/icons/comment.png" width="36" alt=""> | **Comment at the line.** Click a line on the review page, choose **Ask** to discuss it or **Implement** to change it. Claude replies in the thread; you resolve it. |
+| <img src="docs/media/icons/guide.png" width="36" alt=""> | **Guided PR review.** Claude orders a PR's changes into steps by severity and explains each one. Tick **Viewed** on every step and you have covered the whole PR. |
+| <img src="docs/media/icons/review.png" width="36" alt=""> | **Code review agents.** **Review** runs correctness, design, security, performance and test agents. Findings arrive as threads, and Claude can re-check them against the current code. |
+| <img src="docs/media/icons/pr.png" width="36" alt=""> | **The whole GitHub PR.** Conversation, commits since your last review, checks and the merge box on one page. Claude drafts your replies to GitHub comments. |
+| <img src="docs/media/icons/sidebar.png" width="36" alt=""> | **Pull Requests sidebar.** Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The orb marks rows where Claude is working. |
+| <img src="docs/media/icons/linked.png" width="36" alt=""> | **Linked changes.** A PR that needs changes in other repositories lists them, with the branch Claude made and **Push and open draft PR**. |
 
 ## How it works
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/kaiketsu-labs/diffguide/main/docs/media/review-loop.png" alt="The review loop: comment on a line, Claude wakes up, Claude answers in the thread, you resolve or reply to keep going." width="100%">
+  <img src="docs/media/review-loop.png" alt="The review loop: comment on a line, Claude wakes up, Claude answers in the thread, you resolve or reply to keep going." width="100%">
 </p>
 
 A small local helper waits for your comment and wakes the Claude conversation you connected. Claude does not poll for comments. It answers through review tools that put the reply back in the thread. Threads stay in VS Code's workspace storage. [Architecture →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/HOW-IT-WORKS.md)
