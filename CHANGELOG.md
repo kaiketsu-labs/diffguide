@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.9.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.8.0...v0.9.0) (2026-11-12)
+
+
+### Features
+
+* **branding:** new logo, banner and readme ([#69](https://github.com/kaiketsu-labs/diffguide/issues/69)) ([8b3f9c3](https://github.com/kaiketsu-labs/diffguide/commit/8b3f9c33adf8599358eea6551c4295025cb2580c))
+
+
+### Refactoring
+
+* **src:** layered architecture and split review page script ([#66](https://github.com/kaiketsu-labs/diffguide/issues/66)) ([2429173](https://github.com/kaiketsu-labs/diffguide/commit/2429173a69ba0f423f938ab5ae09da5fa3a6f9a8))
+* **src:** split activate() and the pr list into modules ([#68](https://github.com/kaiketsu-labs/diffguide/issues/68)) ([c08cb2c](https://github.com/kaiketsu-labs/diffguide/commit/c08cb2c8f78976747b23db24d9c3ac91ce5ef561))
+
 ## [0.8.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.7.0...v0.8.0) (2026-11-11)
 
 
