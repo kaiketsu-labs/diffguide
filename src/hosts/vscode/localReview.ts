@@ -16,6 +16,7 @@ import { type FileDiff, highlightSource, readPullRequestDiff, wholeFileDiff } fr
 import { mediaType } from '../../page/media.js';
 import { eventIntents, threadView } from '../../page/overviewState.js';
 import { readFilePreview, readMediaSides } from '../../page/preview/fileContent.js';
+import { implementThreadRequest } from '../../page/pullRequest/threadActions.js';
 import type { DiffSelection, FilesView, OverviewActions, OverviewReveal, OverviewState, PageComment } from '../../page/protocol.js';
 import { DefinitionPeeks } from './definitions.js';
 import { readFileIcons } from './fileIcons.js';
@@ -56,9 +57,6 @@ export function localClaudeStatus(bridge: Pick<ReviewBridge, 'state'>, waiting: 
   const text = !connected ? 'Claude not connected' : deliveryReady === true ? 'Claude connected' : 'Delivery paused';
   return { text: waiting > 0 ? `${text} · ${waiting} waiting` : text, running: false, retry: false };
 }
-
-/** What an Implement without a note asks Claude in a thread that already has a conversation. */
-export const implementThreadRequest = 'Implement what this thread discussed.';
 
 /**
  * The workspace repository's uncommitted changes on the review page.

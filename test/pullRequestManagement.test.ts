@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as vscode from 'vscode';
 import type { ChangeRequestDetails, Forge } from '../src/core/forge.js';
-import { sharedPerTurn } from '../src/hosts/vscode/autoSync.js';
+import { sharedPerTurn } from '../src/page/pullRequest/githubReads.js';
 import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
 import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
 import { githubPageActions, type PageContext } from '../src/page/pullRequestPageActions.js';

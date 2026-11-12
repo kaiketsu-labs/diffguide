@@ -11,7 +11,7 @@ import { icons } from '../../page/icons.js';
 import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
 import { pollWhileFocused } from './autoSync.js';
 import { workingIcon } from './claudeStatus.js';
-import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestView.js';
+import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestItems.js';
 
 const revealMessage = (reveal: OverviewReveal | undefined): ExtensionMessage => reveal === undefined ? {}
   : 'path' in reveal ? { reveal: reveal.path } : 'step' in reveal ? { revealStep: reveal.step } : 'thread' in reveal ? { revealThread: reveal.thread } : { revealGroup: reveal.group };
