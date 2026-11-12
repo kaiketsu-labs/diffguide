@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ReviewEvent, ReviewThread } from '../src/contracts.js';
-import { buildReviewBatchPrompt, buildReviewPrompt, reviewInstructions } from '../src/eventPrompt.js';
+import { buildReviewBatchPrompt, buildReviewPrompt, reviewInstructions } from '../src/agents/claude/eventPrompt.js';
+import type { ReviewEvent, ReviewThread } from '../src/core/contracts.js';
 
 /** Capture representative user feedback without involving the editor or transport. */
 function event(id: string, text: string): ReviewEvent {

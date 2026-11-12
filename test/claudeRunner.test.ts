@@ -5,10 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
-
-import { ClaudeRunner, contextTokens, describeTool, StepLog, type ClaudeRunnerOptions } from '../src/claudeRunner.js';
-import { lockWorktree } from '../src/linkedChanges.js';
-import type { ReviewEvent, ReviewStore } from '../src/contracts.js';
+import { ClaudeRunner, type ClaudeRunnerOptions, contextTokens, describeTool, StepLog } from '../src/agents/claude/claudeRunner.js';
+import type { ReviewEvent, ReviewStore } from '../src/core/contracts.js';
+import { lockWorktree } from '../src/core/linkedChanges.js';
 import { settle } from './fakes/vscode.js';
 
 /** Wait for the runner's file and process work to reach a state. */

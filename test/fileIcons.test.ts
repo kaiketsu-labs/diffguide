@@ -3,8 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-
-import { readFileIcons } from '../src/fileIcons.js';
+import { readFileIcons } from '../src/hosts/vscode/fileIcons.js';
 import { ColorThemeKind, extensions, window, workspace } from './fakes/vscode.js';
 
 test('picks icons by file name, then extension, then language, then the default, like VS Code', async (t) => {

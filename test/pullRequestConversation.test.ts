@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import * as vscode from 'vscode';
-import { showPullRequestOverview, type OverviewActions, type OverviewState } from '../src/pullRequestOverview.js';
-import { githubPageActions, suggestionEdits, type PageContext } from '../src/pullRequestPageActions.js';
-import { parseConversation, type PullRequestConversation, type PullRequestDetails, type RemoteThread } from '../src/pullRequests.js';
-import { applyLineSuggestions } from '../src/suggestions.js';
-import { generatedPaths, readPullRequestDiff } from '../src/unifiedDiff.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, RemoteThread } from '../src/core/forge.js';
+import { applyLineSuggestions } from '../src/core/suggestions.js';
+import { generatedPaths, readPullRequestDiff } from '../src/core/unifiedDiff.js';
+import { parseConversation } from '../src/forges/github/parse.js';
+import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
+import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
+import { githubPageActions, type PageContext, suggestionEdits } from '../src/page/pullRequestPageActions.js';
 import { EventEmitter, resetFakeWindow, window } from './fakes/vscode.js';
 
 const oid = (digit: string): string => digit.repeat(40);
@@ -135,11 +137,11 @@ test('reads one commit\'s changes, hides whitespace changes and marks generated 
   assert.deepEqual([...await generatedPaths(repo, ['src/x.min.js', 'Cargo.lock', 'src/app.ts'])], ['src/x.min.js', 'Cargo.lock']);
 });
 
-const details: PullRequestDetails = {
+const details: ChangeRequestDetails = {
   title: 'PR', body: '', bodyHtml: '', open: true, merged: false, draft: false, canEdit: true, branchDeletable: false, labels: [], assignees: [], reviewers: [],
   mergeable: 'yes', viewerIsAuthor: false, viewerAvatarUrl: '', mergeMethods: ['squash'], checks: [],
 };
-const conversation: PullRequestConversation = {
+const conversation: ChangeRequestConversation = {
   timeline: [
     { kind: 'commit', id: 'PC1', oid: oid('a'), headline: 'One', message: '', author: 'bob', avatarUrl: '', createdAt: '' },
     { kind: 'comment', id: 'IC1', author: 'bob', avatarUrl: '', createdAt: '', bodyHtml: '', body: 'x', canEdit: false, canDelete: false, canHide: false, canReact: true, edited: false, reactions: [] },

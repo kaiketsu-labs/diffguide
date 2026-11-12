@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { anchorFromText, capturedCodeContext, fileAnchor, hashDocumentText, locateCodeAnchor } from '../src/anchors.js';
-import type { CodeAnchor } from '../src/contracts.js';
+import { anchorFromText, capturedCodeContext, fileAnchor, hashDocumentText, locateCodeAnchor } from '../src/core/anchors.js';
+import type { CodeAnchor } from '../src/core/contracts.js';
 
 /** Capture a full-line review selection with neighboring code for restoration tests. */
 function anchor(text: string, startLine: number, endLine = startLine): CodeAnchor {

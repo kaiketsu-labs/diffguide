@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
-import { request as httpRequest } from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
 import type { TestContext } from 'node:test';
-
-import { createReviewBridge } from '../src/bridge.js';
-import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/contracts.js';
-import { createReviewStore } from '../src/store.js';
-import { pullRequestAnchor } from '../src/anchors.js';
-import { parseThread, readBatch, record } from '../src/connection.js';
-import { maximumConversationMessages, maximumReviewTextLength } from '../src/limits.js';
+import test from 'node:test';
+import { createReviewBridge } from '../src/agents/claude/bridge.js';
+import { pullRequestAnchor } from '../src/core/anchors.js';
+import { parseThread, readBatch, record } from '../src/core/connection.js';
+import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/core/contracts.js';
+import { maximumConversationMessages, maximumReviewTextLength } from '../src/core/limits.js';
+import { createReviewStore } from '../src/core/store.js';
 
 /** Start a real loopback bridge over isolated durable storage for each test. */
 async function fixture(t: TestContext): Promise<{ store: ReviewStore; bridge: ReviewBridge; headers: Record<string, string> }> {

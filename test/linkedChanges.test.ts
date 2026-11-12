@@ -3,9 +3,8 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-
-import { addLink, addWorked, addedLines, branchPins, crossReferences, ensureBranchWorktree, linkedBranchName, linkKey, lockWorktree, readStoredLinks, removeLink, writeStoredLinks } from '../src/linkedChanges.js';
-import { git } from '../src/worktrees.js';
+import { git } from '../src/core/git/worktrees.js';
+import { addedLines, addLink, addWorked, branchPins, crossReferences, ensureBranchWorktree, linkedBranchName, linkKey, lockWorktree, readStoredLinks, removeLink, writeStoredLinks } from '../src/core/linkedChanges.js';
 
 test('reads branch pins of other GitHub repositories from added diff lines', () => {
   const diff = [

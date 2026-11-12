@@ -5,12 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
-
-import type { CodeAnchor } from '../src/contracts.js';
-import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis } from '../src/prAnalysis.js';
-import { PullRequestAnalysis, runStructuredClaude, type AnalysisOptions } from '../src/prAnalysisRunner.js';
-import { createReviewStore } from '../src/store.js';
-import { parseUnifiedDiff } from '../src/unifiedDiff.js';
+import { type AnalysisOptions, PullRequestAnalysis, runStructuredClaude } from '../src/agents/claude/prAnalysisRunner.js';
+import type { CodeAnchor } from '../src/core/contracts.js';
+import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis } from '../src/core/prAnalysis.js';
+import { createReviewStore } from '../src/core/store.js';
+import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 import { settle } from './fakes/vscode.js';
 
 const diff = [

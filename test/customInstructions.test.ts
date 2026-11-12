@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { readCustomInstructions } from '../src/customInstructions.js';
+import { readCustomInstructions } from '../src/core/customInstructions.js';
 
 async function put(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });

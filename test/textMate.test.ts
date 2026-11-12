@@ -3,9 +3,8 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-
-import { codePreviewHtml, codePreviewStyles, useEditorHighlighter } from '../src/codePreview.js';
-import { TextMateHighlighter, customizationRules, readThemeRules } from '../src/textMate.js';
+import { codePreviewHtml, codePreviewStyles, useEditorHighlighter } from '../src/core/codePreview.js';
+import { customizationRules, readThemeRules, TextMateHighlighter } from '../src/hosts/vscode/textMate.js';
 
 const wasm = require.resolve('vscode-oniguruma/release/onig.wasm');
 

@@ -2,10 +2,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
 import type { TestContext } from 'node:test';
-
-import { requireNodeRuntime } from '../src/executables.js';
+import test from 'node:test';
+import { requireNodeRuntime } from '../src/core/executables.js';
 
 /** Exercise real child-process failures using local executables without a Claude session. */
 async function runtime(t: TestContext, source: string): Promise<string> {

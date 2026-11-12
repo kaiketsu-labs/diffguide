@@ -2,7 +2,7 @@ import { copyFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: { extension: 'src/extension.ts', channel: 'src/channel.ts', 'hook-waiter': 'src/hookWaiter.ts', 'edit-guard': 'src/editGuardHook.ts', 'live-connect': 'src/liveConnect.ts' },
+  entryPoints: { extension: 'src/hosts/vscode/extension.ts', channel: 'src/agents/claude/channel.ts', 'hook-waiter': 'src/agents/claude/hookWaiter.ts', 'edit-guard': 'src/agents/claude/editGuardHook.ts', 'live-connect': 'src/agents/claude/liveConnect.ts' },
   outdir: 'dist',
   outExtension: { '.js': '.cjs' },
   bundle: true,
@@ -16,7 +16,7 @@ await build({
 });
 
 await build({
-  entryPoints: { overview: 'src/webview/overview.ts' },
+  entryPoints: { overview: 'src/page/webview/main.ts' },
   outdir: 'dist',
   bundle: true,
   platform: 'browser',
@@ -28,7 +28,7 @@ await build({
 });
 
 await build({
-  entryPoints: { pdf: 'src/webview/pdf.ts' },
+  entryPoints: { pdf: 'src/page/webview/pdf.ts' },
   outdir: 'dist',
   bundle: true,
   minify: true,

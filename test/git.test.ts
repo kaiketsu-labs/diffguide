@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-
-import { getHeadRevision, readGitBase } from '../src/git.js';
+import { getHeadRevision, readGitBase } from '../src/core/git/git.js';
 
 const executeFile = promisify(execFile);
 

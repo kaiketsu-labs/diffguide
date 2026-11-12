@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { fenceFilePaths, markdownBlocks, markdownHtml } from '../src/markdown.js';
+import { fenceFilePaths, markdownBlocks, markdownHtml } from '../src/page/preview/markdown.js';
 
 test('renders the Markdown Claude writes: paragraphs, lists, inline code, emphasis, links and fenced code', () => {
   const html = markdownHtml('`5` is **hardcoded**, see _notes_.\nSecond line.\n\n- `a.json` has 3\n- b\n\n1. one\n2. two\n\n> quoted\n\n## Fix\n\n```typescript\nconst total = 2;\n```');

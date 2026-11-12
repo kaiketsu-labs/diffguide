@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
 import type { TestContext } from 'node:test';
-
-import type { CodeAnchor, ReviewStore } from '../src/contracts.js';
-import { createReviewStore, parseAgentUpdate, ReviewStoreError } from '../src/store.js';
-import { maximumReplyLength, maximumReviewTextLength } from '../src/limits.js';
-import { publishableText } from '../src/pullRequestComments.js';
-import { pullRequestAnchor } from '../src/anchors.js';
+import test from 'node:test';
+import { pullRequestAnchor } from '../src/core/anchors.js';
+import type { CodeAnchor, ReviewStore } from '../src/core/contracts.js';
+import { maximumReplyLength, maximumReviewTextLength } from '../src/core/limits.js';
+import { publishableText } from '../src/core/pullRequestComments.js';
+import { createReviewStore, parseAgentUpdate, ReviewStoreError } from '../src/core/store.js';
 
 /** Create isolated storage and register cleanup with the test lifecycle. */
 async function fixture(t: TestContext): Promise<{ store: ReviewStore; file: string; root: string }> {

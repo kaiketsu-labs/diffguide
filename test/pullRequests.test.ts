@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type * as vscode from 'vscode';
-
-import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
-import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githubApi.js';
-import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { fileTree, type FileFolder } from '../src/fileTree.js';
-import { registerPullRequestView } from '../src/pullRequestView.js';
-import { groupSearchResults, parseGitRemote, parsePullRequestLink, pickGitHubRemote } from '../src/pullRequests.js';
-import type { PullRequestWorktrees } from '../src/pullRequestView.js';
-import { DataTransfer, EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
+import { type FileFolder, fileTree } from '../src/core/fileTree.js';
+import type { ChangeRequestSummary, Forge } from '../src/core/forge.js';
+import { errorDetail, githubEndpoints, GitHubSignInRequired } from '../src/forges/github/githubApi.js';
+import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads } from '../src/forges/github/parse.js';
+import { groupSearchResults, remoteNameFor } from '../src/forges/github/provider.js';
+import { parseGitRemote, parsePullRequestLink, pickGitHubRemote } from '../src/forges/github/remotes.js';
+import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
+import { type PullRequestWorktrees, registerPullRequestView } from '../src/hosts/vscode/pullRequestView.js';
+import { commands, DataTransfer, env, EventEmitter, FakeMemento, settle, window } from './fakes/vscode.js';
 
 const ghEntry = {
   author: { id: 'MDQ', is_bot: false, login: 'octo', name: 'Octo' },
@@ -18,7 +17,7 @@ const ghEntry = {
   title: 'Add review sidebar', url: 'https://github.com/acme/app/pull/7',
 };
 
-const summary: PullRequestSummary = {
+const summary: ChangeRequestSummary = {
   number: 7, title: 'Add review sidebar', url: 'https://github.com/acme/app/pull/7',
   author: 'octo', draft: true, headBranch: 'feature', baseBranch: 'main',
 };
@@ -187,7 +186,7 @@ test('keeps the reasons GitHub gives from a failed API call', () => {
 test('groups PRs by role, opens a worktree on click and the browser from the inline action', async (t) => {
   window.trees.length = 0;
   env.opened.length = 0;
-  const provider: PullRequestProvider = {
+  const provider: Forge = {
   ...mockPullRequestProvider,
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
     listMine: async () => [],
@@ -304,11 +303,11 @@ test('shows the CLI error instead of the tree and reloads on refresh', async (t)
 
 test('offers GitHub sign-in as the welcome button, or on the repository row when other repositories loaded', async (t) => {
   window.trees.length = 0;
-  const signedOut = async (): Promise<PullRequestProvider> => { throw new GitHubSignInRequired('github'); };
-  const loaded = async (): Promise<PullRequestProvider> => ({
+  const signedOut = async (): Promise<Forge> => { throw new GitHubSignInRequired('github'); };
+  const loaded = async (): Promise<Forge> => ({
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }), listMine: async () => [summary], listReviewRequested: async () => [],
     openCount: async () => 0,
-  } as unknown as PullRequestProvider);
+  } as unknown as Forge);
   let checkouts = [{ folder: 'app', connect: signedOut, worktrees: recordingWorktrees() }];
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
@@ -328,7 +327,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
   window.trees.length = 0;
   const listed: string[] = [];
   const connected: string[] = [];
-  const provider = (name: string, pullRequests: readonly PullRequestSummary[]): PullRequestProvider => ({
+  const provider = (name: string, pullRequests: readonly ChangeRequestSummary[]): Forge => ({
   ...mockPullRequestProvider,
     readRepository: async () => ({ name, url: `https://github.com/${name}` }),
     listMine: async () => pullRequests,
@@ -353,7 +352,7 @@ test('lists repositories with PRs, routes actions to the PR\'s own repository an
     deleteBranch: async () => { throw new Error('not used'); },
     pickerOptions: async () => { throw new Error('not used'); },
   });
-  const connect = (name: string, pullRequests: readonly PullRequestSummary[]) => async () => { connected.push(name); return provider(name, pullRequests); };
+  const connect = (name: string, pullRequests: readonly ChangeRequestSummary[]) => async () => { connected.push(name); return provider(name, pullRequests); };
   const serviceA = recordingWorktrees();
   const serviceB = recordingWorktrees();
   const settings = new FakeMemento();
@@ -435,12 +434,12 @@ test('shows the last loaded PR lists at once and replaces them when the fresh on
   window.trees.length = 0;
   let release: () => void = () => undefined;
   const slow = new Promise<void>((resolve) => { release = resolve; });
-  const provider: PullRequestProvider = {
+  const provider: Forge = {
   ...mockPullRequestProvider,
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
     listMine: async () => { await slow; return [{ ...summary, number: 8, title: 'feat(ui): Fresh' }]; },
     listReviewRequested: async () => [],
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const workspace = new FakeMemento();
   await workspace.update('diffGuide.pullRequestSnapshot', { app: { repository: { name: 'acme/app', url: 'https://github.com/acme/app' }, mine: [summary], reviewRequested: [] } });
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), workspace);
@@ -476,7 +475,7 @@ test('reads a PR\'s reviewed files once for its row, and redraws only that PR wh
     listReviewRequested: async () => [],
     listFiles: async () => [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }, { path: 'b.ts', additions: 1, deletions: 0, change: 'added' }],
     openCount: async () => 0,
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const worktrees = recordingWorktrees();
   worktrees.checkedOut.add(7);
   let reads = 0;
@@ -516,7 +515,7 @@ test('shows unpushed commits and uncommitted edits on a checked-out PR row', asy
     listReviewRequested: async () => [],
     listFiles: async () => [{ path: 'src/a.ts', additions: 1, deletions: 0, change: 'added' }],
     openCount: async () => 0,
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const worktrees = recordingWorktrees();
   worktrees.checkedOut.add(7);
   worktrees.localChanges = async () => ({ commits: 2, files: new Map([['src/a.ts', 'both' as const]]) });
@@ -557,7 +556,7 @@ test('shows unpushed commits and uncommitted edits on a checked-out PR row', asy
 
 test('filters PRs by author and shows their size and dates', async (t) => {
   window.trees.length = 0;
-  const pr = (number: number, author: string): PullRequestSummary => ({
+  const pr = (number: number, author: string): ChangeRequestSummary => ({
     ...summary, number, author, draft: false, createdAt: '2026-11-01T10:00:00Z', updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
     changes: { additions: 312, deletions: 48, files: 14 },
   });
@@ -566,7 +565,7 @@ test('filters PRs by author and shows their size and dates', async (t) => {
     listMine: async () => [],
     listReviewRequested: async () => [pr(7, 'octo'), pr(8, 'alice')],
     openCount: async () => 0,
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
   const workspace = new FakeMemento();
@@ -599,7 +598,7 @@ test('filters PRs by author and shows their size and dates', async (t) => {
 
 test('pins PRs above the role sections in the dragged order and drops them once GitHub reports them closed', async (t) => {
   window.trees.length = 0;
-  const pr = (number: number, title: string): PullRequestSummary => ({ ...summary, number, title, draft: false });
+  const pr = (number: number, title: string): ChangeRequestSummary => ({ ...summary, number, title, draft: false });
   let reviewRequested = [pr(1, 'One'), pr(2, 'Two'), pr(3, 'Three')];
   let open = new Set<number>();
   const asked: number[][] = [];
@@ -613,7 +612,7 @@ test('pins PRs above the role sections in the dragged order and drops them once 
       return numbers.filter((number) => open.has(number)).map((number) => pr(number, `Still open ${number}`));
     },
     openCount: async () => 0,
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const workspace = new FakeMemento();
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, new FakeMemento(), workspace);
   t.after(() => { view.dispose(); });
@@ -706,14 +705,14 @@ test('reads pending reviewers and whether a review request reached the viewer di
 test('marks my PRs awaiting review, filters Mine to them, tells direct from team requests, and copies a PR link', async (t) => {
   window.trees.length = 0;
   env.clipboard.writes.length = 0;
-  const waiting: PullRequestSummary = { ...summary, number: 8, draft: false, requestedReviewers: [{ name: 'alice', team: false }, { name: 'Core', team: true }] };
-  const idle: PullRequestSummary = { ...summary, number: 9, draft: false };
+  const waiting: ChangeRequestSummary = { ...summary, number: 8, draft: false, requestedReviewers: [{ name: 'alice', team: false }, { name: 'Core', team: true }] };
+  const idle: ChangeRequestSummary = { ...summary, number: 9, draft: false };
   const provider = {
     ...mockPullRequestProvider,
     readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
     listMine: async () => [waiting, idle],
     listReviewRequested: async () => [{ ...summary, number: 10, requestedVia: 'you' }, { ...summary, number: 11, requestedVia: 'team', requestedReviewers: [{ name: 'Core', team: true }] }],
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees: recordingWorktrees() }], noStatusChanges, settings, new FakeMemento());
@@ -750,7 +749,7 @@ test('lists every open PR of a repository under All open only once expanded, wit
     listReviewRequested: async () => [],
     search: async (query: string) => { searched.push(query); return [summary, { ...summary, number: 12, title: 'Someone else', author: 'bob' }]; },
     openCount: async () => 2,
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const worktrees = recordingWorktrees();
   const settings = new FakeMemento();
   await settings.update('diffGuide.groupBy', 'repository');
@@ -787,7 +786,7 @@ test('opens a PR from a pasted link in the workspace folder of its repository, o
     listMine: async () => [],
     listReviewRequested: async () => [],
     pullRequest: async (number: number) => { asked.push(number); return number === 57 ? { ...summary, number } : undefined; },
-  } as unknown as PullRequestProvider);
+  } as unknown as Forge);
   const other = recordingWorktrees();
   const app = recordingWorktrees();
   const shown: string[] = [];

@@ -3,21 +3,23 @@ import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test, { afterEach } from 'node:test';
+import { afterEach } from 'node:test';
+import test from 'node:test';
 import { promisify } from 'node:util';
 import type * as vscode from 'vscode';
-
-import { anchorFromText } from '../src/anchors.js';
-import type { ReviewBridge, ReviewStore } from '../src/contracts.js';
-import { getHeadRevision } from '../src/git.js';
-import { LocalFilesView } from '../src/localFilesView.js';
-import { checkoutLabel, groupByRepository, listLocalCheckouts, matchesFilter, parseWorktreeList, type LocalCheckout } from '../src/localCheckouts.js';
-import { LocalReview, localClaudeStatus } from '../src/localReview.js';
-import { LocalSessions } from '../src/localSessions.js';
-import { type ExtensionMessage, isPageOpen, type OverviewActions, showPullRequestOverview } from '../src/pullRequestOverview.js';
-import type { ClaudeChoice, ClaudeLauncher } from '../src/setup.js';
-import { createReviewStore } from '../src/store.js';
-import { wholeFileDiff } from '../src/unifiedDiff.js';
+import type { AgentChoice } from '../src/core/agent.js';
+import { anchorFromText } from '../src/core/anchors.js';
+import type { ReviewBridge, ReviewStore } from '../src/core/contracts.js';
+import { getHeadRevision } from '../src/core/git/git.js';
+import { checkoutLabel, groupByRepository, listLocalCheckouts, type LocalCheckout, matchesFilter, parseWorktreeList } from '../src/core/git/localCheckouts.js';
+import { createReviewStore } from '../src/core/store.js';
+import { wholeFileDiff } from '../src/core/unifiedDiff.js';
+import { LocalFilesView } from '../src/hosts/vscode/localFilesView.js';
+import { localClaudeStatus, LocalReview } from '../src/hosts/vscode/localReview.js';
+import { LocalSessions } from '../src/hosts/vscode/localSessions.js';
+import { isPageOpen, showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
+import type { ClaudeLauncher } from '../src/hosts/vscode/setup.js';
+import type { ExtensionMessage, OverviewActions } from '../src/page/protocol.js';
 import { extensionContext, FakeMemento, resetFakeWindow, Uri, window, workspace } from './fakes/vscode.js';
 
 const executeFile = promisify(execFile);
@@ -49,8 +51,8 @@ const bridge: ReviewBridge = {
 };
 
 /** A launcher that records the page's Claude choices instead of starting Claude. */
-function fakeLauncher(): ClaudeLauncher & { readonly choices: ClaudeChoice[] } {
-  const choices: ClaudeChoice[] = [];
+function fakeLauncher(): ClaudeLauncher & { readonly choices: AgentChoice[] } {
+  const choices: AgentChoice[] = [];
   return {
     choices, hasTerminal: false,
     start: async () => undefined, copyCommand: async () => undefined, connectRunning: async () => undefined,

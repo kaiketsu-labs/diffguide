@@ -5,10 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-
-import { readGitBaseBytes } from '../src/git.js';
-import { inlineLocalImages } from '../src/markdown.js';
-import { mediaType } from '../src/media.js';
+import { readGitBaseBytes } from '../src/core/git/git.js';
+import { mediaType } from '../src/page/media.js';
+import { inlineLocalImages } from '../src/page/preview/markdown.js';
 
 test('previews images, SVG and PDF by extension, and nothing else', () => {
   assert.equal(mediaType('docs/Logo.PNG'), 'image/png');

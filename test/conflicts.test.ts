@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-
-import { catchUpWithPullRequest, commitAndPush, commitFiles, commitsSince, conflictTask, discardSince, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/conflicts.js';
+import { catchUpWithPullRequest, commitAndPush, commitFiles, commitsSince, conflictTask, discardSince, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/core/conflicts.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();

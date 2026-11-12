@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { findDeclaration } from '../src/definitions.js';
+import { findDeclaration } from '../src/hosts/vscode/definitions.js';
 
 test('finds a same-file declaration by name when no language extension answers', () => {
   const source = ['import os', '', 'def load_config(path):', '    return path', '', 'class Loader:', '    pass', 'config = load_config("x")'].join('\n');
