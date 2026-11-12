@@ -37,7 +37,7 @@ Claude's code appears in syntax-colored blocks. Cmd/Ctrl-click a name in the dif
 
 ## Start in a minute
 
-Download a `.vsix` from [GitHub Releases](https://github.com/kaiketsu-labs/diffguide/releases), then choose **Extensions → … → Install from VSIX…** in VS Code. The extension is not published on the Marketplace yet.
+Install **DiffGuide** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide). Each [GitHub release](https://github.com/kaiketsu-labs/diffguide/releases) also carries a `.vsix`.
 
 Open a trusted local Git repository and click **Connect Claude** on the local review page:
 
@@ -122,6 +122,26 @@ Pages whose comments go to a conversation you connected show no count; manage th
 
 Drafting never posts, resolves or adds a message to the thread. Your notes stay on the page.
 
+## Pull Requests sidebar
+
+Lists your PRs and your review requests, including those sent to your teams, per repository, with a collapsed **All open** group for every open PR and their count. Click a PR to open its review page. Your PRs waiting on reviewers show a yellow eye and **Awaiting review**; review requests say **Direct** or **via** the team. **Show only my PRs awaiting review** in the view's … menu filters Mine. **Copy Link** on a PR's context menu copies its GitHub link. **DiffGuide: Open PR in DiffGuide** opens the review page from a pasted PR link or `owner/repo#57`, in the workspace folder that holds that repository.
+
+## The whole GitHub PR
+
+The review page covers GitHub's PR tabs: conversation with comments, reviews, reactions, edits and events; commits with per-commit diffs and changes since your last review; a file tree, file filters and hidden whitespace; check annotations and re-runs; and a merge box with branch protection, update branch, auto-merge, merge queue and revert.
+
+## Linked changes
+
+A PR that needs changes in other repositories shows them in **Linked changes**: each linked PR's state, or the branch Claude made where there is none yet, with **Push** and **Push and open draft PR**. PRs link through GitHub mentions, dependency pins to a branch in the diff, Claude's edits or **Link a PR…**; **Unlink** hides one. Claude reads other repositories freely; its file edits there are limited to DiffGuide worktrees, one Claude run at a time per worktree.
+
+## Settings
+
+| Setting | Effect |
+| --- | --- |
+| `diffGuide.claudePath` | Choose your Claude executable when multiple installations exist. |
+| `diffGuide.nodePath` | Choose the Node.js 20+ executable used by the integration. |
+| `diffGuide.transport` | `hooks` is the default. `channels` is an experimental alternative with additional prerequisites. |
+
 ## Preview status
 
 This is an early preview. Local review and PR review share one review page; its colors follow your VS Code theme. Current checks and remaining authenticated integration work are recorded in the [review findings](REVIEW.md). The demo uses simulated responses.
@@ -135,6 +155,14 @@ The [daily-workflow audit](https://github.com/flucas96/local-review/issues/4) tr
 - Submitted comments persist. Unsent comment text stays on the review page until it closes.
 - Local review needs the workspace folder to be a Git repository's top folder.
 - Delivery is at least once. Event IDs reduce duplicate responses; agent side effects cannot be guaranteed exactly once after a crash.
+
+Planned:
+
+- Open VSX publication
+- Linux and Windows verification
+- GitLab merge requests
+- Coding agents besides Claude Code
+- Reviewing changes from any source
 
 ## Contribute
 
