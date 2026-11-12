@@ -1,6 +1,6 @@
 # Install DiffGuide
 
-DiffGuide is distributed as a VSIX preview. A Marketplace listing is not available yet.
+DiffGuide is a preview on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide). Each [GitHub release](https://github.com/kaiketsu-labs/diffguide/releases) also carries a `.vsix`.
 
 ## Requirements
 
@@ -14,9 +14,8 @@ DiffGuide is distributed as a VSIX preview. A Marketplace listing is not availab
 
 ## Install the extension
 
-1. Open [GitHub Releases](https://github.com/kaiketsu-labs/diffguide/releases) and download the attached `.vsix`. Preview releases may be marked **Pre-release**. If no release is available, a maintainer must first publish one.
-2. In VS Code, open **Extensions**, choose **… → Install from VSIX…**, and select the downloaded file.
-3. Open your local Git repository in a trusted VS Code window.
+1. In VS Code, open **Extensions**, search for **DiffGuide** and choose **Install**. To install a `.vsix` from [GitHub Releases](https://github.com/kaiketsu-labs/diffguide/releases) instead, choose **… → Install from VSIX…**.
+2. Open your local Git repository in a trusted VS Code window.
 
 VS Code also supports `code --install-extension /path/to/diffguide-VERSION.vsix`. See the [official VSIX installation instructions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#packaging-extensions).
 
@@ -66,3 +65,15 @@ Wait for Claude's reply. **Resolve** closes a thread when you accept it and **Re
 Keep **DiffGuide: Transport** set to **hooks** for the default connection. The optional **channels** mode uses Claude's development-channel interface and depends on account availability, organization policy, and startup confirmation. Choose it before connecting a new session.
 
 For unresolved problems, [open an issue](https://github.com/kaiketsu-labs/diffguide/issues/new/choose) with your extension, VS Code, Node, and Claude versions plus reproducible steps. Remove credentials and private code from logs before sharing them.
+
+## Moving from Pair Review
+
+DiffGuide is a new extension with the ID `kaiketsu-labs.diffguide`, so VS Code does not update Pair Review to it.
+
+- Uninstall Pair Review, then install DiffGuide.
+- Settings moved from `pairReview.*` to `diffGuide.*`, and commands from `pairReview.*` to `diffGuide.*`. Rename your settings, keybindings and theme color overrides (`pairReview.selectionBackground`, `pairReview.selectionBorder`) by hand.
+- Side-composer drafts, comment window contrast, pinned and hidden PRs, and seen Claude answers start fresh.
+- Local review threads in plain workspaces start empty.
+- PR worktrees under `.claude/worktrees/pair-review/` move to `.claude/worktrees/diffguide/`, with their threads, the first time you open each PR.
+- DiffGuide updates the handoff comments Pair Review posted on GitHub instead of adding new ones.
+- In Claude, run `/diffguide:connect`. Setup removes the old Pair Review plugin.
