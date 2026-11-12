@@ -19,21 +19,26 @@ DiffGuide is a review page in VS Code for your local changes and your GitHub pul
   <a href="https://github.com/kaiketsu-labs/diffguide/issues">Issues</a>
 </p>
 
-## Features
+## Three ways to review
 
 | | |
 | --- | --- |
-| <img src="docs/media/icons/comment.png" width="36" alt=""> | **Comment at the line.** Click a line on the review page, choose **Ask** to discuss it or **Implement** to change it. The agent replies in the thread; you resolve it. |
-| <img src="docs/media/icons/guide.png" width="36" alt=""> | **Guided PR review.** The agent orders a PR's changes into steps by severity and explains each one. Tick **Viewed** on every step and you have covered the whole PR. |
-| <img src="docs/media/icons/review.png" width="36" alt=""> | **Code review agents.** **Review** runs correctness, design, security, performance and test agents. Findings arrive as threads, and the agent can re-check them against the current code. |
-| <img src="docs/media/icons/pr.png" width="36" alt=""> | **The whole GitHub PR.** Conversation, commits since your last review, checks and the merge box on one page. The agent drafts your replies to GitHub comments. |
+| <img src="docs/media/icons/comment.png" width="36" alt=""> | **Comment at the line.** Click a line and choose **Ask** to discuss it, **Implement** to change it, or **Reply** to draft your GitHub answer. The agent reads the codebase, runs the tests and edits the code for exactly those lines, while you write the next comment. |
+| <img src="docs/media/icons/guide.png" width="36" alt=""> | **Guide.** **Build guide** has the agent order a PR's changes into steps by severity and explain each one. Tick **Viewed** on every step and you have covered the whole PR. |
+| <img src="docs/media/icons/review.png" width="36" alt=""> | **Code review.** **Review** sends correctness, design, security, performance and test agents over the change. Each proves its findings in its own worktree, with a failing test, a trace or a citation, before they open as threads. |
+
+## Around the review
+
+| | |
+| --- | --- |
+| <img src="docs/media/icons/pr.png" width="36" alt=""> | **The whole GitHub PR.** Conversation, commits since your last review, checks and the merge box on one page. |
 | <img src="docs/media/icons/sidebar.png" width="36" alt=""> | **Pull Requests sidebar.** Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The orb marks rows where the agent is working. |
 | <img src="docs/media/icons/linked.png" width="36" alt=""> | **Linked changes.** A PR that needs changes in other repositories lists them, with the branch the agent made and **Push and open draft PR**. |
 
 ## How it works
 
 <p align="center">
-  <img src="docs/media/review-loop.png" alt="The review loop: comment on a line, the agent wakes up, the agent answers in the thread, you resolve or reply to keep going." width="100%">
+  <img src="docs/media/review-loop.png" alt="You comment on lines with Ask, Implement or Reply and keep reviewing. The agent works through each comment in order and answers in its thread. You resolve." width="100%">
 </p>
 
 A small local helper waits for your comment and wakes the agent conversation you connected. The agent does not poll for comments. It answers through review tools that put the reply back in the thread. Threads stay in VS Code's workspace storage. [Architecture →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/HOW-IT-WORKS.md)
