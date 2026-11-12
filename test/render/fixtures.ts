@@ -117,6 +117,50 @@ export const local: OverviewState = {
   analysis: { running: false, stale: false },
 };
 
+const kw = (text: string): string => `<span class="hljs-keyword">${text}</span>`;
+const fn = (text: string): string => `<span class="hljs-title function_">${text}</span>`;
+const num = (text: string): string => `<span class="hljs-number">${text}</span>`;
+const retryFile: FileDiff = {
+  path: 'src/retry.ts', change: 'modified', binary: false, additions: 6, deletions: 1,
+  hunks: [{ header: '@@ -8,8 +8,13 @@', lines: [
+    { kind: 'context', oldLine: 8, newLine: 8, html: `${kw('export')} ${kw('async')} ${kw('function')} ${fn('withRetry')}(operation, attempts) {` },
+    { kind: 'add', newLine: 9, html: `  ${kw('const')} timeout = ${num('5000')};` },
+    { kind: 'context', oldLine: 9, newLine: 10, html: `  ${kw('for')} (${kw('let')} i = ${num('0')}; i &lt; attempts; i++) {` },
+    { kind: 'del', oldLine: 10, html: `    ${kw('return')} ${kw('await')} ${fn('operation')}();` },
+    { kind: 'add', newLine: 11, html: `    ${kw('try')} {` },
+    { kind: 'add', newLine: 12, html: `      ${kw('return')} ${kw('await')} ${fn('withTimeout')}(${fn('operation')}(), timeout);` },
+    { kind: 'add', newLine: 13, html: `    } ${kw('catch')} (error) {` },
+    { kind: 'add', newLine: 14, html: `      ${kw('if')} (!(error ${kw('instanceof')} TimeoutError)) ${kw('throw')} error;` },
+    { kind: 'add', newLine: 15, html: '    }' },
+    { kind: 'context', oldLine: 11, newLine: 16, html: `    ${kw('await')} ${fn('sleep')}(${num('1000')});` },
+    { kind: 'context', oldLine: 12, newLine: 17, html: '  }' },
+    { kind: 'context', oldLine: 13, newLine: 18, html: `  ${kw('throw')} ${kw('new')} ${fn('RetryError')}(attempts);` },
+    { kind: 'context', oldLine: 14, newLine: 19, html: '}' },
+  ] }],
+};
+
+/** The README's "How it works" picture: an answered Ask, an Implement in progress and a new comment, on one local file. */
+export const readme: OverviewState = {
+  ...local, headBranch: 'feat/retry-timeout',
+  claude: { text: 'Feedback on', running: true, retry: false, link: { delivering: true, terminal: true } },
+  threads: [
+    { id: '66666666-6666-6666-6666-666666666666', location: 'src/retry.ts:9', text: 'Read the timeout from settings, not a constant.', status: 'Working',
+      path: 'src/retry.ts', side: 'new', startLine: 9, endLine: 9, resolved: false, title: 'Timeout from settings', working: 'Editing',
+      progress: { startedAt: now - 48_000, steps: [
+        { verb: 'Read', target: 'src/settings.ts', detail: 'Read 64 lines', done: true },
+        { verb: 'Edit', target: 'src/retry.ts', done: true },
+        { verb: 'Bash', target: 'npm test -- retry', done: false },
+      ] },
+      messages: [{ author: 'human', html: '<p>Read the timeout from settings, not a constant.</p>', createdAt: ago(1), intent: 'implement' }] },
+    { id: '77777777-7777-7777-7777-777777777777', location: 'src/retry.ts:12-14', text: 'Does a timeout use up an attempt?', status: 'Answered',
+      path: 'src/retry.ts', side: 'new', startLine: 12, endLine: 14, resolved: false, title: 'Timeout per attempt',
+      messages: [
+        { author: 'human', html: '<p>Does a timeout use up an attempt?</p>', createdAt: ago(4), intent: 'ask' },
+        { author: 'claude', html: '<p>Yes. The <code>catch</code> swallows a <code>TimeoutError</code>, so the loop counts it as a failed attempt. <code>npm test -- retry</code> passes, 12 tests.</p>', createdAt: ago(3) },
+      ] },
+  ],
+};
+
 const filesMessage: ExtensionMessage = { files, selection: { range: { kind: 'all' }, whitespace: false }, atHead: true };
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 
@@ -128,6 +172,9 @@ export const scenes: Readonly<Record<string, Scene>> = {
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
   local: scene(local, [{ shot: 'local.png' }]),
+  readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
+    saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },
+    width: 1100, height: 900, steps: [{ scrollTo: '#files', shot: 'readme.png' }] },
   hover: scene(pullRequest, [
     { scrollTo: '#files', hover: '.nav-thread', wait: 600, shot: 'hover-nav.png' },
     { hover: '#files', wait: 100, shot: 'hover-gone.png' },

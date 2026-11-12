@@ -56,7 +56,7 @@ DiffGuide is a review page in VS Code for your local changes and your GitHub pul
 ## How it works
 
 <p align="center">
-  <img src="docs/media/review-loop.png" alt="You comment on lines with Ask, Implement or Reply and keep reviewing. The agent works through each comment in order and answers in its thread. You resolve." width="100%">
+  <img src="docs/media/how-it-works.png" alt="The DiffGuide review page: the agent works on an Implement comment and shows each step in the thread, an Ask on lines 12 to 14 is answered, and you write the next comment meanwhile." width="100%">
 </p>
 
 A small local helper waits for your comment and wakes the agent conversation you connected. The agent does not poll for comments. It answers through review tools that put the reply back in the thread. Threads stay in VS Code's workspace storage. [Architecture →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/HOW-IT-WORKS.md)
