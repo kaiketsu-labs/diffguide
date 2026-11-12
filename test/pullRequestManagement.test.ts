@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as vscode from 'vscode';
-import { showPullRequestOverview, type OverviewActions, type OverviewState } from '../src/pullRequestOverview.js';
-import type { PullRequestDetails, PullRequestProvider } from '../src/pullRequests.js';
-import { githubPageActions, type PageContext } from '../src/pullRequestPageActions.js';
-import { sharedPerTurn } from '../src/autoSync.js';
+import type { PullRequestDetails, PullRequestProvider } from '../src/core/forge.js';
+import { githubPageActions, type PageContext } from '../src/core/pullRequestPageActions.js';
+import { sharedPerTurn } from '../src/hosts/vscode/autoSync.js';
+import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
+import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
 import { EventEmitter, resetFakeWindow, window } from './fakes/vscode.js';
 
 const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 200)); };
@@ -64,7 +65,7 @@ test('successful management action also reloads authoritative state', async () =
 
 test('partial reviewer writes reach the page as actual remote state, and retry requests only the missing removal', async () => {
   resetFakeWindow();
-  const { saveSelection } = await import('../src/pullRequestEdits.js');
+  const { saveSelection } = await import('../src/core/pullRequestEdits.js');
   const remote = new Set(['alice']);
   let additions = 0; let withdrawals = 0; let fail = true;
   const snapshot = (): PullRequestDetails => ({ ...details, reviewers: [...remote].map((name) => ({ name, state: 'requested' })) });
@@ -72,7 +73,7 @@ test('partial reviewer writes reach the page as actual remote state, and retry r
   const provider = {
     requestReviewers: async (_n: number, value: { users: readonly string[] }) => { additions++; value.users.forEach((u) => remote.add(u)); },
     removeReviewers: async (_n: number, value: { users: readonly string[] }) => { withdrawals++; if (fail) throw new Error('Forbidden'); value.users.forEach((u) => remote.delete(u)); },
-  } as unknown as import('../src/pullRequests.js').PullRequestProvider;
+  } as unknown as import('../src/core/forge.js').PullRequestProvider;
   const changed = new EventEmitter<void>();
   const actions = {
     pick: async (what: 'reviewers', picked: { values: string[]; teams: string[] }) => saveSelection(provider, 7, current, what, picked),

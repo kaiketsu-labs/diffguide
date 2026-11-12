@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ReviewThread } from '../src/contracts.js';
-import { latestAnswers, SeenAnswers } from '../src/claudeAnswers.js';
+import type { ReviewThread } from '../src/core/contracts.js';
+import { latestAnswers, SeenAnswers } from '../src/hosts/vscode/claudeAnswers.js';
 import { FakeMemento } from './fakes/vscode.js';
 
 const anchor = { path: 'src/user.ts', startLine: 12, endLine: 12, selectedText: 'x', contextBefore: '', contextAfter: '', documentHash: 'h', side: 'working', baseRevision: 'HEAD' } as const;

@@ -5,12 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-
-import { mockPullRequestProvider } from '../src/mockPullRequests.js';
-import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { createReviewData, ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/worktrees.js';
-import { cleanUpWorktrees } from '../src/worktreeCleanup.js';
-import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/pullRequestDiff.js';
+import type { PullRequestProvider, PullRequestSummary } from '../src/core/forge.js';
+import { cleanUpWorktrees } from '../src/core/git/worktreeCleanup.js';
+import { createReviewData, ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
+import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
+import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/hosts/vscode/pullRequestDiff.js';
 import { commands, Uri, workspace } from './fakes/vscode.js';
 
 const executeFile = promisify(execFile);

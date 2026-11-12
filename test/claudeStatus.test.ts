@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { backgroundStatus, claudeStatus } from '../src/claudeStatus.js';
+import { backgroundStatus, claudeStatus } from '../src/hosts/vscode/claudeStatus.js';
 
 const idle = { running: false, threads: new Set<string>(), skipped: 0 };
 

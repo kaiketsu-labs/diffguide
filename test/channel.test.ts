@@ -1,16 +1,16 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 import assert from 'node:assert/strict';
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
 import type { TestContext } from 'node:test';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
-import { createReviewBridge } from '../src/bridge.js';
-import { record } from '../src/connection.js';
-import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/contracts.js';
-import { createReviewStore } from '../src/store.js';
+import test from 'node:test';
+import { createReviewBridge } from '../src/agents/claude/bridge.js';
+import { record } from '../src/core/connection.js';
+import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/core/contracts.js';
+import { createReviewStore } from '../src/core/store.js';
 
 interface ChannelFixture {
   readonly store: ReviewStore;

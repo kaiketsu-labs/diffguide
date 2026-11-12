@@ -9,7 +9,7 @@ import { build } from 'esbuild';
 const native = ['orb', 'orbAsleep', 'orbAway', 'mark', 'inbox', 'outbox', 'stack', 'repository', 'bookmark', 'bookmarkFilled', 'search', 'filter', 'filterActive', 'refresh',
   'pullRequest', 'draftPullRequest', 'merge', 'closePullRequest', 'ready', 'requestChanges', 'comment', 'show'];
 
-const bundle = await build({ entryPoints: ['src/icons.ts'], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'warning' });
+const bundle = await build({ entryPoints: ['src/page/icons.ts'], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'warning' });
 const module = { exports: {} };
 new Function('module', 'exports', bundle.outputFiles[0].text)(module, module.exports);
 const { icons } = module.exports;
@@ -21,7 +21,7 @@ const dir = await mkdtemp(join(tmpdir(), 'diffguide-icons-'));
 try {
   for (const name of native) {
     const svg = icons[name];
-    if (svg === undefined) throw new Error(`src/icons.ts has no icon "${name}"`);
+    if (svg === undefined) throw new Error(`src/page/icons.ts has no icon "${name}"`);
     await writeFile(join(dir, `${name}.svg`), svg.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" ').replace(/ (aria-hidden|shape-rendering)="[^"]*"/g, ''));
   }
   const python = spawnSync('uv', ['run', '-q', '--with', 'fonttools==4.68.0', '--with', 'picosvg==0.23.0', 'python', '-I', 'scripts/iconFont.py', dir, join(dir, 'font.woff'), ...native], { stdio: 'inherit' });

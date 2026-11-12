@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { htmlPreview } from '../src/htmlPreview.js';
+import { htmlPreview } from '../src/page/preview/htmlPreview.js';
 
 test('an HTML file gets source lines on each element, a frame marker, and no scripts or inline handlers', () => {
   const { html, marker } = htmlPreview('<!doctype html>\n<html><head><title>T</title></head>\n<body>\n<p onclick="steal()">a\nb</p>\n<script>bad()</script>\n<template><b>x</b></template>\n</body></html>\n');

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
 import type { TestContext } from 'node:test';
-import type { ReviewEvent } from '../src/contracts.js';
-import { createHookDeliveryLedger } from '../src/hookDelivery.js';
+import test from 'node:test';
+import { createHookDeliveryLedger } from '../src/agents/claude/hookDelivery.js';
+import type { ReviewEvent } from '../src/core/contracts.js';
 
 /** Provide isolated session metadata without a network server or review-store mutations. */
 async function fixture(t: TestContext): Promise<{ root: string; connectionPath: string }> {

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { parseReviewUsage, readStoredReview, splitAgentCost, weightedTurn } from '../src/review.js';
+import { parseReviewUsage, readStoredReview, splitAgentCost, weightedTurn } from '../src/core/review.js';
 
 const result = {
   type: 'result',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { blockBrowserShortcutsScript } from '../src/browserShortcuts.js';
+import { blockBrowserShortcutsScript } from '../src/page/browserShortcuts.js';
 
 type Key = { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean };
 

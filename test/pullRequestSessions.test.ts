@@ -3,20 +3,18 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test, { afterEach } from 'node:test';
+import { afterEach } from 'node:test';
+import test from 'node:test';
 import { promisify } from 'node:util';
-import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type * as vscode from 'vscode';
-
-import { pullRequestFileUri } from '../src/pullRequestDiff.js';
-import type { PullRequestComment, PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { readPublications } from '../src/pullRequestComments.js';
-import { PullRequestSessions } from '../src/pullRequestSessions.js';
-import { anchorFromText } from '../src/anchors.js';
-import { ensureWorktree, readPullRequestBase, reviewDataPath } from '../src/worktrees.js';
-import {
-  commands, extensionContext, resetFakeEditor, resetFakeWindow, Uri, window,
-} from './fakes/vscode.js';
+import { anchorFromText } from '../src/core/anchors.js';
+import type { PullRequestComment, PullRequestProvider, PullRequestSummary } from '../src/core/forge.js';
+import { ensureWorktree, readPullRequestBase, reviewDataPath } from '../src/core/git/worktrees.js';
+import { readPublications } from '../src/core/pullRequestComments.js';
+import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
+import { pullRequestFileUri } from '../src/hosts/vscode/pullRequestDiff.js';
+import { PullRequestSessions } from '../src/hosts/vscode/pullRequestSessions.js';
+import { commands, extensionContext, resetFakeEditor, resetFakeWindow, Uri, window } from './fakes/vscode.js';
 
 const executeFile = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];

@@ -3,10 +3,10 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-
-import { diffRanges, draftReplyTask, githubFeedbackRequest, githubReplyTask, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/pullRequestComments.js';
-import { buildOverviewState, overviewHtml } from '../src/pullRequestOverview.js';
-import type { PullRequestSession } from '../src/pullRequestSessions.js';
+import { diffRanges, draftReplyTask, githubFeedbackRequest, githubReplyTask, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/core/pullRequestComments.js';
+import type { PullRequestSession } from '../src/hosts/vscode/pullRequestSessions.js';
+import { overviewHtml } from '../src/page/html.js';
+import { buildOverviewState } from '../src/page/overviewState.js';
 
 test('reads the lines each side of a diff shows, so comments outside it go on the whole file', () => {
   const diff = '@@ -1,3 +1,4 @@\n a\n+b\n@@ -20 +21,0 @@\n-c\n@@ -40,2 +41,6 @@\n';

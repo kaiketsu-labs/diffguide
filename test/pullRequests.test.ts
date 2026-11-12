@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mockPullRequestProvider } from '../src/mockPullRequests.js';
 import type * as vscode from 'vscode';
-
-import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, remoteNameFor } from '../src/pullRequests.js';
-import { GitHubSignInRequired, errorDetail, githubEndpoints } from '../src/githubApi.js';
-import type { PullRequestProvider, PullRequestSummary } from '../src/pullRequests.js';
-import { fileTree, type FileFolder } from '../src/fileTree.js';
-import { registerPullRequestView } from '../src/pullRequestView.js';
-import { groupSearchResults, parseGitRemote, parsePullRequestLink, pickGitHubRemote } from '../src/pullRequests.js';
-import type { PullRequestWorktrees } from '../src/pullRequestView.js';
-import { DataTransfer, EventEmitter, FakeMemento, commands, env, settle, window } from './fakes/vscode.js';
+import { type FileFolder, fileTree } from '../src/core/fileTree.js';
+import type { PullRequestProvider, PullRequestSummary } from '../src/core/forge.js';
+import { errorDetail, githubEndpoints, GitHubSignInRequired } from '../src/forges/github/githubApi.js';
+import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads } from '../src/forges/github/parse.js';
+import { groupSearchResults, remoteNameFor } from '../src/forges/github/provider.js';
+import { parseGitRemote, parsePullRequestLink, pickGitHubRemote } from '../src/forges/github/remotes.js';
+import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
+import { type PullRequestWorktrees, registerPullRequestView } from '../src/hosts/vscode/pullRequestView.js';
+import { commands, DataTransfer, env, EventEmitter, FakeMemento, settle, window } from './fakes/vscode.js';
 
 const ghEntry = {
   author: { id: 'MDQ', is_bot: false, login: 'octo', name: 'Octo' },

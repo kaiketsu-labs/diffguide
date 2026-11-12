@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Checkouts, nestedRepositoryRoots, type Checkout } from '../src/checkouts.js';
-import type { FileReviews } from '../src/reviewedFiles.js';
-import type { PullRequestSessions } from '../src/pullRequestSessions.js';
-import { worktreePath } from '../src/worktrees.js';
+import test from 'node:test';
+import { worktreePath } from '../src/core/git/worktrees.js';
+import type { FileReviews } from '../src/core/reviewedFiles.js';
+import { type Checkout, Checkouts, nestedRepositoryRoots } from '../src/hosts/vscode/checkouts.js';
+import type { PullRequestSessions } from '../src/hosts/vscode/pullRequestSessions.js';
 import { EventEmitter } from './fakes/vscode.js';
 
 /** Checkouts with sessions that only count restores. */

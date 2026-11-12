@@ -4,8 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-
-import { parseUnifiedDiff, readPullRequestDiff, savedCodeDiff, splitHighlightedLines } from '../src/unifiedDiff.js';
+import { parseUnifiedDiff, readPullRequestDiff, savedCodeDiff, splitHighlightedLines } from '../src/core/unifiedDiff.js';
 
 const output = [
   'diff --git a/src/a.ts b/src/a.ts',

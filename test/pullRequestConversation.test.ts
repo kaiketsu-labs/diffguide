@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import * as vscode from 'vscode';
-import { showPullRequestOverview, type OverviewActions, type OverviewState } from '../src/pullRequestOverview.js';
-import { githubPageActions, suggestionEdits, type PageContext } from '../src/pullRequestPageActions.js';
-import { parseConversation, type PullRequestConversation, type PullRequestDetails, type RemoteThread } from '../src/pullRequests.js';
-import { applyLineSuggestions } from '../src/suggestions.js';
-import { generatedPaths, readPullRequestDiff } from '../src/unifiedDiff.js';
+import type { PullRequestConversation, PullRequestDetails, RemoteThread } from '../src/core/forge.js';
+import { githubPageActions, type PageContext, suggestionEdits } from '../src/core/pullRequestPageActions.js';
+import { applyLineSuggestions } from '../src/core/suggestions.js';
+import { generatedPaths, readPullRequestDiff } from '../src/core/unifiedDiff.js';
+import { parseConversation } from '../src/forges/github/parse.js';
+import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
+import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
 import { EventEmitter, resetFakeWindow, window } from './fakes/vscode.js';
 
 const oid = (digit: string): string => digit.repeat(40);

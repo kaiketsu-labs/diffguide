@@ -1,5 +1,5 @@
-import type { ExtensionMessage, OverviewState } from '../../src/pullRequestOverview.js';
-import type { FileDiff, DiffLine } from '../../src/unifiedDiff.js';
+import type { DiffLine, FileDiff } from '../../src/core/unifiedDiff.js';
+import type { ExtensionMessage, OverviewState } from '../../src/page/protocol.js';
 
 /** One render: the page's state and messages, the saved page state, and the steps that take screenshots. */
 export interface Scene {

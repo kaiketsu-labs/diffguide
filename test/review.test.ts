@@ -3,12 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-
-import type { CodeAnchor, Finding } from '../src/contracts.js';
-import { findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/review.js';
-import { ReviewTracker } from '../src/reviewRunner.js';
-import { createReviewStore } from '../src/store.js';
-import { parseUnifiedDiff } from '../src/unifiedDiff.js';
+import type { CodeAnchor, Finding } from '../src/core/contracts.js';
+import { findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/core/review.js';
+import { ReviewTracker } from '../src/core/reviewRunner.js';
+import { createReviewStore } from '../src/core/store.js';
+import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 
 const diff = [
   'diff --git a/src/a.ts b/src/a.ts',

@@ -1,17 +1,16 @@
-import type * as vscode from 'vscode';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import test, { afterEach } from 'node:test';
-import type { TestContext } from 'node:test';
+import { afterEach, type TestContext } from 'node:test';
+import test from 'node:test';
 import { promisify } from 'node:util';
-
-import type { ReviewBridge } from '../src/contracts.js';
-import { prepareConnection, registerClaudeLauncher } from '../src/setup.js';
-import { writePrivateJson } from '../src/privateFiles.js';
-import { readSessionBinding } from '../src/sessionBinding.js';
+import type * as vscode from 'vscode';
+import { readSessionBinding } from '../src/agents/claude/sessionBinding.js';
+import type { ReviewBridge } from '../src/core/contracts.js';
+import { writePrivateJson } from '../src/core/privateFiles.js';
+import { prepareConnection, registerClaudeLauncher } from '../src/hosts/vscode/setup.js';
 import { commands, env, FakeTerminal, resetFakeEditor, resetFakeWindow, terminalEvents, window, workspace } from './fakes/vscode.js';
 
 const registrations: vscode.Disposable[] = [];

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { orbLoader, orbLoaderStyles } from '../src/orbLoader.js';
+import { orbLoader, orbLoaderStyles } from '../src/page/orbLoader.js';
 
 test('every orb frame fits inside its animation canvas', () => {
   const { width, height, frames } = orbLoader;

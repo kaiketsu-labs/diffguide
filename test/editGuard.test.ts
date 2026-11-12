@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { editedPaths, editRefusal } from '../src/editGuard.js';
+import { editedPaths, editRefusal } from '../src/agents/claude/editGuard.js';
 
 test('lets Claude edit read-only repositories only inside their DiffGuide worktrees', () => {
   const readOnly = ['/repos/a', '/repos/b'];

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { anchorFromText } from '../src/anchors.js';
-import { applySuggestion, parseSuggestions, suggestionMarkdown, withoutSuggestions } from '../src/suggestions.js';
+import { anchorFromText } from '../src/core/anchors.js';
+import { applySuggestion, parseSuggestions, suggestionMarkdown, withoutSuggestions } from '../src/core/suggestions.js';
 
 const reply = [
   'Two ways to do it.',

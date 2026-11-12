@@ -1,18 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
 import type { TestContext } from 'node:test';
+import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-
-import { createReviewBridge } from '../src/bridge.js';
-import { readBatch } from '../src/connection.js';
-import type { ReviewBatch } from '../src/connection.js';
-import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/contracts.js';
-import { createReviewStore } from '../src/store.js';
+import { createReviewBridge } from '../src/agents/claude/bridge.js';
+import { readBatch, type ReviewBatch } from '../src/core/connection.js';
+import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/core/contracts.js';
+import { createReviewStore } from '../src/core/store.js';
 
 interface HookResult {
   readonly code: number | null;

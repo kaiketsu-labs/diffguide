@@ -3,10 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-
-import type { PullRequestProvider } from '../src/pullRequests.js';
-import { FileReviews, markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../src/reviewedFiles.js';
-import { worktreePath } from '../src/worktrees.js';
+import type { PullRequestProvider } from '../src/core/forge.js';
+import { worktreePath } from '../src/core/git/worktrees.js';
+import { FileReviews, markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../src/core/reviewedFiles.js';
 
 test('keeps a file reviewed until its content changes, and clears it on untick', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'diffguide-reviewed-'));
