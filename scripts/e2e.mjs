@@ -1,4 +1,4 @@
-// Drives the installed extension in a real VS Code: local review page, comment, simulated agent answer, resolve.
+// Drives the installed extension in one real VS Code window through each scenario in turn.
 // Usage: npm run e2e [-- --vsix <file>] [--code <binary>] [--out <dir>] [--keep]
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -20,7 +20,7 @@ const code = option('--code') ?? (process.platform === 'darwin' ? '/Applications
 const cli = join(code, process.platform === 'darwin' ? '../../Resources/app/bin/code' : '../bin/code');
 if (!existsSync(vsix)) throw new Error(`${vsix} is missing. Run npm run package first.`);
 await mkdir(out, { recursive: true });
-await rm(join(out, 'failure.png'), { force: true });
+for (const file of await readdir(out)) if (file.startsWith('failure')) await rm(join(out, file), { force: true });
 
 const root = await mkdtemp(join(tmpdir(), 'diffguide-e2e-'));
 const userData = join(root, 'user-data');
@@ -33,6 +33,10 @@ await writeFile(join(repo, 'src/app.ts'), before.join('\n') + '\n');
 git('init', '-q', '-b', 'main');
 git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.test', 'add', '.');
 git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.test', 'commit', '-q', '-m', 'init');
+// The mock forge checks PRs out on top of origin/main.
+execFileSync('git', ['clone', '-q', '--bare', repo, join(root, 'origin.git')], { stdio: 'pipe' });
+git('remote', 'add', 'origin', join(root, 'origin.git'));
+git('fetch', '-q', 'origin');
 await writeFile(join(repo, 'src/app.ts'), before.map((line, index) => index === 4 ? 'export const value5 = parse(input) ?? 5;' : line).join('\n') + '\n');
 
 const userSettings = process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/Code/User/settings.json') : join(homedir(), '.config/Code/User/settings.json');
@@ -41,7 +45,7 @@ await mkdir(join(userData, 'User'), { recursive: true });
 await writeFile(join(userData, 'User/settings.json'), JSON.stringify({
   'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'workbench.tips.enabled': false,
   'update.mode': 'none', 'extensions.autoUpdate': false, 'telemetry.telemetryLevel': 'off', 'window.restoreWindows': 'none',
-  'chat.disableAIFeatures': true, ...theme ? { 'workbench.colorTheme': theme } : {},
+  'chat.disableAIFeatures': true, 'diffGuide.mockPullRequests': true, ...theme ? { 'workbench.colorTheme': theme } : {},
 }));
 // Only themes that ship with VS Code are available in the throwaway profile; others fall back to the default.
 execFileSync(cli, ['--user-data-dir', userData, '--extensions-dir', extensions, '--install-extension', vsix, '--force'], { stdio: 'pipe' });
@@ -89,63 +93,106 @@ async function fakeAgent(stop) {
 }
 const realRepo = import('node:fs/promises').then(({ realpath }) => realpath(repo));
 
-const steps = [];
-const step = (name) => { steps.push(name); console.log(`- ${name}`); };
-const agent = { done: false };
-let browser;
-let failure;
-try {
-  browser = await until('VS Code to accept a debugger', () => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 60_000);
-  const workbench = await until('the workbench window', async () => browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes('workbench')), 30_000);
-  await workbench.waitForSelector('.monaco-workbench', { timeout: 30_000 });
-  step('VS Code started with the installed VSIX');
-  const agentRun = fakeAgent(agent);
-
+const palette = async (workbench, title) => {
   await workbench.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P');
-  await workbench.keyboard.type('DiffGuide: Review local changes');
+  await workbench.keyboard.type(title);
   await workbench.waitForSelector('.quick-input-list .monaco-list-row', { timeout: 10_000 });
   await workbench.keyboard.press('Enter');
-  const page = await until('the review page', async () => {
-    for (const frame of workbench.frames()) if (await frame.$('#view-files')) return frame;
-    return undefined;
-  }, 30_000);
-  step('Review local changes opened the review page');
+};
+/** The review page frame that shows `selector`, so a page closed by an earlier scenario is skipped. */
+const reviewPage = (workbench, selector) => until('the review page', async () => {
+  for (const frame of workbench.frames()) if (await frame.$('#view-files') && await frame.$(selector)) return frame;
+  return undefined;
+}, 30_000);
 
-  await page.click('#view-files');
-  const line = 'td.num.pick[data-path="src/app.ts"][data-side="new"]';
-  await page.waitForSelector(line, { timeout: 15_000 });
-  const cell = await until('line 5 of src/app.ts', async () => {
-    for (const each of await page.$$(line)) if ((await each.textContent())?.trim() === '5') return each;
-    return undefined;
-  });
-  await cell.click();
-  await page.waitForSelector('textarea[data-draft="composer"]', { timeout: 5_000 });
-  await page.fill('textarea[data-draft="composer"]', 'Why the fallback here?');
-  await page.click('.composer-actions button:has-text("Ask")');
-  step('Commented on src/app.ts:5 and sent it with Ask');
+/** Each scenario starts with no editors open and leaves its own files untouched by the others. */
+const scenarios = [
+  {
+    name: 'local review',
+    async run(workbench, step) {
+      await palette(workbench, 'DiffGuide: Review local changes');
+      const page = await reviewPage(workbench, 'body');
+      step('Review local changes opened the review page');
 
-  await page.waitForSelector('text=Simulated agent:', { timeout: 30_000 });
-  await workbench.screenshot({ path: join(out, 'answered.png') });
-  step('The simulated agent answer appeared in the thread');
+      await page.click('#view-files');
+      const line = 'td.num.pick[data-path="src/app.ts"][data-side="new"]';
+      await page.waitForSelector(line, { timeout: 15_000 });
+      const cell = await until('line 5 of src/app.ts', async () => {
+        for (const each of await page.$$(line)) if ((await each.textContent())?.trim() === '5') return each;
+        return undefined;
+      });
+      await cell.click();
+      await page.waitForSelector('textarea[data-draft="composer"]', { timeout: 5_000 });
+      await page.fill('textarea[data-draft="composer"]', 'Why the fallback here?');
+      await page.click('.composer-actions button:has-text("Ask")');
+      step('Commented on src/app.ts:5 and sent it with Ask');
 
-  await page.click('button:has-text("Resolve")');
-  await page.locator('.state:visible', { hasText: 'Resolved' }).first().waitFor({ timeout: 10_000 });
-  await workbench.screenshot({ path: join(out, 'resolved.png') });
-  step('Resolve marked the thread resolved');
-  agent.done = true;
-  await agentRun;
+      await page.waitForSelector('text=Simulated agent:', { timeout: 30_000 });
+      await workbench.screenshot({ path: join(out, 'local-answered.png') });
+      step('The simulated agent answer appeared in the thread');
+
+      await page.click('button:has-text("Resolve")');
+      await page.locator('.state:visible', { hasText: 'Resolved' }).first().waitFor({ timeout: 10_000 });
+      await workbench.screenshot({ path: join(out, 'local-resolved.png') });
+      step('Resolve marked the thread resolved');
+    },
+  },
+  {
+    name: 'pull request',
+    async run(workbench, step) {
+      await palette(workbench, 'Focus on Pull Requests View');
+      const row = (title) => workbench.locator(`.monaco-list-row[aria-label*="${title}"]`).first();
+      await row('Add pull request sidebar').waitFor({ timeout: 30_000 });
+      await row('Migrate auth to OAuth device flow').waitFor({ timeout: 5_000 });
+      await workbench.screenshot({ path: join(out, 'pr-sidebar.png') });
+      step('The sidebar listed the mock PRs in Mine and Review requested');
+
+      await row('Migrate auth to OAuth device flow').click();
+      const page = await reviewPage(workbench, 'text=Sample pull request');
+      await page.click('#view-files');
+      await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
+      await workbench.screenshot({ path: join(out, 'pr-files.png') });
+      step('Opening #201 checked it out and showed its diff');
+    },
+  },
+];
+
+let browser;
+let workbench;
+const failures = [];
+let passed = 0;
+const agent = { done: false };
+try {
+  browser = await until('VS Code to accept a debugger', () => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 60_000);
+  workbench = await until('the workbench window', async () => browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes('workbench')), 30_000);
+  await workbench.waitForSelector('.monaco-workbench', { timeout: 30_000 });
+  console.log('VS Code started with the installed VSIX');
 } catch (error) {
-  failure = error;
-  const page = browser?.contexts().flatMap((context) => context.pages())[0];
-  await page?.screenshot({ path: join(out, 'failure.png') }).catch(() => undefined);
-} finally {
-  agent.done = true;
-  await browser?.close().catch(() => undefined);
-  app.kill();
-  if (!keep) await rm(root, { recursive: true, force: true }).catch(() => undefined);
+  failures.push({ name: 'startup', step: 'nothing', error });
 }
-if (failure) {
-  console.error(`FAILED after: ${steps.at(-1) ?? 'nothing'}\n${failure.stack ?? failure}\nScreenshot: ${join(out, 'failure.png')}${keep ? `\nProfile and repo kept in ${root}` : ''}`);
+const agentRun = workbench === undefined ? undefined : fakeAgent(agent);
+for (const scenario of workbench === undefined ? [] : scenarios) {
+  console.log(scenario.name);
+  let last = 'nothing';
+  const step = (name) => { last = name; console.log(`  - ${name}`); };
+  try {
+    await scenario.run(workbench, step);
+    passed += 1;
+  } catch (error) {
+    failures.push({ name: scenario.name, step: last, error });
+    await workbench.screenshot({ path: join(out, `failure-${scenario.name.replaceAll(' ', '-')}.png`) }).catch(() => undefined);
+  }
+  await workbench.keyboard.press('Escape').catch(() => undefined);
+  await palette(workbench, 'View: Close All Editors').catch(() => undefined);
+}
+agent.done = true;
+await agentRun;
+await browser?.close().catch(() => undefined);
+app.kill();
+if (!keep) await rm(root, { recursive: true, force: true }).catch(() => undefined);
+for (const { name, step, error } of failures) console.error(`FAILED ${name} after: ${step}\n${error.stack ?? error}`);
+if (failures.length > 0) {
+  console.error(`Screenshots in ${out}${keep ? `\nProfile and repo kept in ${root}` : ''}`);
   if (process.env.E2E_LOG) console.error(appLog.slice(-4000));
   process.exitCode = 1;
-} else console.log(`passed: ${steps.length} steps, screenshots in ${out}`);
+} else console.log(`passed: ${passed} scenarios, screenshots in ${out}`);
