@@ -16,7 +16,7 @@ await build({
 });
 
 await build({
-  entryPoints: { overview: 'src/webview/overview.ts' },
+  entryPoints: { overview: 'src/webview/main.ts' },
   outdir: 'dist',
   bundle: true,
   platform: 'browser',
