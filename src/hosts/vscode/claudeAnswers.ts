@@ -2,7 +2,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { record } from '../../core/connection.js';
 import type { ReviewThread } from '../../core/contracts.js';
-import { ago } from './pullRequestView.js';
+import type { Checkouts } from './checkouts.js';
+import { ago } from './pullRequestItems.js';
 
 /** Claude's latest reply in one local thread of a PR. */
 export interface ClaudeAnswer {
@@ -110,4 +111,18 @@ export class ClaudeAnswersTree implements vscode.TreeDataProvider<ClaudeAnswer>,
   dispose(): void {
     this.#changed.dispose();
   }
+}
+
+/** The Claude answers view over every open PR, with a badge counting the answers not seen yet. */
+export function registerAnswersView(checkouts: Checkouts, seenAnswers: SeenAnswers): vscode.Disposable[] {
+  const allAnswers = (): ClaudeAnswer[] => latestAnswers(checkouts.opened.map(({ session }) => ({ key: session.session.key, number: session.metadata.pullRequest.number, threads: session.session.store.threads })));
+  const answersTree = new ClaudeAnswersTree(allAnswers, seenAnswers);
+  const answersView = vscode.window.createTreeView('diffGuide.answers', { treeDataProvider: answersTree });
+  const showAnswerCount = (): void => {
+    const fresh = allAnswers().filter((answer) => seenAnswers.isNew(answer)).length;
+    answersView.badge = fresh === 0 ? undefined : { value: fresh, tooltip: `${fresh} new ${fresh === 1 ? 'answer' : 'answers'} from Claude` };
+  };
+  const answersChanged = (): void => { answersTree.refresh(); showAnswerCount(); };
+  showAnswerCount();
+  return [answersTree, answersView, checkouts.onDidChangeState(answersChanged), checkouts.onDidChange(answersChanged), seenAnswers.onDidChange(answersChanged)];
 }

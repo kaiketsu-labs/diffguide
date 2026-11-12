@@ -9,15 +9,16 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 | Layer | Holds | May import |
 |---|---|---|
 | `core/` | Domain: review store and contracts, anchors, diffs, review marks, guide model, git and worktrees. `forge.ts` and `agent.ts` define the `Forge` and agent interfaces; `events.ts` and `host.ts` replace VS Code's events and storage. | `core` |
-| `page/` | The review page, host-neutral: `protocol.ts` (both message directions and their validation), `html.ts` (HTML and CSS), `overviewState.ts` (state the page shows), page actions, previews, and `webview/` (the browser script). | `core` |
+| `page/` | The review page, host-neutral: `protocol.ts` (both message directions and their validation), `html.ts` (HTML and CSS), `overviewState.ts` (state the page shows), page actions, previews, `pullRequest/` (the PR page controller) and `webview/` (the browser script). | `core` |
 | `forges/github/` | `Forge` for GitHub: `provider.ts` (`GitHubApiProvider`), `parse.ts` (API responses), `githubApi.ts` (requests; sign-in through the `GitHubHost` port). | `core` |
 | `agents/claude/` | Claude Code: `claudeRunner.ts` (`AgentRunner`), `reviewRunner.ts` (`AgentCodeReview`), `prAnalysisRunner.ts` (`AgentGuideAnalysis`), bridge, channel and hooks. | `core` |
-| `hosts/vscode/` | The VS Code extension: `extension.ts` wires everything, `reviewPanel.ts` hosts the page, sidebars, settings, terminals, and the `GitHubHost` implementation. | everything |
+| `hosts/vscode/` | The VS Code extension: `extension.ts` wires everything, `reviewPanel.ts` hosts the page, `pullRequestPage.ts` gives the PR page controller its `PageHost`, sidebars, settings, terminals, and the `GitHubHost` implementation. | everything |
 
 - New domain logic goes in `core`, new page features in `page`. Code that names GitHub or Claude goes in `forges/github` or `agents/claude`, behind the interface in `core`. Only `hosts/vscode` imports `vscode`.
 - Hosts construct concrete forges and agents (`GitHubApiProvider`, `ClaudeRunner`) and pass them on as `Forge`, `AgentRunner`, `AgentCodeReview` and `AgentGuideAnalysis`. GitLab, other agents and a standalone host each add a folder under their layer.
 - Core types use neutral names (`ChangeRequestSummary`, `AgentActivity`). Wire formats, persisted values and UI copy keep their existing names, such as `'github'` thread sources.
 - `core/unifiedDiff.ts` parses `git diff` into highlighted hunks. `core/anchors.ts` captures and relocates code by content. `core/reviewedFiles.ts` stores Viewed files and read line ranges. `hosts/vscode/localReview.ts` feeds the page in local mode.
+- `page/pullRequest/controller.ts` composes a PR page from `RemoteData` (GitHub reads), `DiffView` (the Files tab), `pageState.ts` and one action group per area (threads, GitHub, suggestions, Claude, worktree, files, linked changes). Anything that needs VS Code goes through `PageHost` in `context.ts`.
 
 ### Page script (`src/page/webview/`)
 

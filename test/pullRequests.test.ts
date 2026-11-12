@@ -8,7 +8,8 @@ import { parseDetails, parsePickerOptions, parsePullRequestFiles, parsePullReque
 import { groupSearchResults, remoteNameFor } from '../src/forges/github/provider.js';
 import { parseGitRemote, parsePullRequestLink, pickGitHubRemote } from '../src/forges/github/remotes.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
-import { type PullRequestWorktrees, registerPullRequestView } from '../src/hosts/vscode/pullRequestView.js';
+import { registerPullRequestView } from '../src/hosts/vscode/pullRequestView.js';
+import type { PullRequestWorktrees } from '../src/hosts/vscode/pullRequestWorktrees.js';
 import { commands, DataTransfer, env, EventEmitter, FakeMemento, settle, window } from './fakes/vscode.js';
 
 const ghEntry = {

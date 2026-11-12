@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PendingWrites, sharedPerTurn } from '../src/hosts/vscode/autoSync.js';
+import { PendingWrites, sharedPerTurn } from '../src/page/pullRequest/githubReads.js';
 
 test('loads requested in one turn share a request, and a later turn sends a new one', async () => {
   let loads = 0;

@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { loadWASM, OnigScanner, OnigString } from 'vscode-oniguruma';
 import { type IGrammar, INITIAL, type IRawTheme, parseRawGrammar, Registry, type StateStack } from 'vscode-textmate';
 import * as vscode from 'vscode';
-import { escapeCode } from '../../core/codePreview.js';
+import { escapeCode, useEditorHighlighter } from '../../core/codePreview.js';
 
 /** Languages and grammars that installed extensions contribute, as VS Code reads them. */
 export interface TextMateContributions {
@@ -242,4 +242,23 @@ export async function editorHighlighter(wasmPath: string): Promise<TextMateHighl
     return new TextMateHighlighter(installedContributions(extensions), { rules: [...rules, ...customizations] }, wasmPath);
   }
   return undefined;
+}
+
+/** Highlight code in the editor's theme, loading it again when the theme, an extension or a color setting changes. */
+export function registerEditorHighlighter(context: vscode.ExtensionContext): vscode.Disposable[] {
+  let themeLoads = 0;
+  const loadHighlighter = (): void => {
+    const load = ++themeLoads;
+    void editorHighlighter(context.asAbsolutePath(path.join('dist', 'onig.wasm'))).catch(() => undefined).then((highlighter) => {
+      if (load === themeLoads) useEditorHighlighter(highlighter);
+    });
+  };
+  loadHighlighter();
+  return [
+    vscode.window.onDidChangeActiveColorTheme(loadHighlighter),
+    vscode.extensions.onDidChange(loadHighlighter),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('editor.tokenColorCustomizations') || event.affectsConfiguration('workbench.colorTheme')) loadHighlighter();
+    }),
+  ];
 }
