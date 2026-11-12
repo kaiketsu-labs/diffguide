@@ -1,11 +1,11 @@
-import type { PullRequestDetails, PullRequestProvider, ReviewerSet } from '../core/forge.js';
+import type { ChangeRequestDetails, Forge, ReviewerSet } from '../core/forge.js';
 import type { PickTarget } from './protocol.js';
 
 /** What the page's picker ended with: logins or label names in `values`, and team slugs in `teams` for reviewers. */
 export interface PickedSelection { readonly values: readonly string[]; readonly teams: readonly string[] }
 
 /** Save a picker's final selection on GitHub, writing only what changed. */
-export async function saveSelection(provider: PullRequestProvider, number: number, details: PullRequestDetails, what: PickTarget, picked: PickedSelection): Promise<void> {
+export async function saveSelection(provider: Forge, number: number, details: ChangeRequestDetails, what: PickTarget, picked: PickedSelection): Promise<void> {
   if (!details.canEdit) throw new Error('You do not have permission to edit this pull request.');
   if (what === 'reviewers') {
     const before = details.reviewers.filter((reviewer) => reviewer.state === 'requested' || reviewer.rerequested === true);

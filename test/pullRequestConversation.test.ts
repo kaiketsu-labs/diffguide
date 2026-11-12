@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import * as vscode from 'vscode';
-import type { PullRequestConversation, PullRequestDetails, RemoteThread } from '../src/core/forge.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, RemoteThread } from '../src/core/forge.js';
 import { applyLineSuggestions } from '../src/core/suggestions.js';
 import { generatedPaths, readPullRequestDiff } from '../src/core/unifiedDiff.js';
 import { parseConversation } from '../src/forges/github/parse.js';
@@ -137,11 +137,11 @@ test('reads one commit\'s changes, hides whitespace changes and marks generated 
   assert.deepEqual([...await generatedPaths(repo, ['src/x.min.js', 'Cargo.lock', 'src/app.ts'])], ['src/x.min.js', 'Cargo.lock']);
 });
 
-const details: PullRequestDetails = {
+const details: ChangeRequestDetails = {
   title: 'PR', body: '', bodyHtml: '', open: true, merged: false, draft: false, canEdit: true, branchDeletable: false, labels: [], assignees: [], reviewers: [],
   mergeable: 'yes', viewerIsAuthor: false, viewerAvatarUrl: '', mergeMethods: ['squash'], checks: [],
 };
-const conversation: PullRequestConversation = {
+const conversation: ChangeRequestConversation = {
   timeline: [
     { kind: 'commit', id: 'PC1', oid: oid('a'), headline: 'One', message: '', author: 'bob', avatarUrl: '', createdAt: '' },
     { kind: 'comment', id: 'IC1', author: 'bob', avatarUrl: '', createdAt: '', bodyHtml: '', body: 'x', canEdit: false, canDelete: false, canHide: false, canReact: true, edited: false, reactions: [] },

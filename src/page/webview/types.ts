@@ -1,6 +1,6 @@
 /** Types shared between page modules. */
-import type { ClaudeStep } from '../../core/agent.js';
-import type { CommentKind, PullRequestDetails } from '../../core/forge.js';
+import type { AgentStep } from '../../core/agent.js';
+import type { ChangeRequestDetails, CommentKind } from '../../core/forge.js';
 import type { DiffSide, GitHubThreadView, OverviewState } from '../protocol.js';
 import type { OrbMotion } from './orb.js';
 
@@ -12,12 +12,12 @@ export interface Composer { path: string; side: DiffSide; start: number; end: nu
 export interface FileComposer { path: string; text: string; target?: 'claude' | 'github' }
 export type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })
   | (GitHubThreadView & { readonly source: 'github' });
-export type ReviewerState = PullRequestDetails['reviewers'][number]['state'];
-export type CheckState = PullRequestDetails['checks'][number]['state'];
+export type ReviewerState = ChangeRequestDetails['reviewers'][number]['state'];
+export type CheckState = ChangeRequestDetails['checks'][number]['state'];
 /** A question that waits for its confirm button in place of what asked it; `redraw` draws that place. */
 export interface Ask { readonly key: string; readonly question: string; readonly label: string; send(): void; redraw(): void }
 
-export type StepPick = (step: ClaudeStep) => readonly [OrbMotion, (number | undefined)?];
+export type StepPick = (step: AgentStep) => readonly [OrbMotion, (number | undefined)?];
 
 /** Where a GitHub comment sits: what kind GitHub calls it, how to redraw it, and where a quote goes. */
 export interface CommentPlace { readonly kind: CommentKind; redraw(): void; quote(text: string): void }

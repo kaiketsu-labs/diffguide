@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PullRequestDetails, PullRequestProvider } from '../src/core/forge.js';
+import type { ChangeRequestDetails, Forge } from '../src/core/forge.js';
 import { reviewerChanges, saveSelection } from '../src/page/pullRequestEdits.js';
 
 test('requests newly picked reviewers and withdraws unpicked requests', () => {
@@ -10,7 +10,7 @@ test('requests newly picked reviewers and withdraws unpicked requests', () => {
   });
 });
 
-const details: PullRequestDetails = {
+const details: ChangeRequestDetails = {
   title: 'Test', body: '', bodyHtml: '', open: true, merged: false, draft: false, canEdit: true,
   branchDeletable: false, labels: [{ name: 'old', color: 'ffffff' }], assignees: ['alice'],
   reviewers: [{ name: 'alice', state: 'requested' }, { name: 'Core', team: 'core', state: 'requested' }],
@@ -23,7 +23,7 @@ function fixture(fail?: string) {
     requestReviewers: async (n: number, value: unknown) => write('add', n, value),
     removeReviewers: async (n: number, value: unknown) => write('remove', n, value),
     editPullRequest: async (n: number, value: unknown) => write('edit', n, value),
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   return { calls, provider };
 }
 const unchanged = { reviewers: { values: ['alice'], teams: ['core'] }, assignees: { values: ['alice'], teams: [] }, labels: { values: ['old'], teams: [] } };
@@ -71,7 +71,7 @@ test('a team with the same display name as a user stays a separate request', asy
   assert.deepEqual(calls, [['add', 7, { users: ['bob'], teams: [] }], ['remove', 7, { users: [], teams: ['core'] }]]);
 });
 test('a re-requested reviewer counts as requested: kept when ticked, withdrawn when unticked', async () => {
-  const reviewed: PullRequestDetails = { ...details, reviewers: [{ name: 'bob', state: 'approved', rerequested: true }] };
+  const reviewed: ChangeRequestDetails = { ...details, reviewers: [{ name: 'bob', state: 'approved', rerequested: true }] };
   const kept = fixture();
   await saveSelection(kept.provider, 7, reviewed, 'reviewers', { values: ['bob'], teams: [] });
   assert.deepEqual(kept.calls, []);

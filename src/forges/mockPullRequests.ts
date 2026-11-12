@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { PullRequestProvider, PullRequestSummary, ReviewVerdict } from '../core/forge.js';
+import type { ChangeRequestSummary, Forge, ReviewVerdict } from '../core/forge.js';
 import { git } from '../core/git/worktrees.js';
 
 const sampleHtmlPath = 'docs/sample-page.html';
@@ -50,7 +50,7 @@ async function checkoutSample(worktree: string): Promise<void> {
 }
 
 /** Build a sample PR whose link points at a placeholder repository. */
-function sample(number: number, title: string, author: string, draft: boolean, headBranch: string, review?: ReviewVerdict): PullRequestSummary {
+function sample(number: number, title: string, author: string, draft: boolean, headBranch: string, review?: ReviewVerdict): ChangeRequestSummary {
   return {
     number, title, url: `https://github.com/mock/sample-repo/pull/${number}`, author, draft, headBranch, baseBranch: 'main', ...(review === undefined ? {} : { review }),
     createdAt: new Date(Date.now() - number * 3_600_000).toISOString(), updatedAt: new Date(Date.now() - number * 60_000).toISOString(),
@@ -59,7 +59,7 @@ function sample(number: number, title: string, author: string, draft: boolean, h
 }
 
 /** Fixed sample data that fills every sidebar section without contacting a code host. */
-export const mockPullRequestProvider: PullRequestProvider = {
+export const mockPullRequestProvider: Forge = {
   crossReferences: async () => [],
   linkedState: async () => undefined,
   pullRequestForBranch: async () => undefined,

@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type Disposable, Emitter } from './events.js';
 import { anchorFromText, locateCodeAnchor } from './anchors.js';
 import { record } from './connection.js';
 import type { CodeAnchor } from './contracts.js';
-import type { PullRequestProvider } from './forge.js';
+import { type Disposable, Emitter } from './events.js';
+import type { Forge } from './forge.js';
 import { isWorkspaceRelativePath, readGitBase } from './git/git.js';
 import { createDataFolder, reviewDataPath, worktreePath } from './git/worktrees.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
@@ -175,7 +175,7 @@ export class FileReviews implements Disposable {
   }
 
   /** Files among `paths` that are reviewed locally or marked Viewed on the code host. */
-  async reviewed(provider: PullRequestProvider, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>> {
+  async reviewed(provider: Forge, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>> {
     const [local, viewed] = await Promise.all([
       readReviewedFiles(this.#folder(repository, number), paths, this.#data(repository, number)),
       this.#viewedOn(provider, repository, number).catch(() => new Set<string>()),
@@ -184,7 +184,7 @@ export class FileReviews implements Disposable {
   }
 
   /** Tick or untick a file here and on the code host. */
-  async set(provider: PullRequestProvider, repository: string, number: number, path: string, reviewed: boolean): Promise<void> {
+  async set(provider: Forge, repository: string, number: number, path: string, reviewed: boolean): Promise<void> {
     await setFileReviewed(this.#folder(repository, number), path, reviewed, this.#data(repository, number));
     const viewed = await this.#viewedOn(provider, repository, number).catch(() => undefined);
     if (reviewed) viewed?.add(path);
@@ -217,7 +217,7 @@ export class FileReviews implements Disposable {
     this.#changed.dispose();
   }
 
-  #viewedOn(provider: PullRequestProvider, repository: string, number: number): Promise<Set<string>> {
+  #viewedOn(provider: Forge, repository: string, number: number): Promise<Set<string>> {
     const key = `${repository}#${number}`;
     let viewed = this.#viewed.get(key);
     if (viewed === undefined) {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type Reviewer, reviewers as allReviewers } from '../../core/contracts.js';
-import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type PullRequestConversation, type ReactionContent, reactionContents, type ReviewEvent } from '../../core/forge.js';
+import { type ChangeRequestConversation, type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type ReactionContent, reactionContents, type ReviewEvent } from '../../core/forge.js';
 import { recheckRequest } from '../../core/review.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
@@ -112,7 +112,7 @@ export async function showPullRequestOverview(
     });
   };
   panels.set(key, { panel, sendFiles: (next) => { reveal = next; sendFiles(); }, detach: () => { release(); disposed.dispose(); return panel; } });
-  const conversation = (): PullRequestConversation | undefined => state.conversation;
+  const conversation = (): ChangeRequestConversation | undefined => state.conversation;
   /** A comment on this page the viewer may change in the way `may` names, found in the conversation or a GitHub thread. */
   const findComment = (id: unknown, may: 'canEdit' | 'canDelete' | 'canHide' | 'canReact'): boolean => typeof id === 'string'
     && ((conversation()?.timeline ?? []).some((item) => item.kind !== 'commit' && item.kind !== 'event' && item.id === id && item[may])

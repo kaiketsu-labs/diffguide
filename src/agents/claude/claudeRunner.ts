@@ -2,10 +2,10 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
-import { type Disposable, Emitter } from '../../core/events.js';
-import type { ClaudeActivity, ClaudeContext, ClaudeLaunch, ClaudeStep, ClaudeTask, ClaudeTaskResult } from '../../core/agent.js';
+import type { AgentActivity, AgentContext, AgentLaunch, AgentRunner, AgentStep, AgentTask, AgentTaskResult } from '../../core/agent.js';
 import { record } from '../../core/connection.js';
 import type { ReviewEvent, ReviewStore } from '../../core/contracts.js';
+import { Emitter } from '../../core/events.js';
 import type { PullRequestRole } from '../../core/git/worktrees.js';
 import { readPrivateJson, writePrivateJson } from '../../core/privateFiles.js';
 import { quotePosix, stopProcess } from '../../core/shell.js';
@@ -49,12 +49,12 @@ const suggestionNote = 'To propose new code for the commented lines without edit
 export const untrustedCheckoutFlags = ['--setting-sources', 'user', '--strict-mcp-config'];
 
 /** One resumable background Claude conversation per PR that answers comments as they are sent. */
-export class ClaudeRunner implements Disposable {
+export class ClaudeRunner implements AgentRunner {
   readonly #changed = new Emitter<void>();
   readonly onDidChange = this.#changed.event;
   readonly #subscription: { dispose(): void };
   readonly #sent = new Set<string>();
-  #activity: ClaudeActivity = { running: false, threads: new Set(), skipped: 0 };
+  #activity: AgentActivity = { running: false, threads: new Set(), skipped: 0 };
   #child: ReturnType<typeof spawnProcess> | undefined;
   #stopping = false;
   #disposed = false;
@@ -67,14 +67,14 @@ export class ClaudeRunner implements Disposable {
   /** Claude's last message in the current or latest run. */
   #reply: string | undefined;
   /** Context size of the saved conversation, read from its session file on first use. */
-  #context: ClaudeContext | undefined;
+  #context: AgentContext | undefined;
 
-  get activity(): ClaudeActivity {
+  get activity(): AgentActivity {
     return this.#activity;
   }
 
   /** The conversation's context size after its latest run, or undefined before its first. */
-  async context(): Promise<ClaudeContext | undefined> {
+  async context(): Promise<AgentContext | undefined> {
     if (this.#context === undefined) this.#context = readContext(await readPrivateJson(this.#sessionPath).catch(() => undefined));
     return this.#context;
   }
@@ -98,7 +98,7 @@ export class ClaudeRunner implements Disposable {
    * Run a task in this PR's conversation; resolves with Claude's error or its last message.
    * On someone else's PR, Git hooks stay off, since the PR's author controls the checkout.
    */
-  async runTask(task: ClaudeTask): Promise<ClaudeTaskResult> {
+  async runTask(task: AgentTask): Promise<AgentTaskResult> {
     if (this.#disposed || this.#child !== undefined || this.#activity.running) throw new Error('Claude is still working on this PR. Try again when it is done.');
     this.#set({ running: true, step: 'Starting', progress: { steps: [], startedAt: Date.now() }, task: task.label, threads: new Set(), skipped: 0, error: undefined, stopped: undefined });
     let error: string | undefined;
@@ -120,7 +120,7 @@ export class ClaudeRunner implements Disposable {
   }
 
   /** How to open this PR's conversation interactively; starts and remembers a new conversation when there is none yet. */
-  async launch(): Promise<ClaudeLaunch> {
+  async launch(): Promise<AgentLaunch> {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const { sessionId, resume } = await this.#session();
     if (!resume) await writePrivateJson(this.#sessionPath, { sessionId });
@@ -167,12 +167,12 @@ export class ClaudeRunner implements Disposable {
     this.#changed.dispose();
   }
 
-  #set(activity: { [K in keyof ClaudeActivity]: ClaudeActivity[K] | undefined }): void {
+  #set(activity: { [K in keyof AgentActivity]: AgentActivity[K] | undefined }): void {
     const { step, progress, task, error, stopped, ...rest } = activity;
     this.#activity = {
       ...rest, ...(step === undefined ? {} : { step }), ...(progress === undefined ? {} : { progress }),
       ...(task === undefined ? {} : { task }), ...(error === undefined ? {} : { error }), ...(stopped === undefined ? {} : { stopped }),
-    } as ClaudeActivity;
+    } as AgentActivity;
     if (!this.#disposed) this.#changed.fire();
   }
 
@@ -255,7 +255,7 @@ export class ClaudeRunner implements Disposable {
   }
 
   /** Start Claude directly, or through the login shell so the user's own `claude` setup applies. On someone else's PR, Git hooks stay off, since the PR's author controls the checkout. */
-  #command(executable: string, shell: string | undefined, args: readonly string[]): ClaudeLaunch {
+  #command(executable: string, shell: string | undefined, args: readonly string[]): AgentLaunch {
     const env = this.options.role === 'reviewer' ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } : {};
     return shell === undefined
       ? { command: executable, args, cwd: this.options.cwd, env }
@@ -359,7 +359,7 @@ function contextWindow(message: StreamMessage): number | undefined {
   return windows.length ? Math.max(...windows) : undefined;
 }
 
-function readContext(saved: unknown): ClaudeContext | undefined {
+function readContext(saved: unknown): AgentContext | undefined {
   const context = typeof saved === 'object' && saved !== null ? (saved as { context?: unknown }).context : undefined;
   if (typeof context !== 'object' || context === null) return undefined;
   const { tokens, window } = context as { tokens?: unknown; window?: unknown };
@@ -470,15 +470,15 @@ const shownSteps = 3;
 
 /** Follows a run's stream: tool calls become steps, Claude's sentences and tool results their details. */
 export class StepLog {
-  #tools: { id: unknown; name: string; input: Record<string, unknown>; step: ClaudeStep }[] = [];
+  #tools: { id: unknown; name: string; input: Record<string, unknown>; step: AgentStep }[] = [];
   /** "Thinking" or "Writing" after the last tool call. */
-  #phase: ClaudeStep | undefined;
+  #phase: AgentStep | undefined;
   #sentence: string | undefined;
 
   constructor(private readonly cwd: string) {}
 
   /** Oldest first, like a transcript: the latest tool calls, then what Claude does now; between calls it is thinking. */
-  get steps(): readonly ClaudeStep[] {
+  get steps(): readonly AgentStep[] {
     const steps = this.#tools.map((tool) => tool.step);
     const now = this.#phase ?? (steps.length > 0 && steps.every((step) => step.done) ? { verb: 'Thinking', done: false } : undefined);
     return (now === undefined ? steps : [...steps, now]).slice(-shownSteps);

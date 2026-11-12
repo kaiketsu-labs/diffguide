@@ -1,5 +1,5 @@
 /** Busy state, the page notice, and the agent's working motion. */
-import type { ClaudeProgress, ClaudeStep } from '../../core/agent.js';
+import type { AgentProgress, AgentStep } from '../../core/agent.js';
 import type { ExtensionMessage, OverviewState, PageMessage } from '../protocol.js';
 import { $, button, checkStates, el, labels, stateIcon } from './dom.js';
 import { orbCanvas, stepMotion } from './orb.js';
@@ -15,7 +15,7 @@ export const elapsed = (since: number, until = Date.now()): string => {
 };
 
 /** A run's orb motion per step: it wakes as the run starts, then follows the step's verb. */
-export const runMotion = (progress: ClaudeProgress): StepPick => (step) =>
+export const runMotion = (progress: AgentProgress): StepPick => (step) =>
   progress.steps.length === 0 ? ['wake', performance.now() - (Date.now() - progress.startedAt)] : [stepMotion(step.verb)];
 
 /** When each thread's current waiting or pickup state began, so its orb plays the change once; threads already in that state when the page opened skip it. */
@@ -31,7 +31,7 @@ export function noteWorking(before: OverviewState | undefined, state: OverviewSt
 }
 
 /** Claude's latest steps like a Claude Code transcript, oldest first: a check on finished ones, the orb, the run's time and `stop` on the current one. */
-export function stepLog(steps: readonly ClaudeStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)], orb = true, phase = 0): HTMLElement {
+export function stepLog(steps: readonly AgentStep[], startedAt?: number, stop?: HTMLElement, pick: StepPick = ({ verb }) => [stepMotion(verb)], orb = true, phase = 0): HTMLElement {
   const log = el('div', 'step-log');
   const shown = steps.length > 0 ? steps : [{ verb: 'Starting', done: false }];
   shown.forEach((step, index) => {

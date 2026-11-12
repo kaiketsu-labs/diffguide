@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { PullRequestProvider } from '../src/core/forge.js';
+import type { Forge } from '../src/core/forge.js';
 import { worktreePath } from '../src/core/git/worktrees.js';
 import { FileReviews, markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../src/core/reviewedFiles.js';
 
@@ -52,7 +52,7 @@ test('merges local ticks with the code host\'s Viewed flags and sends ticks to i
   const provider = {
     viewedFiles: async () => { reads += 1; return new Set(['b.ts']); },
     setViewed: async (_number: number, file: string, viewed: boolean) => { calls.push(`${file}:${viewed}`); },
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const reviews = new FileReviews(storage);
   t.after(() => { reviews.dispose(); });
 

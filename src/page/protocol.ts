@@ -1,7 +1,7 @@
-import type { ClaudeChoice, ClaudeContext, ClaudeConversation, ClaudeProgress } from '../core/agent.js';
+import type { AgentChoice, AgentContext, AgentConversation, AgentProgress } from '../core/agent.js';
 import type { LocalChange, LocalCommit } from '../core/conflicts.js';
 import type { Finding, Reviewer, ReviewIntent, WithdrawnComment } from '../core/contracts.js';
-import type { CommentKind, HideReason, LinkedPullRequestState, MergeMessage, MergeMethod, PickerOptions, PullRequestConversation, PullRequestDetails, ReactionContent, ReviewEvent } from '../core/forge.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, CommentKind, HideReason, LinkedChangeRequestState, MergeMessage, MergeMethod, PickerOptions, ReactionContent, ReviewEvent } from '../core/forge.js';
 import type { Analysis } from '../core/prAnalysis.js';
 import type { ReviewView } from '../core/review.js';
 import type { LineRange, ReadRange } from '../core/reviewedFiles.js';
@@ -58,9 +58,9 @@ export interface OverviewState {
   readonly read: readonly ReadRange[];
   /** Claude's status; `fixingConflicts` is the current step while Claude fixes merge conflicts. */
   readonly claude: {
-    readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string; readonly progress?: ClaudeProgress;
+    readonly text: string; readonly running: boolean; readonly retry: boolean; readonly fixingConflicts?: string; readonly progress?: AgentProgress;
     /** How full the PR's Claude conversation is after its latest run; left out before its first run and on pages whose conversation you connect. */
-    readonly context?: ClaudeContext;
+    readonly context?: AgentContext;
     /** The connected conversation's link, on pages whose comments go to a conversation you connect: whether it receives comments, and whether its review terminal is open. */
     readonly link?: { readonly delivering: boolean; readonly terminal: boolean };
   };
@@ -72,7 +72,7 @@ export interface OverviewState {
     /** What Claude is doing with this thread right now, while it waits for or works on it. */
     readonly working?: string;
     /** Claude's latest steps while it works on this thread. */
-    readonly progress?: ClaudeProgress;
+    readonly progress?: AgentProgress;
     /** The suggestion option written to the worktree from this thread, while the page is open. */
     readonly applied?: AppliedSuggestion;
     /** Commits Claude made while answering this thread, oldest first; `after` is the index of the message they show under, else they show at the end. */
@@ -111,10 +111,10 @@ export interface OverviewState {
   readonly github?: readonly GitHubThreadView[];
   readonly githubError?: string;
   /** Code host state; undefined while loading or when the host could not be reached. */
-  readonly details?: PullRequestDetails;
+  readonly details?: ChangeRequestDetails;
   readonly detailsError?: string;
   /** Timeline, merge box extras and check notes; undefined while loading or when GitHub refused the query. */
-  readonly conversation?: PullRequestConversation;
+  readonly conversation?: ChangeRequestConversation;
   readonly conversationError?: string;
   readonly analysis: AnalysisView;
   /** Missing on pages that cannot run a code review. */
@@ -135,7 +135,7 @@ export interface LinkedChange {
   readonly key: string;
   readonly repository: string;
   readonly sources: readonly ('mention' | 'pin' | 'claude' | 'manual')[];
-  readonly pullRequest?: LinkedPullRequestState;
+  readonly pullRequest?: LinkedChangeRequestState;
   /** The branch Claude's worktree is on, when there is one. */
   readonly branch?: string;
   readonly unpushed: number;
@@ -149,7 +149,7 @@ export interface LinkedChange {
 export interface AnalysisView {
   readonly running: boolean;
   readonly step?: string;
-  readonly progress?: ClaudeProgress;
+  readonly progress?: AgentProgress;
   readonly error?: string;
   readonly result?: Analysis;
   /** The result was made for an older head commit. */
@@ -194,7 +194,7 @@ export interface GitHubMessageView {
   readonly canReact: boolean;
   readonly hidden?: string;
   readonly edited: boolean;
-  readonly reactions: PullRequestConversation['description']['reactions'];
+  readonly reactions: ChangeRequestConversation['description']['reactions'];
   readonly createdAt: string;
   readonly suggestion?: true;
 }
@@ -284,9 +284,9 @@ export interface OverviewActions {
   /** Turn a local review page into the review page of its branch's PR, in the same tab. */
   openPullRequest?(): Promise<void>;
   /** Recent conversations of the page's folder, to resume one; only where you connect Claude yourself. */
-  claudeConversations?(): Promise<readonly ClaudeConversation[]>;
+  claudeConversations?(): Promise<readonly AgentConversation[]>;
   /** Connect Claude as the page's Claude menu chose; returns a notice for the page. */
-  connectClaude?(choice: ClaudeChoice): Promise<string | undefined>;
+  connectClaude?(choice: AgentChoice): Promise<string | undefined>;
   /** Open the PR's Claude conversation in a VS Code terminal. */
   openTerminal(): Promise<void>;
   /** Push the worktree's commits to the PR's branch. */
@@ -444,7 +444,7 @@ export type PageMessage =
   | { readonly action: 'fix-conflicts'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
   | { readonly action: 'picker-options' | 'claude-conversations' }
-  | ({ readonly action: 'connect-claude' } & ClaudeChoice)
+  | ({ readonly action: 'connect-claude' } & AgentChoice)
   | { readonly action: 'copy-connect'; readonly command: 'reload' | 'connect' }
   | ({ readonly action: 'pick'; readonly what: PickTarget } & PickedSelection)
   | { readonly action: 'draft'; readonly draft: boolean };
@@ -491,7 +491,7 @@ export interface ExtensionMessage {
   readonly pickerError?: string;
   readonly branches?: readonly string[];
   readonly branchesError?: string;
-  readonly conversations?: readonly ClaudeConversation[];
+  readonly conversations?: readonly AgentConversation[];
   readonly conversationsError?: string;
   /** A running Claude can now connect itself with `/diffguide:connect`. */
   readonly runningReady?: true;
@@ -517,7 +517,7 @@ export const isOid = (value: unknown): value is string => typeof value === 'stri
 export const isOptionalText = (value: unknown): value is string | undefined => value === undefined || (typeof value === 'string' && value.length <= maximumReviewLength);
 
 /** A Claude menu choice the page sent; a resumed conversation must be a session ID. */
-export function parseClaudeChoice(value: unknown): ClaudeChoice | undefined {
+export function parseClaudeChoice(value: unknown): AgentChoice | undefined {
   const { how, session } = value as Record<string, unknown>;
   if (how === 'show' || how === 'new' || how === 'running' || how === 'copy') return { how };
   if (how !== 'resume') return undefined;

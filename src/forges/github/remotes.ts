@@ -1,4 +1,4 @@
-import type { PullRequestLink } from '../../core/forge.js';
+import type { ChangeRequestLink } from '../../core/forge.js';
 
 /** A repository on a GitHub host, as a git remote names it. */
 export interface GitHubRemote {
@@ -19,7 +19,7 @@ export function parseGitRemote(url: string): GitHubRemote | undefined {
 }
 
 /** Read a PR from a GitHub link such as `https://github.com/owner/name/pull/57/files#discussion_r1`, or from `owner/name#57`. */
-export function parsePullRequestLink(link: string): PullRequestLink | undefined {
+export function parsePullRequestLink(link: string): ChangeRequestLink | undefined {
   const trimmed = link.trim();
   const short = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/u.exec(trimmed);
   const full = short === null ? /^(?:https?:\/\/)?([A-Za-z0-9.-]+)(?::\d+)?\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/u.exec(trimmed) : null;

@@ -2,7 +2,7 @@ import { watch } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { PullRequestSummary } from '../../core/forge.js';
+import type { ChangeRequestSummary } from '../../core/forge.js';
 import { isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { readPullRequestBase, readWorktree, worktreePath } from '../../core/git/worktrees.js';
 
@@ -132,14 +132,14 @@ async function fileSides(folder: string, repository: string, number: number, rel
   };
 }
 
-async function readBase(folder: string, pullRequest: PullRequestSummary): Promise<string> {
+async function readBase(folder: string, pullRequest: ChangeRequestSummary): Promise<string> {
   const base = await readPullRequestBase(folder, pullRequest.baseBranch);
   if (base === undefined) throw new Error(`Could not find where #${pullRequest.number} branched off ${pullRequest.baseBranch}.`);
   return base;
 }
 
 /** Open one PR file in VS Code's own diff editor, or as a plain file when it was added or deleted. */
-export async function openPullRequestFile(storageRoot: string, repository: string, pullRequest: PullRequestSummary, relativePath: string): Promise<void> {
+export async function openPullRequestFile(storageRoot: string, repository: string, pullRequest: ChangeRequestSummary, relativePath: string): Promise<void> {
   const folder = worktreePath(storageRoot, repository, pullRequest.number);
   const { originalUri, modifiedUri } = await fileSides(folder, repository, pullRequest.number, relativePath, await readBase(folder, pullRequest));
   if (originalUri !== undefined && modifiedUri !== undefined) {

@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { pushCommits } from '../core/conflicts.js';
-import type { PullRequestLink, PullRequestProvider, PullRequestSummary, WorkspaceRepository } from '../core/forge.js';
+import type { ChangeRequestLink, ChangeRequestSummary, Forge, WorkspaceRepository } from '../core/forge.js';
 import { git, worktreePath } from '../core/git/worktrees.js';
 import { addedLines, addLink, branchPins, crossReferences, linkedBranchName, linkedWorktreePath, linkKey, type LinkSource, lockWorktree, readStoredLinks, removeLink, writeStoredLinks } from '../core/linkedChanges.js';
 import type { LinkedChange } from './protocol.js';
@@ -8,8 +8,8 @@ import type { LinkedChange } from './protocol.js';
 /** What the Linked changes card needs from the PR whose page shows it. */
 export interface LinkedContext {
   readonly repository: string;
-  readonly pullRequest: PullRequestSummary;
-  readonly provider: PullRequestProvider;
+  readonly pullRequest: ChangeRequestSummary;
+  readonly provider: Forge;
   /** The PR's own worktree, whose diff may pin other repositories' branches. */
   readonly folder: string;
   readonly base: () => Promise<string>;
@@ -18,7 +18,7 @@ export interface LinkedContext {
   /** Open another workspace repository's PR on its own review page. */
   readonly openPage: (repository: string, number: number) => Promise<void>;
   /** Read a PR link the user pasted, in the code host's link format. */
-  readonly parseLink: (link: string) => PullRequestLink | undefined;
+  readonly parseLink: (link: string) => ChangeRequestLink | undefined;
 }
 
 /** A found row before its state is read: the repository, maybe a PR, and why it is linked. */

@@ -8,7 +8,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import type * as vscode from 'vscode';
 import { anchorFromText } from '../src/core/anchors.js';
-import type { PullRequestComment, PullRequestProvider, PullRequestSummary } from '../src/core/forge.js';
+import type { ChangeRequestComment, ChangeRequestSummary, Forge } from '../src/core/forge.js';
 import { ensureWorktree, readPullRequestBase, reviewDataPath } from '../src/core/git/worktrees.js';
 import { readPublications } from '../src/core/pullRequestComments.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
@@ -39,13 +39,13 @@ async function git(root: string, args: readonly string[]): Promise<void> {
   ], { encoding: 'utf8', timeout: 10_000 });
 }
 
-const pullRequest: PullRequestSummary = {
+const pullRequest: ChangeRequestSummary = {
   number: 5, title: 'Add feature', url: 'https://github.com/acme/app/pull/5',
   author: 'octo', draft: false, headBranch: 'feature', baseBranch: 'main',
 };
 
-const published: { number: number; comment: PullRequestComment; pending: boolean }[] = [];
-const provider: PullRequestProvider = {
+const published: { number: number; comment: ChangeRequestComment; pending: boolean }[] = [];
+const provider: Forge = {
   ...mockPullRequestProvider,
   readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
   listMine: async () => [],
@@ -70,7 +70,7 @@ const provider: PullRequestProvider = {
   deleteBranch: async () => { throw new Error('not used'); },
   pickerOptions: async () => { throw new Error('not used'); },
 };
-const connect = async (): Promise<PullRequestProvider> => provider;
+const connect = async (): Promise<Forge> => provider;
 
 /** Source clone with a PR worktree for `feature`, plus a separate local review store. */
 async function fixture(): Promise<{ source: string; storage: string; worktree: string; context: vscode.ExtensionContext }> {

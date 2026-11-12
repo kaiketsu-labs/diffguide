@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import type { PullRequestProvider, PullRequestSummary } from '../src/core/forge.js';
+import type { ChangeRequestSummary, Forge } from '../src/core/forge.js';
 import { cleanUpWorktrees } from '../src/core/git/worktreeCleanup.js';
 import { createReviewData, ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
@@ -22,7 +22,7 @@ async function git(root: string, args: readonly string[]): Promise<void> {
   ], { encoding: 'utf8', timeout: 10_000 });
 }
 
-const pullRequest: PullRequestSummary = {
+const pullRequest: ChangeRequestSummary = {
   number: 5, title: 'Add feature', url: 'https://github.com/acme/app/pull/5',
   author: 'octo', draft: false, headBranch: 'feature', baseBranch: 'main',
 };
@@ -52,7 +52,7 @@ async function fixture(t: { after(callback: () => Promise<void>): void }): Promi
 const detached = async (_number: number, worktree: string): Promise<void> => { await git(worktree, ['switch', '--quiet', '--detach', 'origin/feature']); };
 
 /** Check out the PR branch the way a code host CLI would. */
-const provider = (checkouts: string[]): PullRequestProvider => ({
+const provider = (checkouts: string[]): Forge => ({
   ...mockPullRequestProvider,
   readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
   listMine: async () => [],
@@ -158,7 +158,7 @@ test('cleans up worktrees of finished or unused PRs, but never one holding work'
   const storage = await repositoryStorage(source);
   assert.ok(storage !== undefined);
   const state = new Map([[5, { open: false, merged: true }], [6, { open: true, merged: false }], [7, { open: true, merged: false }], [8, { open: false, merged: false }]]);
-  const host: PullRequestProvider = { ...provider([]), checkout: detached, details: async (number) => ({ ...state.get(number) }) as never };
+  const host: Forge = { ...provider([]), checkout: detached, details: async (number) => ({ ...state.get(number) }) as never };
   for (const number of state.keys()) await ensureWorktree(source, storage, host, 'acme/app', { ...pullRequest, number }, 'author');
   const longAgo = new Date(Date.now() - 30 * 86_400_000);
   await utimes(`${worktreePath(storage, 'acme/app', 7)}.json`, longAgo, longAgo);
@@ -172,7 +172,7 @@ test('cleans up worktrees of finished or unused PRs, but never one holding work'
 
 test('cleans up the worktree when checkout fails', async (t) => {
   const { source, storage } = await fixture(t);
-  const failing: PullRequestProvider = { ...provider([]), checkout: async () => { throw new Error('checkout failed'); } };
+  const failing: Forge = { ...provider([]), checkout: async () => { throw new Error('checkout failed'); } };
 
   await assert.rejects(ensureWorktree(source, storage, failing, 'acme/app', pullRequest, 'author'), /checkout failed/u);
   await assert.rejects(stat(worktreePath(storage, 'acme/app', 5)));

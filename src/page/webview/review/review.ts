@@ -1,5 +1,5 @@
 /** Review cards: findings, live progress, lanes and usage. */
-import type { ClaudeStep } from '../../../core/agent.js';
+import type { AgentStep } from '../../../core/agent.js';
 import { type Finding, type Reviewer, reviewers } from '../../../core/contracts.js';
 import { type DropReason, reviewerInfo, type ReviewLane, type ReviewLaneItem, type ReviewLive, type ReviewStage, reviewStages, type ReviewUsage } from '../../../core/review.js';
 import { icons } from '../../icons.js';
@@ -273,7 +273,7 @@ function laneStatus(lane: ReviewLane, busy: boolean): string {
 /** Offsets each lane's orb so side-by-side orbs don't move in lockstep. */
 const orbPhaseMs = 1370;
 
-function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: readonly ClaudeStep[], since: number | undefined, state: 'active' | 'done' | 'failed' | 'idle', lane?: ReviewLane, phase = 0): HTMLElement {
+function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: readonly AgentStep[], since: number | undefined, state: 'active' | 'done' | 'failed' | 'idle', lane?: ReviewLane, phase = 0): HTMLElement {
   const node = el('div', 'review-lane ' + state);
   const head = el('div', 'lane-head');
   // The running step below carries the orb; the empty icon keeps the lane names aligned.

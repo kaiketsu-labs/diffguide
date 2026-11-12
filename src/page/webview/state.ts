@@ -1,5 +1,5 @@
 /** Page state shared between modules: `prefs` persists with the page, `received` mirrors what the extension sent, `ui` is transient. */
-import type { ClaudeConversation } from '../../core/agent.js';
+import type { AgentConversation } from '../../core/agent.js';
 import type { Reviewer } from '../../core/contracts.js';
 import type { MergeMethod, PickerOptions } from '../../core/forge.js';
 import type { GuideGroup } from '../../core/prAnalysis.js';
@@ -123,7 +123,7 @@ export interface Received {
   guide: GuideGroup[] | undefined;
   /** Which part of the Claude menu shows: the choices, conversations to resume, or the steps that connect a running Claude. */
   connectView: 'choices' | 'resume' | 'preparing' | 'running';
-  conversations: readonly ClaudeConversation[] | string | undefined;
+  conversations: readonly AgentConversation[] | string | undefined;
 }
 export const received: Received = {
   repositoryFiles: [],

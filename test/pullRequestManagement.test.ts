@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as vscode from 'vscode';
-import type { PullRequestDetails, PullRequestProvider } from '../src/core/forge.js';
+import type { ChangeRequestDetails, Forge } from '../src/core/forge.js';
 import { sharedPerTurn } from '../src/hosts/vscode/autoSync.js';
 import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
 import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
@@ -13,7 +13,7 @@ const base: OverviewState = {
   title: 'PR', author: 'alice', headBranch: 'feature', baseBranch: 'main', url: 'https://github.com/acme/app/pull/7',
   viewed: [], read: [], threads: [], claude: { text: '', running: false, retry: false }, analysis: { running: false, stale: false },
 };
-const details: PullRequestDetails = {
+const details: ChangeRequestDetails = {
   title: 'PR', body: '', bodyHtml: '', open: true, merged: false, draft: false, canEdit: true,
   branchDeletable: false, labels: [], assignees: [], reviewers: [], mergeable: 'yes', viewerIsAuthor: false,
   viewerAvatarUrl: '', mergeMethods: [], checks: [],
@@ -68,12 +68,12 @@ test('partial reviewer writes reach the page as actual remote state, and retry r
   const { saveSelection } = await import('../src/page/pullRequestEdits.js');
   const remote = new Set(['alice']);
   let additions = 0; let withdrawals = 0; let fail = true;
-  const snapshot = (): PullRequestDetails => ({ ...details, reviewers: [...remote].map((name) => ({ name, state: 'requested' })) });
+  const snapshot = (): ChangeRequestDetails => ({ ...details, reviewers: [...remote].map((name) => ({ name, state: 'requested' })) });
   let current = snapshot();
   const provider = {
     requestReviewers: async (_n: number, value: { users: readonly string[] }) => { additions++; value.users.forEach((u) => remote.add(u)); },
     removeReviewers: async (_n: number, value: { users: readonly string[] }) => { withdrawals++; if (fail) throw new Error('Forbidden'); value.users.forEach((u) => remote.delete(u)); },
-  } as unknown as import('../src/core/forge.js').PullRequestProvider;
+  } as unknown as import('../src/core/forge.js').Forge;
   const changed = new EventEmitter<void>();
   const actions = {
     pick: async (what: 'reviewers', picked: { values: string[]; teams: string[] }) => saveSelection(provider, 7, current, what, picked),
@@ -175,7 +175,7 @@ test('a page action reads each part of the PR from GitHub once', async () => {
     details: async () => { reads.details++; await wait(); return details; },
     threads: async () => { reads.threads++; await wait(); return []; },
     conversation: async () => { reads.conversation++; await wait(); return {}; },
-  } as unknown as PullRequestProvider;
+  } as unknown as Forge;
   const load = { details: sharedPerTurn(() => provider.details(7)), threads: sharedPerTurn(() => provider.threads(7)), conversation: sharedPerTurn(() => provider.conversation(7)) };
   const reloadAll = (): void => { void load.details(); void load.threads(); void load.conversation(); };
   const actions = {
@@ -240,7 +240,7 @@ test('enables auto-merge only when GitHub offers it, and says why not otherwise'
 test('re-requesting a review reloads the sidebar too, since it lists pending reviewers', async () => {
   const requested: unknown[] = [];
   const reloads: unknown[] = [];
-  const provider = { requestReviewers: async (...args: unknown[]) => { requested.push(args); } } as unknown as PullRequestProvider;
+  const provider = { requestReviewers: async (...args: unknown[]) => { requested.push(args); } } as unknown as Forge;
   await githubPageActions({ provider, number: 7, reload: (listed?: boolean) => { reloads.push(listed); } } as unknown as PageContext).rerequestReview('bob');
   assert.deepEqual(requested, [[7, { users: ['bob'], teams: [] }]]);
   assert.deepEqual(reloads, [true]);

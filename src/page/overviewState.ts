@@ -1,7 +1,7 @@
-import { type ClaudeActivity, type ClaudeContext, type ClaudeProgress, claudeStatus } from '../core/agent.js';
+import { type AgentActivity, type AgentContext, type AgentProgress, agentStatus } from '../core/agent.js';
 import { conflictFixLabel, type WorktreeCommit } from '../core/conflicts.js';
 import type { ReviewIntent, ReviewStore, ReviewThread } from '../core/contracts.js';
-import type { PullRequestConversation, PullRequestDetails, PullRequestSummary, RemoteThread } from '../core/forge.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, ChangeRequestSummary, RemoteThread } from '../core/forge.js';
 import { type Publication, publishableText } from '../core/pullRequestComments.js';
 import type { ReviewView } from '../core/review.js';
 import type { ReadRange } from '../core/reviewedFiles.js';
@@ -50,18 +50,18 @@ export interface OpenedReview {
     publication?(threadId: string): Publication | undefined;
     linkedGitHubThread?(threadId: string): string | undefined;
   };
-  readonly runner: { readonly activity: ClaudeActivity };
+  readonly runner: { readonly activity: AgentActivity };
   readonly commits: (threadId: string) => readonly WorktreeCommit[];
 }
 
 /** Collect a PR's overview from its summary, file progress and review session. */
 export function buildOverviewState(
-  pullRequest: PullRequestSummary, opened: OpenedReview, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
-  details?: PullRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
-  conversation?: PullRequestConversation | Error, claudeContext?: ClaudeContext, review?: ReviewView,
+  pullRequest: ChangeRequestSummary, opened: OpenedReview, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
+  details?: ChangeRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
+  conversation?: ChangeRequestConversation | Error, claudeContext?: AgentContext, review?: ReviewView,
 ): OverviewState {
   const { session, runner } = opened;
-  const claude = claudeStatus(runner.activity);
+  const claude = agentStatus(runner.activity);
   const intents = eventIntents(session.store.events);
   return {
     title: `#${pullRequest.number} ${pullRequest.title}`,
@@ -103,7 +103,7 @@ export function buildOverviewState(
 /** What Claude is doing on a thread, where it was published and the commits Claude made for it, when the session knows. */
 interface ThreadExtras {
   readonly activity?: string;
-  readonly progress?: ClaudeProgress;
+  readonly progress?: AgentProgress;
   /** Whether the current Claude run answers this thread. */
   readonly running?: boolean;
   readonly publication?: Publication;

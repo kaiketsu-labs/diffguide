@@ -1,5 +1,5 @@
 /** Page menus: the picker, toolbar menus, and confirm-in-place questions. */
-import type { PickerOptions, PullRequestDetails } from '../../core/forge.js';
+import type { ChangeRequestDetails, PickerOptions } from '../../core/forge.js';
 import { icons } from '../icons.js';
 import type { PickTarget } from '../protocol.js';
 import { $, button, el, icon, labels } from './dom.js';
@@ -12,7 +12,7 @@ import type { Ask } from './types.js';
 interface PickerItem { readonly key: string; readonly text: string; readonly note?: string; readonly color?: string; readonly description?: string }
 const pickerPlaceholders: Record<PickTarget, string> = { reviewers: 'Filter people and teams', assignees: 'Filter people', labels: 'Filter labels', milestone: 'Filter milestones' };
 
-function pickedKeys(what: PickTarget, details: PullRequestDetails): Set<string> {
+function pickedKeys(what: PickTarget, details: ChangeRequestDetails): Set<string> {
   if (what === 'milestone') return new Set(details.milestone === undefined ? [] : [String(details.milestone.number)]);
   if (what === 'labels') return new Set(details.labels.map((label) => label.name));
   if (what === 'assignees') return new Set(details.assignees);
@@ -20,7 +20,7 @@ function pickedKeys(what: PickTarget, details: PullRequestDetails): Set<string> 
 }
 
 /** The repository's choices plus whatever the PR already has, so current values stay removable. */
-function pickerItems(what: PickTarget, details: PullRequestDetails, options: PickerOptions): PickerItem[] {
+function pickerItems(what: PickTarget, details: ChangeRequestDetails, options: PickerOptions): PickerItem[] {
   if (what === 'milestone') {
     const all = new Map([...details.milestone === undefined ? [] : [details.milestone], ...options.milestones].map((milestone) => [milestone.number, milestone]));
     return [...all.values()].map((milestone) => ({ key: String(milestone.number), text: milestone.title }));

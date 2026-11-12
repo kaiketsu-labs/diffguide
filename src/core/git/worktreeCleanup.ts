@@ -1,11 +1,11 @@
-import type { PullRequestProvider } from '../forge.js';
+import type { Forge } from '../forge.js';
 import { isWorktreeDisposable, listWorktrees, worktreeOpenedAt } from './worktrees.js';
 
 /** What cleanup needs from one checkout. */
 export interface CleanupTarget {
   readonly root: string;
   readonly storageRoot: string;
-  readonly connect: () => Promise<PullRequestProvider>;
+  readonly connect: () => Promise<Forge>;
   /** Close the PR's session and remove its worktree. */
   readonly remove: (repository: string, number: number) => Promise<void>;
 }

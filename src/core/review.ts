@@ -1,4 +1,4 @@
-import type { ClaudeStep } from './agent.js';
+import type { AgentStep } from './agent.js';
 import { type FindingEvidence, type FindingSeverity, type Reviewer, reviewers } from './contracts.js';
 import { lineText } from './prAnalysis.js';
 import correctness from './prompts/correctness.md';
@@ -371,7 +371,7 @@ export interface ReviewLane {
   readonly startedAt: number;
   readonly endedAt?: number;
   readonly failed?: boolean;
-  readonly steps: readonly ClaudeStep[];
+  readonly steps: readonly AgentStep[];
   readonly items?: readonly ReviewLaneItem[];
 }
 
@@ -381,7 +381,7 @@ export interface ReviewLive {
   readonly stage: ReviewStage;
   readonly startedAt: number;
   readonly endedAt?: number;
-  readonly orchestrator: readonly ClaudeStep[];
+  readonly orchestrator: readonly AgentStep[];
   readonly lanes: readonly ReviewLane[];
   readonly usage?: ReviewUsage;
 }

@@ -3,12 +3,12 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from '../../agents/claude/bridge.js';
 import { readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
-import { backgroundStatus, type ClaudeChoice, claudeStatus, type ClaudeTask } from '../../core/agent.js';
+import { type AgentChoice, agentStatus, type AgentTask, backgroundStatus } from '../../core/agent.js';
 import { anchorFromText, fileAnchor, pullRequestAnchor } from '../../core/anchors.js';
 import { prepareHighlighting, useEditorHighlighter } from '../../core/codePreview.js';
 import { commitAndPush, commitFiles, conflictTask, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits } from '../../core/conflicts.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from '../../core/contracts.js';
-import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread, WorkspaceRepository } from '../../core/forge.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, ChangeRequestSummary, ChangeRequestVersion, Forge, RemoteThread, WorkspaceRepository } from '../../core/forge.js';
 import { isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { listLocalCheckouts, type LocalCheckout } from '../../core/git/localCheckouts.js';
 import { cleanUpWorktrees } from '../../core/git/worktreeCleanup.js';
@@ -20,7 +20,6 @@ import { createReviewStore } from '../../core/store.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from '../../core/suggestions.js';
 import { type FileDiff, highlightSource, readPullRequestDiff, savedCodeDiff } from '../../core/unifiedDiff.js';
 import { signInToGitHub, useGitHubHost, watchGitHubSessions } from '../../forges/github/githubApi.js';
-import { vscodeGitHubHost } from './githubHost.js';
 import { GitHubApiProvider } from '../../forges/github/provider.js';
 import { parsePullRequestLink } from '../../forges/github/remotes.js';
 import { mockPullRequestProvider } from '../../forges/mockPullRequests.js';
@@ -37,6 +36,7 @@ import { type Checkout, Checkouts, nestedRepositoryRoots } from './checkouts.js'
 import { type ClaudeAnswer, ClaudeAnswersTree, latestAnswers, SeenAnswers } from './claudeAnswers.js';
 import { DefinitionPeeks } from './definitions.js';
 import { readFileIcons } from './fileIcons.js';
+import { vscodeGitHubHost } from './githubHost.js';
 import { LocalFilesView } from './localFilesView.js';
 import { type BranchPullRequests, implementThreadRequest, listRepositoryFiles, localClaudeStatus, LocalReview, toDisposable, wholeFile } from './localReview.js';
 import { type LocalSession, LocalSessions } from './localSessions.js';
@@ -86,7 +86,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const checkouts = new Checkouts(root, context.globalStorageUri.fsPath, {
     discover: async () => mockPullRequests() ? [] : await nestedRepositoryRoots(root),
     create: (checkoutRoot, storageRoot) => {
-      const connect = async (): Promise<PullRequestProvider> => mockPullRequests() ? mockPullRequestProvider : await GitHubApiProvider.connect(checkoutRoot);
+      const connect = async (): Promise<Forge> => mockPullRequests() ? mockPullRequestProvider : await GitHubApiProvider.connect(checkoutRoot);
       return { root: checkoutRoot, storageRoot, connect, sessions: new PullRequestSessions(context, storageRoot, checkoutRoot, connect, {}, workspaceRepositories), fileReviews: new FileReviews(storageRoot) };
     },
     onRestoreError: (error) => {
@@ -120,7 +120,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
      * Show a PR's review page. `onCheckout` opens your own PR on that checkout instead of a worktree, in its local page's tab:
      * its comments stay in the checkout's review and reach the conversation you connected there, and the checkout never moves on its own.
      */
-    const showOverview = async (checkout: Checkout, provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole, reveal?: OverviewReveal, onCheckout?: LocalSession): Promise<void> => {
+    const showOverview = async (checkout: Checkout, provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole, reveal?: OverviewReveal, onCheckout?: LocalSession): Promise<void> => {
       const { storageRoot, sessions: pullRequestSessions } = checkout;
       if (onCheckout === undefined) await ensureWorktree(checkout.root, storageRoot, provider, repository, pullRequest, role);
       const opened = onCheckout === undefined ? await pullRequestSessions.open(repository, pullRequest.number)
@@ -141,7 +141,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const definitions = new DefinitionPeeks(folder);
       /** The base branch, which the page can change. */
       let baseBranch = pullRequest.baseBranch;
-      const current = (): PullRequestSummary => ({ ...pullRequest, baseBranch });
+      const current = (): ChangeRequestSummary => ({ ...pullRequest, baseBranch });
       const readBase = async (): Promise<string> => {
         const base = await readPullRequestBase(folder, baseBranch);
         if (base === undefined) throw new Error(`Could not find where #${pullRequest.number} branched off ${baseBranch}.`);
@@ -164,7 +164,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return { anchor, base };
       };
       /** Run a drafting task in the PR's conversation and return Claude's comment. */
-      const runDraft = async (task: ClaudeTask): Promise<string> => {
+      const runDraft = async (task: AgentTask): Promise<string> => {
         const { error, reply } = await opened.runner.runTask(task);
         if (error !== undefined) throw new Error(`Claude could not draft the reply: ${error}`);
         if (reply === undefined) throw new Error('Claude did not write a draft. Try again.');
@@ -172,7 +172,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
       const readHead = async (): Promise<string> => (await git(folder, ['rev-parse', 'HEAD'])).trim();
       /** The PR on GitHub at the last check, so the next one can ask whether it changed. */
-      let version: PullRequestVersion | undefined;
+      let version: ChangeRequestVersion | undefined;
       /** The worktree commit the page's files were last sent for, so a move by Claude's run or a sync shows up. */
       let shownHead: string | undefined;
       /** A commit the diff needs, fetched when a force push left it out of the worktree. */
@@ -233,9 +233,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const detailsChanged = new vscode.EventEmitter<void>();
       /** The user's own changes on GitHub, kept on the page until GitHub's reads catch up with them. */
       const written = new PendingWrites();
-      let details: Promise<PullRequestDetails | Error> | undefined;
+      let details: Promise<ChangeRequestDetails | Error> | undefined;
       const asError = (error: unknown): Error => error instanceof Error ? error : new Error(String(error));
-      const currentDetails = async (): Promise<PullRequestDetails> => {
+      const currentDetails = async (): Promise<ChangeRequestDetails> => {
         const loaded = await (details ?? loadDetails());
         if (loaded instanceof Error) throw loaded;
         return loaded;
@@ -246,19 +246,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void loadConversation();
         void vscode.commands.executeCommand('diffGuide.refreshPullRequests');
       };
-      const loadDetails = sharedPerTurn((): Promise<PullRequestDetails | Error> => {
+      const loadDetails = sharedPerTurn((): Promise<ChangeRequestDetails | Error> => {
         details = provider.details(pullRequest.number).catch(asError);
         void details.then(() => { detailsChanged.fire(); });
         return details;
       });
       let remote: Promise<readonly RemoteThread[] | Error> | undefined;
-      let conversation: Promise<PullRequestConversation | Error> | undefined;
-      const loadConversation = sharedPerTurn((): Promise<PullRequestConversation | Error> => {
+      let conversation: Promise<ChangeRequestConversation | Error> | undefined;
+      const loadConversation = sharedPerTurn((): Promise<ChangeRequestConversation | Error> => {
         conversation = provider.conversation(pullRequest.number).catch(asError);
         void conversation.then(() => { detailsChanged.fire(); });
         return conversation;
       });
-      const currentConversation = async (): Promise<PullRequestConversation> => {
+      const currentConversation = async (): Promise<ChangeRequestConversation> => {
         const loaded = await (conversation ?? loadConversation());
         if (loaded instanceof Error) throw loaded;
         return loaded;
@@ -270,7 +270,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       /** File contents around each suggestion applied without committing, so Discard can put the file back. */
       const undo = new Map<string, { readonly path: string; readonly before: string; readonly after: string }>();
       /** Where to push the PR's branch: `origin`, or the fork's URL when the branch lives in a fork. */
-      const pushTarget = (loaded: PullRequestDetails): string => loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
+      const pushTarget = (loaded: ChangeRequestDetails): string => loaded.headRepository === undefined ? 'origin' : `https://${new URL(pullRequest.url).host}/${loaded.headRepository}.git`;
       const loadThreads = sharedPerTurn((): Promise<readonly RemoteThread[] | Error> => {
         remote = provider.threads(pullRequest.number).catch(asError);
         void remote.then(() => { detailsChanged.fire(); });
@@ -496,7 +496,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         openInEditor: (path) => openPullRequestFile(storageRoot, repository, current(), path),
         ...onCheckout === undefined ? {} : {
           claudeConversations: () => onCheckout.launcher.conversations(),
-          connectClaude: (choice: ClaudeChoice) => onCheckout.launcher.connect(choice),
+          connectClaude: (choice: AgentChoice) => onCheckout.launcher.connect(choice),
         },
         openTerminal: async () => {
           if (onCheckout !== undefined) { await onCheckout.launcher.connect({ how: 'show' }); return; }
@@ -747,7 +747,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         claudeStatus: (repository, number) => {
           const opened = sessions.get(repository, number);
           if (opened === undefined) return undefined;
-          const claude = claudeStatus(opened.runner.activity).text;
+          const claude = agentStatus(opened.runner.activity).text;
           const background = backgroundStatus(opened.analysis.activity.running, opened.review.activity.running);
           return background === undefined ? claude : [claude === 'Claude idle' ? undefined : claude, background].filter(Boolean).join(' · ');
         },
@@ -892,7 +892,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         status.hide();
         return;
       }
-      const current = claudeStatus(focused.runner.activity);
+      const current = agentStatus(focused.runner.activity);
       status.text = `$(${current.icon}) ${focused.session.label} · ${current.text}`;
       status.tooltip = current.retry ? `${focused.runner.activity.error ?? 'Some comments were not picked up.'} Click to send them again.` : `Show what Claude did for ${focused.session.label}`;
       status.show();
@@ -1039,7 +1039,7 @@ function claudeFinished(runner: Pick<PullRequestSession['runner'], 'activity' | 
 
 /** Open a PR's Claude log, and send comments again after a failed or skipped run. */
 function showClaude({ runner, output }: PullRequestSession): void {
-  if (claudeStatus(runner.activity).retry) runner.retry();
+  if (agentStatus(runner.activity).retry) runner.retry();
   output.show(true);
 }
 

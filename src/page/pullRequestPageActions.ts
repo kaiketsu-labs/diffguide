@@ -1,14 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { commitAndPush, commitFiles, fetchPullRequestHead, syncKeepingLocalCommits } from '../core/conflicts.js';
-import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, RemoteThread } from '../core/forge.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, Forge, RemoteThread } from '../core/forge.js';
 import { git } from '../core/git/worktrees.js';
 import { applyLineSuggestions, type LineSuggestion, parseSuggestions } from '../core/suggestions.js';
 import type { OverviewActions, PickedSuggestion } from './protocol.js';
 
 /** What the review page's GitHub actions need from the page that runs them. */
 export interface PageContext {
-  readonly provider: PullRequestProvider;
+  readonly provider: Forge;
   readonly number: number;
   readonly headBranch: string;
   readonly baseBranch: () => string;
@@ -18,11 +18,11 @@ export interface PageContext {
   readonly keepCheckout?: boolean;
   /** Skip Git hooks when committing, for someone else's PR. */
   readonly hooksOff: boolean;
-  details(): Promise<PullRequestDetails>;
-  conversation(): Promise<PullRequestConversation>;
+  details(): Promise<ChangeRequestDetails>;
+  conversation(): Promise<ChangeRequestConversation>;
   /** Read GitHub's review threads again. */
   threads(): Promise<readonly RemoteThread[]>;
-  pushTarget(details: PullRequestDetails): string;
+  pushTarget(details: ChangeRequestDetails): string;
   claudeBusy(): boolean;
   /** Reload the page's GitHub state after a change; `listed` also refreshes the sidebar, for changes it shows. */
   reload(listed?: boolean): void;

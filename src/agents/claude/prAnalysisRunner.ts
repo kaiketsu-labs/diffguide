@@ -2,22 +2,13 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { type Disposable, Emitter } from '../../core/events.js';
-import type { ClaudeProgress } from '../../core/agent.js';
-import type { CodeAnchor, ReviewStore } from '../../core/contracts.js';
-import { type Analysis, analysisPrompt, analysisSchema, type ChangeBlock, changeBlocks, parseClaudeAnalysis, readStoredAnalysis } from '../../core/prAnalysis.js';
+import type { AgentGuideAnalysis, AgentProgress, AnalysisActivity, AnalysisInput } from '../../core/agent.js';
+import type { ReviewStore } from '../../core/contracts.js';
+import { Emitter } from '../../core/events.js';
+import { type Analysis, analysisPrompt, analysisSchema, changeBlocks, parseClaudeAnalysis, readStoredAnalysis } from '../../core/prAnalysis.js';
 import { writePrivateJson } from '../../core/privateFiles.js';
 import { stopProcess } from '../../core/shell.js';
-import type { FileDiff } from '../../core/unifiedDiff.js';
 import { type ClaudeRunnerOptions, contentBlocks, describeTool, parseLine, StepLog, type StreamMessage, untrustedCheckoutFlags } from './claudeRunner.js';
-
-/** What the analysis run is doing right now. */
-export interface AnalysisActivity {
-  readonly running: boolean;
-  readonly step?: string;
-  readonly progress?: ClaudeProgress;
-  readonly error?: string;
-}
 
 export interface AnalysisOptions {
   readonly store: ReviewStore;
@@ -31,16 +22,6 @@ export interface AnalysisOptions {
   readonly instructions?: () => Promise<string>;
 }
 
-/** What one run analyzes. */
-export interface AnalysisInput {
-  readonly files: readonly FileDiff[];
-  readonly head: string;
-  /** Title and branches, for the prompt. */
-  readonly about: string;
-  /** Anchor for a block's lines, to open its note as a thread. */
-  readonly anchor: (block: ChangeBlock) => Promise<CodeAnchor>;
-}
-
 const analysisFile = (dataPath: string): string => join(dataPath, 'analysis.json');
 
 /** The analysis saved in a PR's review data folder, if any. */
@@ -52,7 +33,7 @@ const blockedTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'Web
 const maximumPromptLength = 800_000;
 
 /** A one-shot, read-only Claude run that orders a PR's changes for review; separate from the conversation that answers comments. */
-export class PullRequestAnalysis implements Disposable {
+export class PullRequestAnalysis implements AgentGuideAnalysis {
   readonly #changed = new Emitter<void>();
   readonly onDidChange = this.#changed.event;
   #activity: AnalysisActivity = { running: false };
@@ -171,7 +152,7 @@ export interface StructuredRun {
   readonly stopped: () => boolean;
   readonly onChild: (child: ReturnType<typeof spawnProcess> | undefined) => void;
   readonly onStep: (step: string) => void;
-  readonly onProgress: (progress: ClaudeProgress) => void;
+  readonly onProgress: (progress: AgentProgress) => void;
   /** Every parsed stream message, for callers that track more than the step log. */
   readonly onMessage?: (message: StreamMessage) => void;
 }

@@ -5,11 +5,12 @@ import { createReviewBridge } from '../../agents/claude/bridge.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from '../../agents/claude/claudeRunner.js';
 import { PullRequestAnalysis } from '../../agents/claude/prAnalysisRunner.js';
 import { CodeReview } from '../../agents/claude/reviewRunner.js';
+import type { AgentCodeReview, AgentGuideAnalysis, AgentRunner } from '../../core/agent.js';
 import { catchUpWithPullRequest, commitsSince, discardSince, type WorktreeCommit, worktreeSnapshot } from '../../core/conflicts.js';
 import type { CodeAnchor, LinkedRepositoryHandler, ReviewBridge, ReviewStore } from '../../core/contracts.js';
 import { type InstructionKind, readCustomInstructions } from '../../core/customInstructions.js';
 import { requireNodeRuntime, resolveExecutable } from '../../core/executables.js';
-import type { PullRequestProvider, PullRequestSummary, WorkspaceRepository } from '../../core/forge.js';
+import type { ChangeRequestSummary, Forge, WorkspaceRepository } from '../../core/forge.js';
 import { createDataFolder, createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, type PullRequestWorktree, readPullRequestBase, readWorktree, worktreePath } from '../../core/git/worktrees.js';
 import { addWorked, crossReferences, ensureBranchWorktree, isWorktreeIdle, linkedBranchName, linkedWorktreePath, lockWorktree, readStoredLinks, writeStoredLinks } from '../../core/linkedChanges.js';
 import { type CommentPlacement, placeComment, publishableText, readClaudeCommits, readGitHubLinks, readPublications, writeClaudeCommits, writeGitHubLinks, writePublications } from '../../core/pullRequestComments.js';
@@ -24,11 +25,11 @@ import { prepareConnection } from './setup.js';
 export interface PullRequestSession {
   readonly session: ReviewSession;
   readonly bridge: ReviewBridge;
-  readonly runner: ClaudeRunner;
+  readonly runner: AgentRunner;
   /** Claude's guided-review analysis of the PR. */
-  readonly analysis: PullRequestAnalysis;
+  readonly analysis: AgentGuideAnalysis;
   /** The code review agents' run on the PR. */
-  readonly review: CodeReview;
+  readonly review: AgentCodeReview;
   /** Full log of what Claude did for this PR. */
   readonly output: vscode.OutputChannel;
   /** Commits Claude made while answering a local thread, oldest first. */
@@ -61,7 +62,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     private readonly storageRoot: string,
     private readonly sourceRoot: string,
     /** The code host that published threads go to. */
-    private readonly connect: () => Promise<PullRequestProvider>,
+    private readonly connect: () => Promise<Forge>,
     /** Replaces how Claude is found and started, for tests. */
     private readonly claude: Partial<Pick<ClaudeRunnerOptions, 'resolve' | 'spawn'>> = {},
     /** Other repositories of the workspace by `owner/name`, which Claude reaches only through DiffGuide worktrees. */
@@ -159,7 +160,7 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
    * Open your own PR on a checkout that already has a review, such as the folder you work in.
    * Its comments stay in that review and reach the conversation you connected; the session's own Claude only builds the guide.
    */
-  async openOnCheckout(repository: string, pullRequest: PullRequestSummary, checkout: { readonly root: string; readonly store: ReviewStore; readonly bridge: ReviewBridge; readonly dataPath: string }): Promise<PullRequestSession> {
+  async openOnCheckout(repository: string, pullRequest: ChangeRequestSummary, checkout: { readonly root: string; readonly store: ReviewStore; readonly bridge: ReviewBridge; readonly dataPath: string }): Promise<PullRequestSession> {
     const id = `${key(repository, pullRequest.number)}@${checkout.root}`;
     let pending = this.#onCheckouts.get(id);
     if (pending === undefined) {

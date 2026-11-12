@@ -1,5 +1,5 @@
 /** The Conversation card: timeline entries, commits and the comment form. */
-import type { GitHubComment, TimelineItem } from '../../../core/forge.js';
+import type { ConversationComment, TimelineItem } from '../../../core/forge.js';
 import { icons } from '../../icons.js';
 import type { GitHubMessageView, GitHubThreadView, OverviewState } from '../../protocol.js';
 import { $, agentButton, button, el, icon, personAvatar, stateIcon, type StateShape, timeLabel } from '../dom.js';
@@ -121,7 +121,7 @@ function commentItem(item: Extract<TimelineItem, { kind: 'comment' | 'review' }>
 }
 
 /** A note for the agent under a conversation comment; Ask or Implement opens a local thread about the whole PR that quotes the comment. */
-function commentAskBox(comment: GitHubComment, place: CommentPlace): HTMLElement {
+function commentAskBox(comment: ConversationComment, place: CommentPlace): HTMLElement {
   const key = 'comment-ask:' + comment.id;
   const box = el('div', 'thread draft');
   const head = el('div', 'strip');

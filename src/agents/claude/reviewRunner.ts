@@ -1,24 +1,17 @@
 import type { spawn as spawnProcess } from 'node:child_process';
 import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { type Disposable, Emitter } from '../../core/events.js';
-import type { KeyValueStore } from '../../core/host.js';
-import { type CodeAnchor, type Reviewer, reviewers, type ReviewStore } from '../../core/contracts.js';
+import type { AgentCodeReview, CodeReviewActivity, CodeReviewInput } from '../../core/agent.js';
+import { type Reviewer, reviewers, type ReviewStore } from '../../core/contracts.js';
+import { Emitter } from '../../core/events.js';
 import { excludeFromGit, git } from '../../core/git/worktrees.js';
+import type { KeyValueStore } from '../../core/host.js';
 import { writePrivateJson } from '../../core/privateFiles.js';
 import { type CodeReviewResult, type DroppedCandidate, findingText, handbackItems, parseReviewOutput, parseReviewUsage, readStoredReview, type ReviewAgent, reviewAgents, type ReviewLane, type ReviewLaneItem, type ReviewLive, reviewPrompt, reviewSchema, type ReviewStage, type ReviewUsage, type ReviewView, splitAgentCost, weightedTurn, type WeightedTurn } from '../../core/review.js';
 import { quotePosix, stopProcess } from '../../core/shell.js';
-import type { FileDiff } from '../../core/unifiedDiff.js';
 import { type ClaudeRunnerOptions, contentBlocks, StepLog, type StreamMessage, untrustedCheckoutFlags } from './claudeRunner.js';
 import { worktreeFolder } from './editGuard.js';
 import { runStructuredClaude, type StructuredRun } from './prAnalysisRunner.js';
-
-/** What the code review is doing right now; a failed run keeps its last live state. */
-export interface CodeReviewActivity {
-  readonly running: boolean;
-  readonly live?: ReviewLive;
-  readonly error?: string;
-}
 
 interface AgentCall {
   readonly reviewer: Reviewer;
@@ -136,16 +129,6 @@ export interface CodeReviewOptions {
   readonly spawn?: typeof spawnProcess;
 }
 
-/** What one review covers. */
-export interface CodeReviewInput {
-  readonly files: readonly FileDiff[];
-  /** What is under review, for the prompt. */
-  readonly about: string;
-  readonly reviewers: readonly Reviewer[];
-  /** Anchor for a finding's lines on the new side. */
-  readonly anchor: (range: { readonly path: string; readonly side: 'new'; readonly startLine: number; readonly endLine: number }) => Promise<CodeAnchor>;
-}
-
 // Not review.json: the thread store owns that name in the same folder.
 const reviewFile = (dataPath: string): string => join(dataPath, 'code-review.json');
 const runsFolder = (cwd: string): string => join(cwd, worktreeFolder, 'review');
@@ -191,7 +174,7 @@ async function sweepRuns(cwd: string): Promise<void> {
 }
 
 /** A headless Claude run that has review agents look for defects, prove them in scratch worktrees, and posts the proven ones as threads. */
-export class CodeReview implements Disposable {
+export class CodeReview implements AgentCodeReview {
   readonly #changed = new Emitter<void>();
   readonly onDidChange = this.#changed.event;
   #activity: CodeReviewActivity = { running: false };
@@ -341,7 +324,7 @@ export async function savePicks(state: KeyValueStore, repository: string, picks:
 }
 
 /** The page's view of a code review. */
-export async function reviewView(review: CodeReview, picked: readonly Reviewer[]): Promise<ReviewView> {
+export async function reviewView(review: AgentCodeReview, picked: readonly Reviewer[]): Promise<ReviewView> {
   const result = await review.result();
   const { running, live, error } = review.activity;
   return { running, picked, ...(live === undefined ? {} : { live }), ...(error === undefined ? {} : { error }), ...(result === undefined ? {} : { result }) };

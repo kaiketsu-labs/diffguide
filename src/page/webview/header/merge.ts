@@ -1,5 +1,5 @@
 /** Merge form, merge checklist and branch update menus. */
-import type { MergeMethod, PullRequestConversation, PullRequestDetails } from '../../../core/forge.js';
+import type { ChangeRequestConversation, ChangeRequestDetails, MergeMethod } from '../../../core/forge.js';
 import { isWriter } from '../conversation/comment.js';
 import { $, el, setLabel, stateIcon, type StateShape } from '../dom.js';
 import { closeToolbarMenu, menuRow, openToolbarMenu } from '../menus.js';
@@ -97,7 +97,7 @@ export function openUpdateMenu(): void {
 }
 
 /** GitHub's merge box checklist: reviews, checks and branch protection. */
-export function mergeChecklist(details: PullRequestDetails, conversation: PullRequestConversation): HTMLLIElement[] {
+export function mergeChecklist(details: ChangeRequestDetails, conversation: ChangeRequestConversation): HTMLLIElement[] {
   const rows: HTMLLIElement[] = [];
   const add = (tone: string, shape: StateShape, text: string): void => {
     const row = el('li');

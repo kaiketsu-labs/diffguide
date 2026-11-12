@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { WorktreeCommit } from './conflicts.js';
 import { record } from './connection.js';
 import type { CodeAnchor, ReviewThread } from './contracts.js';
-import type { PullRequestComment } from './forge.js';
+import type { ChangeRequestComment } from './forge.js';
 import { git } from './git/worktrees.js';
 import { readPrivateJson, writePrivateJson } from './privateFiles.js';
 
@@ -19,7 +19,7 @@ export function publishableText(thread: ReviewThread): string {
 }
 
 /** Where a thread lands on the code host, minus the text. */
-export type CommentPlacement = Omit<PullRequestComment, 'body'>;
+export type CommentPlacement = Omit<ChangeRequestComment, 'body'>;
 
 /** Place a thread on the PR diff: on its lines when the diff shows them, else on the whole file, as a whole-file thread always goes. */
 export async function placeComment(worktree: string, base: string, anchor: CodeAnchor): Promise<CommentPlacement> {

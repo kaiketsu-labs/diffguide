@@ -1,6 +1,6 @@
 
 /** Open pull request shown in the sidebar, validated from provider output. */
-export interface PullRequestSummary {
+export interface ChangeRequestSummary {
   readonly number: number;
   readonly title: string;
   readonly url: string;
@@ -37,7 +37,7 @@ export function strongestVerdict(states: readonly string[]): ReviewVerdict | und
 }
 
 /** File changed by a pull request, as the code host reports it. */
-export interface PullRequestFile {
+export interface ChangeRequestFile {
   readonly path: string;
   readonly additions: number;
   readonly deletions: number;
@@ -45,13 +45,13 @@ export interface PullRequestFile {
 }
 
 /** Repository whose pull requests the sidebar lists. */
-export interface PullRequestRepository {
+export interface ForgeRepository {
   readonly name: string;
   readonly url: string;
 }
 
 /** A comment for the PR's diff; without `lines` it applies to the whole file. */
-export interface PullRequestComment {
+export interface ChangeRequestComment {
   readonly path: string;
   readonly body: string;
   readonly commitId: string;
@@ -60,7 +60,7 @@ export interface PullRequestComment {
 }
 
 /** A PR's description, review and CI state, as the overview shows them. */
-export interface PullRequestDetails {
+export interface ChangeRequestDetails {
   /** Description already rendered and sanitized by the code host. */
   readonly bodyHtml: string;
   readonly title: string;
@@ -100,7 +100,7 @@ export const reactionContents: readonly ReactionContent[] = ['THUMBS_UP', 'THUMB
 export interface ReactionCount { readonly content: ReactionContent; readonly count: number; readonly viewerReacted: boolean }
 
 /** A comment anyone wrote on GitHub, with what the viewer may do to it. Bodies come rendered and sanitized by GitHub; `body` is the Markdown for editing and quoting. */
-export interface GitHubComment {
+export interface ConversationComment {
   readonly id: string;
   readonly author: string;
   readonly authorName?: string;
@@ -121,9 +121,9 @@ export interface GitHubComment {
 
 /** One entry of a PR's Conversation tab, oldest first. */
 export type TimelineItem =
-  | (GitHubComment & { readonly kind: 'comment' })
+  | (ConversationComment & { readonly kind: 'comment' })
   /** `comments` holds the IDs of the review's diff comments, which the page shows from their threads. */
-  | (GitHubComment & { readonly kind: 'review'; readonly state: 'approved' | 'changes' | 'commented' | 'dismissed' | 'pending'; readonly commit?: string; readonly comments: readonly string[] })
+  | (ConversationComment & { readonly kind: 'review'; readonly state: 'approved' | 'changes' | 'commented' | 'dismissed' | 'pending'; readonly commit?: string; readonly comments: readonly string[] })
   | { readonly kind: 'commit'; readonly id: string; readonly oid: string; readonly headline: string; readonly message: string; readonly author: string; readonly avatarUrl: string; readonly createdAt: string; readonly checks?: 'success' | 'failure' | 'pending'
     /** Lines added and removed; `files` is missing when GitHub could not count them. */
     readonly additions?: number; readonly deletions?: number; readonly files?: number }
@@ -167,7 +167,7 @@ export interface CommitDefaults {
 }
 
 /** The PR's Conversation tab and merge box extras, read apart from its details so older GitHub servers keep the rest of the page. */
-export interface PullRequestConversation {
+export interface ChangeRequestConversation {
   readonly timeline: readonly TimelineItem[];
   /** The PR's own node, for reacting to its description. */
   readonly description: { readonly id: string; readonly reactions: readonly ReactionCount[]; readonly canReact: boolean };
@@ -201,7 +201,7 @@ export interface RemoteThread {
   readonly url: string;
   /** Still in the viewer's unsubmitted review, so only they see it. */
   readonly pending: boolean;
-  readonly comments: readonly (GitHubComment & { readonly pending: boolean })[];
+  readonly comments: readonly (ConversationComment & { readonly pending: boolean })[];
   /** Set when the thread is about the whole file; its lines are then a placeholder for line 1. */
   readonly scope?: 'file';
   /** The diff hunk the first comment was written on, ending at its last line. */
@@ -223,7 +223,7 @@ export interface PickerOptions {
 export interface ReviewerSet { readonly users: readonly string[]; readonly teams: readonly string[] }
 
 /** Fields to change on a PR; `labels` and `assignees` replace the current lists. */
-export interface PullRequestEdit {
+export interface ChangeRequestEdit {
   readonly title?: string;
   readonly body?: string;
   readonly state?: 'open' | 'closed';
@@ -242,22 +242,22 @@ export type MergeMethod = 'merge' | 'squash' | 'rebase';
 export type HideReason = 'OUTDATED' | 'RESOLVED' | 'DUPLICATE' | 'OFF_TOPIC' | 'LOW_QUALITY' | 'SPAM' | 'ABUSE';
 
 /** Pull request queries and the user's own review actions, implemented once per code host CLI. */
-export interface PullRequestProvider {
-  readRepository(): Promise<PullRequestRepository>;
-  listMine(): Promise<readonly PullRequestSummary[]>;
-  listReviewRequested(): Promise<readonly PullRequestSummary[]>;
-  listFiles(number: number): Promise<readonly PullRequestFile[]>;
+export interface Forge {
+  readRepository(): Promise<ForgeRepository>;
+  listMine(): Promise<readonly ChangeRequestSummary[]>;
+  listReviewRequested(): Promise<readonly ChangeRequestSummary[]>;
+  listFiles(number: number): Promise<readonly ChangeRequestFile[]>;
   /** Check the PR's head branch out into an existing worktree folder. */
   checkout(number: number, worktree: string): Promise<void>;
   /** Files the user marked "Viewed" on the code host. */
   viewedFiles(number: number): Promise<ReadonlySet<string>>;
   setViewed(number: number, path: string, viewed: boolean): Promise<void>;
   /** Post a diff comment, into the user's pending review or right away, and return its link. */
-  publishComment(number: number, comment: PullRequestComment, pending: boolean): Promise<string>;
-  details(number: number): Promise<PullRequestDetails>;
+  publishComment(number: number, comment: ChangeRequestComment, pending: boolean): Promise<string>;
+  details(number: number): Promise<ChangeRequestDetails>;
   threads(number: number): Promise<readonly RemoteThread[]>;
   /** Details and review threads together, in as few requests as the code host allows. */
-  overview(number: number): Promise<{ readonly details: PullRequestDetails; readonly threads: readonly RemoteThread[] }>;
+  overview(number: number): Promise<{ readonly details: ChangeRequestDetails; readonly threads: readonly RemoteThread[] }>;
   /** Post a reply to a code host thread right away, visible to everyone. */
   replyToThread(threadId: string, body: string): Promise<void>;
   resolveThread(threadId: string, resolved: boolean): Promise<void>;
@@ -266,21 +266,21 @@ export interface PullRequestProvider {
   /** Submit the user's review, including comments already in their pending review. */
   submitReview(number: number, event: ReviewEvent, body: string): Promise<void>;
   merge(number: number, method: MergeMethod, message?: MergeMessage): Promise<void>;
-  editPullRequest(number: number, edit: PullRequestEdit): Promise<void>;
+  editPullRequest(number: number, edit: ChangeRequestEdit): Promise<void>;
   setDraft(number: number, draft: boolean): Promise<void>;
   requestReviewers(number: number, reviewers: ReviewerSet): Promise<void>;
   removeReviewers(number: number, reviewers: ReviewerSet): Promise<void>;
   deleteBranch(branch: string): Promise<void>;
   pickerOptions(): Promise<PickerOptions>;
   /** Search this repository's PRs with GitHub search syntax, such as `is:closed` or `assignee:@me`. */
-  search(query: string): Promise<readonly PullRequestSummary[]>;
+  search(query: string): Promise<readonly ChangeRequestSummary[]>;
   /** How many open PRs this repository has, from GitHub search's count without listing them. */
   openCount(): Promise<number>;
   /** The PRs among `numbers` that are still open, read fresh. */
-  openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]>;
+  openPullRequests(numbers: readonly number[]): Promise<readonly ChangeRequestSummary[]>;
   /** One PR in any state, or undefined when the repository has none with that number. */
-  pullRequest(number: number): Promise<PullRequestSummary | undefined>;
-  conversation(number: number): Promise<PullRequestConversation>;
+  pullRequest(number: number): Promise<ChangeRequestSummary | undefined>;
+  conversation(number: number): Promise<ChangeRequestConversation>;
   /** Post a comment on the PR itself, outside any review; resolves with its link. */
   addComment(number: number, body: string): Promise<string>;
   editComment(kind: CommentKind, id: string, body: string): Promise<void>;
@@ -308,21 +308,21 @@ export interface PullRequestProvider {
   /** GitHub's rendering of Markdown in this repository, for previewing a comment. */
   renderMarkdown(text: string): Promise<string>;
   /** The PR's head and last update; returns `known` itself when nothing changed. */
-  version(number: number, known?: PullRequestVersion): Promise<PullRequestVersion>;
+  version(number: number, known?: ChangeRequestVersion): Promise<ChangeRequestVersion>;
   /** The repository's most recent PR update, which moves when any PR is opened, changed or closed; returns `known` itself when nothing changed. */
   listVersion(known?: ListVersion): Promise<ListVersion>;
   /** PRs in other repositories that this PR mentions or that mention it, as `CrossReferencedEvent` nodes with `source` and `target`. */
   crossReferences(number: number): Promise<readonly unknown[]>;
   /** A PR's state for the Linked changes card: open, merged or closed, draft, checks, review decision and pushed head. */
-  linkedState(number: number): Promise<LinkedPullRequestState | undefined>;
+  linkedState(number: number): Promise<LinkedChangeRequestState | undefined>;
   /** An open PR whose head is `branch`, if any. */
-  pullRequestForBranch(branch: string): Promise<PullRequestSummary | undefined>;
+  pullRequestForBranch(branch: string): Promise<ChangeRequestSummary | undefined>;
   /** Open a draft PR from `branch` into the default branch; returns its number and link. */
   createDraft(branch: string, title: string, body: string): Promise<{ readonly number: number; readonly url: string }>;
 }
 
 /** What the Linked changes card shows for another repository's PR. */
-export interface LinkedPullRequestState {
+export interface LinkedChangeRequestState {
   readonly number: number;
   readonly title: string;
   readonly url: string;
@@ -335,14 +335,14 @@ export interface LinkedPullRequestState {
   readonly canPush: boolean;
 }
 
-export interface PullRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string }
+export interface ChangeRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string }
 export interface ListVersion { readonly polled?: Polled; readonly latest: string }
 
 /** A GET answered with its ETag, for asking later whether it changed. */
 export interface Polled { readonly etag: string; readonly data: unknown }
 
 /** A pull request a link names; `host` is absent for the short `owner/name#57` form. */
-export interface PullRequestLink {
+export interface ChangeRequestLink {
   readonly host?: string;
   readonly owner: string;
   readonly name: string;
@@ -353,5 +353,5 @@ export interface PullRequestLink {
 export interface WorkspaceRepository {
   readonly root: string;
   readonly storageRoot: string;
-  readonly connect: () => Promise<PullRequestProvider>;
+  readonly connect: () => Promise<Forge>;
 }

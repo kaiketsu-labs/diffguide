@@ -1,5 +1,5 @@
 /** Page header: PR state, title, description, branch chips and linked changes. */
-import type { PullRequestDetails } from '../../../core/forge.js';
+import type { ChangeRequestDetails } from '../../../core/forge.js';
 import { icons } from '../../icons.js';
 import type { OverviewState, PageMessage } from '../../protocol.js';
 import { $, button, el, icon, timeLabel } from '../dom.js';
@@ -61,7 +61,7 @@ export function editBody(): void {
 }
 
 /** The merge box: merge controls while open, then the PR's state and what you can still do with it. */
-export function renderState(details: PullRequestDetails): void {
+export function renderState(details: ChangeRequestDetails): void {
   const draft = details.open && details.draft;
   $('merge-title').textContent = details.merged ? 'Merged' : !details.open ? 'Closed' : draft ? 'Draft' : 'Merge';
   const conversation = received.current?.conversation;
@@ -118,7 +118,7 @@ export function renderState(details: PullRequestDetails): void {
   $('state-actions').replaceChildren(...ui.asking?.key === 'state' ? [askRow(ui.asking)] : actions);
 }
 
-export function verdict(reviewers: PullRequestDetails['reviewers']): readonly [string, string] {
+export function verdict(reviewers: ChangeRequestDetails['reviewers']): readonly [string, string] {
   for (const key of ['changes', 'approved', 'commented'] as const) {
     const names = reviewers.filter((reviewer) => reviewer.state === key).map((reviewer) => reviewer.name);
     if (names.length) return [verdictText[key][0], verdictText[key][1] + names.join(', ')];

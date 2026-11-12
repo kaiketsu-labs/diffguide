@@ -7,7 +7,7 @@ import { afterEach } from 'node:test';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import type * as vscode from 'vscode';
-import type { ClaudeChoice } from '../src/core/agent.js';
+import type { AgentChoice } from '../src/core/agent.js';
 import { anchorFromText } from '../src/core/anchors.js';
 import type { ReviewBridge, ReviewStore } from '../src/core/contracts.js';
 import { getHeadRevision } from '../src/core/git/git.js';
@@ -51,8 +51,8 @@ const bridge: ReviewBridge = {
 };
 
 /** A launcher that records the page's Claude choices instead of starting Claude. */
-function fakeLauncher(): ClaudeLauncher & { readonly choices: ClaudeChoice[] } {
-  const choices: ClaudeChoice[] = [];
+function fakeLauncher(): ClaudeLauncher & { readonly choices: AgentChoice[] } {
+  const choices: AgentChoice[] = [];
   return {
     choices, hasTerminal: false,
     start: async () => undefined, copyCommand: async () => undefined, connectRunning: async () => undefined,

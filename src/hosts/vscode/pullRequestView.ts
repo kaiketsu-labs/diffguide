@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { LocalChange } from '../../core/conflicts.js';
-import type { ListVersion, PullRequestProvider, PullRequestRepository, PullRequestSummary, ReviewVerdict } from '../../core/forge.js';
+import type { ChangeRequestSummary, Forge, ForgeRepository, ListVersion, ReviewVerdict } from '../../core/forge.js';
 import type { PullRequestRole } from '../../core/git/worktrees.js';
 import { GitHubSignInRequired } from '../../forges/github/githubApi.js';
 import { parsePullRequestLink } from '../../forges/github/remotes.js';
@@ -8,7 +8,7 @@ import { pollWhileFocused } from './autoSync.js';
 import { workingIcon } from './claudeStatus.js';
 
 type Listing =
-  | { readonly kind: 'ready'; readonly folder: string; readonly provider: PullRequestProvider; readonly worktrees: PullRequestWorktrees; readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[]; readonly openCount?: number }
+  | { readonly kind: 'ready'; readonly folder: string; readonly provider: Forge; readonly worktrees: PullRequestWorktrees; readonly repository: ForgeRepository; readonly mine: readonly ChangeRequestSummary[]; readonly reviewRequested: readonly ChangeRequestSummary[]; readonly openCount?: number }
   | { readonly kind: 'failed'; readonly folder: string; readonly message: string; readonly signIn?: GitHubSignInRequired['provider'] };
 
 type Ready = Extract<Listing, { kind: 'ready' }>;
@@ -16,7 +16,7 @@ type Ready = Extract<Listing, { kind: 'ready' }>;
 /** Where a PR row sits, so a PR shown in two places redraws in both. */
 type Placement = 'pinned' | PullRequestRole | 'allOpen';
 
-type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary; readonly pinned?: true; readonly placement?: Placement };
+type PullRequestNode = { readonly kind: 'pullRequest'; readonly listing: Ready; readonly role: PullRequestRole; readonly pullRequest: ChangeRequestSummary; readonly pinned?: true; readonly placement?: Placement };
 
 type RepositoryNode = { readonly kind: 'repository'; readonly listing: Ready; /** Set when grouped by role: the row then holds only that role's PRs. */ readonly role?: PullRequestRole };
 
@@ -41,14 +41,14 @@ const awaitingReviewKey = 'diffGuide.awaitingReviewOnly';
 const pinMime = 'application/vnd.code.tree.diffguide.pullrequests';
 
 /** A PR the user pinned, with its last known summary so it stays listed after it leaves the role searches, such as once reviewed. */
-interface Pin { readonly repository: string; readonly role: PullRequestRole; readonly pullRequest: PullRequestSummary }
+interface Pin { readonly repository: string; readonly role: PullRequestRole; readonly pullRequest: ChangeRequestSummary }
 
 function pinKey(pin: Pin): string {
   return `${pin.repository}#${pin.pullRequest.number}`;
 }
 
 /** A repository's PR lists from the last load, shown at once while fresh ones load. */
-type Snapshot = Readonly<Record<string, { readonly repository: PullRequestRepository; readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[]; readonly openCount?: number }>>;
+type Snapshot = Readonly<Record<string, { readonly repository: ForgeRepository; readonly mine: readonly ChangeRequestSummary[]; readonly reviewRequested: readonly ChangeRequestSummary[]; readonly openCount?: number }>>;
 
 const pullRequestScheme = 'diffguide-pr';
 
@@ -84,18 +84,18 @@ function rowState(local: { readonly commits: number; readonly edited: number }):
 export interface PullRequestWorktrees {
   exists(repository: string, number: number): Promise<boolean>;
   /** Ensure the PR's worktree and open its review page. */
-  open(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole): Promise<void>;
+  open(provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole): Promise<void>;
   remove(repository: string, number: number): Promise<void>;
   /** Show what the PR's Claude did, and send skipped comments again. */
-  showClaude(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole): Promise<void>;
+  showClaude(provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole): Promise<void>;
   /** Claude's state for a PR with an open review, shown beside it. */
   claudeStatus(repository: string, number: number): string | undefined;
   /** Whether Claude answers comments, builds the guide or reviews for a PR with an open review. */
   working(repository: string, number: number): boolean;
   /** Files of a checked-out PR ticked Viewed and unchanged since, or marked Viewed on the code host. */
-  reviewedFiles(provider: PullRequestProvider, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>>;
+  reviewedFiles(provider: Forge, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>>;
   /** Open a tab with the PR's review progress, threads and Claude activity. */
-  showOverview(provider: PullRequestProvider, repository: string, pullRequest: PullRequestSummary, role: PullRequestRole): Promise<void>;
+  showOverview(provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole): Promise<void>;
   /** What a checked-out PR's worktree has that GitHub does not: commits ahead of `pushedHead`, and each changed file. */
   localChanges(repository: string, number: number, pushedHead: string | undefined): Promise<{ readonly commits: number; readonly files: ReadonlyMap<string, LocalChange> }>;
   /** Drop cached code host state so the next read is fresh. */
@@ -106,7 +106,7 @@ export interface PullRequestWorktrees {
 export interface PullRequestCheckout {
   /** Folder named when its PRs cannot be listed. */
   readonly folder: string;
-  connect(): Promise<PullRequestProvider>;
+  connect(): Promise<Forge>;
   readonly worktrees: PullRequestWorktrees;
 }
 
@@ -167,12 +167,12 @@ const roleIcons: Record<PullRequestRole, string> = { author: 'diffguide-outbox',
 const roles: readonly PullRequestRole[] = ['reviewer', 'author'];
 
 /** "alice, team Core" for a PR's pending reviewers. */
-function reviewerNames(pullRequest: PullRequestSummary): string {
+function reviewerNames(pullRequest: ChangeRequestSummary): string {
   return (pullRequest.requestedReviewers ?? []).map((reviewer) => reviewer.team ? `team ${reviewer.name}` : reviewer.name).join(', ');
 }
 
 /** "Direct" or "via Core" for a review request to the viewer, or undefined when unknown. */
-function requestedViaLabel(pullRequest: PullRequestSummary): string | undefined {
+function requestedViaLabel(pullRequest: ChangeRequestSummary): string | undefined {
   if (pullRequest.requestedVia === 'you') return 'Direct';
   if (pullRequest.requestedVia !== 'team') return undefined;
   const teams = (pullRequest.requestedReviewers ?? []).filter((reviewer) => reviewer.team);
@@ -191,7 +191,7 @@ function splitCommitType(title: string): { readonly type?: string; readonly subj
   return match === null ? { subject: title } : { type: match[1] as string, subject: match[2] as string };
 }
 
-function pullRequestsOf(listing: Ready, role: PullRequestRole, author?: string): readonly PullRequestSummary[] {
+function pullRequestsOf(listing: Ready, role: PullRequestRole, author?: string): readonly ChangeRequestSummary[] {
   const all = role === 'author' ? listing.mine : listing.reviewRequested;
   return author === undefined ? all : all.filter((pullRequest) => pullRequest.author === author);
 }
@@ -246,7 +246,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   /** Whether each PR row last showed commits to push, so only a change to that redraws its repository rows. */
   readonly #aheadShown = new Map<string, boolean>();
   /** Each repository's open PRs, loaded once its All open group is expanded. */
-  readonly #allOpen = new Map<string, Promise<readonly PullRequestSummary[]>>();
+  readonly #allOpen = new Map<string, Promise<readonly ChangeRequestSummary[]>>();
   /** Worktree and reviewed state per PR, read once per redraw. */
   readonly #checkedOut = new Map<string, Promise<boolean>>();
   readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
@@ -324,7 +324,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   }
 
   /** A listing's PRs in a role section: those by the chosen author, without the pinned ones; in Mine only those awaiting review while that filter is on. */
-  #sectionOf(listing: Ready, role: PullRequestRole): readonly PullRequestSummary[] {
+  #sectionOf(listing: Ready, role: PullRequestRole): readonly ChangeRequestSummary[] {
     const pinned = new Set(this.#pins.map(pinKey));
     const awaitingOnly = role === 'author' && this.awaitingReviewOnly;
     return pullRequestsOf(listing, role, this.author).filter((pullRequest) => !pinned.has(`${listing.repository.name}#${pullRequest.number}`)
@@ -369,7 +369,7 @@ class PullRequestTree implements vscode.TreeDataProvider<Node> {
   }
 
   /** A repository's open PRs by the chosen author, searched once until refresh. */
-  async #allOpenOf(listing: Ready): Promise<readonly PullRequestSummary[]> {
+  async #allOpenOf(listing: Ready): Promise<readonly ChangeRequestSummary[]> {
     let all = this.#allOpen.get(listing.folder);
     if (all === undefined) {
       all = listing.provider.search('is:open sort:updated-desc');

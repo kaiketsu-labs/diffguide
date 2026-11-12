@@ -1,5 +1,5 @@
 import { record } from '../../core/connection.js';
-import { type Annotation, type CheckExtras, type GitHubComment, type Label, type LinkedPullRequestState, type MergeMethod, type MergeState, type Milestone, type PickerOptions, type PullRequestConversation, type PullRequestDetails, type PullRequestFile, type PullRequestSummary, type ReactionContent, reactionContents, type ReactionCount, type RemoteThread, type RepositoryPermission, type RequestedReviewer, strongestVerdict, type TimelineItem } from '../../core/forge.js';
+import { type Annotation, type ChangeRequestConversation, type ChangeRequestDetails, type ChangeRequestFile, type ChangeRequestSummary, type CheckExtras, type ConversationComment, type Label, type LinkedChangeRequestState, type MergeMethod, type MergeState, type Milestone, type PickerOptions, type ReactionContent, reactionContents, type ReactionCount, type RemoteThread, type RepositoryPermission, type RequestedReviewer, strongestVerdict, type TimelineItem } from '../../core/forge.js';
 
 /** A search or repository PR node in the shape `parsePullRequestList` reads. */
 export function searchNode(node: unknown): Record<string, unknown> {
@@ -8,7 +8,7 @@ export function searchNode(node: unknown): Record<string, unknown> {
 }
 
 /** Validate a PR list from a GitHub search, rejecting the whole response on any malformed entry. */
-export function parsePullRequestList(value: unknown): readonly PullRequestSummary[] {
+export function parsePullRequestList(value: unknown): readonly ChangeRequestSummary[] {
   if (!Array.isArray(value)) throw new Error('GitHub returned an invalid PR list.');
   return (value as readonly unknown[]).map((entry) => {
     const record = object(entry);
@@ -54,12 +54,12 @@ function requestedReviewersOf(value: unknown): readonly RequestedReviewer[] {
   });
 }
 
-const changeTypes: Record<string, PullRequestFile['change']> = {
+const changeTypes: Record<string, ChangeRequestFile['change']> = {
   ADDED: 'added', MODIFIED: 'modified', DELETED: 'deleted', RENAMED: 'renamed', CHANGED: 'modified', COPIED: 'added',
 };
 
 /** Validate a PR's changed files, rejecting paths that leave the repository. */
-export function parsePullRequestFiles(value: unknown): readonly PullRequestFile[] {
+export function parsePullRequestFiles(value: unknown): readonly ChangeRequestFile[] {
   const files = object(value)['files'];
   if (!Array.isArray(files)) throw new Error('GitHub returned an invalid file list.');
   return (files as readonly unknown[]).map((entry) => {
@@ -76,12 +76,12 @@ export function parsePullRequestFiles(value: unknown): readonly PullRequestFile[
   });
 }
 
-const reviewStates: Record<string, PullRequestDetails['reviewers'][number]['state']> = {
+const reviewStates: Record<string, ChangeRequestDetails['reviewers'][number]['state']> = {
   APPROVED: 'approved', CHANGES_REQUESTED: 'changes', COMMENTED: 'commented', DISMISSED: 'dismissed',
 };
 
 /** Map a check run conclusion or commit status to one of four states. */
-function checkState(raw: unknown): PullRequestDetails['checks'][number]['state'] {
+function checkState(raw: unknown): ChangeRequestDetails['checks'][number]['state'] {
   const value = String(raw);
   if (value === 'SUCCESS') return 'success';
   if (['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(value)) return 'failure';
@@ -90,10 +90,10 @@ function checkState(raw: unknown): PullRequestDetails['checks'][number]['state']
 }
 
 /** Validate PR details from GraphQL; reviewers without an account and malformed checks are left out. */
-export function parseDetails(repository: Record<string, unknown>, viewer: Record<string, unknown> = {}): PullRequestDetails {
+export function parseDetails(repository: Record<string, unknown>, viewer: Record<string, unknown> = {}): ChangeRequestDetails {
   const pullRequest = object(repository['pullRequest']);
   const methods: readonly [string, MergeMethod][] = [['squashMergeAllowed', 'squash'], ['mergeCommitAllowed', 'merge'], ['rebaseMergeAllowed', 'rebase']];
-  const reviewers: PullRequestDetails['reviewers'][number][] = [];
+  const reviewers: ChangeRequestDetails['reviewers'][number][] = [];
   const author = object(pullRequest['author'] ?? {})['login'];
   // Opinionated reviews leave out comment-only ones, so commenters come from latestReviews; the author's replies in review threads count as reviews there.
   const reviews = [...list(object(pullRequest['latestOpinionatedReviews'])['nodes']), ...list(object(pullRequest['latestReviews'] ?? { nodes: [] })['nodes'])];
@@ -116,7 +116,7 @@ export function parseDetails(repository: Record<string, unknown>, viewer: Record
   }
   const commit = list(object(pullRequest['commits'])['nodes'])[0];
   const rollup = commit === undefined ? null : object(object(commit)['commit'])['statusCheckRollup'];
-  const checks: PullRequestDetails['checks'][number][] = [];
+  const checks: ChangeRequestDetails['checks'][number][] = [];
   if (typeof rollup === 'object' && rollup !== null) {
     for (const node of list(object((rollup as Record<string, unknown>)['contexts'])['nodes'])) {
       const check = object(node);
@@ -176,7 +176,7 @@ function parseReactions(groups: unknown): readonly ReactionCount[] {
 }
 
 /** A comment, review or review comment as GitHub sent it; a deleted user shows as ghost. */
-function parseComment(comment: Record<string, unknown>): GitHubComment {
+function parseComment(comment: Record<string, unknown>): ConversationComment {
   const author = comment['author'] === null || comment['author'] === undefined ? {} : object(comment['author']);
   const url = typeof comment['url'] === 'string' ? optionalHttpsUrl(comment['url']) : '';
   const reason = comment['minimizedReason'];
@@ -311,7 +311,7 @@ export function canWrite(permission: RepositoryPermission): boolean {
 }
 
 /** Validate the Conversation query: `repository` holds the PR's extras, `timeline` every page of timeline nodes. */
-export function parseConversation(repository: Record<string, unknown>, viewer: Record<string, unknown>, timeline: readonly unknown[]): PullRequestConversation {
+export function parseConversation(repository: Record<string, unknown>, viewer: Record<string, unknown>, timeline: readonly unknown[]): ChangeRequestConversation {
   const pullRequest = object(repository['pullRequest']);
   const viewerLogin = typeof viewer['login'] === 'string' ? viewer['login'] : '';
   const items = parseTimeline(timeline);
@@ -402,7 +402,7 @@ function parseLabels(connection: unknown): readonly Label[] {
 }
 
 /** A linked PR's state from a `pullRequest` node. */
-export function parseLinkedState(pr: Record<string, unknown>): LinkedPullRequestState {
+export function parseLinkedState(pr: Record<string, unknown>): LinkedChangeRequestState {
   const rollup = object(object(object(list(object(pr['commits'])['nodes'])[0])['commit'])['statusCheckRollup'])['state'];
   const checks = rollup === 'SUCCESS' ? 'success' : rollup === 'FAILURE' || rollup === 'ERROR' ? 'failure' : rollup === 'PENDING' || rollup === 'EXPECTED' ? 'pending' : undefined;
   const decision = pr['reviewDecision'];

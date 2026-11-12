@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, utimes } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
-import type { PullRequestProvider, PullRequestSummary } from '../forge.js';
+import type { ChangeRequestSummary, Forge } from '../forge.js';
 import { readPrivateJson, writePrivateJson } from '../privateFiles.js';
 
 /** Whether the user wrote the PR (Claude may implement) or reviews someone else's (Claude only suggests). */
@@ -12,7 +12,7 @@ export interface PullRequestWorktree {
   readonly version: 1;
   readonly repository: string;
   readonly role: PullRequestRole;
-  readonly pullRequest: PullRequestSummary;
+  readonly pullRequest: ChangeRequestSummary;
   /** Checkout the worktree was created from; only that window restores its review session. */
   readonly sourceRoot?: string;
 }
@@ -121,8 +121,8 @@ export async function hasWorktree(storageRoot: string, repository: string, numbe
 
 /** Create the PR's worktree unless it exists, and return its folder. */
 export async function ensureWorktree(
-  sourceRoot: string, storageRoot: string, provider: PullRequestProvider,
-  repository: string, pullRequest: PullRequestSummary, role: PullRequestRole,
+  sourceRoot: string, storageRoot: string, provider: Forge,
+  repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole,
 ): Promise<string> {
   checkNames(repository, pullRequest.baseBranch);
   const folder = worktreePath(storageRoot, repository, pullRequest.number);

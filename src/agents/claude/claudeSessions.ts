@@ -1,7 +1,7 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ClaudeConversation } from '../../core/agent.js';
+import type { AgentConversation } from '../../core/agent.js';
 import { record } from '../../core/connection.js';
 import { readPrivateJson } from '../../core/privateFiles.js';
 import { isSessionId } from '../../core/sessionBinding.js';
@@ -47,7 +47,7 @@ async function runningSessions(configRoot: string, workspaceRoots: ReadonlySet<s
 /** List recent conversations for this exact project; Claude's picker remains the fallback. */
 export async function listClaudeConversations(
   workspaceRoot: string, configRoot = process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
-): Promise<readonly ClaudeConversation[]> {
+): Promise<readonly AgentConversation[]> {
   const root = await realpath(workspaceRoot);
   const roots = new Set([root, resolve(workspaceRoot)]);
   const directories = await Promise.all([...roots].map(async projectRoot => {
@@ -65,7 +65,7 @@ export async function listClaudeConversations(
   ]);
   const distinct = new Map(files.filter(file => file !== undefined).map(file => [file.id, file]));
   const recent = [...distinct.values()].sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, 20);
-  const found = await Promise.all(recent.map(async (file): Promise<ClaudeConversation | undefined> => {
+  const found = await Promise.all(recent.map(async (file): Promise<AgentConversation | undefined> => {
     try {
       let title = '';
       let automaticTitle = '';

@@ -2,11 +2,12 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import * as vscode from 'vscode';
 import { CodeReview, readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
+import type { AgentCodeReview } from '../../core/agent.js';
 import { anchorFromText, fileAnchor } from '../../core/anchors.js';
 import { prepareHighlighting } from '../../core/codePreview.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from '../../core/contracts.js';
 import { resolveExecutable } from '../../core/executables.js';
-import type { PullRequestSummary } from '../../core/forge.js';
+import type { ChangeRequestSummary } from '../../core/forge.js';
 import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { git } from '../../core/git/worktrees.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
@@ -77,11 +78,11 @@ export class LocalReview implements vscode.Disposable {
   /** Finds the branch's PR and opens it in this page's place; unset when GitHub is not available. */
   #pullRequests: BranchPullRequests | undefined;
   /** The last PR lookup, by branch; `pullRequest` is undefined when the branch has no open PR of yours. */
-  #found: { readonly branch: string; readonly at: number; readonly pullRequest: PullRequestSummary | undefined } | undefined;
+  #found: { readonly branch: string; readonly at: number; readonly pullRequest: ChangeRequestSummary | undefined } | undefined;
   #looking: string | undefined;
   /** Suggestion options written to files while the page is open, by thread, and the content before, so Discard can put it back. */
   readonly #applied = new Map<string, { readonly message: number; readonly option: number; readonly path: string; readonly before: string; readonly after: string }>();
-  readonly #codeReview: CodeReview;
+  readonly #codeReview: AgentCodeReview;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -140,12 +141,12 @@ export class LocalReview implements vscode.Disposable {
   }
 
   /** The branch's PR from the last lookup; a stale or missing one is looked up again and redraws the page when it arrives. */
-  #branchPullRequest(branch: string): PullRequestSummary | undefined {
+  #branchPullRequest(branch: string): ChangeRequestSummary | undefined {
     const known = this.#found?.branch === branch ? this.#found : undefined;
     const pullRequests = this.#pullRequests;
     if (pullRequests !== undefined && (known === undefined || Date.now() - known.at > pullRequestLookupMs) && this.#looking !== branch) {
       this.#looking = branch;
-      const done = (pullRequest: PullRequestSummary | undefined): void => {
+      const done = (pullRequest: ChangeRequestSummary | undefined): void => {
         if (this.#looking === branch) this.#looking = undefined;
         const changed = this.#found?.branch !== branch || this.#found.pullRequest?.number !== pullRequest?.number;
         this.#found = { branch, at: Date.now(), pullRequest };
@@ -413,8 +414,8 @@ export class LocalReview implements vscode.Disposable {
 
 /** Your open PRs by head branch, and opening one on the checkout in the local page's place. */
 export interface BranchPullRequests {
-  find(branch: string): Promise<PullRequestSummary | undefined>;
-  open(pullRequest: PullRequestSummary): Promise<void>;
+  find(branch: string): Promise<ChangeRequestSummary | undefined>;
+  open(pullRequest: ChangeRequestSummary): Promise<void>;
 }
 
 /** A store or bridge subscription as a VS Code disposable. */

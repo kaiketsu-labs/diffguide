@@ -1,4 +1,4 @@
-import type { CommentKind, LinkedPullRequestState, ListVersion, MergeMessage, MergeMethod, PickerOptions, Polled, PullRequestComment, PullRequestConversation, PullRequestDetails, PullRequestEdit, PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, PullRequestVersion, ReactionContent, RemoteThread, ReviewerSet, ReviewEvent } from '../../core/forge.js';
+import type { ChangeRequestComment, ChangeRequestConversation, ChangeRequestDetails, ChangeRequestEdit, ChangeRequestFile, ChangeRequestSummary, ChangeRequestVersion, CommentKind, Forge, ForgeRepository, LinkedChangeRequestState, ListVersion, MergeMessage, MergeMethod, PickerOptions, Polled, ReactionContent, RemoteThread, ReviewerSet, ReviewEvent } from '../../core/forge.js';
 import { git } from '../../core/git/worktrees.js';
 import { endpointsFor, githubPoll, githubRequest } from './githubApi.js';
 import { canWrite, httpsUrl, list, object, parseConversation, parseDetails, parseLinkedState, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, searchNode, text } from './parse.js';
@@ -7,7 +7,7 @@ import { type GitHubRemote, parseGitRemote, pickGitHubRemote } from './remotes.j
 const graphqlMethods: Record<MergeMethod, string> = { merge: 'MERGE', squash: 'SQUASH', rebase: 'REBASE' };
 
 /** Open PRs by the viewer and requesting the viewer's review, keyed by lowercase `owner/name`. */
-type SearchResults = ReadonlyMap<string, { readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }>;
+type SearchResults = ReadonlyMap<string, { readonly mine: readonly ChangeRequestSummary[]; readonly reviewRequested: readonly ChangeRequestSummary[] }>;
 
 const searchFields = 'number title url isDraft headRefName headRefOid baseRefName createdAt updatedAt additions deletions changedFiles author{login} repository{nameWithOwner} latestReviews(first:20){nodes{state}} '
   + 'reviewRequests(first:20){nodes{requestedReviewer{__typename ... on User{login} ... on Team{name} ... on Bot{login} ... on Mannequin{login}}}}';
@@ -88,7 +88,7 @@ export function groupSearchResults(mine: readonly unknown[], reviewRequested: re
   };
   for (const node of mine) add(node, 'mine');
   for (const node of reviewRequested) add(node, 'reviewRequested');
-  const via = (pullRequest: PullRequestSummary): PullRequestSummary => {
+  const via = (pullRequest: ChangeRequestSummary): ChangeRequestSummary => {
     const reviewers = pullRequest.requestedReviewers ?? [];
     const requestedVia = viewer !== undefined && reviewers.some((reviewer) => !reviewer.team && reviewer.name.toLowerCase() === viewer.toLowerCase()) ? 'you'
       : reviewers.some((reviewer) => reviewer.team) ? 'team' : undefined;
@@ -98,7 +98,7 @@ export function groupSearchResults(mine: readonly unknown[], reviewRequested: re
 }
 
 /** Query pull requests through the user's GitHub sign-in in VS Code. */
-export class GitHubApiProvider implements PullRequestProvider {
+export class GitHubApiProvider implements Forge {
   /** One search per GitHub host serves every repository's PR lists. */
   static readonly #searches = new Map<string, Promise<SearchResults>>();
   /** One provider per repository keeps its remotes, PR ids and Viewed flags until `forget`. */
@@ -126,21 +126,21 @@ export class GitHubApiProvider implements PullRequestProvider {
   }
 
   /** Read from git remotes the way GitHub CLI picks its repository. */
-  async readRepository(): Promise<PullRequestRepository> {
+  async readRepository(): Promise<ForgeRepository> {
     const remote = pickGitHubRemote(await this.#remoteConfig());
     if (remote === undefined) throw new Error('No GitHub remote found in this repository.');
     return { name: `${remote.owner}/${remote.name}`, url: `https://${remote.host}/${remote.owner}/${remote.name}` };
   }
 
-  async listMine(): Promise<readonly PullRequestSummary[]> {
+  async listMine(): Promise<readonly ChangeRequestSummary[]> {
     return (await this.#listed()).mine;
   }
 
-  async listReviewRequested(): Promise<readonly PullRequestSummary[]> {
+  async listReviewRequested(): Promise<readonly ChangeRequestSummary[]> {
     return (await this.#listed()).reviewRequested;
   }
 
-  async #listed(): Promise<{ readonly mine: readonly PullRequestSummary[]; readonly reviewRequested: readonly PullRequestSummary[] }> {
+  async #listed(): Promise<{ readonly mine: readonly ChangeRequestSummary[]; readonly reviewRequested: readonly ChangeRequestSummary[] }> {
     const { owner, name, host } = await this.#repo();
     let search = GitHubApiProvider.#searches.get(host);
     if (search === undefined) {
@@ -185,7 +185,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return groupSearchResults(mine, reviewRequested, viewer);
   }
 
-  async listFiles(number: number): Promise<readonly PullRequestFile[]> {
+  async listFiles(number: number): Promise<readonly ChangeRequestFile[]> {
     const files: unknown[] = [];
     let after: string | null = null;
     for (let page = 0; page < 30; page++) {
@@ -237,7 +237,7 @@ export class GitHubApiProvider implements PullRequestProvider {
       { id: await this.#pullRequestId(number), path });
   }
 
-  async publishComment(number: number, comment: PullRequestComment, pending: boolean): Promise<string> {
+  async publishComment(number: number, comment: ChangeRequestComment, pending: boolean): Promise<string> {
     const { lines } = comment;
     const startLine = lines !== undefined && lines.start < lines.end ? lines.start : null;
     if (!pending) {
@@ -260,7 +260,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return httpsUrl(object(list(object(thread['comments'])['nodes'])[0])['url']);
   }
 
-  async details(number: number): Promise<PullRequestDetails> {
+  async details(number: number): Promise<ChangeRequestDetails> {
     const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){${viewerField} repository(owner:$owner,name:$name){
       ${mergeMethodFields} pullRequest(number:$number){${detailsFields}}}}`, { number });
     return parseDetails(object(data['repository']), object(data['viewer']));
@@ -270,7 +270,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return await this.#threads(number);
   }
 
-  async overview(number: number): Promise<{ readonly details: PullRequestDetails; readonly threads: readonly RemoteThread[] }> {
+  async overview(number: number): Promise<{ readonly details: ChangeRequestDetails; readonly threads: readonly RemoteThread[] }> {
     const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){${viewerField} repository(owner:$owner,name:$name){
       ${mergeMethodFields} pullRequest(number:$number){id ${detailsFields} ${threadsField}}}}`, { number, after: null });
     const repository = object(data['repository']);
@@ -328,7 +328,7 @@ export class GitHubApiProvider implements PullRequestProvider {
       { id: await this.#pullRequestId(number), method: graphqlMethods[method], headline: message.headline ?? null, body: message.body ?? null });
   }
 
-  async editPullRequest(number: number, edit: PullRequestEdit): Promise<void> {
+  async editPullRequest(number: number, edit: ChangeRequestEdit): Promise<void> {
     await this.#rest(`issues/${number}`, 'PATCH', edit);
   }
 
@@ -356,7 +356,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return parsePickerOptions(object(data['repository']));
   }
 
-  async search(query: string): Promise<readonly PullRequestSummary[]> {
+  async search(query: string): Promise<readonly ChangeRequestSummary[]> {
     const { owner, name, host } = await this.#repo();
     const data = await this.#graphqlOn(host, `query($query:String!){search(query:$query,type:ISSUE,first:50){nodes{... on PullRequest{${searchFields}}}}}`,
       { query: `repo:${owner}/${name} is:pr ${query}` });
@@ -372,7 +372,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return count;
   }
 
-  async openPullRequests(numbers: readonly number[]): Promise<readonly PullRequestSummary[]> {
+  async openPullRequests(numbers: readonly number[]): Promise<readonly ChangeRequestSummary[]> {
     const valid = numbers.filter((number) => Number.isSafeInteger(number) && number > 0);
     if (valid.length === 0) return [];
     const fields = valid.map((number) => `pr${number}:pullRequest(number:${number}){state ${searchFields}}`).join(' ');
@@ -381,7 +381,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return parsePullRequestList(open.map(searchNode));
   }
 
-  async pullRequest(number: number): Promise<PullRequestSummary | undefined> {
+  async pullRequest(number: number): Promise<ChangeRequestSummary | undefined> {
     if (!Number.isSafeInteger(number) || number <= 0) return undefined;
     const repository = object((await this.#graphql(`query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pr:pullRequest(number:${number}){${searchFields}}}}`, {}))['repository']);
     return repository['pr'] === null || repository['pr'] === undefined ? undefined : parsePullRequestList([searchNode(repository['pr'])])[0];
@@ -394,7 +394,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return list(object(object(object(object(data['repository'])['pullRequest'])['timelineItems']))['nodes']);
   }
 
-  async linkedState(number: number): Promise<LinkedPullRequestState | undefined> {
+  async linkedState(number: number): Promise<LinkedChangeRequestState | undefined> {
     const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
       number title url state isDraft headRefName headRefOid reviewDecision viewerCanUpdate commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}`, { number });
     const pr = object(object(data['repository'])['pullRequest']);
@@ -402,7 +402,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return parseLinkedState(pr);
   }
 
-  async pullRequestForBranch(branch: string): Promise<PullRequestSummary | undefined> {
+  async pullRequestForBranch(branch: string): Promise<ChangeRequestSummary | undefined> {
     const data = await this.#graphql(`query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){pullRequests(first:1,states:OPEN,headRefName:$branch){nodes{${searchFields}}}}}`, { branch });
     const nodes = list(object(object(data['repository'])['pullRequests'])['nodes']);
     return nodes.length === 0 ? undefined : parsePullRequestList(nodes.map(searchNode))[0];
@@ -416,7 +416,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return { number: created['number'] as number, url: httpsUrl(created['url']) };
   }
 
-  async conversation(number: number): Promise<PullRequestConversation> {
+  async conversation(number: number): Promise<ChangeRequestConversation> {
     const data = await this.#graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){viewer{login} repository(owner:$owner,name:$name){${conversationFields}}}`,
       { number, after: null });
     const repository = object(data['repository']);
@@ -547,7 +547,7 @@ export class GitHubApiProvider implements PullRequestProvider {
     return typeof html === 'string' ? html : '';
   }
 
-  async version(number: number, known?: PullRequestVersion): Promise<PullRequestVersion> {
+  async version(number: number, known?: ChangeRequestVersion): Promise<ChangeRequestVersion> {
     const polled = await this.#poll(`pulls/${number}`, known?.polled);
     if (polled === known?.polled) return known;
     const pullRequest = object(polled.data);

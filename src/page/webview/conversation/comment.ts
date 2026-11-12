@@ -1,5 +1,5 @@
 /** A conversation comment: reactions, tools, body and hide menu. */
-import type { GitHubComment, HideReason, PullRequestConversation, ReactionContent, ReactionCount } from '../../../core/forge.js';
+import type { ChangeRequestConversation, ConversationComment, HideReason, ReactionContent, ReactionCount } from '../../../core/forge.js';
 import { icons } from '../../icons.js';
 import { $, button, el, icon } from '../dom.js';
 import { askInline, askRow, closeToolbarMenu, menuRow, openToolbarMenu } from '../menus.js';
@@ -20,7 +20,7 @@ const hideReasons: readonly (readonly [HideReason, string])[] = [['OUTDATED', 'O
 
 const reactionEmoji: Record<ReactionContent, string> = { THUMBS_UP: '👍', THUMBS_DOWN: '👎', LAUGH: '😄', HOORAY: '🎉', CONFUSED: '😕', HEART: '❤️', ROCKET: '🚀', EYES: '👀' };
 const reactionNames: Record<ReactionContent, string> = { THUMBS_UP: '+1', THUMBS_DOWN: '-1', LAUGH: 'Laugh', HOORAY: 'Hooray', CONFUSED: 'Confused', HEART: 'Heart', ROCKET: 'Rocket', EYES: 'Eyes' };
-export const isWriter = (conversation: PullRequestConversation | undefined): boolean => conversation !== undefined && ['admin', 'maintain', 'write'].includes(conversation.permission);
+export const isWriter = (conversation: ChangeRequestConversation | undefined): boolean => conversation !== undefined && ['admin', 'maintain', 'write'].includes(conversation.permission);
 
 /** Reaction chips that toggle the viewer's own reaction, and a button that opens the eight GitHub reactions. */
 export function reactionsRow(subject: string, reactions: readonly ReactionCount[], canReact: boolean, redraw: () => void): HTMLElement {
@@ -72,7 +72,7 @@ export function toolButton(svg: string, tip: string, onClick: () => void): HTMLB
 }
 
 /** Quote, edit, hide and delete, as far as the viewer may. */
-export function commentTools(comment: GitHubComment, place: CommentPlace): HTMLElement {
+export function commentTools(comment: ConversationComment, place: CommentPlace): HTMLElement {
   const tools = el('span', 'msg-tools');
   if (place.kind !== 'reviewComment' && comment.body.trim() && !hiddenComment(comment) && !commentAsks.has(comment.id)) {
     tools.append(toolButton(icons.agentAsk, 'Ask the agent about this comment', () => { commentAsks.set(comment.id, ''); ui.focusNext = 'comment-ask:' + comment.id; place.redraw(); }));
@@ -99,7 +99,7 @@ export function commentTools(comment: GitHubComment, place: CommentPlace): HTMLE
 }
 
 /** The comment's body: folded when hidden, a form while edited, else GitHub's HTML with its reactions. */
-export function commentBody(comment: GitHubComment, place: CommentPlace): HTMLElement[] {
+export function commentBody(comment: ConversationComment, place: CommentPlace): HTMLElement[] {
   if (comment.hidden !== undefined && !revealed.has(comment.id)) {
     const note = el('div', 'hidden-note', 'Hidden as ' + comment.hidden + '.');
     note.append(button('Show', () => { revealed.add(comment.id); place.redraw(); }, 'quiet'));

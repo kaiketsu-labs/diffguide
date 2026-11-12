@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
-import type { PullRequestProvider } from '../../core/forge.js';
+import type { Forge } from '../../core/forge.js';
 import { hasWorktree, repositoryStorage } from '../../core/git/worktrees.js';
 import type { FileReviews } from '../../core/reviewedFiles.js';
 import type { PullRequestSession, PullRequestSessions } from './pullRequestSessions.js';
@@ -11,7 +11,7 @@ import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 export interface Checkout {
   readonly root: string;
   readonly storageRoot: string;
-  readonly connect: () => Promise<PullRequestProvider>;
+  readonly connect: () => Promise<Forge>;
   readonly sessions: PullRequestSessions;
   readonly fileReviews: FileReviews;
 }

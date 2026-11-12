@@ -2,7 +2,7 @@ import { mkdir, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { listClaudeConversations } from '../../agents/claude/claudeSessions.js';
-import type { ClaudeChoice, ClaudeConversation } from '../../core/agent.js';
+import type { AgentChoice, AgentConversation } from '../../core/agent.js';
 import type { ReviewBridge } from '../../core/contracts.js';
 import { requireNodeRuntime, resolveExecutable } from '../../core/executables.js';
 import { readPrivateJson, writePrivateJson } from '../../core/privateFiles.js';
@@ -130,9 +130,9 @@ export interface ClaudeLauncher extends vscode.Disposable {
   /** Fires when the review terminal opens or closes. */
   readonly onDidChange: vscode.Event<void>;
   /** Recent conversations of this session's folder, for the page's Resume list. */
-  conversations(): Promise<readonly ClaudeConversation[]>;
+  conversations(): Promise<readonly AgentConversation[]>;
   /** Act on a choice from the review page; returns a notice for the page, and throws instead of showing VS Code messages. */
-  connect(choice: ClaudeChoice): Promise<string | undefined>;
+  connect(choice: AgentChoice): Promise<string | undefined>;
 }
 
 /** Another conversation still receives comments, so a new one must wait; commands report it as information, not as a failure. */
@@ -279,7 +279,7 @@ export function createClaudeLauncher(
     await copy(resume);
     void vscode.window.showInformationMessage('Command copied. Run it at a shell prompt; exit any running Claude with /exit first.');
   });
-  const connect = (choice: ClaudeChoice): Promise<string | undefined> => exclusive(async () => {
+  const connect = (choice: AgentChoice): Promise<string | undefined> => exclusive(async () => {
     switch (choice.how) {
       case 'show': {
         const current = liveTerminal();

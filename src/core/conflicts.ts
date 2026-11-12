@@ -1,4 +1,4 @@
-import type { ClaudeTask } from './agent.js';
+import type { AgentTask } from './agent.js';
 import { git } from './git/worktrees.js';
 
 /**
@@ -186,7 +186,7 @@ export interface ConflictFix {
 export const conflictFixLabel = 'fixing merge conflicts';
 
 /** Ask Claude to merge the base, resolve the conflicts, commit and push; it may run only the Git commands this needs. */
-export function conflictTask({ base, baseBranch, headBranch, pushTo, answer }: ConflictFix): ClaudeTask {
+export function conflictTask({ base, baseBranch, headBranch, pushTo, answer }: ConflictFix): AgentTask {
   if (!/^[a-f\d]{40,64}$/u.test(base) || !isBranch(baseBranch) || !isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for fixing conflicts.');
   const push = `git push ${pushTo} HEAD:refs/heads/${headBranch}`;
   return {
