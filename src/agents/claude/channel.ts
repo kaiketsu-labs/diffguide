@@ -6,8 +6,8 @@ import { BridgeClient, BridgeError, BridgeProtocolError, isIdentifier, isText, p
 import type { AgentUpdate } from '../../core/contracts.js';
 import { readCustomInstructions } from '../../core/customInstructions.js';
 import { maximumReplyLength, maximumTitleLength } from '../../core/limits.js';
+import { ownsSession } from '../../core/sessionBinding.js';
 import { buildReviewPrompt, reviewInstructions, reviewReplyInstructions } from './eventPrompt.js';
-import { ownsSession } from './sessionBinding.js';
 
 /** Opening a linked worktree can wait for another Claude run to finish in it. */
 const linkedRepositoryTimeoutMs = 60 * 60 * 1000;

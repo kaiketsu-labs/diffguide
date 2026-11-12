@@ -2,14 +2,14 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import * as vscode from 'vscode';
-import { type ClaudeRunnerOptions, contentBlocks, describeTool, parseLine, StepLog, type StreamMessage, untrustedCheckoutFlags } from '../agents/claude/claudeRunner.js';
-import type { ClaudeProgress } from './agent.js';
-import type { CodeAnchor, ReviewStore } from './contracts.js';
-import { type Analysis, analysisPrompt, analysisSchema, type ChangeBlock, changeBlocks, parseClaudeAnalysis, readStoredAnalysis } from './prAnalysis.js';
-import { writePrivateJson } from './privateFiles.js';
-import { stopProcess } from './shell.js';
-import type { FileDiff } from './unifiedDiff.js';
+import { type Disposable, Emitter } from '../../core/events.js';
+import type { ClaudeProgress } from '../../core/agent.js';
+import type { CodeAnchor, ReviewStore } from '../../core/contracts.js';
+import { type Analysis, analysisPrompt, analysisSchema, type ChangeBlock, changeBlocks, parseClaudeAnalysis, readStoredAnalysis } from '../../core/prAnalysis.js';
+import { writePrivateJson } from '../../core/privateFiles.js';
+import { stopProcess } from '../../core/shell.js';
+import type { FileDiff } from '../../core/unifiedDiff.js';
+import { type ClaudeRunnerOptions, contentBlocks, describeTool, parseLine, StepLog, type StreamMessage, untrustedCheckoutFlags } from './claudeRunner.js';
 
 /** What the analysis run is doing right now. */
 export interface AnalysisActivity {
@@ -52,8 +52,8 @@ const blockedTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'Web
 const maximumPromptLength = 800_000;
 
 /** A one-shot, read-only Claude run that orders a PR's changes for review; separate from the conversation that answers comments. */
-export class PullRequestAnalysis implements vscode.Disposable {
-  readonly #changed = new vscode.EventEmitter<void>();
+export class PullRequestAnalysis implements Disposable {
+  readonly #changed = new Emitter<void>();
   readonly onDidChange = this.#changed.event;
   #activity: AnalysisActivity = { running: false };
   #result: Promise<Analysis | undefined> | undefined;

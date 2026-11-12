@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { loadWASM, OnigScanner, OnigString } from 'vscode-oniguruma';
 import { type IGrammar, INITIAL, type IRawTheme, parseRawGrammar, Registry, type StateStack } from 'vscode-textmate';
 import * as vscode from 'vscode';
-import { escapeCode } from '../../page/preview/codePreview.js';
+import { escapeCode } from '../../core/codePreview.js';
 
 /** Languages and grammars that installed extensions contribute, as VS Code reads them. */
 export interface TextMateContributions {

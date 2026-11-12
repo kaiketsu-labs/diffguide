@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
+import { escapeCode } from '../../core/codePreview.js';
 import { blockBrowserShortcutsScript } from '../../page/browserShortcuts.js';
-import { escapeCode } from '../../page/preview/codePreview.js';
 import { webviewStyles } from '../../page/webviewStyles.js';
 
 /** A thread's comment as it will be posted, before the user edits it. */

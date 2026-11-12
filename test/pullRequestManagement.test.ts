@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as vscode from 'vscode';
 import type { PullRequestDetails, PullRequestProvider } from '../src/core/forge.js';
-import { githubPageActions, type PageContext } from '../src/core/pullRequestPageActions.js';
 import { sharedPerTurn } from '../src/hosts/vscode/autoSync.js';
 import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
 import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
+import { githubPageActions, type PageContext } from '../src/page/pullRequestPageActions.js';
 import { EventEmitter, resetFakeWindow, window } from './fakes/vscode.js';
 
 const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 200)); };
@@ -65,7 +65,7 @@ test('successful management action also reloads authoritative state', async () =
 
 test('partial reviewer writes reach the page as actual remote state, and retry requests only the missing removal', async () => {
   resetFakeWindow();
-  const { saveSelection } = await import('../src/core/pullRequestEdits.js');
+  const { saveSelection } = await import('../src/page/pullRequestEdits.js');
   const remote = new Set(['alice']);
   let additions = 0; let withdrawals = 0; let fail = true;
   const snapshot = (): PullRequestDetails => ({ ...details, reviewers: [...remote].map((name) => ({ name, state: 'requested' })) });

@@ -8,13 +8,10 @@ import { type CommentKind, type HideReason, type MergeMessage, type MergeMethod,
 import { recheckRequest } from '../../core/review.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
-import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewState, panels, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
+import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
 import { pollWhileFocused } from './autoSync.js';
 import { workingIcon } from './claudeStatus.js';
 import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestView.js';
-
-/** Where the review page scrolls when it opens: a file, a step of the guided review or a thread. `reload` reads the files first, for a file the page may not show yet. */
-export type OverviewReveal = { readonly path: string; readonly reload?: true } | { readonly step: string } | { readonly group: string } | { readonly thread: string };
 
 const revealMessage = (reveal: OverviewReveal | undefined): ExtensionMessage => reveal === undefined ? {}
   : 'path' in reveal ? { reveal: reveal.path } : 'step' in reveal ? { revealStep: reveal.step } : 'thread' in reveal ? { revealThread: reveal.thread } : { revealGroup: reveal.group };
@@ -433,3 +430,5 @@ export async function showPullRequestOverview(
   };
   const disposed = panel.onDidDispose(release);
 }
+/** Open review pages by key; `sendFiles` reads the files again and then shows `reveal`. */
+export const panels = new Map<string, { readonly panel: vscode.WebviewPanel; readonly sendFiles: (reveal?: OverviewReveal) => void; readonly detach: () => vscode.WebviewPanel }>();

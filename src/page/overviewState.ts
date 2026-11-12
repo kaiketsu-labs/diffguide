@@ -1,15 +1,14 @@
-import type { ClaudeContext, ClaudeProgress } from '../core/agent.js';
-import { conflictFixLabel } from '../core/conflicts.js';
-import type { ReviewIntent, ReviewThread } from '../core/contracts.js';
+import { type ClaudeActivity, type ClaudeContext, type ClaudeProgress, claudeStatus } from '../core/agent.js';
+import { conflictFixLabel, type WorktreeCommit } from '../core/conflicts.js';
+import type { ReviewIntent, ReviewStore, ReviewThread } from '../core/contracts.js';
 import type { PullRequestConversation, PullRequestDetails, PullRequestSummary, RemoteThread } from '../core/forge.js';
 import { type Publication, publishableText } from '../core/pullRequestComments.js';
+import type { ReviewView } from '../core/review.js';
 import type { ReadRange } from '../core/reviewedFiles.js';
 import { parseSuggestions, withoutSuggestions } from '../core/suggestions.js';
 import { highlightSource } from '../core/unifiedDiff.js';
-import { claudeStatus } from '../hosts/vscode/claudeStatus.js';
-import type { PullRequestSession } from '../hosts/vscode/pullRequestSessions.js';
 import { markdownHtml } from './preview/markdown.js';
-import type { AnalysisView, GitHubThreadView, OverviewState, ReviewView } from './protocol.js';
+import type { AnalysisView, GitHubThreadView, OverviewState } from './protocol.js';
 
 function githubThreadView(thread: RemoteThread): GitHubThreadView {
   return {
@@ -43,9 +42,21 @@ const threadStatus: Record<ReviewThread['status'], string> = {
   queued: 'Waiting for Claude', received: 'Picked up', working: 'Claude is working', answered: 'Answered', ready: 'Ready for review',
 };
 
+/** What the page state reads from a PR's open review session. */
+export interface OpenedReview {
+  readonly session: {
+    readonly store: ReviewStore;
+    activity?(threadId: string): string | undefined;
+    publication?(threadId: string): Publication | undefined;
+    linkedGitHubThread?(threadId: string): string | undefined;
+  };
+  readonly runner: { readonly activity: ClaudeActivity };
+  readonly commits: (threadId: string) => readonly WorktreeCommit[];
+}
+
 /** Collect a PR's overview from its summary, file progress and review session. */
 export function buildOverviewState(
-  pullRequest: PullRequestSummary, opened: PullRequestSession, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
+  pullRequest: PullRequestSummary, opened: OpenedReview, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
   details?: PullRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
   conversation?: PullRequestConversation | Error, claudeContext?: ClaudeContext, review?: ReviewView,
 ): OverviewState {

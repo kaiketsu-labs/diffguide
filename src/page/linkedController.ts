@@ -1,11 +1,9 @@
 import { stat } from 'node:fs/promises';
-import { parsePullRequestLink } from '../forges/github/remotes.js';
-import type { WorkspaceRepository } from '../hosts/vscode/pullRequestSessions.js';
-import type { LinkedChange } from '../page/protocol.js';
-import { pushCommits } from './conflicts.js';
-import type { PullRequestProvider, PullRequestSummary } from './forge.js';
-import { git, worktreePath } from './git/worktrees.js';
-import { addedLines, addLink, branchPins, crossReferences, linkedBranchName, linkedWorktreePath, linkKey, type LinkSource, lockWorktree, readStoredLinks, removeLink, writeStoredLinks } from './linkedChanges.js';
+import { pushCommits } from '../core/conflicts.js';
+import type { PullRequestLink, PullRequestProvider, PullRequestSummary, WorkspaceRepository } from '../core/forge.js';
+import { git, worktreePath } from '../core/git/worktrees.js';
+import { addedLines, addLink, branchPins, crossReferences, linkedBranchName, linkedWorktreePath, linkKey, type LinkSource, lockWorktree, readStoredLinks, removeLink, writeStoredLinks } from '../core/linkedChanges.js';
+import type { LinkedChange } from './protocol.js';
 
 /** What the Linked changes card needs from the PR whose page shows it. */
 export interface LinkedContext {
@@ -19,6 +17,8 @@ export interface LinkedContext {
   readonly repositories: () => Promise<ReadonlyMap<string, WorkspaceRepository>>;
   /** Open another workspace repository's PR on its own review page. */
   readonly openPage: (repository: string, number: number) => Promise<void>;
+  /** Read a PR link the user pasted, in the code host's link format. */
+  readonly parseLink: (link: string) => PullRequestLink | undefined;
 }
 
 /** A found row before its state is read: the repository, maybe a PR, and why it is linked. */
@@ -161,7 +161,7 @@ export function linkedChanges(context: LinkedContext): {
       return created.url;
     },
     async link(link) {
-      const parsed = parsePullRequestLink(link);
+      const parsed = context.parseLink(link);
       if (parsed === undefined) throw new Error('Paste a GitHub PR link, or owner/repo#12.');
       const name = `${parsed.owner}/${parsed.name}`;
       if (name.toLowerCase() === repository.toLowerCase()) throw new Error('That PR is in this repository. Link PRs from other repositories.');

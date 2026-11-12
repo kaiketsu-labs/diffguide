@@ -3,9 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { ReviewTracker } from '../src/agents/claude/reviewRunner.js';
 import type { CodeAnchor, Finding } from '../src/core/contracts.js';
 import { findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/core/review.js';
-import { ReviewTracker } from '../src/core/reviewRunner.js';
 import { createReviewStore } from '../src/core/store.js';
 import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 

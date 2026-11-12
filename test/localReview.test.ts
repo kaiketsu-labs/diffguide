@@ -7,6 +7,7 @@ import { afterEach } from 'node:test';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import type * as vscode from 'vscode';
+import type { ClaudeChoice } from '../src/core/agent.js';
 import { anchorFromText } from '../src/core/anchors.js';
 import type { ReviewBridge, ReviewStore } from '../src/core/contracts.js';
 import { getHeadRevision } from '../src/core/git/git.js';
@@ -17,7 +18,7 @@ import { LocalFilesView } from '../src/hosts/vscode/localFilesView.js';
 import { localClaudeStatus, LocalReview } from '../src/hosts/vscode/localReview.js';
 import { LocalSessions } from '../src/hosts/vscode/localSessions.js';
 import { isPageOpen, showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
-import type { ClaudeChoice, ClaudeLauncher } from '../src/hosts/vscode/setup.js';
+import type { ClaudeLauncher } from '../src/hosts/vscode/setup.js';
 import type { ExtensionMessage, OverviewActions } from '../src/page/protocol.js';
 import { extensionContext, FakeMemento, resetFakeWindow, Uri, window, workspace } from './fakes/vscode.js';
 

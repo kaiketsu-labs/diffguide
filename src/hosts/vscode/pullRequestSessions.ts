@@ -3,29 +3,22 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from '../../agents/claude/bridge.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from '../../agents/claude/claudeRunner.js';
+import { PullRequestAnalysis } from '../../agents/claude/prAnalysisRunner.js';
+import { CodeReview } from '../../agents/claude/reviewRunner.js';
 import { catchUpWithPullRequest, commitsSince, discardSince, type WorktreeCommit, worktreeSnapshot } from '../../core/conflicts.js';
 import type { CodeAnchor, LinkedRepositoryHandler, ReviewBridge, ReviewStore } from '../../core/contracts.js';
 import { type InstructionKind, readCustomInstructions } from '../../core/customInstructions.js';
 import { requireNodeRuntime, resolveExecutable } from '../../core/executables.js';
-import type { PullRequestProvider, PullRequestSummary } from '../../core/forge.js';
+import type { PullRequestProvider, PullRequestSummary, WorkspaceRepository } from '../../core/forge.js';
 import { createDataFolder, createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, type PullRequestWorktree, readPullRequestBase, readWorktree, worktreePath } from '../../core/git/worktrees.js';
 import { addWorked, crossReferences, ensureBranchWorktree, isWorktreeIdle, linkedBranchName, linkedWorktreePath, lockWorktree, readStoredLinks, writeStoredLinks } from '../../core/linkedChanges.js';
-import { findLinked } from '../../core/linkedController.js';
-import { PullRequestAnalysis } from '../../core/prAnalysisRunner.js';
 import { type CommentPlacement, placeComment, publishableText, readClaudeCommits, readGitHubLinks, readPublications, writeClaudeCommits, writeGitHubLinks, writePublications } from '../../core/pullRequestComments.js';
-import { CodeReview } from '../../core/reviewRunner.js';
 import { createReviewStore } from '../../core/store.js';
+import { findLinked } from '../../page/linkedController.js';
 import { showPublishPanel } from './publishPanel.js';
 import { parsePullRequestFileUri, pullRequestFileUri } from './pullRequestDiff.js';
 import type { ReviewSession, ReviewSessionSource } from './reviewSession.js';
 import { prepareConnection } from './setup.js';
-
-/** Another workspace repository Claude may change for a PR: where its worktrees live and how to reach its PRs. */
-export interface WorkspaceRepository {
-  readonly root: string;
-  readonly storageRoot: string;
-  readonly connect: () => Promise<PullRequestProvider>;
-}
 
 /** A PR's review: its comments, the bridge Claude replies through, and the background Claude that answers them. */
 export interface PullRequestSession {

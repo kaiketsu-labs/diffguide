@@ -1,18 +1,18 @@
-import * as vscode from 'vscode';
-import { isSessionId } from '../agents/claude/sessionBinding.js';
-import type { ClaudeContext, ClaudeConversation, ClaudeProgress } from '../core/agent.js';
+import type { ClaudeChoice, ClaudeContext, ClaudeConversation, ClaudeProgress } from '../core/agent.js';
 import type { LocalChange, LocalCommit } from '../core/conflicts.js';
 import type { Finding, Reviewer, ReviewIntent, WithdrawnComment } from '../core/contracts.js';
 import type { CommentKind, HideReason, LinkedPullRequestState, MergeMessage, MergeMethod, PickerOptions, PullRequestConversation, PullRequestDetails, ReactionContent, ReviewEvent } from '../core/forge.js';
 import type { Analysis } from '../core/prAnalysis.js';
-import type { PickedSelection } from '../core/pullRequestEdits.js';
-import type { CodeReviewResult, ReviewLive } from '../core/review.js';
+import type { ReviewView } from '../core/review.js';
 import type { LineRange, ReadRange } from '../core/reviewedFiles.js';
+import { isSessionId } from '../core/sessionBinding.js';
 import type { FileDiff } from '../core/unifiedDiff.js';
-import type { OverviewReveal } from '../hosts/vscode/reviewPanel.js';
-import type { ClaudeChoice } from '../hosts/vscode/setup.js';
 import type { MediaPreview } from './media.js';
 import type { MarkdownBlock } from './preview/markdown.js';
+import type { PickedSelection } from './pullRequestEdits.js';
+
+/** Where the review page scrolls when it opens: a file, a step of the guided review or a thread. `reload` reads the files first, for a file the page may not show yet. */
+export type OverviewReveal = { readonly path: string; readonly reload?: true } | { readonly step: string } | { readonly group: string } | { readonly thread: string };
 
 /** A definition's code, ready for the review page's side panel. */
 export interface DefinitionPeek {
@@ -156,15 +156,6 @@ export interface AnalysisView {
   readonly stale: boolean;
   /** Commits since the result's head, or undefined when that head is no longer in the branch's history, as after a force push. */
   readonly behind?: number;
-}
-
-/** The code review: whether it runs, the reviewers picked for the next run, and the last result. */
-export interface ReviewView {
-  readonly running: boolean;
-  readonly live?: ReviewLive;
-  readonly error?: string;
-  readonly result?: CodeReviewResult;
-  readonly picked: readonly Reviewer[];
 }
 
 export type DiffSide = 'old' | 'new';
@@ -541,8 +532,6 @@ export function parseRange(value: unknown, commits: readonly string[]): DiffRang
   if (kind === 'all' || kind === 'since') return { kind };
   return kind === 'commits' && isOid(from) && isOid(to) && commits.includes(from) && commits.includes(to) ? { kind, from, to } : undefined;
 }
-/** Open review pages by key; `sendFiles` reads the files again and then shows `reveal`. */
-export const panels = new Map<string, { readonly panel: vscode.WebviewPanel; readonly sendFiles: (reveal?: OverviewReveal) => void; readonly detach: () => vscode.WebviewPanel }>();
 
 export const isLine = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
 export const isText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '' && value.length <= maximumReviewLength;

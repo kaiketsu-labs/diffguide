@@ -407,3 +407,12 @@ export function handbackItems(text: string): ReviewLaneItem[] {
     return [{ title, ...(severity === undefined ? {} : { severity }), ...(verdict === undefined ? {} : { verdict }) }];
   }).slice(0, maximumLaneItems);
 }
+
+/** The code review: whether it runs, the reviewers picked for the next run, and the last result. */
+export interface ReviewView {
+  readonly running: boolean;
+  readonly live?: ReviewLive;
+  readonly error?: string;
+  readonly result?: CodeReviewResult;
+  readonly picked: readonly Reviewer[];
+}

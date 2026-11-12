@@ -7,9 +7,9 @@ import { afterEach, type TestContext } from 'node:test';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import type * as vscode from 'vscode';
-import { readSessionBinding } from '../src/agents/claude/sessionBinding.js';
 import type { ReviewBridge } from '../src/core/contracts.js';
 import { writePrivateJson } from '../src/core/privateFiles.js';
+import { readSessionBinding } from '../src/core/sessionBinding.js';
 import { prepareConnection, registerClaudeLauncher } from '../src/hosts/vscode/setup.js';
 import { commands, env, FakeTerminal, resetFakeEditor, resetFakeWindow, terminalEvents, window, workspace } from './fakes/vscode.js';
 

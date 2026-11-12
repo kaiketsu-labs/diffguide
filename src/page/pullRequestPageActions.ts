@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { OverviewActions, PickedSuggestion } from '../page/protocol.js';
-import { commitAndPush, commitFiles, fetchPullRequestHead, syncKeepingLocalCommits } from './conflicts.js';
-import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, RemoteThread } from './forge.js';
-import { git } from './git/worktrees.js';
-import { applyLineSuggestions, type LineSuggestion, parseSuggestions } from './suggestions.js';
+import { commitAndPush, commitFiles, fetchPullRequestHead, syncKeepingLocalCommits } from '../core/conflicts.js';
+import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, RemoteThread } from '../core/forge.js';
+import { git } from '../core/git/worktrees.js';
+import { applyLineSuggestions, type LineSuggestion, parseSuggestions } from '../core/suggestions.js';
+import type { OverviewActions, PickedSuggestion } from './protocol.js';
 
 /** What the review page's GitHub actions need from the page that runs them. */
 export interface PageContext {

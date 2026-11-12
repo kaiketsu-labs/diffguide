@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { codePreviewHtml, escapeCode, prepareHighlighting } from '../page/preview/codePreview.js';
 import { capturedCodeContext } from './anchors.js';
+import { codePreviewHtml, escapeCode, prepareHighlighting } from './codePreview.js';
 import type { CodeAnchor } from './contracts.js';
 import { git } from './git/worktrees.js';
 

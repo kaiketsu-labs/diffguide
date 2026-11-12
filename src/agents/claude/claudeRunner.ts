@@ -2,7 +2,7 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
-import * as vscode from 'vscode';
+import { type Disposable, Emitter } from '../../core/events.js';
 import type { ClaudeActivity, ClaudeContext, ClaudeLaunch, ClaudeStep, ClaudeTask, ClaudeTaskResult } from '../../core/agent.js';
 import { record } from '../../core/connection.js';
 import type { ReviewEvent, ReviewStore } from '../../core/contracts.js';
@@ -49,8 +49,8 @@ const suggestionNote = 'To propose new code for the commented lines without edit
 export const untrustedCheckoutFlags = ['--setting-sources', 'user', '--strict-mcp-config'];
 
 /** One resumable background Claude conversation per PR that answers comments as they are sent. */
-export class ClaudeRunner implements vscode.Disposable {
-  readonly #changed = new vscode.EventEmitter<void>();
+export class ClaudeRunner implements Disposable {
+  readonly #changed = new Emitter<void>();
   readonly onDidChange = this.#changed.event;
   readonly #subscription: { dispose(): void };
   readonly #sent = new Set<string>();

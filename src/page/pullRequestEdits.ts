@@ -1,5 +1,5 @@
-import type { PickTarget } from '../page/protocol.js';
-import type { PullRequestDetails, PullRequestProvider, ReviewerSet } from './forge.js';
+import type { PullRequestDetails, PullRequestProvider, ReviewerSet } from '../core/forge.js';
+import type { PickTarget } from './protocol.js';
 
 /** What the page's picker ended with: logins or label names in `values`, and team slugs in `teams` for reviewers. */
 export interface PickedSelection { readonly values: readonly string[]; readonly teams: readonly string[] }

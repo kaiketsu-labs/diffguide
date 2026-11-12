@@ -1,7 +1,29 @@
 import { execFile } from 'node:child_process';
-import * as vscode from 'vscode';
+import type { Disposable } from '../../core/events.js';
+import type { Polled } from '../../core/forge.js';
 
 type AuthProvider = 'github' | 'github-enterprise';
+
+/** What GitHub needs from the host: its GitHub sign-ins and the enterprise address setting. */
+export interface GitHubHost {
+  /** The sign-in's access token; `silent` never prompts, `create` prompts when signed out, `renew` asks for a new sign-in. */
+  token(provider: AuthProvider, scopes: readonly string[], mode: 'silent' | 'create' | 'renew'): Promise<string | undefined>;
+  /** The `github-enterprise.uri` setting. */
+  enterpriseUri(): string | undefined;
+  onDidChangeSessions(listener: (provider: string) => void): Disposable;
+}
+
+let host: GitHubHost | undefined;
+
+/** Set once at startup, before any GitHub request. */
+export function useGitHubHost(value: GitHubHost): void {
+  host = value;
+}
+
+function gitHubHost(): GitHubHost {
+  if (host === undefined) throw new Error('No GitHub host is set.');
+  return host;
+}
 
 /** Where a GitHub host serves its API, and which VS Code sign-in it takes. */
 export interface GitHubEndpoints {
@@ -33,7 +55,7 @@ function enterpriseHost(uri: string | undefined): string | undefined {
 
 /** Endpoints for a host under the user's current `github-enterprise.uri` setting. */
 export function endpointsFor(host: string): GitHubEndpoints {
-  return githubEndpoints(host, vscode.workspace.getConfiguration('github-enterprise').get<string>('uri'));
+  return githubEndpoints(host, gitHubHost().enterpriseUri());
 }
 
 const tokens = new Map<AuthProvider, Promise<string>>();
@@ -53,8 +75,8 @@ export class GitHubSignInRequired extends Error {
 function token({ host, authProvider: provider }: GitHubEndpoints, interactive: boolean): Promise<string> {
   let found = tokens.get(provider);
   if (found === undefined) {
-    found = interactive ? signInToGitHub(provider) : Promise.resolve(vscode.authentication.getSession(provider, scopes, { silent: true })).then(async (session) => {
-      const accessToken = session?.accessToken ?? await ghToken(host);
+    found = interactive ? signInToGitHub(provider) : gitHubHost().token(provider, scopes, 'silent').then(async (session) => {
+      const accessToken = session ?? await ghToken(host);
       if (accessToken === undefined) throw new GitHubSignInRequired(provider);
       return accessToken;
     });
@@ -82,18 +104,17 @@ async function ghToken(host: string): Promise<string | undefined> {
 
 /** Show VS Code's GitHub sign-in, for the provider that last needed one when none is given. */
 export async function signInToGitHub(provider: AuthProvider = lastMissing): Promise<string> {
-  const session = rejected.has(provider)
-    ? await vscode.authentication.getSession(provider, scopes, { forceNewSession: true })
-    : await vscode.authentication.getSession(provider, scopes, { createIfNone: true });
+  const session = await gitHubHost().token(provider, scopes, rejected.has(provider) ? 'renew' : 'create');
+  if (session === undefined) throw new GitHubSignInRequired(provider);
   rejected.delete(provider);
-  tokens.set(provider, Promise.resolve(session.accessToken));
-  return session.accessToken;
+  tokens.set(provider, Promise.resolve(session));
+  return session;
 }
 
 /** Drop cached sign-ins and notify `onChange` when the user signs in or out of GitHub in VS Code. */
-export function watchGitHubSessions(onChange: () => void): vscode.Disposable {
-  return vscode.authentication.onDidChangeSessions(({ provider }) => {
-    if (provider.id !== 'github' && provider.id !== 'github-enterprise') return;
+export function watchGitHubSessions(onChange: () => void): Disposable {
+  return gitHubHost().onDidChangeSessions((provider) => {
+    if (provider !== 'github' && provider !== 'github-enterprise') return;
     tokens.clear();
     onChange();
   });
@@ -131,9 +152,6 @@ export async function githubRequest(endpoints: GitHubEndpoints, url: string, met
     throw new Error('GitHub returned invalid data.');
   }
 }
-
-/** A GET answered with its ETag, for asking later whether it changed. */
-export interface Polled { readonly etag: string; readonly data: unknown }
 
 /** GET `url` again; returns `known` itself when GitHub answers 304, which does not count against the rate limit. */
 export async function githubPoll(endpoints: GitHubEndpoints, url: string, known?: Polled): Promise<Polled> {

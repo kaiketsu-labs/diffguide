@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { prepareHighlighting } from '../../core/codePreview.js';
 import { highlightSource } from '../../core/unifiedDiff.js';
-import { prepareHighlighting } from '../../page/preview/codePreview.js';
 import type { DefinitionPeek } from '../../page/protocol.js';
 
 /** Lines shown around a definition, so the panel scrolls through its surroundings. */

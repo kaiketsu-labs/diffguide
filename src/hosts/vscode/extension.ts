@@ -2,48 +2,49 @@ import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from '../../agents/claude/bridge.js';
-import type { ClaudeTask } from '../../core/agent.js';
+import { readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
+import { backgroundStatus, type ClaudeChoice, claudeStatus, type ClaudeTask } from '../../core/agent.js';
 import { anchorFromText, fileAnchor, pullRequestAnchor } from '../../core/anchors.js';
+import { prepareHighlighting, useEditorHighlighter } from '../../core/codePreview.js';
 import { commitAndPush, commitFiles, conflictTask, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits } from '../../core/conflicts.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from '../../core/contracts.js';
-import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread } from '../../core/forge.js';
+import type { PullRequestConversation, PullRequestDetails, PullRequestProvider, PullRequestSummary, PullRequestVersion, RemoteThread, WorkspaceRepository } from '../../core/forge.js';
 import { isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { listLocalCheckouts, type LocalCheckout } from '../../core/git/localCheckouts.js';
 import { cleanUpWorktrees } from '../../core/git/worktreeCleanup.js';
 import { ensureWorktree, git, hasWorktree, type PullRequestRole, readPullRequestBase, removeWorktree, worktreePath } from '../../core/git/worktrees.js';
 import { maximumReplyLength } from '../../core/limits.js';
-import { linkedChanges } from '../../core/linkedController.js';
 import { draftReplyTask, githubFeedbackRequest, githubReplyTask, placeComment } from '../../core/pullRequestComments.js';
-import { saveSelection } from '../../core/pullRequestEdits.js';
-import { githubPageActions } from '../../core/pullRequestPageActions.js';
 import { FileReviews } from '../../core/reviewedFiles.js';
-import { readPicks, reviewView, savePicks } from '../../core/reviewRunner.js';
 import { createReviewStore } from '../../core/store.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from '../../core/suggestions.js';
 import { type FileDiff, highlightSource, readPullRequestDiff, savedCodeDiff } from '../../core/unifiedDiff.js';
-import { signInToGitHub, watchGitHubSessions } from '../../forges/github/githubApi.js';
+import { signInToGitHub, useGitHubHost, watchGitHubSessions } from '../../forges/github/githubApi.js';
+import { vscodeGitHubHost } from './githubHost.js';
 import { GitHubApiProvider } from '../../forges/github/provider.js';
+import { parsePullRequestLink } from '../../forges/github/remotes.js';
 import { mockPullRequestProvider } from '../../forges/mockPullRequests.js';
+import { linkedChanges } from '../../page/linkedController.js';
 import { mediaType } from '../../page/media.js';
 import { buildOverviewState } from '../../page/overviewState.js';
-import { prepareHighlighting, useEditorHighlighter } from '../../page/preview/codePreview.js';
 import { readFilePreview, readMediaSides } from '../../page/preview/fileContent.js';
 import { fenceFilePaths, markdownHtml } from '../../page/preview/markdown.js';
-import type { AnalysisView, AppliedSuggestion, DiffSelection, FilesView, LinkedChange, PageComment } from '../../page/protocol.js';
+import type { AnalysisView, AppliedSuggestion, DiffSelection, FilesView, LinkedChange, OverviewReveal, PageComment } from '../../page/protocol.js';
+import { saveSelection } from '../../page/pullRequestEdits.js';
+import { githubPageActions } from '../../page/pullRequestPageActions.js';
 import { PendingWrites, sharedPerTurn } from './autoSync.js';
 import { type Checkout, Checkouts, nestedRepositoryRoots } from './checkouts.js';
 import { type ClaudeAnswer, ClaudeAnswersTree, latestAnswers, SeenAnswers } from './claudeAnswers.js';
-import { backgroundStatus, claudeStatus } from './claudeStatus.js';
 import { DefinitionPeeks } from './definitions.js';
 import { readFileIcons } from './fileIcons.js';
 import { LocalFilesView } from './localFilesView.js';
 import { type BranchPullRequests, implementThreadRequest, listRepositoryFiles, localClaudeStatus, LocalReview, toDisposable, wholeFile } from './localReview.js';
 import { type LocalSession, LocalSessions } from './localSessions.js';
 import { openPullRequestFile, readBaseContent, registerPullRequestDiffs } from './pullRequestDiff.js';
-import { checkoutDataPath, type PullRequestSession, PullRequestSessions, type WorkspaceRepository } from './pullRequestSessions.js';
+import { checkoutDataPath, type PullRequestSession, PullRequestSessions } from './pullRequestSessions.js';
 import { type PullRequestWorktrees, registerPullRequestView } from './pullRequestView.js';
-import { isPageOpen, type OverviewReveal, revealOpenPage, showPullRequestOverview } from './reviewPanel.js';
-import { type ClaudeChoice, prepareConnection, registerClaudeLauncher } from './setup.js';
+import { isPageOpen, revealOpenPage, showPullRequestOverview } from './reviewPanel.js';
+import { prepareConnection, registerClaudeLauncher } from './setup.js';
 import { editorHighlighter } from './textMate.js';
 
 let activeStore: ReviewStore | undefined;
@@ -53,6 +54,7 @@ let activePullRequests: Checkouts | undefined;
 
 /** Initialize one workspace-scoped review and its private local connection. */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  useGitHubHost(vscodeGitHubHost);
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (folder === undefined || folder.uri.scheme !== 'file' || !vscode.workspace.isTrusted) return;
   const root = folder.uri.fsPath;
@@ -319,7 +321,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       /** Local threads posted on GitHub at the last state change; one more means GitHub has a comment the page has not read yet. */
       let published = publishedThreads();
       const linked = linkedChanges({
-        repository, pullRequest, provider, folder, base: readBase, dataPath: opened.dataPath, repositories: workspaceRepositories,
+        repository, pullRequest, provider, folder, base: readBase, dataPath: opened.dataPath, repositories: workspaceRepositories, parseLink: parsePullRequestLink,
         openPage: async (name, number) => {
           const other = (await workspaceRepositories()).get(name.toLowerCase());
           const target = other === undefined ? undefined : (await checkouts.list()).find((each) => each.storageRoot === other.storageRoot);

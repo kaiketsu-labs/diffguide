@@ -1,3 +1,4 @@
+import type { PullRequestLink } from '../../core/forge.js';
 
 /** A repository on a GitHub host, as a git remote names it. */
 export interface GitHubRemote {
@@ -15,14 +16,6 @@ export function parseGitRemote(url: string): GitHubRemote | undefined {
   if (host === undefined || owner === undefined || name === undefined) return undefined;
   const valid = /^[A-Za-z0-9_.-]+$/u;
   return valid.test(owner) && valid.test(name) && valid.test(host) ? { host: host.toLowerCase(), owner, name } : undefined;
-}
-
-/** A pull request a link names; `host` is absent for the short `owner/name#57` form. */
-export interface PullRequestLink {
-  readonly host?: string;
-  readonly owner: string;
-  readonly name: string;
-  readonly number: number;
 }
 
 /** Read a PR from a GitHub link such as `https://github.com/owner/name/pull/57/files#discussion_r1`, or from `owner/name#57`. */

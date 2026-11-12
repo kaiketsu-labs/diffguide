@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import type { ClaudeConversation } from '../../core/agent.js';
 import { record } from '../../core/connection.js';
 import { readPrivateJson } from '../../core/privateFiles.js';
-import { isSessionId } from './sessionBinding.js';
+import { isSessionId } from '../../core/sessionBinding.js';
 
 /** Keep conversation labels bounded and free of terminal or layout control characters. */
 function label(value: unknown, maximum = 100): string {

@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import { posix } from 'node:path';
+import { codePreviewHtml, escapeCode } from '../../core/codePreview.js';
 import { mediaType } from '../media.js';
-import { codePreviewHtml, escapeCode } from './codePreview.js';
 
 const fenceFiles: Readonly<Record<string, string>> = {
   ts: 'x.ts', typescript: 'x.ts', tsx: 'x.tsx', js: 'x.js', javascript: 'x.js', jsx: 'x.jsx', json: 'x.json',

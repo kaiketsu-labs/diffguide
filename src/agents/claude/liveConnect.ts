@@ -1,7 +1,7 @@
 import { open, realpath, unlink } from 'node:fs/promises';
 import { readDescriptor, record } from '../../core/connection.js';
 import { readPrivateJson, writePrivateJson } from '../../core/privateFiles.js';
-import { isSessionId, readSessionBinding } from './sessionBinding.js';
+import { isSessionId, readSessionBinding } from '../../core/sessionBinding.js';
 
 /** Serialize explicit selection changes so a stale launch cannot clear a new owner. */
 async function withSelectionLock(path: string, action: () => Promise<void>): Promise<void> {

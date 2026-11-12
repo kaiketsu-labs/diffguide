@@ -1,5 +1,5 @@
-import { record } from '../../core/connection.js';
-import { readPrivateJson } from '../../core/privateFiles.js';
+import { record } from './connection.js';
+import { readPrivateJson } from './privateFiles.js';
 
 /** Identify one explicitly selected conversation without reading its transcript. */
 export interface SessionBinding {

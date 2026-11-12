@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PullRequestDetails, PullRequestProvider } from '../src/core/forge.js';
-import { reviewerChanges, saveSelection } from '../src/core/pullRequestEdits.js';
+import { reviewerChanges, saveSelection } from '../src/page/pullRequestEdits.js';
 
 test('requests newly picked reviewers and withdraws unpicked requests', () => {
   assert.deepEqual(reviewerChanges({ users: ['alice', 'bob'], teams: ['core'] }, { users: ['bob', 'carol'], teams: ['core', 'web'] }), {

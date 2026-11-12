@@ -2,11 +2,11 @@ import { mkdir, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { listClaudeConversations } from '../../agents/claude/claudeSessions.js';
-import { readSessionBinding } from '../../agents/claude/sessionBinding.js';
-import type { ClaudeConversation } from '../../core/agent.js';
+import type { ClaudeChoice, ClaudeConversation } from '../../core/agent.js';
 import type { ReviewBridge } from '../../core/contracts.js';
 import { requireNodeRuntime, resolveExecutable } from '../../core/executables.js';
 import { readPrivateJson, writePrivateJson } from '../../core/privateFiles.js';
+import { readSessionBinding } from '../../core/sessionBinding.js';
 import { quotePosix } from '../../core/shell.js';
 import { installLivePlugin, showLiveConnection } from './liveSetup.js';
 
@@ -119,9 +119,6 @@ async function prepareClaudeCommand(
     join(storagePath, 'connection.json'), bindingPath, binding.sessionId]);
   return `${release} && ${launch}`;
 }
-
-/** How the review page connects Claude: show its terminal, start or resume a conversation there, prepare a running one, or copy a start command. */
-export type ClaudeChoice = { readonly how: 'show' | 'new' | 'running' | 'copy' } | { readonly how: 'resume'; readonly session?: string };
 
 /** Claude connection actions for one review session. */
 export interface ClaudeLauncher extends vscode.Disposable {

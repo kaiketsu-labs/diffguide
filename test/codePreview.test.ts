@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { codePreviewHtml, useEditorHighlighter } from '../src/page/preview/codePreview.js';
+import { codePreviewHtml, useEditorHighlighter } from '../src/core/codePreview.js';
 
 /** Recover preview source after removing only generated span markup. */
 function sourceText(html: string): string {

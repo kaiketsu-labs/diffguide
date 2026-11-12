@@ -1,6 +1,6 @@
-import type { CommentKind, LinkedPullRequestState, ListVersion, MergeMessage, MergeMethod, PickerOptions, PullRequestComment, PullRequestConversation, PullRequestDetails, PullRequestEdit, PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, PullRequestVersion, ReactionContent, RemoteThread, ReviewerSet, ReviewEvent } from '../../core/forge.js';
+import type { CommentKind, LinkedPullRequestState, ListVersion, MergeMessage, MergeMethod, PickerOptions, Polled, PullRequestComment, PullRequestConversation, PullRequestDetails, PullRequestEdit, PullRequestFile, PullRequestProvider, PullRequestRepository, PullRequestSummary, PullRequestVersion, ReactionContent, RemoteThread, ReviewerSet, ReviewEvent } from '../../core/forge.js';
 import { git } from '../../core/git/worktrees.js';
-import { endpointsFor, githubPoll, githubRequest, type Polled } from './githubApi.js';
+import { endpointsFor, githubPoll, githubRequest } from './githubApi.js';
 import { canWrite, httpsUrl, list, object, parseConversation, parseDetails, parseLinkedState, parsePickerOptions, parsePullRequestFiles, parsePullRequestList, parseReviewThreads, searchNode, text } from './parse.js';
 import { type GitHubRemote, parseGitRemote, pickGitHubRemote } from './remotes.js';
 

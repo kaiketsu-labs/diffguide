@@ -6,12 +6,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import * as vscode from 'vscode';
 import type { PullRequestConversation, PullRequestDetails, RemoteThread } from '../src/core/forge.js';
-import { githubPageActions, type PageContext, suggestionEdits } from '../src/core/pullRequestPageActions.js';
 import { applyLineSuggestions } from '../src/core/suggestions.js';
 import { generatedPaths, readPullRequestDiff } from '../src/core/unifiedDiff.js';
 import { parseConversation } from '../src/forges/github/parse.js';
 import { showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
 import type { OverviewActions, OverviewState } from '../src/page/protocol.js';
+import { githubPageActions, type PageContext, suggestionEdits } from '../src/page/pullRequestPageActions.js';
 import { EventEmitter, resetFakeWindow, window } from './fakes/vscode.js';
 
 const oid = (digit: string): string => digit.repeat(40);

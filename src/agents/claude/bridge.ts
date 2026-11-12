@@ -2,8 +2,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { BridgeState, CodeAnchor, ConnectionDescriptor, Disposable, LinkedRepositoryHandler, ReviewBridge, ReviewEvent, ReviewMessage, ReviewStore, ReviewThread } from '../../core/contracts.js';
 import { maximumConversationMessages, maximumConversationTextLength, maximumIdentifierLength, maximumPathLength, maximumReviewTextLength } from '../../core/limits.js';
+import { readSessionBinding } from '../../core/sessionBinding.js';
 import { parseAgentUpdate, ReviewStoreError } from '../../core/store.js';
-import { readSessionBinding } from './sessionBinding.js';
 
 const maximumBodyBytes = 256 * 1024;
 const pollDurationMs = 20_000;

@@ -1,4 +1,3 @@
-import type { Polled } from '../forges/github/githubApi.js';
 
 /** Open pull request shown in the sidebar, validated from provider output. */
 export interface PullRequestSummary {
@@ -338,3 +337,21 @@ export interface LinkedPullRequestState {
 
 export interface PullRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string }
 export interface ListVersion { readonly polled?: Polled; readonly latest: string }
+
+/** A GET answered with its ETag, for asking later whether it changed. */
+export interface Polled { readonly etag: string; readonly data: unknown }
+
+/** A pull request a link names; `host` is absent for the short `owner/name#57` form. */
+export interface PullRequestLink {
+  readonly host?: string;
+  readonly owner: string;
+  readonly name: string;
+  readonly number: number;
+}
+
+/** Another workspace repository Claude may change for a PR: where its worktrees live and how to reach its PRs. */
+export interface WorkspaceRepository {
+  readonly root: string;
+  readonly storageRoot: string;
+  readonly connect: () => Promise<PullRequestProvider>;
+}

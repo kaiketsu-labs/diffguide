@@ -1,17 +1,17 @@
 import type { spawn as spawnProcess } from 'node:child_process';
 import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import * as vscode from 'vscode';
-import { type ClaudeRunnerOptions, contentBlocks, StepLog, type StreamMessage, untrustedCheckoutFlags } from '../agents/claude/claudeRunner.js';
-import { worktreeFolder } from '../agents/claude/editGuard.js';
-import type { ReviewView } from '../page/protocol.js';
-import { type CodeAnchor, type Reviewer, reviewers, type ReviewStore } from './contracts.js';
-import { excludeFromGit, git } from './git/worktrees.js';
+import { type Disposable, Emitter } from '../../core/events.js';
+import type { KeyValueStore } from '../../core/host.js';
+import { type CodeAnchor, type Reviewer, reviewers, type ReviewStore } from '../../core/contracts.js';
+import { excludeFromGit, git } from '../../core/git/worktrees.js';
+import { writePrivateJson } from '../../core/privateFiles.js';
+import { type CodeReviewResult, type DroppedCandidate, findingText, handbackItems, parseReviewOutput, parseReviewUsage, readStoredReview, type ReviewAgent, reviewAgents, type ReviewLane, type ReviewLaneItem, type ReviewLive, reviewPrompt, reviewSchema, type ReviewStage, type ReviewUsage, type ReviewView, splitAgentCost, weightedTurn, type WeightedTurn } from '../../core/review.js';
+import { quotePosix, stopProcess } from '../../core/shell.js';
+import type { FileDiff } from '../../core/unifiedDiff.js';
+import { type ClaudeRunnerOptions, contentBlocks, StepLog, type StreamMessage, untrustedCheckoutFlags } from './claudeRunner.js';
+import { worktreeFolder } from './editGuard.js';
 import { runStructuredClaude, type StructuredRun } from './prAnalysisRunner.js';
-import { writePrivateJson } from './privateFiles.js';
-import { type CodeReviewResult, type DroppedCandidate, findingText, handbackItems, parseReviewOutput, parseReviewUsage, readStoredReview, type ReviewAgent, reviewAgents, type ReviewLane, type ReviewLaneItem, type ReviewLive, reviewPrompt, reviewSchema, type ReviewStage, type ReviewUsage, splitAgentCost, weightedTurn, type WeightedTurn } from './review.js';
-import { quotePosix, stopProcess } from './shell.js';
-import type { FileDiff } from './unifiedDiff.js';
 
 /** What the code review is doing right now; a failed run keeps its last live state. */
 export interface CodeReviewActivity {
@@ -191,8 +191,8 @@ async function sweepRuns(cwd: string): Promise<void> {
 }
 
 /** A headless Claude run that has review agents look for defects, prove them in scratch worktrees, and posts the proven ones as threads. */
-export class CodeReview implements vscode.Disposable {
-  readonly #changed = new vscode.EventEmitter<void>();
+export class CodeReview implements Disposable {
+  readonly #changed = new Emitter<void>();
   readonly onDidChange = this.#changed.event;
   #activity: CodeReviewActivity = { running: false };
   #result: Promise<CodeReviewResult | undefined> | undefined;
@@ -331,12 +331,12 @@ export class CodeReview implements vscode.Disposable {
 const picksKey = (repository: string): string => `diffGuide.reviewers:${repository}`;
 
 /** The reviewers picked for a repository's next review; all of them until the user picks. */
-export function readPicks(state: vscode.Memento, repository: string): Reviewer[] {
+export function readPicks(state: KeyValueStore, repository: string): Reviewer[] {
   const saved = state.get<unknown>(picksKey(repository));
   return Array.isArray(saved) ? reviewers.filter((reviewer) => saved.includes(reviewer)) : [...reviewers];
 }
 
-export async function savePicks(state: vscode.Memento, repository: string, picks: readonly Reviewer[]): Promise<void> {
+export async function savePicks(state: KeyValueStore, repository: string, picks: readonly Reviewer[]): Promise<void> {
   await state.update(picksKey(repository), [...picks]);
 }
 

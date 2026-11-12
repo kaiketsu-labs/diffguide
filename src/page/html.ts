@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { codePreviewStyles } from '../core/codePreview.js';
 import { icons } from './icons.js';
 import { orbLoaderStyles } from './orbLoader.js';
-import { codePreviewStyles } from './preview/codePreview.js';
 import type { OverviewState } from './protocol.js';
 import { webviewStyles } from './webviewStyles.js';
 

@@ -1,25 +1,25 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import * as vscode from 'vscode';
+import { CodeReview, readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
 import { anchorFromText, fileAnchor } from '../../core/anchors.js';
+import { prepareHighlighting } from '../../core/codePreview.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from '../../core/contracts.js';
 import { resolveExecutable } from '../../core/executables.js';
 import type { PullRequestSummary } from '../../core/forge.js';
 import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { git } from '../../core/git/worktrees.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
-import { CodeReview, readPicks, reviewView, savePicks } from '../../core/reviewRunner.js';
 import { applySuggestion, parseSuggestions } from '../../core/suggestions.js';
 import { type FileDiff, highlightSource, readPullRequestDiff, wholeFileDiff } from '../../core/unifiedDiff.js';
 import { mediaType } from '../../page/media.js';
 import { eventIntents, threadView } from '../../page/overviewState.js';
-import { prepareHighlighting } from '../../page/preview/codePreview.js';
 import { readFilePreview, readMediaSides } from '../../page/preview/fileContent.js';
-import type { DiffSelection, FilesView, OverviewActions, OverviewState, PageComment } from '../../page/protocol.js';
+import type { DiffSelection, FilesView, OverviewActions, OverviewReveal, OverviewState, PageComment } from '../../page/protocol.js';
 import { DefinitionPeeks } from './definitions.js';
 import { readFileIcons } from './fileIcons.js';
 import { loginShell } from './pullRequestSessions.js';
-import { type OverviewReveal, revealOpenPage, showPullRequestOverview } from './reviewPanel.js';
+import { revealOpenPage, showPullRequestOverview } from './reviewPanel.js';
 import type { ClaudeLauncher } from './setup.js';
 
 /** Page key of the window folder's local review; other checkouts add their folder. */

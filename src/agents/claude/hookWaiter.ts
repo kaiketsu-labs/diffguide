@@ -4,9 +4,9 @@ import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BridgeClient, BridgeProtocolError, readBatch, readDescriptor, record, type ReviewBatch } from '../../core/connection.js';
 import { readCustomInstructions } from '../../core/customInstructions.js';
+import { ownsSession } from '../../core/sessionBinding.js';
 import { buildReviewBatchPrompt } from './eventPrompt.js';
 import { createHookDeliveryLedger } from './hookDelivery.js';
-import { ownsSession } from './sessionBinding.js';
 
 /** Read the bounded JSON envelope supplied to a Claude command hook. */
 async function readHookInput(): Promise<Record<string, unknown>> {

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import * as vscode from 'vscode';
+import { type Disposable, Emitter } from './events.js';
 import { anchorFromText, locateCodeAnchor } from './anchors.js';
 import { record } from './connection.js';
 import type { CodeAnchor } from './contracts.js';
@@ -154,8 +154,8 @@ export async function unmarkRangesRead(worktree: string, ids: readonly string[],
 }
 
 /** Reviewed files per PR: local ticks merged with the code host's "Viewed" flags, which are cached until `forget`. */
-export class FileReviews implements vscode.Disposable {
-  readonly #changed = new vscode.EventEmitter<string>();
+export class FileReviews implements Disposable {
+  readonly #changed = new Emitter<string>();
   /** Fires with `owner/name#number` of the PR whose files were ticked or unticked. */
   readonly onDidChange = this.#changed.event;
   readonly #viewed = new Map<string, Promise<Set<string>>>();
