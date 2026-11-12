@@ -21,19 +21,37 @@ DiffGuide is a review page in VS Code for your local changes and your GitHub pul
 
 ## Three ways to review
 
-| | |
-| --- | --- |
-| <img src="docs/media/icons/comment.png" width="36" alt=""> | **Comment at the line.** Click a line and choose **Ask** to discuss it, **Implement** to change it, or **Reply** to draft your GitHub answer. The agent reads the codebase, runs the tests and edits the code for exactly those lines, while you write the next comment. |
-| <img src="docs/media/icons/guide.png" width="36" alt=""> | **Guide.** **Build guide** has the agent order a PR's changes into steps by severity and explain each one. Tick **Viewed** on every step and you have covered the whole PR. |
-| <img src="docs/media/icons/review.png" width="36" alt=""> | **Code review.** **Review** sends correctness, design, security, performance and test agents over the change. Each proves its findings in its own worktree, with a failing test, a trace or a citation, before they open as threads. |
+<table>
+  <tr>
+    <td><img src="docs/media/icons/comment.png" width="36" alt=""></td>
+    <td><b>Comment at the line.</b> Click a line and choose <b>Ask</b> to discuss it, <b>Implement</b> to change it, or <b>Reply</b> to draft your GitHub answer. The agent reads the codebase, runs the tests and edits the code for exactly those lines, while you write the next comment.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/icons/guide.png" width="36" alt=""></td>
+    <td><b>Guide.</b> <b>Build guide</b> has the agent order a PR's changes into steps by severity and explain each one. Tick <b>Viewed</b> on every step and you have covered the whole PR.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/icons/review.png" width="36" alt=""></td>
+    <td><b>Code review.</b> <b>Review</b> sends correctness, design, security, performance and test agents over the change. Each proves its findings in its own worktree, with a failing test, a trace or a citation, before they open as threads.</td>
+  </tr>
+</table>
 
 ## Around the review
 
-| | |
-| --- | --- |
-| <img src="docs/media/icons/pr.png" width="36" alt=""> | **The whole GitHub PR.** Conversation, commits since your last review, checks and the merge box on one page. |
-| <img src="docs/media/icons/sidebar.png" width="36" alt=""> | **Pull Requests sidebar.** Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The orb marks rows where the agent is working. |
-| <img src="docs/media/icons/linked.png" width="36" alt=""> | **Linked changes.** A PR that needs changes in other repositories lists them, with the branch the agent made and **Push and open draft PR**. |
+<table>
+  <tr>
+    <td><img src="docs/media/icons/pr.png" width="36" alt=""></td>
+    <td><b>The whole GitHub PR.</b> Conversation, commits since your last review, checks and the merge box on one page.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/icons/sidebar.png" width="36" alt=""></td>
+    <td><b>Pull Requests sidebar.</b> Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The orb marks rows where the agent is working.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/icons/linked.png" width="36" alt=""></td>
+    <td><b>Linked changes.</b> A PR that needs changes in other repositories lists them, with the branch the agent made and <b>Push and open draft PR</b>.</td>
+  </tr>
+</table>
 
 ## How it works
 
