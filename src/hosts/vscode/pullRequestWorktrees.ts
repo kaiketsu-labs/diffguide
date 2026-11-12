@@ -1,13 +1,35 @@
 import * as vscode from 'vscode';
 import { agentStatus, backgroundStatus } from '../../core/agent.js';
-import { localChanges } from '../../core/conflicts.js';
+import { type LocalChange, localChanges } from '../../core/conflicts.js';
+import type { ChangeRequestSummary, Forge } from '../../core/forge.js';
 import { cleanUpWorktrees } from '../../core/git/worktreeCleanup.js';
-import { ensureWorktree, hasWorktree, removeWorktree, worktreePath } from '../../core/git/worktrees.js';
+import { ensureWorktree, hasWorktree, type PullRequestRole, removeWorktree, worktreePath } from '../../core/git/worktrees.js';
 import { GitHubApiProvider } from '../../forges/github/provider.js';
 import type { Checkout, Checkouts } from './checkouts.js';
 import { showClaude } from './claudeStatus.js';
-import type { PullRequestWorktrees } from './pullRequestItems.js';
 import type { ShowOverview } from './pullRequestPage.js';
+
+/** Worktree operations the sidebar triggers, kept separate so the tree stays testable. */
+export interface PullRequestWorktrees {
+  exists(repository: string, number: number): Promise<boolean>;
+  /** Ensure the PR's worktree and open its review page. */
+  open(provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole): Promise<void>;
+  remove(repository: string, number: number): Promise<void>;
+  /** Show what the PR's Claude did, and send skipped comments again. */
+  showClaude(provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole): Promise<void>;
+  /** Claude's state for a PR with an open review, shown beside it. */
+  claudeStatus(repository: string, number: number): string | undefined;
+  /** Whether Claude answers comments, builds the guide or reviews for a PR with an open review. */
+  working(repository: string, number: number): boolean;
+  /** Files of a checked-out PR ticked Viewed and unchanged since, or marked Viewed on the code host. */
+  reviewedFiles(provider: Forge, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>>;
+  /** Open a tab with the PR's review progress, threads and Claude activity. */
+  showOverview(provider: Forge, repository: string, pullRequest: ChangeRequestSummary, role: PullRequestRole): Promise<void>;
+  /** What a checked-out PR's worktree has that GitHub does not: commits ahead of `pushedHead`, and each changed file. */
+  localChanges(repository: string, number: number, pushedHead: string | undefined): Promise<{ readonly commits: number; readonly files: ReadonlyMap<string, LocalChange> }>;
+  /** Drop cached code host state so the next read is fresh. */
+  forget(): void;
+}
 
 /** The PR worktrees of one checkout, as the PR list uses them. */
 export function worktreesOf(checkouts: Checkouts, checkout: Checkout, showOverview: ShowOverview): PullRequestWorktrees {

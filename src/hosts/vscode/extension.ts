@@ -151,4 +151,3 @@ export async function deactivate(): Promise<void> {
   activeStore = undefined;
   activeLocalSessions = undefined;
 }
-

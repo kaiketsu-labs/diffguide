@@ -4,7 +4,6 @@ import { pollWhileFocused } from './autoSync.js';
 import { legendProvider, pinMime, pullRequestKey, rowDecorationProvider, type Node, type PullRequestCheckout, type PullRequestNode, type RepositoryNode } from './pullRequestItems.js';
 import { PullRequestTree } from './pullRequestTree.js';
 
-export type { PullRequestWorktrees } from './pullRequestItems.js';
 
 /** Register the pull request sidebar and its commands. */
 export function registerPullRequestView(

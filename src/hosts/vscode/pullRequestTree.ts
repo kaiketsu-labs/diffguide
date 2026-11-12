@@ -6,8 +6,9 @@ import { parsePullRequestLink } from '../../forges/github/remotes.js';
 import {
   allOpenItem, allOpenRootItem, authorKey, awaitingReviewKey, groupByKey, hiddenKey, limited, messageItem, parallelListings, pinKey, pinnedItem, pinnedKey,
   pullRequestItem, pullRequestKey, pullRequestsOf, repositoryItem, roleItem, roles, sectionItem, snapshotKey,
-  type Listing, type Node, type Pin, type Placement, type PullRequestCheckout, type PullRequestNode, type PullRequestRowLookups, type PullRequestWorktrees, type Ready, type RepositoryNode, type Snapshot,
+  type Listing, type Node, type Pin, type Placement, type PullRequestCheckout, type PullRequestNode, type PullRequestRowLookups, type Ready, type RepositoryNode, type Snapshot,
 } from './pullRequestItems.js';
+import type { PullRequestWorktrees } from './pullRequestWorktrees.js';
 
 /** List each repository's open pull requests by the user's role in them. */
 export class PullRequestTree implements vscode.TreeDataProvider<Node> {
