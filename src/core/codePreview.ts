@@ -117,8 +117,10 @@ export interface EditorHighlighter {
 }
 
 let editorHighlighter: EditorHighlighter | undefined;
+/** Paths `prepareHighlighting` loaded, so whether the editor can color them is settled and any result may be kept. */
+const prepared = new Set<string>();
 
-/** Editor-colored markup by file path and content, so reading the same files again skips highlighting; bounded by total length. */
+/** Colored markup by file path and content, so reading the same files again skips highlighting; bounded by total length. */
 const highlighted = new Map<string, string>();
 let highlightedLength = 0;
 const maximumHighlightedLength = 64_000_000;
@@ -135,6 +137,7 @@ function remember(key: string, html: string): void {
 
 export function useEditorHighlighter(highlighter: EditorHighlighter | undefined): void {
   editorHighlighter = highlighter;
+  prepared.clear();
   highlighted.clear();
   highlightedLength = 0;
 }
@@ -142,6 +145,14 @@ export function useEditorHighlighter(highlighter: EditorHighlighter | undefined)
 /** Load what `codePreviewHtml` needs to color these files like the editor. */
 export async function prepareHighlighting(filePaths: readonly string[]): Promise<void> {
   await editorHighlighter?.prepare(filePaths).catch(() => undefined);
+  for (const filePath of filePaths) prepared.add(filePath);
+}
+
+/** The markup `codePreviewHtml` would return, when it needs no highlighting to get it; undefined otherwise. */
+export function knownPreviewHtml(code: string, filePath: string): string | undefined {
+  if (code.length > 200_000) return escapeCode(code);
+  const key = createHash('sha1').update(filePath).update('\0').update(code).digest('base64');
+  return highlighted.get(key);
 }
 
 /** Highlight bounded, known source languages using escaped, allowlisted markup only. */
@@ -163,6 +174,12 @@ export function codePreviewHtml(code: string, filePath: string): string {
   } catch {
     // highlight.js below still colors the file.
   }
+  const fallback = highlightJs(code, filePath);
+  if (prepared.has(filePath)) remember(key, fallback);
+  return fallback;
+}
+
+function highlightJs(code: string, filePath: string): string {
   const language = languages[path.extname(filePath).toLowerCase()];
   if (language === undefined || code.length > 20_000) return escapeCode(code);
   try {

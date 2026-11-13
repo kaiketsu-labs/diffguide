@@ -239,3 +239,43 @@ test('hands only a conversation comment with text to the agent, with a known int
   assert.ok(panel.sent.some((sent) => (sent as { done?: string }).done === 'comment-ask:IC1'));
   panel.dispose();
 });
+
+test('sends the files uncolored first and the colored ones after, unless a newer read replaced them', async () => {
+  resetFakeWindow();
+  const state: OverviewState = {
+    title: 'PR', author: 'alice', headBranch: 'feature', baseBranch: 'main', url: 'https://github.com/acme/app/pull/7', viewed: [], read: [], threads: [],
+    claude: { text: '', running: false, retry: false }, analysis: { running: false, stale: false }, details, conversation, github: [],
+  };
+  const file = (html: string) => ({ path: 'a.ts', change: 'modified' as const, binary: false, additions: 1, deletions: 0, hunks: [{ header: '@@ -1 +1 @@', lines: [{ kind: 'add' as const, newLine: 1, html }] }] });
+  const selection = { range: { kind: 'all' as const }, whitespace: false };
+  let colorings = 0;
+  const releases: (() => void)[] = [];
+  const actions = {
+    readFiles: async () => ({ files: [file('a')], selection, atHead: true, colored: async () => {
+      colorings++;
+      await new Promise<void>((resolve) => { releases.push(resolve); });
+      return [file('<span class="tm-ff0000">a</span>')];
+    } }),
+    refresh: () => undefined,
+  } as unknown as OverviewActions;
+  await showPullRequestOverview('plain-first-test', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 20)); };
+  const sentFiles = () => panel.sent.flatMap((sent) => 'files' in (sent as object) ? [(sent as { files: ReturnType<typeof file>[] }).files[0]?.hunks[0]?.lines[0]?.html] : []);
+  panel.receive({ action: 'ready' });
+  await tick();
+  assert.deepEqual(sentFiles(), ['a']);
+  assert.equal(colorings, 1);
+  releases.shift()?.();
+  await tick();
+  assert.deepEqual(sentFiles(), ['a', '<span class="tm-ff0000">a</span>']);
+
+  panel.receive({ action: 'files', range: { kind: 'all' }, whitespace: false });
+  await tick();
+  panel.receive({ action: 'files', range: { kind: 'all' }, whitespace: false });
+  await tick();
+  for (const release of releases.splice(0)) release();
+  await tick();
+  assert.deepEqual(sentFiles(), ['a', '<span class="tm-ff0000">a</span>', 'a', 'a', '<span class="tm-ff0000">a</span>'], 'the first read\'s colors arrived after the second read');
+  panel.dispose();
+});

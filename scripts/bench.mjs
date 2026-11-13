@@ -109,9 +109,12 @@ async function pageRun(browser, dump) {
     await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
     return { handled, painted: performance.now() - start };
   }, message);
-  const filesMessage = dump.messages.find((message) => 'files' in message);
+  const filesMessages = dump.messages.filter((message) => 'files' in message);
+  const filesMessage = filesMessages[0];
   const stateMessage = { state: JSON.parse(dump.html.match(/<script[^>]*id="initial"[^>]*>([\s\S]*?)<\/script>/u)?.[1] ?? 'null')?.state };
   const files = await deliver(filesMessage);
+  // The colored files replace the uncolored ones when they came in two messages.
+  const colored = filesMessages.length > 1 ? await deliver(filesMessages.at(-1)) : undefined;
   const viewed = await page.evaluate(async () => {
     const box = document.querySelector('.file .viewed input');
     const start = performance.now();
@@ -125,7 +128,7 @@ async function pageRun(browser, dump) {
   const nodes = await page.evaluate(() => document.getElementsByTagName('*').length);
   await page.close();
   if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
-  return { boot, files, viewed, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), nodes };
+  return { boot, files, ...colored ? { colored } : {}, viewed, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), nodes };
 }
 
 const report = { label, scale, runs, date: new Date().toISOString(), fixtures: {} };

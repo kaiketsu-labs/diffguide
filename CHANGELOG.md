@@ -3,6 +3,7 @@
 ## Unreleased
 
 - PR pages open before GitHub sends the description, reviewers and checks. Pulsing bars hold their places, and review and merge wait until GitHub answers.
+- A PR's changed files show right away the first time they are read, without syntax colors; the colors follow once they are ready.
 - Review pages reopen in their tabs after a window reload, instead of closing.
 - Refresh on the review page spins while it reloads, then says "Refreshed." or shows why it failed.
 - Resolving a thread folds it, also after jumping to it from the code review card.

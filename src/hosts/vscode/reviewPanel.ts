@@ -110,12 +110,18 @@ export async function showPullRequestOverview(
   };
   updateTabIcon();
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
+  let filesReads = 0;
   const sendFiles = (select?: DiffSelection): void => {
     const reading = select === undefined && early !== undefined ? early : actions.readFiles(select);
     early = undefined;
-    void reading.then(({ files, selection, atHead, icons, repositoryFiles }) => {
+    const read = ++filesReads;
+    void reading.then(async ({ files, selection, atHead, icons, repositoryFiles, colored }) => {
       post({ files, selection, atHead, ...icons === undefined ? {} : { icons }, ...repositoryFiles === undefined ? {} : { repositoryFiles }, ...revealMessage(reveal) });
       reveal = undefined;
+      if (colored === undefined || read !== filesReads) return;
+      // The uncolored files stay on the page if coloring fails.
+      const withColors = await colored().catch(() => undefined);
+      if (withColors !== undefined && read === filesReads) post({ files: withColors, selection, atHead });
     }, (error: unknown) => {
       post({ filesError: error instanceof Error ? error.message : String(error) });
     });
