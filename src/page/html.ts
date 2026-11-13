@@ -79,6 +79,7 @@ section:has(>.picker){position:relative}.picker{position:absolute;top:28px;left:
 .tabs svg{width:16px;height:16px;fill:currentColor}
 .tabs>*{flex:none;white-space:nowrap}.file-icon{display:inline-block;width:16px;font-size:14px;font-weight:400;line-height:1;text-align:center}img.file-icon{height:16px}.file-head .file-icon{flex:none}
 .tabs .count{min-width:18px;height:18px;padding:0 var(--space-6);border-radius:var(--radius-pill);font-size:11px;font-weight:600;line-height:18px;text-align:center;color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.tabs .count:empty{display:none}
+#refresh.busy>svg{animation:refresh-spin 1s linear infinite}@keyframes refresh-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){#refresh.busy>svg{animation:none;opacity:.5}}
 #view-guide.busy>svg{color:var(--agent)}#view-guide.busy>svg>path{animation:guide-busy 1.2s steps(1,end) infinite}@keyframes guide-busy{25%{transform:translateY(-1px)}50%{transform:none}75%{transform:translateY(1px)}}
 @media (prefers-reduced-motion:reduce){#view-guide.busy>svg>path{animation:none}}
 .tabs .tab-warning{display:inline-flex;margin-left:calc(-1 * var(--space-2));color:var(--warning)}.tabs .tab-warning[hidden]{display:none}.tabs .tab-warning svg{width:12px;height:12px}.tab-warning[data-tip]:hover::after{left:0;right:auto}

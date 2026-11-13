@@ -360,7 +360,8 @@ export interface OverviewActions {
   deleteBranch(): Promise<void>;
   /** Remove the PR's local worktree, which the page confirmed, and its local comments. */
   removeWorktree(): Promise<void>;
-  refresh(): void;
+  /** Re-read the page's state; resolves with the first failed read's message, or undefined. */
+  refresh(): Promise<string | undefined>;
   /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
   pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string }>;
   /** Open a linked PR's own review page. */
@@ -487,6 +488,8 @@ export interface ExtensionMessage {
   /** The form whose send succeeded, or 'review'. */
   readonly done?: string | undefined;
   readonly idle?: true;
+  /** A Refresh the page asked for finished; any failure arrives as `error`. */
+  readonly refreshed?: true;
   readonly pickerOptions?: PickerOptions;
   readonly pickerError?: string;
   readonly branches?: readonly string[];

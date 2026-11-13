@@ -55,7 +55,13 @@ document.addEventListener('mouseover', (event) => {
 document.addEventListener('scroll', hideThreadHover, { capture: true, passive: true });
 
 $('show-unpushed').addEventListener('click', showUnpushed);
-for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry'], ['refresh', 'refresh']] as const) $(id).addEventListener('click', () => post({ action }));
+for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry']] as const) $(id).addEventListener('click', () => post({ action }));
+const refresh = $<HTMLButtonElement>('refresh');
+refresh.addEventListener('click', () => {
+  refresh.disabled = true;
+  refresh.classList.add('busy');
+  post({ action: 'refresh' });
+});
 $('stop-claude').addEventListener('click', stopClaude);
 $('connect').addEventListener('click', openConnectMenu);
 $('context').addEventListener('click', openContextMenu);

@@ -69,7 +69,11 @@ export function pullRequestPageController(page: PullRequestPage): PageController
       ...claudeActions(parts),
       ...worktreeActions(parts),
       ...linked.actions(),
-      refresh: () => { linked.forget(); void remote.loadDetails(); void remote.loadThreads(); void remote.loadConversation(); },
+      refresh: async () => {
+        linked.forget();
+        const reads = await Promise.all([remote.loadDetails(), remote.loadThreads(), remote.loadConversation()]);
+        return reads.find((read) => read instanceof Error)?.message;
+      },
     },
   };
 }
