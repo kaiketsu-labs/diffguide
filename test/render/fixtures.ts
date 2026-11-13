@@ -106,6 +106,7 @@ export const pullRequest: OverviewState = {
   },
   unpushed: [{ oid: 'f'.repeat(40), subject: 'Use the configured limit', author: 'claude', createdAt: ago(10), files: 1, additions: 2, deletions: 1 }],
   local: { 'src/api/client.ts': 'unpushed' },
+  linked: [],
 };
 
 /** The same PR while Claude works on a thread. */
@@ -174,6 +175,7 @@ const { conversation: _conversation, ...withoutConversation } = pullRequest;
 const { details: _details, github: _github, ...withoutDetails } = withoutConversation;
 const { reviewed: _reviewed, ...withoutReviewed } = pullRequest;
 const listPending: OverviewState = { ...withoutReviewed, reviewedPending: true };
+const { linked: _linked, ...withoutLinked } = pullRequest;
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
@@ -201,6 +203,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
       { expect: '#reviewed .skeleton' }, { absent: '#files .file', shot: 'list-loading.png' },
       { send: { state: pullRequest }, expect: '#files .file' }, { absent: '#reviewed .skeleton' },
     ] },
+  // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
+  linkedLoading: scene(withoutLinked, [
+    { expect: '#linked:not([hidden]) .skeleton', shot: 'linked-loading.png' },
+    { send: { state: { ...withoutLinked, linked: [] } }, absent: '#linked .skeleton' }, { expect: '#linked-rows', text: 'No PRs in other repositories go with this one.' },
+  ], { saved: { view: 'overview' } }),
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },
     width: 1100, height: 900, steps: [{ scrollTo: '#files', shot: 'readme.png' }] },
