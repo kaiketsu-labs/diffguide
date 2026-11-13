@@ -16,7 +16,7 @@ import { renderBaseMenu, renderReviewers } from './header/reviewers.js';
 import { closeToolbarMenu, renderPicker } from './menus.js';
 import { peeks, probes, renderPeek, showLink } from './peek.js';
 import { render, revealGroup, revealStep } from './render.js';
-import { closedFiles, collapsed, prefs, publishing, received, replies, save, ui } from './state.js';
+import { closedFiles, collapsed, prefs, publishing, received, replies, save, setPageKey, ui } from './state.js';
 import { hopIntoAvatar, setBusy, showNotice } from './status.js';
 import { renderNavThreads } from './threads/list.js';
 import { allThreads, redrawThread } from './threads/model.js';
@@ -183,5 +183,6 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.pickerOptions) { ui.pickerOptions = data.pickerOptions; ui.pickerError = undefined; renderPicker(); }
   if (data.pickerError !== undefined) { ui.pickerError = data.pickerError; renderPicker(); }
   if (data.idle) setBusy(false);
+  if (data.pageKey !== undefined) setPageKey(data.pageKey);
   if (data.refreshed) { const refresh = $<HTMLButtonElement>('refresh'); refresh.disabled = false; refresh.classList.remove('busy'); }
 }

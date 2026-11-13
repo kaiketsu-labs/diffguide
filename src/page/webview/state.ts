@@ -45,6 +45,8 @@ export interface Saved {
   readonly navWidth?: number | undefined;
   /** Height of the comments panel under the file list in pixels, when the user resized it. */
   readonly navThreadsHeight?: number | undefined;
+  /** The extension's name for this page, so a window reload can reopen it. */
+  readonly pageKey?: string;
 }
 export const initial = JSON.parse($('initial').textContent ?? '') as { readonly state: OverviewState; readonly pdfScript?: string };
 const saved = (api.getState() ?? {}) as Saved;
@@ -56,10 +58,16 @@ export const replies = new Map(Object.entries(saved.replies ?? {}));
 export const publishing = new Map(Object.entries(saved.publishing ?? {}));
 export const hiddenTypes = new Set(saved.hiddenTypes ?? []);
 export const closedFiles = new Set(saved.closedFiles ?? []);
+let pageKey = saved.pageKey;
+
+export function setPageKey(key: string): void {
+  pageKey = key;
+  save();
+}
 
 export function save(): void {
   api.setState({ layout: prefs.layout, view: prefs.view, peekWidth: prefs.peekWidth, folders: prefs.folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer: prefs.composer, fileComposer: prefs.fileComposer, showArchived: prefs.showArchived, guideInFiles: prefs.guideInFiles, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: prefs.wantedRange ?? received.diffRange, whitespace: prefs.whitespace, filter: prefs.fileFilter, hideViewed: prefs.hideViewed, hiddenTypes: [...hiddenTypes], closedFiles: [...closedFiles], conversationDraft: prefs.conversationDraft, conversationFolded: prefs.conversationFolded, marginThreads: prefs.marginThreads, allFiles: prefs.allFiles, listHidden: prefs.listHidden, navWidth: prefs.navWidth, navThreadsHeight: prefs.navThreadsHeight });
+    range: prefs.wantedRange ?? received.diffRange, whitespace: prefs.whitespace, filter: prefs.fileFilter, hideViewed: prefs.hideViewed, hiddenTypes: [...hiddenTypes], closedFiles: [...closedFiles], conversationDraft: prefs.conversationDraft, conversationFolded: prefs.conversationFolded, marginThreads: prefs.marginThreads, allFiles: prefs.allFiles, listHidden: prefs.listHidden, navWidth: prefs.navWidth, navThreadsHeight: prefs.navThreadsHeight, ...pageKey === undefined ? {} : { pageKey } });
 }
 /** The open reviewer, assignee or label picker; it saves on close when `selected` differs from `initial`. */
 interface Picker { readonly what: PickTarget; readonly initial: ReadonlySet<string>; readonly selected: Set<string>; readonly node: HTMLElement; readonly list: HTMLElement }
