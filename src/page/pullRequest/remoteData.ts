@@ -14,6 +14,8 @@ export class RemoteData {
   #details: Promise<ChangeRequestDetails | Error> | undefined;
   #threads: Promise<readonly RemoteThread[] | Error> | undefined;
   #conversation: Promise<ChangeRequestConversation | Error> | undefined;
+  /** A conversation read has finished; until then the page shows without one, since it is GitHub's slowest read. */
+  #conversationRead = false;
 
   constructor(private readonly provider: Forge, private readonly number: number, private readonly refreshSidebar: () => void) {}
 
@@ -25,7 +27,7 @@ export class RemoteData {
 
   readonly loadConversation = sharedPerTurn((): Promise<ChangeRequestConversation | Error> => {
     this.#conversation = this.provider.conversation(this.number).catch(asError);
-    void this.#conversation.then(() => { this.changed(); });
+    void this.#conversation.then(() => { this.#conversationRead = true; this.changed(); });
     return this.#conversation;
   });
 
@@ -49,6 +51,12 @@ export class RemoteData {
 
   conversation(): Promise<ChangeRequestConversation | Error> {
     return this.#conversation ?? this.loadConversation();
+  }
+
+  /** The conversation, or undefined before GitHub first sends it; `onDidChange` fires when it arrives. */
+  async shownConversation(): Promise<ChangeRequestConversation | Error | undefined> {
+    const reading = this.conversation();
+    return this.#conversationRead ? await reading : undefined;
   }
 
   async currentDetails(): Promise<ChangeRequestDetails> {
@@ -85,6 +93,6 @@ export class RemoteData {
     const nextDetails = this.provider.details(this.number).catch(asError);
     const nextConversation = this.provider.conversation(this.number).catch(asError);
     void nextDetails.then(() => { this.#details = nextDetails; this.changed(); });
-    void nextConversation.then(() => { this.#conversation = nextConversation; this.changed(); });
+    void nextConversation.then(() => { this.#conversation = nextConversation; this.#conversationRead = true; this.changed(); });
   }
 }
