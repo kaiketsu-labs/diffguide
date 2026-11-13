@@ -187,6 +187,8 @@ test('the page reaches GitHub only for commits, comments and reactions the PR ha
     await tick();
   }
   assert.deepEqual(calls, [
+    // The page reads its files as it opens.
+    `files ${JSON.stringify(null)}`,
     `files ${JSON.stringify({ range: { kind: 'commits', from: oid('a'), to: oid('a') }, whitespace: true })}`,
     'comment Thanks',
     'react IC1 ROCKET true',

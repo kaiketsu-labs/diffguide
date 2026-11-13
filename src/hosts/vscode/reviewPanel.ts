@@ -8,7 +8,7 @@ import { type ChangeRequestConversation, type CommentKind, type HideReason, type
 import { recheckRequest } from '../../core/review.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
-import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
+import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, type FilesView, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
 import { pollWhileFocused } from './autoSync.js';
 import { workingIcon } from './claudeStatus.js';
 import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestItems.js';
@@ -82,6 +82,9 @@ export async function showPullRequestOverview(
 ): Promise<void> {
   if (revealOpenPage(key, revealAt)) return;
   let reveal = revealAt;
+  /** The files, read while the state loads so they are ready when the page is; the page's first file request takes them. */
+  let early: Promise<FilesView> | undefined = (async () => await actions.readFiles())();
+  early.catch(() => undefined);
   let state = await read();
   const restoredPanel = restored.get(key);
   restored.delete(key);
@@ -108,7 +111,9 @@ export async function showPullRequestOverview(
   updateTabIcon();
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
   const sendFiles = (select?: DiffSelection): void => {
-    void actions.readFiles(select).then(({ files, selection, atHead, icons, repositoryFiles }) => {
+    const reading = select === undefined && early !== undefined ? early : actions.readFiles(select);
+    early = undefined;
+    void reading.then(({ files, selection, atHead, icons, repositoryFiles }) => {
       post({ files, selection, atHead, ...icons === undefined ? {} : { icons }, ...repositoryFiles === undefined ? {} : { repositoryFiles }, ...revealMessage(reveal) });
       reveal = undefined;
     }, (error: unknown) => {
