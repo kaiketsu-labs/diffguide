@@ -1,6 +1,6 @@
 /** Thread lists, margin marks and the thread hover card. */
 import type { DiffSide } from '../../protocol.js';
-import { $, chevronMark, el, icon, timeLabel, titled } from '../dom.js';
+import { $, chevronMark, el, icon, placeholders, timeLabel, titled } from '../dom.js';
 import { filteredFiles, filtersOn } from '../files/filters.js';
 import { iconNode } from '../files/nav.js';
 import { renderFiles } from '../files/render.js';
@@ -44,7 +44,8 @@ export function renderThreadList(): void {
   $('threads-title').textContent = 'Threads (' + threads.length + ')';
   const list = $('threads');
   list.replaceChildren();
-  if (threads.length === 0) list.append(el('li', 'muted', received.current?.localMode || received.current?.github || received.current?.githubError ? 'No comments yet.' : 'No local comments yet. Loading GitHub comments…'));
+  const githubLoading = !received.current?.localMode && !received.current?.github && !received.current?.githubError;
+  if (threads.length === 0) list.append(el('li', 'muted', githubLoading ? 'No local comments yet.' : 'No comments yet.'));
   if (received.current?.githubError) list.append(el('li', 'bad', 'Could not load GitHub comments: ' + received.current.githubError));
   for (const kind of threadKinds) {
     const members = threads.filter((thread) => threadKind(thread) === kind && standalone(thread));
@@ -65,6 +66,11 @@ export function renderThreadList(): void {
       group.append(rows);
     }
     list.append(group);
+  }
+  if (githubLoading) {
+    const row = el('li');
+    row.append(...placeholders(45));
+    list.append(row);
   }
   renderNavThreads();
 }

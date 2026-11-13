@@ -2,7 +2,7 @@
 import { icons } from '../../icons.js';
 import type { OverviewState } from '../../protocol.js';
 import { isWriter, toolButton } from '../conversation/comment.js';
-import { $, button, el } from '../dom.js';
+import { $, button, detailsLoading, el, placeholders } from '../dom.js';
 import { askInMenu, menuRow, openToolbarMenu } from '../menus.js';
 import { received, ui } from '../state.js';
 import { changePullRequest, status } from '../status.js';
@@ -25,12 +25,19 @@ export function baseButton(): HTMLElement {
 /** The reviewers and their tools, with the dismiss form under the reviewer it is open for; redrawn only when they change, so the form keeps its focus. */
 export function renderReviewers(state: OverviewState, force = false): void {
   const { details, conversation } = state;
-  const stamp = JSON.stringify([details?.reviewers, details?.canEdit, details?.open, conversation?.reviewIds, conversation?.viewerLogin, conversation?.permission, ui.dismissing?.login]);
+  const stamp = JSON.stringify([details?.reviewers, details?.canEdit, details?.open, conversation?.reviewIds, conversation?.viewerLogin, conversation?.permission, ui.dismissing?.login, detailsLoading(state)]);
   if (!force && stamp === reviewersStamp) return;
   reviewersStamp = stamp;
   const reviewers = $('reviewers');
   reviewers.replaceChildren();
-  if (!details) return;
+  if (!details) {
+    if (detailsLoading(state)) {
+      const row = el('li');
+      row.append(...placeholders(55));
+      reviewers.append(row);
+    }
+    return;
+  }
   for (const reviewer of details.reviewers) {
     const tools: HTMLElement[] = [];
     if (details.canEdit && details.open && reviewer.team === undefined && reviewer.state !== 'requested' && reviewer.rerequested !== true && reviewer.name !== conversation?.viewerLogin) {
