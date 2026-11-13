@@ -24,6 +24,8 @@ export interface PageSession extends OpenedReview {
   readonly review: AgentCodeReview;
   /** Where the PR keeps manual links, unlinks and the repositories Claude worked in. */
   readonly dataPath: string;
+  /** Diff against a new base branch from now on, after the PR was retargeted. */
+  useBase(baseBranch: string): Promise<void>;
 }
 
 /** What a PR's review page needs from the host that shows it. */

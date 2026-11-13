@@ -325,6 +325,8 @@ export async function showPullRequestOverview(
         }
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
         else if (action === 'refresh') {
+          // The poll follows a retargeted or moved base branch and GitHub's head.
+          sync.now();
           sendFiles();
           const problem = await actions.refresh();
           post(problem === undefined ? { refreshed: true, notice: { text: 'Refreshed.' } } : { refreshed: true, error: 'Refresh failed: ' + problem });

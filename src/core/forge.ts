@@ -335,7 +335,8 @@ export interface LinkedChangeRequestState {
   readonly canPush: boolean;
 }
 
-export interface ChangeRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string }
+/** `baseBranch` and `baseHead` are the branch the PR targets and that branch's tip, when the forge reports them. */
+export interface ChangeRequestVersion { readonly polled?: Polled; readonly head: string; readonly updatedAt: string; readonly baseBranch?: string; readonly baseHead?: string }
 export interface ListVersion { readonly polled?: Polled; readonly latest: string }
 
 /** A GET answered with its ETag, for asking later whether it changed. */

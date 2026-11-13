@@ -551,7 +551,8 @@ export class GitHubApiProvider implements Forge {
     const polled = await this.#poll(`pulls/${number}`, known?.polled);
     if (polled === known?.polled) return known;
     const pullRequest = object(polled.data);
-    return { polled, head: text(object(pullRequest['head'])['sha']), updatedAt: text(pullRequest['updated_at']) };
+    const base = object(pullRequest['base']);
+    return { polled, head: text(object(pullRequest['head'])['sha']), updatedAt: text(pullRequest['updated_at']), baseBranch: text(base['ref']), baseHead: text(base['sha']) };
   }
 
   async listVersion(known?: ListVersion): Promise<ListVersion> {

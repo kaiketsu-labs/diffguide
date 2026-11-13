@@ -102,6 +102,7 @@ export function githubActions({ page, remote, diff, pushTarget }: PageParts): Gi
       useBase: async (branch) => {
         await git(folder, ['fetch', '--quiet', 'origin', branch]).catch(() => undefined);
         diff.baseBranch = branch;
+        await page.opened.useBase(branch);
       },
     }),
   };

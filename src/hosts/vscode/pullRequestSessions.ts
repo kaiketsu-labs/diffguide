@@ -11,7 +11,7 @@ import type { CodeAnchor, LinkedRepositoryHandler, ReviewBridge, ReviewStore } f
 import { type InstructionKind, readCustomInstructions } from '../../core/customInstructions.js';
 import { requireNodeRuntime, resolveExecutable } from '../../core/executables.js';
 import type { ChangeRequestSummary, Forge, WorkspaceRepository } from '../../core/forge.js';
-import { createDataFolder, createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, type PullRequestWorktree, readPullRequestBase, readWorktree, worktreePath } from '../../core/git/worktrees.js';
+import { createDataFolder, createReviewData, ensureWorktree, git, listWorktrees, migrateWorktrees, type PullRequestWorktree, readPullRequestBase, readWorktree, recordWorktreeBase, worktreePath } from '../../core/git/worktrees.js';
 import { addWorked, crossReferences, ensureBranchWorktree, isWorktreeIdle, linkedBranchName, linkedWorktreePath, lockWorktree, readStoredLinks, writeStoredLinks } from '../../core/linkedChanges.js';
 import { type CommentPlacement, placeComment, publishableText, readClaudeCommits, readGitHubLinks, readPublications, writeClaudeCommits, writeGitHubLinks, writePublications } from '../../core/pullRequestComments.js';
 import { createReviewStore } from '../../core/store.js';
@@ -37,8 +37,10 @@ export interface PullRequestSession {
   /** Where this PR keeps manual links, unlinks and the repositories Claude worked in. */
   readonly dataPath: string;
   readonly worktree: string;
-  /** The PR as it was when its worktree was made, and whose PR it is. */
+  /** The PR as it was when its worktree was made, with the base branch it targets now, and whose PR it is. */
   readonly metadata: PullRequestWorktree;
+  /** Diff against a new base branch from now on, after the PR was retargeted. */
+  useBase(baseBranch: string): Promise<void>;
   /** False when the PR is open on a checkout whose own review keeps the bridge, and a connected conversation answers. */
   readonly ownsBridge: boolean;
 }
@@ -425,7 +427,14 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       },
       linkedGitHubThread: (threadId) => links.get(threadId)?.id,
     };
-    const result: PullRequestSession = { session, bridge, runner, analysis, review, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, metadata, ownsBridge };
+    const result: PullRequestSession = {
+      session, bridge, runner, analysis, review, output, commits: (threadId) => commits.get(threadId) ?? [], dataPath, worktree, ownsBridge,
+      get metadata() { return metadata; },
+      useBase: async (baseBranch) => {
+        metadata = { ...metadata, pullRequest: { ...metadata.pullRequest, baseBranch } };
+        if (ownsBridge) await recordWorktreeBase(worktree, baseBranch);
+      },
+    };
     return result;
   }
 }

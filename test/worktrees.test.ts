@@ -7,7 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import type { ChangeRequestSummary, Forge } from '../src/core/forge.js';
 import { cleanUpWorktrees } from '../src/core/git/worktreeCleanup.js';
-import { createReviewData, ensureWorktree, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
+import { createReviewData, ensureWorktree, followBase, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, recordWorktreeBase, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
 import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/hosts/vscode/pullRequestDiff.js';
 import { commands, Uri, workspace } from './fakes/vscode.js';
@@ -99,6 +99,24 @@ test('creates a PR worktree once, reviews it against the merge base and removes 
   await removeWorktree(source, storage, 'acme/app', 5);
   assert.equal(await hasWorktree(storage, 'acme/app', 5), false);
   await assert.rejects(stat(folder));
+});
+
+test('follows the base branch GitHub reports: fetches a moved tip and records a retarget', async (t) => {
+  const { source, storage } = await fixture(t);
+  const folder = await ensureWorktree(source, storage, provider([]), 'acme/app', pullRequest, 'reviewer');
+  const origin = path.join(path.dirname(source), 'origin');
+  await writeFile(path.join(origin, 'moved.ts'), 'export const moved = 1;\n');
+  await git(origin, ['add', '.']);
+  await git(origin, ['commit', '--quiet', '-m', 'main moves on']);
+  const tip = (await executeFile('git', ['-C', origin, 'rev-parse', 'main'], { encoding: 'utf8' })).stdout.trim();
+
+  assert.equal(await followBase(folder, 'main', tip), true);
+  assert.equal((await executeFile('git', ['-C', folder, 'rev-parse', 'origin/main'], { encoding: 'utf8' })).stdout.trim(), tip);
+  assert.equal(await followBase(folder, 'main', tip), false);
+  await assert.rejects(followBase(folder, '--upload-pack=x', tip), /Unsupported base branch name/u);
+
+  await recordWorktreeBase(folder, 'feature');
+  assert.equal((await readWorktree(storage, folder))?.pullRequest.baseBranch, 'feature');
 });
 
 test('keeps PR worktrees under the checkout\'s .claude/worktrees, hidden from Git without touching .gitignore', async (t) => {
