@@ -83,10 +83,14 @@ export async function showPullRequestOverview(
   if (revealOpenPage(key, revealAt)) return;
   let reveal = revealAt;
   let state = await read();
-  const adopted = adopt === undefined ? undefined : panels.get(adopt)?.detach();
+  const restoredPanel = restored.get(key);
+  restored.delete(key);
+  const adopted = restoredPanel ?? (adopt === undefined ? undefined : panels.get(adopt)?.detach());
   if (adopted !== undefined) adopted.title = state.title;
-  const panel = adopted ?? vscode.window.createWebviewPanel('diffGuide.pullRequestOverview', state.title, vscode.ViewColumn.Active,
-    { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')], retainContextWhenHidden: true, enableFindWidget: true });
+  const panel = adopted ?? vscode.window.createWebviewPanel(reviewPageType, state.title, vscode.ViewColumn.Active,
+    { localResourceRoots: [], ...pageOptions(extensionUri), retainContextWhenHidden: true, enableFindWidget: true });
+  if (restoredPanel !== undefined) panel.webview.options = pageOptions(extensionUri);
+  const pageKey = key;
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
   panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
   let colors = new Map<string, string>();
@@ -153,7 +157,7 @@ export async function showPullRequestOverview(
         range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command, reviewers: reviewersPicked } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
-        if (action === 'ready') sendFiles();
+        if (action === 'ready') { post({ pageKey }); sendFiles(); }
         else if (action === 'theme-colors') { colors = themeColors((value as Record<string, unknown>)['colors']); updateTabIcon(); }
         else if (action === 'comment' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
           && startLine <= endLine && isText(text) && commentIntents.includes(intent)) {
@@ -432,4 +436,26 @@ export async function showPullRequestOverview(
   const disposed = panel.onDidDispose(release);
 }
 /** Open review pages by key; `sendFiles` reads the files again and then shows `reveal`. */
+const reviewPageType = 'diffGuide.pullRequestOverview';
+const pageOptions = (extensionUri: vscode.Uri): vscode.WebviewOptions => ({ enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')] });
+/** Tabs VS Code kept over a window reload, waiting for their page to open in them. */
+const restored = new Map<string, vscode.WebviewPanel>();
+
+/**
+ * Reopen review pages in the tabs VS Code kept over a window reload. `open` opens the page a key names and
+ * its tab closes when no page takes it, such as for a PR whose worktree is gone.
+ */
+export function restoreReviewPages(open: (key: string) => Promise<unknown>): vscode.Disposable {
+  return vscode.window.registerWebviewPanelSerializer(reviewPageType, {
+    async deserializeWebviewPanel(panel, state: unknown) {
+      const key = typeof state === 'object' && state !== null ? (state as Record<string, unknown>)['pageKey'] : undefined;
+      if (typeof key !== 'string' || panels.has(key) || restored.has(key)) { panel.dispose(); return; }
+      restored.set(key, panel);
+      await open(key).catch(() => false);
+      // The page opens in the tab by taking it from `restored`; a tab still there found no page.
+      if (restored.get(key) === panel) { restored.delete(key); panel.dispose(); }
+    },
+  });
+}
+
 export const panels = new Map<string, { readonly panel: vscode.WebviewPanel; readonly sendFiles: (reveal?: OverviewReveal) => void; readonly detach: () => vscode.WebviewPanel }>();

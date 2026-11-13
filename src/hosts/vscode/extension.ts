@@ -13,7 +13,7 @@ import { Checkouts, nestedRepositoryRoots } from './checkouts.js';
 import { registerAnswersView, SeenAnswers } from './claudeAnswers.js';
 import { registerClaudeStatus, reportClaudeFailures, showClaude } from './claudeStatus.js';
 import { vscodeGitHubHost } from './githubHost.js';
-import { LocalReview } from './localReview.js';
+import { LocalReview, mainPageKey } from './localReview.js';
 import { branchPullRequests, registerLocalReviewView, repositoryRoot } from './localReviewView.js';
 import { LocalSessions } from './localSessions.js';
 import { registerPullRequestDiffs } from './pullRequestDiff.js';
@@ -21,6 +21,7 @@ import { pullRequestPages } from './pullRequestPage.js';
 import { PullRequestSessions } from './pullRequestSessions.js';
 import { registerPullRequestView } from './pullRequestView.js';
 import { cleanUpPullRequestWorktrees, worktreesOf } from './pullRequestWorktrees.js';
+import { restoreReviewPages } from './reviewPanel.js';
 import { prepareConnection, registerClaudeLauncher } from './setup.js';
 import { registerEditorHighlighter } from './textMate.js';
 
@@ -124,6 +125,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     activeLocalSessions = localSessions;
     context.subscriptions.push(localSessions, ...registerLocalReviewView(context.workspaceState, checkouts, localSessions, mainRoot, showOverview));
     void localSessions.restore(async (folder) => stat(folder).then((info) => info.isDirectory(), () => false));
+    context.subscriptions.push(restoreReviewPages(async (key) => {
+      if (key === mainPageKey) return main?.review.open();
+      if (key.startsWith(mainPageKey + ':')) {
+        const folder = key.slice(mainPageKey.length + 1);
+        if (!await stat(folder).then((info) => info.isDirectory(), () => false)) return;
+        return (await localSessions.get(folder)).review.open();
+      }
+      await checkouts.list();
+      const found = checkouts.opened.find(({ session }) => `${session.metadata.repository}#${session.metadata.pullRequest.number}` === key);
+      if (found === undefined) return;
+      const { checkout, session } = found;
+      await showOverview(checkout, await checkout.connect(), session.metadata.repository, session.metadata.pullRequest, session.metadata.role);
+    }));
     context.subscriptions.push(bridge, launchers, vscode.commands.registerCommand('diffGuide.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
       const focused = document === undefined ? undefined : checkouts.forUri(document.uri);

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Review pages reopen in their tabs after a window reload, instead of closing.
 - Refresh on the review page spins while it reloads, then says "Refreshed." or shows why it failed.
 - Resolving a thread folds it, also after jumping to it from the code review card.
 - In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.

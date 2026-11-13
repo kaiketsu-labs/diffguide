@@ -44,7 +44,8 @@
     "onStartupFinished",
     "onView:diffGuide.pullRequests",
     "onFileSystem:diffguide-pr",
-    "onView:diffGuide.local"
+    "onView:diffGuide.local",
+    "onWebviewPanel:diffGuide.pullRequestOverview"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

@@ -490,6 +490,8 @@ export interface ExtensionMessage {
   readonly idle?: true;
   /** A Refresh the page asked for finished; any failure arrives as `error`. */
   readonly refreshed?: true;
+  /** The page's key, which the page keeps in its saved state for restoring after a reload. */
+  readonly pageKey?: string;
   readonly pickerOptions?: PickerOptions;
   readonly pickerError?: string;
   readonly branches?: readonly string[];
