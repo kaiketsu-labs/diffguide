@@ -177,11 +177,13 @@ async function main(): Promise<void> {
     void showPullRequestOverview('bench/repo#1', page.read, changed, page.actions as never, vscode.Uri.file('/bench'));
     const panel = await shown;
     const filesAt = await message(panel, 'files', 0);
+    const filesMessage = panel.sent.find((sent) => 'files' in (sent as object));
+    // Files without any color span came before their colors; `colored` is when the colored files reached the page.
+    const coloredAt = JSON.stringify(filesMessage).includes('<span') ? filesAt : await message(panel, 'files', panel.sent.indexOf(filesMessage) + 1);
     await settle();
     const window = { from, to: clock() };
-    const filesMessage = panel.sent.find((sent) => 'files' in (sent as object));
     return {
-      from, panel: panelAt - from, files: filesAt - from, settled: window.to - from,
+      from, panel: panelAt - from, files: filesAt - from, colored: coloredAt - from, settled: window.to - from,
       htmlBytes: panel.webview.html.length, filesBytes: JSON.stringify(filesMessage).length,
       git: between(gitCalls, window).length, github: between(calls, window).map((call) => call.method),
       panelObject: panel,

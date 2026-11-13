@@ -210,6 +210,8 @@ export interface FilesView {
   readonly icons?: FileIcons;
   /** Every file in the checkout, for the page's All files list. */
   readonly repositoryFiles?: readonly string[];
+  /** `files` with syntax colors, set when `files` lack some; coloring starts when it is called. */
+  readonly colored?: () => Promise<readonly FileDiff[]>;
 }
 /** A GitHub suggestion picked for committing: the thread and its comment. */
 /** A suggestion option written from a local thread: pushed, committed after unpushed commits, or only applied to the worktree. */
