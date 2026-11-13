@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Resolving a thread folds it, also after jumping to it from the code review card.
+
 ## [0.9.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.8.0...v0.9.0) (2026-11-12)
 
 
