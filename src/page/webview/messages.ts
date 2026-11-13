@@ -17,7 +17,7 @@ import { closeToolbarMenu, renderPicker } from './menus.js';
 import { peeks, probes, renderPeek, showLink } from './peek.js';
 import { render, revealGroup, revealStep } from './render.js';
 import { closedFiles, collapsed, prefs, publishing, received, replies, save, setPageKey, ui } from './state.js';
-import { hopIntoAvatar, setBusy, showNotice } from './status.js';
+import { hopIntoAvatar, setBusy, setStale, showNotice } from './status.js';
 import { renderNavThreads } from './threads/list.js';
 import { allThreads, redrawThread } from './threads/model.js';
 import { batch, renderBatch } from './threads/suggestions.js';
@@ -53,6 +53,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.icons) received.fileIcons = data.icons;
   if (data.repositoryFiles) received.repositoryFiles = data.repositoryFiles;
   if (data.files) {
+    setStale(false);
     const changed = changedFiles(data.files, shownAs);
     received.files = data.files;
     for (const file of received.files) if (!collapsed.has(file.path) && (file.generated || isLarge(file))) collapsed.set(file.path, true);
@@ -183,6 +184,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.pickerOptions) { ui.pickerOptions = data.pickerOptions; ui.pickerError = undefined; renderPicker(); }
   if (data.pickerError !== undefined) { ui.pickerError = data.pickerError; renderPicker(); }
   if (data.idle) setBusy(false);
+  if (data.stale) setStale(true);
   if (data.pageKey !== undefined) setPageKey(data.pageKey);
   if (data.refreshed) { const refresh = $<HTMLButtonElement>('refresh'); refresh.disabled = false; refresh.classList.remove('busy'); }
 }

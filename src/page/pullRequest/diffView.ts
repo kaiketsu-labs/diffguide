@@ -18,6 +18,8 @@ export class DiffView {
   /** Comments and read marks need the whole PR at its latest version. */
   #atHead = true;
   #paths: readonly string[] = [];
+  /** The merge base the shown files were read against, while they show all changes. */
+  #shownBase: string | undefined;
   /** Changed files from the latest diff read, so media previews need no second read. */
   #files: readonly FileDiff[] = [];
 
@@ -38,6 +40,12 @@ export class DiffView {
     const base = await readPullRequestBase(this.page.folder, this.baseBranch);
     if (base === undefined) throw new Error(`Could not find where #${this.page.pullRequest.number} branched off ${this.baseBranch}.`);
     return base;
+  }
+
+  /** Whether the base moved since the shown files were read, such as after fetching a moved or retargeted base branch. */
+  async baseChanged(): Promise<boolean> {
+    const shown = this.#shownBase;
+    return shown !== undefined && await this.readBase().catch(() => shown) !== shown;
   }
 
   async readHead(): Promise<string> {
@@ -89,6 +97,7 @@ export class DiffView {
     this.#atHead = to === undefined;
     this.#paths = files.map((file) => file.path);
     this.#files = files;
+    this.#shownBase = range.kind === 'all' ? base : undefined;
     const [whole, repositoryFiles] = await Promise.all([range.kind === 'all' ? this.#threadFiles(this.#paths) : [], host.listRepositoryFiles(folder).catch(() => [])]);
     const icons = await host.fileIcons([...new Set([...repositoryFiles, ...this.#paths, ...whole.map((file) => file.path)])]).catch(() => undefined);
     return { files: [...files, ...whole], repositoryFiles, selection: this.#selection, atHead: this.#atHead, ...icons === undefined ? {} : { icons } };

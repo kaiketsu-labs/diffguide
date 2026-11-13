@@ -363,7 +363,7 @@ export interface OverviewActions {
   /** Re-read the page's state; resolves with the first failed read's message, or undefined. */
   refresh(): Promise<string | undefined>;
   /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
-  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string }>;
+  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string; readonly stale?: boolean }>;
   /** Open a linked PR's own review page. */
   openLinked(key: string): Promise<void>;
   /** Push Claude's commits in a linked worktree to its branch on GitHub. */
@@ -490,6 +490,8 @@ export interface ExtensionMessage {
   readonly idle?: true;
   /** A Refresh the page asked for finished; any failure arrives as `error`. */
   readonly refreshed?: true;
+  /** The shown files are out of date and stay so until the user refreshes. */
+  readonly stale?: true;
   /** The page's key, which the page keeps in its saved state for restoring after a reload. */
   readonly pageKey?: string;
   readonly pickerOptions?: PickerOptions;
