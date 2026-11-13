@@ -44,7 +44,11 @@ function liveLogs(): LiveLog[] {
   });
 }
 
+/** Files that came before GitHub's Viewed marks, drawn once the state has them so files do not tick or hide after they show. */
+let heldFiles: ExtensionMessage | undefined;
+
 export function onExtensionMessage(data: ExtensionMessage): void {
+  if (data.files && !data.state && received.current?.reviewedPending) { heldFiles = data; return; }
   const live = data.state ? liveLogs() : [];
   if (data.state) render(data.state);
   for (const log of live) void hopIntoAvatar(log);
@@ -187,4 +191,9 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.stale) setStale(true);
   if (data.pageKey !== undefined) setPageKey(data.pageKey);
   if (data.refreshed) { const refresh = $<HTMLButtonElement>('refresh'); refresh.disabled = false; refresh.classList.remove('busy'); }
+  if (heldFiles && data.state && !data.state.reviewedPending) {
+    const held = heldFiles;
+    heldFiles = undefined;
+    onExtensionMessage(held);
+  }
 }

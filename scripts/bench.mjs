@@ -112,6 +112,9 @@ async function pageRun(browser, dump) {
   const filesMessages = dump.messages.filter((message) => 'files' in message);
   const filesMessage = filesMessages[0];
   const stateMessage = { state: JSON.parse(dump.html.match(/<script[^>]*id="initial"[^>]*>([\s\S]*?)<\/script>/u)?.[1] ?? 'null')?.state };
+  // GitHub's file list comes before the files, so the page has its Viewed marks and draws the files when they arrive.
+  const listed = dump.messages.find((message) => message.state && !message.state.reviewedPending);
+  if (listed) await deliver(listed);
   const files = await deliver(filesMessage);
   // The colored files replace the uncolored ones when they came in two messages.
   const colored = filesMessages.length > 1 ? await deliver(filesMessages.at(-1)) : undefined;
