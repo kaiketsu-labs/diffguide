@@ -1,5 +1,6 @@
 import type { DiffLine, FileDiff } from '../../src/core/unifiedDiff.js';
 import type { ExtensionMessage, OverviewState } from '../../src/page/protocol.js';
+import { githubCodeHtml } from '../../src/page/preview/githubCode.js';
 
 /** One render: the page's state and messages, the saved page state, and the steps that take screenshots. */
 export interface Scene {
@@ -241,12 +242,12 @@ const githubMarkup: OverviewState = {
   conversation: {
     ...submitted.conversation!,
     timeline: [...submitted.conversation!.timeline, { kind: 'comment', id: 'k2', author: 'alice', avatarUrl: '', createdAt: ago(1), body: '',
-      bodyHtml: '<div class="highlight highlight-source-python notranslate position-relative overflow-auto" dir="auto"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">read</span>(<span class="pl-s1">ctx</span>):\n    <span class="pl-k">return</span> <span class="pl-s1">ctx</span>.<span class="pl-c1">read_result</span>(<span class="pl-s">"request"</span>)  <span class="pl-c"># cached</span></pre></div>'
+      bodyHtml: githubCodeHtml('<div class="highlight highlight-source-python notranslate position-relative overflow-auto" dir="auto"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">read</span>(<span class="pl-s1">ctx</span>):\n    <span class="pl-k">return</span> <span class="pl-s1">ctx</span>.<span class="pl-c1">read_result</span>(<span class="pl-s">"request"</span>)  <span class="pl-c"># cached</span></pre></div>'
         + '<div class="my-2 border rounded-2 js-suggested-changes-blob diff-view js-check-hidden-unicode"><div class="f6 p-2 lh-condensed border-bottom d-flex"><div class="flex-auto flex-items-center color-fg-muted">Suggested change</div></div>'
         + '<div itemprop="text" class="blob-wrapper data file"><table class="d-table tab-size mb-0 width-full"><tbody>'
         + '<tr class="border-0"><td class="blob-num blob-num-deletion blob-num-hidden" data-line-number="·"></td><td class="border-0 px-2 py-1 blob-code-inner blob-code-deletion js-blob-code-deletion blob-code-marker-deletion">    ``inputs`` are readable by name like a stage result.</td></tr>'
         + '<tr class="border-0"><td class="blob-num blob-num-addition blob-num-hidden" data-line-number="·"></td><td class="border-0 px-2 py-1 blob-code-inner blob-code-addition js-blob-code-addition blob-code-marker-addition">    ``inputs`` are objects the caller passes to the rules besides the values.</td></tr>'
-        + '</tbody></table></div></div>',
+        + '</tbody></table></div></div>', 'src/rules.py'),
       canEdit: false, canDelete: false, canHide: false, canReact: true, edited: false, reactions: [] }],
   },
 };
