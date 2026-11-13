@@ -245,3 +245,21 @@ test('re-requesting a review reloads the sidebar too, since it lists pending rev
   assert.deepEqual(requested, [[7, { users: ['bob'], teams: [] }]]);
   assert.deepEqual(reloads, [true]);
 });
+
+for (const [problem, reply] of [[undefined, { refreshed: true, notice: { text: 'Refreshed.' } }], ['GitHub is down', { refreshed: true, error: 'Refresh failed: GitHub is down' }]] as const) {
+  test(`Refresh ends the button's progress and says ${problem === undefined ? 'it is done' : 'why it failed'}`, async () => {
+    resetFakeWindow();
+    let finish: (value: string | undefined) => void = () => undefined;
+    const actions = {
+      refresh: () => new Promise<string | undefined>((done) => { finish = done; }),
+      readFiles: () => new Promise(() => undefined), pollGitHub: async () => ({ reload: false, files: false }),
+    } as unknown as OverviewActions;
+    await showPullRequestOverview('refresh-reply', async () => base, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+    const panel = window.panels.at(-1)!;
+    panel.receive({ action: 'refresh' }); await tick();
+    assert.ok(!panel.sent.some((m) => (m as { refreshed?: boolean }).refreshed), 'the reply waits for the reads');
+    finish(problem); await tick();
+    assert.deepEqual(panel.sent.filter((m) => (m as { refreshed?: boolean }).refreshed), [reply]);
+    panel.dispose();
+  });
+}

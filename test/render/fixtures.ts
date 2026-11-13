@@ -13,8 +13,10 @@ export interface Scene {
   readonly steps: readonly Step[];
 }
 
-/** Runs in order: click, then scroll, then hover, then wait, then shoot. `shot` names the PNG. */
+/** Runs in order: send, click, scroll, hover, wait, then the checks, then shoot. `shot` names the PNG. */
 export interface Step {
+  /** A host message to deliver, such as the state after an action the page posted. */
+  readonly send?: ExtensionMessage;
   readonly click?: string;
   readonly hover?: string;
   readonly scroll?: number;
@@ -22,6 +24,11 @@ export interface Step {
   readonly wait?: number;
   readonly shot?: string;
   readonly full?: boolean;
+  /** A selector that must match; with `text`, its text must contain that. */
+  readonly expect?: string;
+  readonly text?: string;
+  /** A selector that must not match. */
+  readonly absent?: string;
 }
 
 const now = Date.now();
@@ -182,6 +189,13 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { hover: '.margin-mark', wait: 600, shot: 'hover-mark.png' },
   ], { saved: { view: 'files', marginThreads: true } }),
   hoverCard: scene(pullRequest, [{ hover: '.card-thread', wait: 600, shot: 'hover-card.png' }], { saved: { view: 'overview' } }),
+  // A thread opened from its margin mark still folds when resolved.
+  resolveFold: scene(pullRequest, [
+    { click: '.margin-mark[aria-label="Open comment: Null check in parseUser"]', expect: '#thread-11111111-1111-1111-1111-111111111111[open]' },
+    { click: '#thread-11111111-1111-1111-1111-111111111111 button:has-text("Resolve")' },
+    { send: { state: { ...pullRequest, threads: pullRequest.threads.map((each) => each.id.startsWith('1111') ? { ...each, resolved: true, status: 'Resolved' } : each) } },
+      absent: '#thread-11111111-1111-1111-1111-111111111111[open]', shot: 'resolve-fold.png' },
+  ], { saved: { view: 'files', marginThreads: true } }),
   get pending() { return reviewingScenes['pending']!; },
   get since() { return reviewingScenes['since']!; },
   get submitted() { return reviewingScenes['submitted']!; },
@@ -238,6 +252,8 @@ const submitted: OverviewState = {
 };
 
 /** A GitHub comment as GitHub renders it: a highlighted Python block and a suggested change. */
+const pendingLag: OverviewState = { ...reviewing, details: { ...reviewing.details!, pendingComments: 5 } };
+
 const githubMarkup: OverviewState = {
   ...submitted,
   conversation: {
@@ -255,8 +271,19 @@ const githubMarkup: OverviewState = {
 
 export const reviewingScenes: Readonly<Record<string, Scene>> = {
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
-  pending: { state: reviewing, messages: [{ state: reviewing }, filesMessage], steps: [{ shot: 'pending.png', full: true }], saved: { view: 'overview' } },
-  stale: { state: reviewing, messages: [{ state: reviewing }, filesMessage, { stale: true }], steps: [{ shot: 'stale.png' }], saved: { view: 'files' } },
-  githubMarkup: { state: githubMarkup, messages: [{ state: githubMarkup }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'github-markup.png' }], saved: { view: 'overview' } },
+  // The details' count lags at 5; the page counts the 2 pending comments its list shows.
+  pending: { state: pendingLag, messages: [{ state: pendingLag }, filesMessage], saved: { view: 'overview' }, steps: [
+    { expect: '#pending-note', text: '2 pending comments' }, { expect: '#bar-pending', text: '2 pending', shot: 'pending.png', full: true },
+  ] },
+  stale: { state: reviewing, messages: [{ state: reviewing }, filesMessage, { stale: true }], saved: { view: 'files' }, steps: [
+    { expect: '#notice', text: 'The base branch moved on GitHub' },
+    { send: { notice: { text: 'Refreshed.' } }, expect: '#notice', text: 'Refreshed.' },
+    { send: filesMessage, wait: 4500, absent: '#notice span', shot: 'stale.png' },
+  ] },
+  githubMarkup: { state: githubMarkup, messages: [{ state: githubMarkup }, filesMessage], saved: { view: 'overview' }, steps: [
+    { expect: '#conversation pre code .hljs-keyword', text: 'def', absent: '#conversation .pl-k' },
+    // GitHub's suggestion table shows as removed and added lines, its line number cells hidden.
+    { expect: '#conversation .js-suggested-changes-blob .blob-code-addition', text: 'objects the caller passes', absent: '#conversation .js-suggested-changes-blob .blob-num:visible', scrollTo: '#conversation', shot: 'github-markup.png' },
+  ] },
   since: { state: reviewing, messages: [{ state: reviewing }, { ...filesMessage, selection: { range: { kind: 'since' }, whitespace: false } }], steps: [{ shot: 'since.png' }], saved: { view: 'files' } },
 };

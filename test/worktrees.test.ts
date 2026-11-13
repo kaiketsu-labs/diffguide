@@ -7,6 +7,9 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import type { ChangeRequestSummary, Forge } from '../src/core/forge.js';
 import { cleanUpWorktrees } from '../src/core/git/worktreeCleanup.js';
+import type { PageParts } from '../src/page/pullRequest/context.js';
+import { DiffView } from '../src/page/pullRequest/diffView.js';
+import { worktreeActions } from '../src/page/pullRequest/worktreeActions.js';
 import { createReviewData, ensureWorktree, followBase, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, recordWorktreeBase, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
 import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/hosts/vscode/pullRequestDiff.js';
@@ -278,4 +281,37 @@ test('retries creating the review data folder on a transient EIO and explains a 
   let denied = 0;
   await assert.rejects(createReviewData('/tmp/pr-57', async () => { denied++; throw failure('EACCES'); }, 5, 0), /EACCES/u);
   assert.equal(denied, 1);
+});
+
+test('the poll follows a retargeted base: the diff reads against it and the page learns its files are out of date', async (t) => {
+  const { source, storage } = await fixture(t);
+  const folder = await ensureWorktree(source, storage, provider([]), 'acme/app', pullRequest, 'reviewer');
+  const origin = path.join(path.dirname(source), 'origin');
+  await git(origin, ['switch', '--quiet', '-c', 'release', 'feature']);
+  await writeFile(path.join(origin, 'release.ts'), 'export const release = 1;\n');
+  await git(origin, ['add', '.']);
+  await git(origin, ['commit', '--quiet', '-m', 'release']);
+  await git(origin, ['switch', '--quiet', 'main']);
+  const tip = async (branch: string): Promise<string> => (await executeFile('git', ['-C', origin, 'rev-parse', branch], { encoding: 'utf8' })).stdout.trim();
+  const version = { head: await tip('feature'), updatedAt: '', baseBranch: 'release', baseHead: await tip('release') };
+
+  const used: string[] = [];
+  const opened = { runner: { activity: { running: false } }, session: { store: { threads: [] } }, useBase: async (branch: string) => { used.push(branch); } };
+  const host = { listRepositoryFiles: async () => [], fileIcons: async () => undefined };
+  const page = { provider: { version: async () => version }, pullRequest, folder, role: 'reviewer', opened, host, revealed: new Set(), onCheckout: false };
+  const diff = new DiffView(page as unknown as PageParts['page'], async () => undefined);
+  const shown = await diff.read();
+  assert.deepEqual(shown.files.map((file) => file.path), ['feature.ts']);
+  const { pollGitHub } = worktreeActions({ page, diff, remote: { written: { waiting: false } } } as unknown as PageParts);
+
+  opened.runner.activity.running = true;
+  assert.deepEqual(await pollGitHub(), { reload: true, files: false, stale: true });
+  assert.equal(diff.baseBranch, 'release');
+  assert.deepEqual(used, ['release']);
+  assert.equal((await executeFile('git', ['-C', folder, 'rev-parse', 'origin/release'], { encoding: 'utf8' })).stdout.trim(), version.baseHead);
+
+  opened.runner.activity.running = false;
+  assert.deepEqual(await pollGitHub(), { reload: true, files: true });
+  assert.deepEqual((await diff.read()).files.map((file) => file.path), []);
+  assert.deepEqual(await pollGitHub(), { reload: false, files: false });
 });
