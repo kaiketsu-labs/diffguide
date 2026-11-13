@@ -34,6 +34,10 @@ function checkNames(repository: string, branch: string): void {
   if (!/^[\w.-]+\/[\w.-]+$/u.test(repository) || repository.split('/').some((part) => part === '.' || part === '..')) {
     throw new Error(`Unsupported repository name: ${repository}`);
   }
+  checkBranch(branch);
+}
+
+function checkBranch(branch: string): void {
   if (!/^[\w./-]+$/u.test(branch) || branch.startsWith('-') || branch.includes('..')) {
     throw new Error(`Unsupported base branch name: ${branch}`);
   }
@@ -249,6 +253,25 @@ export async function readWorktree(storageRoot: string, folder: string): Promise
     return undefined;
   }
   return record as PullRequestWorktree;
+}
+
+/** Fetch the PR's base branch unless the worktree's copy is already at `head`; returns whether it fetched. */
+export async function followBase(worktree: string, baseBranch: string, head: string): Promise<boolean> {
+  checkBranch(baseBranch);
+  const local = await git(worktree, ['rev-parse', '--verify', '--quiet', `${baseRemote}/${baseBranch}`]).then((out) => out.trim(), () => '');
+  if (local === head) return false;
+  await git(worktree, ['fetch', '--quiet', baseRemote, baseBranch]);
+  return true;
+}
+
+/** Record a retargeted PR's base branch in its worktree's metadata, so later sessions diff against it. */
+export async function recordWorktreeBase(worktree: string, baseBranch: string): Promise<void> {
+  checkBranch(baseBranch);
+  const value = await readPrivateJson(metadataPath(worktree)).catch(() => undefined);
+  if (typeof value !== 'object' || value === null) return;
+  const record = value as PullRequestWorktree;
+  if (record.pullRequest.baseBranch === baseBranch) return;
+  await writePrivateJson(metadataPath(worktree), { ...record, pullRequest: { ...record.pullRequest, baseBranch } });
 }
 
 /** Commit where the PR branched off its target, so the review shows exactly the PR's changes. */

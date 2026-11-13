@@ -1,6 +1,6 @@
 import { pushCommits, syncToPullRequestHead } from '../../core/conflicts.js';
 import type { ChangeRequestVersion } from '../../core/forge.js';
-import { git } from '../../core/git/worktrees.js';
+import { followBase, git } from '../../core/git/worktrees.js';
 import { readPullRequestDiff } from '../../core/unifiedDiff.js';
 import type { OverviewActions } from '../protocol.js';
 import type { PageParts } from './context.js';
@@ -34,7 +34,15 @@ export function worktreeActions({ page, remote, diff, notOnCheckout, pushTarget 
     pollGitHub: async () => {
       const previous = version;
       version = await provider.version(pullRequest.number, previous);
-      const reload = (previous !== undefined && version !== previous) || remote.written.waiting;
+      const { baseBranch, baseHead } = version;
+      // GitHub diffs against the base's current tip, so a retarget or a moved base changes which files are in the PR.
+      const retargeted = baseBranch !== undefined && baseBranch !== '' && baseBranch !== diff.baseBranch;
+      const baseMoved = baseBranch !== undefined && baseBranch !== '' && baseHead !== undefined && await followBase(folder, baseBranch, baseHead);
+      if (retargeted) {
+        diff.baseBranch = baseBranch;
+        await opened.useBase(baseBranch);
+      }
+      const reload = (previous !== undefined && version !== previous) || remote.written.waiting || retargeted;
       if (opened.runner.activity.running) return { reload, files: false };
       const before = await diff.readHead();
       shownHead ??= before;
@@ -46,7 +54,7 @@ export function worktreeActions({ page, remote, diff, notOnCheckout, pushTarget 
         await syncToPullRequestHead(folder, pullRequest.number, previous?.head).catch((error: unknown) => { problem = error instanceof Error ? error.message : String(error); });
       }
       const head = await diff.readHead();
-      const files = head !== shownHead;
+      const files = head !== shownHead || baseMoved || retargeted;
       shownHead = head;
       return { reload: reload || files, files, ...(problem === undefined ? {} : { problem }) };
     },
