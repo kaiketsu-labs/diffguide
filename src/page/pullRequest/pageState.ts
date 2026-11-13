@@ -28,7 +28,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const { provider, repository, pullRequest, folder, opened, fileReviews, host } = page;
   remote.loadFirst();
   void remote.conversation();
-  const linkedRows = linked.read();
+  const linkedRows = linked.shown();
   const paths = listed?.paths;
   const all = [...new Set([...(paths ?? []), ...diff.paths])];
   const [viewed, read] = await Promise.all([
@@ -72,6 +72,6 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const { conflictQuestion } = edits;
   return {
     ...state, threads, ...(listed === undefined ? { reviewedPending: true as const } : {}), ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
-    ...(local.files.size === 0 ? {} : { local: Object.fromEntries(local.files) }), linked: linkedNow,
+    ...(local.files.size === 0 ? {} : { local: Object.fromEntries(local.files) }), ...(linkedNow === undefined ? {} : { linked: linkedNow }),
   };
 }

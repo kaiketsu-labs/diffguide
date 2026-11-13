@@ -62,7 +62,7 @@ test('the page asks GitHub for linked changes while its other reads are still ou
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.ok(asked.includes('crossReferences'), `asked only ${asked.join(', ')}`);
   answerConversation?.();
-  assert.equal((await reading).linked?.length, 0);
+  await reading;
 });
 
 test('the page shows before GitHub sends the conversation, and redraws with it once it arrives', async () => {
@@ -134,4 +134,24 @@ test('the page shows before GitHub sends the file list, and redraws with the vie
   const second = await controller.read();
   assert.deepEqual(second.reviewed, { done: 0, total: 1 });
   assert.equal(second.reviewedPending, undefined);
+});
+
+test('the page shows before GitHub sends the linked changes, and redraws with them once they arrive', async () => {
+  let answerMentions: (() => void) | undefined;
+  const { controller } = await page(async (method) => {
+    if (method === 'crossReferences') {
+      await new Promise<void>((resolve) => { answerMentions = resolve; });
+      return [];
+    }
+    if (method === 'overview') return { details: details(), threads: remoteThreads(['a.ts']) };
+    if (method === 'listFiles') return [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }];
+    return undefined;
+  });
+  const first = await Promise.race([controller.read(), new Promise<undefined>((resolve) => setTimeout(resolve, 1000))]);
+  assert.ok(first !== undefined, 'the page waited for the linked changes');
+  assert.equal(first.linked, undefined);
+  const redrawn = new Promise<void>((resolve) => { controller.onDidChange(() => { resolve(); }); });
+  answerMentions?.();
+  await redrawn;
+  assert.deepEqual((await controller.read()).linked, []);
 });

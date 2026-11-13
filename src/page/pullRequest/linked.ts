@@ -20,9 +20,22 @@ export class LinkedCard {
     });
   }
 
+  /** True once the first rows arrived; until then the page shows without them. */
+  #known = false;
+
   read(): Promise<readonly LinkedChange[]> {
-    this.#rows ??= this.#linked.read().catch(() => []);
+    if (this.#rows === undefined) {
+      const rows = this.#linked.read().catch(() => []);
+      this.#rows = rows;
+      if (!this.#known) void rows.then(() => { this.#known = true; this.remote.changed(); });
+    }
     return this.#rows;
+  }
+
+  /** The card's rows, or undefined while GitHub has not sent the first ones; their arrival redraws the page. */
+  async shown(): Promise<readonly LinkedChange[] | undefined> {
+    const rows = this.read();
+    return this.#known ? await rows : undefined;
   }
 
   /** Read the rows again on the next redraw. */

@@ -2,7 +2,7 @@
 import type { ChangeRequestDetails } from '../../../core/forge.js';
 import { icons } from '../../icons.js';
 import type { OverviewState, PageMessage } from '../../protocol.js';
-import { $, button, el, icon, timeLabel } from '../dom.js';
+import { $, button, el, icon, placeholders, timeLabel } from '../dom.js';
 import { askInline, askRow } from '../menus.js';
 import { render } from '../render.js';
 import { received, ui } from '../state.js';
@@ -131,13 +131,13 @@ export function verdict(reviewers: ChangeRequestDetails['reviewers']): readonly 
 export function renderLinked(state: OverviewState): void {
   const rows = state.linked ?? [];
   const card = $('linked');
-  card.hidden = state.linked === undefined;
-  const stamp = JSON.stringify([rows, ui.linking]);
+  card.hidden = state.localMode === true;
+  const stamp = JSON.stringify([state.linked ?? null, ui.linking]);
   if (card.dataset.stamp === stamp) return;
   card.dataset.stamp = stamp;
   const sourceLabels = { mention: 'Mentioned', pin: 'Pinned in the diff', claude: 'Claude worked here', manual: 'Linked by you' } as const;
   const send = (action: 'linked-open' | 'linked-push' | 'linked-draft' | 'unlink', key: string): void => { post({ action, key }); };
-  $('linked-rows').replaceChildren(...rows.length === 0 ? [el('li', 'muted', 'No PRs in other repositories go with this one.')] : [], ...rows.map((row) => {
+  $('linked-rows').replaceChildren(...state.linked === undefined ? placeholders(60, 40) : rows.length === 0 ? [el('li', 'muted', 'No PRs in other repositories go with this one.')] : [], ...rows.map((row) => {
     const item = el('li', 'linked-row');
     const what = el('div', 'what');
     const name = el('div', 'name');
