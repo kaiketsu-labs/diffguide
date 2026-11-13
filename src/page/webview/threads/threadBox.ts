@@ -277,7 +277,11 @@ export function threadBox(thread: Thread): HTMLElement {
     archive.title = 'Hide this thread. Show archived threads in the filter menu brings it back';
     actions.append(archive);
   }
-  actions.append(iconButton(thread.resolved ? icons.reopen : icons.check, thread.resolved ? 'Reopen' : 'Resolve', () => post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved })));
+  actions.append(iconButton(thread.resolved ? icons.reopen : icons.check, thread.resolved ? 'Reopen' : 'Resolve', () => {
+    // A jump to the thread pins it open; resolving should still fold it.
+    if (!thread.resolved) threadOpen.delete(thread.id);
+    post({ action: github ? 'github-resolve' : 'resolve', id: thread.id, resolved: !thread.resolved });
+  }));
   if (!thread.resolved) actions.append(iconButton(icons.reply, 'Reply', () => { replies.set(thread.id, ''); ui.focusNext = key; save(); redrawThread(thread); }));
   box.append(actions);
   return box;
