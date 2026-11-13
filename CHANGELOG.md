@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Resolving a thread folds it, also after jumping to it from the code review card.
+- In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.
 
 ## [0.9.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.8.0...v0.9.0) (2026-11-12)
 
