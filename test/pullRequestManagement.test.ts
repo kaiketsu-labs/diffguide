@@ -263,3 +263,19 @@ for (const [problem, reply] of [[undefined, { refreshed: true, notice: { text: '
     panel.dispose();
   });
 }
+
+test('a page reads its files while its state still loads, and sends that read once the page is ready', async () => {
+  resetFakeWindow();
+  const order: string[] = [];
+  const actions = {
+    readFiles: async () => { order.push('files'); return { files: [], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }; },
+  } as unknown as OverviewActions;
+  const read = async () => { await new Promise((resolve) => setTimeout(resolve, 50)); order.push('state'); return base; };
+  await showPullRequestOverview('files-early', read, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'ready' });
+  await tick();
+  assert.deepEqual(order, ['files', 'state']);
+  assert.equal(panel.sent.filter((m) => 'files' in (m as object)).length, 1);
+  panel.dispose();
+});
