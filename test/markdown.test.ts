@@ -47,6 +47,11 @@ test('highlights fenced code inside list items and diff fences, without the list
   assert.equal(markdownHtml('```diff\n-old\n+new\n```'), '<pre><code><span class="hljs-deletion">-old</span>\n<span class="hljs-addition">+new</span></code></pre>');
 });
 
+test('reads ```x``` as inline code and closes a fence only on a bare fence at least as long', () => {
+  assert.equal(markdownHtml('Pass ```inputs``` here.\n\n```inputs```\n\nAfter.'), '<p>Pass <code>inputs</code> here.</p><p><code>inputs</code></p><p>After.</p>');
+  assert.equal(markdownHtml('````\n```python\n```\n````\nAfter.'), '<pre><code>```python\n```</code></pre><p>After.</p>');
+});
+
 test('never emits markup from the text itself', () => {
   const html = markdownHtml('<img src=x onerror=alert(1)> [x](javascript:alert(1)) [y](https://a.test/"onmouseover=alert(1)) `<b>`\n```html\n</code><script>alert(1)</script>\n```');
   assert.ok(!/<img|<script|<b>|href="javascript/u.test(html), html);

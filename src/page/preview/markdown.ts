@@ -168,14 +168,16 @@ export function markdownHtml(markdown: string): string {
   return out.join('');
 }
 
-const fenceStart = /^\s*(?:`{3,}|~{3,})/u;
+// A backtick fence's info string has no backticks, so ```x``` on its own line is inline code.
+const fenceStart = /^\s*(?:`{3,}(?!.*`)|~{3,})/u;
 
 /** The fenced block starting at `start`, rendered with its language's highlighting, and the line after its closing fence. Indented fences lose their indent from each code line, as in CommonMark. */
 function fencedCode(lines: readonly string[], start: number): { readonly html: string; readonly next: number } {
   const [, indent = '', marker = '```', language = ''] = /^(\s*)(`{3,}|~{3,})\s*([\w+-]*)/u.exec(lines[start] ?? '') ?? [];
   const body: string[] = [];
   let index = start + 1;
-  while (index < lines.length && !(lines[index] ?? '').trim().startsWith(marker)) {
+  const closing = new RegExp(`^\\s*${marker.charAt(0)}{${marker.length},}\\s*$`, 'u');
+  while (index < lines.length && !closing.test(lines[index] ?? '')) {
     const line = lines[index++] ?? '';
     body.push(line.startsWith(indent) ? line.slice(indent.length) : line.trimStart());
   }
@@ -185,7 +187,7 @@ function fencedCode(lines: readonly string[], start: number): { readonly html: s
 /** Inline code, bold, italics and https links; everything else stays escaped text. Emphasis may span inline code, as on GitHub. */
 function inline(text: string): string {
   const spans: string[] = [];
-  const marked = text.replaceAll('\u0000', '').replaceAll(/`([^`]+)`/gu, (_match, code: string) => `\u0000${spans.push(`<code>${escapeCode(code)}</code>`) - 1}\u0000`);
+  const marked = text.replaceAll('\u0000', '').replaceAll(/(`+)(?!`)(.+?)(?<!`)\1(?!`)/gu, (_match, _ticks: string, code: string) => `\u0000${spans.push(`<code>${escapeCode(code)}</code>`) - 1}\u0000`);
   return escapeCode(marked)
     .replaceAll(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/gu, '<a href="$2">$1</a>')
     .replaceAll(/\*\*(?!\s)(.+?)\*\*/gu, '<strong>$1</strong>')
