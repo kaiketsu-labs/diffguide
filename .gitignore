@@ -6,3 +6,4 @@ dist/
 .diffguide-sketches/
 .render/
 .vscode-test/
+.bench/
