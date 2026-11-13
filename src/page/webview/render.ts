@@ -148,6 +148,10 @@ export function render(state: OverviewState): void {
     fill.style.width = (state.reviewed.total ? 100 * state.reviewed.done / state.reviewed.total : 0) + '%';
     wrap.append(fill);
     reviewed.append(wrap, el('span', '', state.reviewed.done + '/' + state.reviewed.total + ' viewed'));
+  } else if (state.reviewedPending) {
+    const bar = el('span', 'skeleton');
+    bar.style.width = '160px';
+    reviewed.append(bar);
   }
   const claude = $('claude');
   const terminal = $('terminal');

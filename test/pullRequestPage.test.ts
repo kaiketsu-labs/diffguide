@@ -112,3 +112,26 @@ test('the page shows before GitHub sends the details and threads, and redraws wi
   assert.equal(second.details?.title, 'Bench PR');
   assert.equal(second.github?.length, 40);
 });
+
+test('the page shows before GitHub sends the file list, and redraws with the viewed count once it arrives', async () => {
+  let answerFiles: (() => void) | undefined;
+  const { controller } = await page(async (method) => {
+    if (method === 'listFiles') {
+      await new Promise<void>((resolve) => { answerFiles = resolve; });
+      return [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }];
+    }
+    if (method === 'overview') return { details: details(), threads: remoteThreads(['a.ts']) };
+    if (method === 'crossReferences') return [];
+    return undefined;
+  });
+  const first = await Promise.race([controller.read(), new Promise<undefined>((resolve) => setTimeout(resolve, 1000))]);
+  assert.ok(first !== undefined, 'the page waited for the file list');
+  assert.equal(first.reviewed, undefined);
+  assert.equal(first.reviewedPending, true);
+  const redrawn = new Promise<void>((resolve) => { controller.onDidChange(() => { resolve(); }); });
+  answerFiles?.();
+  await redrawn;
+  const second = await controller.read();
+  assert.deepEqual(second.reviewed, { done: 0, total: 1 });
+  assert.equal(second.reviewedPending, undefined);
+});

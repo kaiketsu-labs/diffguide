@@ -174,6 +174,12 @@ export class FileReviews implements Disposable {
     return this.at?.data ?? reviewDataPath(worktreePath(this.storageRoot, repository, number));
   }
 
+  /** Files among `paths` reviewed here, without asking the code host. */
+  async reviewedHere(repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>> {
+    const local = await readReviewedFiles(this.#folder(repository, number), paths, this.#data(repository, number));
+    return new Set(paths.filter((path) => local.has(path)));
+  }
+
   /** Files among `paths` that are reviewed locally or marked Viewed on the code host. */
   async reviewed(provider: Forge, repository: string, number: number, paths: readonly string[]): Promise<ReadonlySet<string>> {
     const [local, viewed] = await Promise.all([

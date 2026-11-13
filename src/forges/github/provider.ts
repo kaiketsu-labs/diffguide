@@ -109,6 +109,8 @@ export class GitHubApiProvider implements Forge {
   readonly #ids = new Map<number, Promise<string>>();
   /** Viewed flags from the latest file list of each PR, so reading them needs no second request. */
   readonly #viewed = new Map<number, ReadonlySet<string>>();
+  /** File lists still on their way, by PR number. */
+  readonly #listing = new Map<number, Promise<readonly ChangeRequestFile[]>>();
 
   private constructor(private readonly workspaceRoot: string) {}
 
@@ -185,7 +187,15 @@ export class GitHubApiProvider implements Forge {
     return groupSearchResults(mine, reviewRequested, viewer);
   }
 
-  async listFiles(number: number): Promise<readonly ChangeRequestFile[]> {
+  listFiles(number: number): Promise<readonly ChangeRequestFile[]> {
+    const listing = this.#listFiles(number);
+    this.#listing.set(number, listing);
+    const done = (): void => { if (this.#listing.get(number) === listing) this.#listing.delete(number); };
+    listing.then(done, done);
+    return listing;
+  }
+
+  async #listFiles(number: number): Promise<readonly ChangeRequestFile[]> {
     const files: unknown[] = [];
     let after: string | null = null;
     for (let page = 0; page < 30; page++) {
@@ -211,6 +221,8 @@ export class GitHubApiProvider implements Forge {
   }
 
   async viewedFiles(number: number): Promise<ReadonlySet<string>> {
+    // A file list on its way also brings the viewed files.
+    await this.#listing.get(number)?.catch(() => undefined);
     const listed = this.#viewed.get(number);
     if (listed !== undefined) return listed;
     const viewed = new Set<string>();

@@ -19,17 +19,21 @@ async function readAnalysis({ page: { opened, folder }, diff }: PageParts): Prom
   };
 }
 
-/** Everything the PR's page shows, read from GitHub, the worktree and the review session. `listed` is the PR's file list on GitHub. */
-export async function readPageState(parts: PageParts, linked: LinkedCard, listed: Promise<readonly string[] | undefined>): Promise<OverviewState> {
+/** The PR's file list on GitHub, or undefined paths when GitHub could not send it. */
+export interface ListedFiles { readonly paths: readonly string[] | undefined }
+
+/** Everything the PR's page shows, read from GitHub, the worktree and the review session. `listed` is undefined until GitHub sends the PR's file list. */
+export async function readPageState(parts: PageParts, linked: LinkedCard, listed: ListedFiles | undefined): Promise<OverviewState> {
   const { page, remote, diff, edits } = parts;
   const { provider, repository, pullRequest, folder, opened, fileReviews, host } = page;
   remote.loadFirst();
   void remote.conversation();
   const linkedRows = linked.read();
-  const paths = await listed;
+  const paths = listed?.paths;
   const all = [...new Set([...(paths ?? []), ...diff.paths])];
   const [viewed, read] = await Promise.all([
-    fileReviews.reviewed(provider, repository, pullRequest.number, all),
+    // GitHub's Viewed marks come with its file list; until then only this machine's marks are known.
+    listed === undefined ? fileReviews.reviewedHere(repository, pullRequest.number, all) : fileReviews.reviewed(provider, repository, pullRequest.number, all),
     diff.readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
   ]);
   const [readDetails, readThreads, analysis, loadedConversation, review] = await Promise.all([remote.shownDetails(), remote.shownThreads(), readAnalysis(parts), remote.shownConversation(), host.reviewView(host.picks())]);
@@ -67,7 +71,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const linkedNow = await linkedRows;
   const { conflictQuestion } = edits;
   return {
-    ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
+    ...state, threads, ...(listed === undefined ? { reviewedPending: true as const } : {}), ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
     ...(local.files.size === 0 ? {} : { local: Object.fromEntries(local.files) }), linked: linkedNow,
   };
 }

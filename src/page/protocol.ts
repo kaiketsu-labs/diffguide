@@ -52,6 +52,8 @@ export interface OverviewState {
   readonly updatedAt?: string;
   readonly changes?: { readonly additions: number; readonly deletions: number; readonly files: number };
   readonly reviewed?: { readonly done: number; readonly total: number };
+  /** The code host's file list, which gives `reviewed` and its Viewed marks, has not arrived yet. */
+  readonly reviewedPending?: true;
   /** Paths of files marked reviewed. */
   readonly viewed: readonly string[];
   /** Line ranges marked read, collapsed in the diff. */
