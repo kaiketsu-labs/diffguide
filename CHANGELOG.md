@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-13)
+
+
+### Notes
+
 - Review pages reopen in their tabs after a window reload, instead of closing.
 - Refresh on the review page spins while it reloads, then says "Refreshed." or shows why it failed.
 - Resolving a thread folds it, also after jumping to it from the code review card.
@@ -10,9 +15,6 @@
 - When the base branch moves while Claude works, a notice says the files are out of date and offers Refresh. It stays until the files reload.
 - **Finish your review** counts the pending comments it lists.
 - In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.
-
-## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-13)
-
 
 ### Features
 
