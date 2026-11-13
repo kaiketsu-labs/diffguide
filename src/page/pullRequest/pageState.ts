@@ -25,6 +25,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const { provider, repository, pullRequest, folder, opened, fileReviews, host } = page;
   remote.loadFirst();
   void remote.conversation();
+  const linkedRows = linked.read();
   const paths = await listed;
   const all = [...new Set([...(paths ?? []), ...diff.paths])];
   const [viewed, read] = await Promise.all([
@@ -63,7 +64,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   });
   const pushedHead = loadedConversation instanceof Error ? undefined : loadedConversation.merge.headOid;
   const [unpushed, local] = await Promise.all([pushedHead === undefined ? [] : unpushedCommits(folder, pushedHead), localChanges(folder, pushedHead)]);
-  const linkedNow = await linked.read();
+  const linkedNow = await linkedRows;
   const { conflictQuestion } = edits;
   return {
     ...state, threads, ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
