@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-13)
+
+
+### Notes
+
 - Review pages reopen in their tabs after a window reload, instead of closing.
 - Refresh on the review page spins while it reloads, then says "Refreshed." or shows why it failed.
 - Resolving a thread folds it, also after jumping to it from the code review card.
@@ -10,6 +15,28 @@
 - When the base branch moves while Claude works, a notice says the files are out of date and offers Refresh. It stays until the files reload.
 - **Finish your review** counts the pending comments it lists.
 - In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.
+
+### Features
+
+* **page:** say when the shown files are out of date ([e267ccf](https://github.com/kaiketsu-labs/diffguide/commit/e267ccf80a31e7758d060f2d918239cc3c63162e))
+* **page:** show refresh progress and result ([29eae9b](https://github.com/kaiketsu-labs/diffguide/commit/29eae9b522a875b394f320fa9aba6a69959dfa1f))
+* **vscode:** reopen review pages after a window reload ([3afd1de](https://github.com/kaiketsu-labs/diffguide/commit/3afd1dec3e0703e9e8d773e3e26186de7d22b9f1))
+
+
+### Bug Fixes
+
+* **markdown:** read ```x``` on one line as inline code ([27704ec](https://github.com/kaiketsu-labs/diffguide/commit/27704ec3e4a1d754a2eb8642342da02fcf0afbe5))
+* **page:** count the pending comments the review list shows ([d30d0aa](https://github.com/kaiketsu-labs/diffguide/commit/d30d0aa0a46f5899ff1cc2a64187e26b8bafd857))
+* **page:** fold a thread when it is resolved ([456b86e](https://github.com/kaiketsu-labs/diffguide/commit/456b86ec7d246bd949089775924514fe2cc10a57))
+* **page:** highlight github code with the page's highlighter ([e8c8684](https://github.com/kaiketsu-labs/diffguide/commit/e8c868460278bf2da926fab7b62980d20ac436cc))
+* **page:** style github suggested changes and code colors ([f3e7f0b](https://github.com/kaiketsu-labs/diffguide/commit/f3e7f0b07664eae0e008a544aa76514e8e65d0e6))
+* **pr:** follow the base branch github reports ([a3a5d01](https://github.com/kaiketsu-labs/diffguide/commit/a3a5d01f1c2b7f119329c702d109436b494224df))
+* **vscode:** reopen PR pages after a reload ([f40e5c5](https://github.com/kaiketsu-labs/diffguide/commit/f40e5c5f65137620c4df5267f88992aeff040202))
+
+
+### Documentation
+
+* **agents:** ship each fix and feature with a failing-first test ([f25ee0a](https://github.com/kaiketsu-labs/diffguide/commit/f25ee0a3166720673f61f5bbdaa2f62fef3e4dc6))
 
 ## [0.9.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.8.0...v0.9.0) (2026-11-12)
 
