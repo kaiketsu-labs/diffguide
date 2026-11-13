@@ -88,3 +88,27 @@ test('the page shows before GitHub sends the conversation, and redraws with it o
   await redrawn;
   assert.equal((await controller.read()).conversation?.viewerLogin, 'bench');
 });
+
+test('the page shows before GitHub sends the details and threads, and redraws with them once they arrive', async () => {
+  let answerOverview: (() => void) | undefined;
+  const { controller } = await page(async (method) => {
+    if (method === 'overview') {
+      await new Promise<void>((resolve) => { answerOverview = resolve; });
+      return { details: details(), threads: remoteThreads(['a.ts']) };
+    }
+    if (method === 'listFiles') return [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }];
+    if (method === 'crossReferences') return [];
+    return undefined;
+  });
+  const first = await Promise.race([controller.read(), new Promise<undefined>((resolve) => setTimeout(resolve, 1000))]);
+  assert.ok(first !== undefined, 'the page waited for the details');
+  assert.equal(first.details, undefined);
+  assert.equal(first.detailsError, undefined);
+  assert.equal(first.github, undefined);
+  const redrawn = new Promise<void>((resolve) => { controller.onDidChange(() => { resolve(); }); });
+  answerOverview?.();
+  await redrawn;
+  const second = await controller.read();
+  assert.equal(second.details?.title, 'Bench PR');
+  assert.equal(second.github?.length, 40);
+});

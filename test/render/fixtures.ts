@@ -171,6 +171,7 @@ export const readme: OverviewState = {
 
 const filesMessage: ExtensionMessage = { files, selection: { range: { kind: 'all' }, whitespace: false }, atHead: true };
 const { conversation: _conversation, ...withoutConversation } = pullRequest;
+const { details: _details, github: _github, ...withoutDetails } = withoutConversation;
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
@@ -185,6 +186,12 @@ export const scenes: Readonly<Record<string, Scene>> = {
   conversationLoading: scene(withoutConversation, [
     { expect: '#merge[disabled]', shot: 'conversation-loading.png' },
     { send: { state: pullRequest }, absent: '#merge[disabled]' },
+  ], { saved: { view: 'overview' } }),
+  // The page shows before GitHub sends the details and threads; pulsing bars hold their places and review and merge wait.
+  detailsLoading: scene(withoutDetails, [
+    { expect: '#body .skeleton' }, { expect: '#reviewers .skeleton' }, { expect: '#merge-status .skeleton' }, { expect: '#threads .skeleton' },
+    { expect: '#merge[disabled]' }, { expect: '#review[disabled]' }, { expect: '[data-event="comment"][disabled]', shot: 'details-loading.png' },
+    { send: { state: pullRequest }, absent: '.skeleton' }, { absent: '#review[disabled]' },
   ], { saved: { view: 'overview' } }),
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },

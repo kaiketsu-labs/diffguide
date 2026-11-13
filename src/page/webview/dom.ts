@@ -20,6 +20,19 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: st
   return node;
 }
 
+/** Pulsing bars that hold a slot's place until GitHub sends its content, one per width in percent. */
+export function placeholders(...widths: number[]): HTMLElement[] {
+  return widths.map((width) => {
+    const bar = el('span', 'skeleton');
+    bar.style.width = width + '%';
+    return bar;
+  });
+}
+
+/** True while a PR page waits for GitHub's first details. */
+export const detailsLoading = (state: { readonly localMode?: boolean; readonly details?: unknown; readonly detailsError?: string } | undefined): boolean =>
+  state !== undefined && state.localMode !== true && state.details === undefined && state.detailsError === undefined;
+
 export function button(label: string, onClick: () => void, className?: string): HTMLButtonElement {
   const node = el('button', className ?? '');
   setLabel(node, label);

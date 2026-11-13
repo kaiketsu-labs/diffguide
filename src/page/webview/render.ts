@@ -5,7 +5,7 @@ import type { OverviewState } from '../protocol.js';
 import { renderAnswers } from './answers.js';
 import { isWriter, reactionsRow, toolButton } from './conversation/comment.js';
 import { renderConversation } from './conversation/timeline.js';
-import { $, el, icon, setLabel, stateIcon } from './dom.js';
+import { $, detailsLoading, el, icon, placeholders, setLabel, stateIcon } from './dom.js';
 import { showListToggle } from './files/filters.js';
 import { renderFiles } from './files/render.js';
 import { guideState } from './guide/model.js';
@@ -54,6 +54,13 @@ export function onShortcut(event: KeyboardEvent): void {
   else return;
 }
 
+/** A list row holding one placeholder bar. */
+function placeholderRow(width: number): HTMLElement {
+  const row = el('li');
+  row.append(...placeholders(width));
+  return row;
+}
+
 export function render(state: OverviewState): void {
   noteWorking(received.current, state);
   received.current = state;
@@ -71,8 +78,9 @@ export function render(state: OverviewState): void {
   }
   $('facts').replaceChildren(...pullRequestFacts(state));
   const { details } = state;
+  const loading = detailsLoading(state);
   const body = $('body');
-  if (!details) body.replaceChildren(el('span', 'muted', state.detailsError ? 'Could not load from GitHub: ' + state.detailsError : 'Loading from GitHub…'));
+  if (!details) body.replaceChildren(...state.detailsError ? [el('span', 'muted', 'Could not load from GitHub: ' + state.detailsError)] : placeholders(70, 55));
   else if (!ui.editingBody && details.bodyHtml.trim()) body.innerHTML = details.bodyHtml;
   else if (!ui.editingBody) body.replaceChildren(el('span', 'muted', 'No description.'));
   renderReviewers(state);
@@ -93,10 +101,10 @@ export function render(state: OverviewState): void {
       checks.append(status(check.state, check.name, check.url, tools));
     }
     if (!details.checks.length) checks.append(el('li', 'muted', 'No checks.'));
-  }
+  } else if (loading) checks.append(placeholderRow(60));
   for (const id of ['pick-reviewers', 'pick-assignees', 'pick-labels', 'pick-milestone']) $(id).hidden = !details?.canEdit;
   $('edit-title').hidden = !details?.canEdit || document.getElementById('title-form') !== null;
-  $('milestone').replaceChildren(...details ? [details.milestone ? el('span', '', details.milestone.title) : el('span', 'muted', 'No milestone.')] : []);
+  $('milestone').replaceChildren(...details ? [details.milestone ? el('span', '', details.milestone.title) : el('span', 'muted', 'No milestone.')] : loading ? placeholders(40) : []);
   const linked = state.conversation?.linkedIssues ?? [];
   $('development').hidden = linked.length === 0;
   $('linked-issues').replaceChildren(...linked.map((issue) => {
@@ -126,12 +134,12 @@ export function render(state: OverviewState): void {
     if (state.conversation && !sameRange(next, received.diffRange)) requestFiles(next, prefs.whitespace);
   }
   $('edit-body').hidden = !details?.canEdit || ui.editingBody;
-  $('assignees').replaceChildren(...details?.assignees.length ? details.assignees.map((name) => el('li', '', name)) : details ? [el('li', 'muted', 'Nobody assigned.')] : []);
+  $('assignees').replaceChildren(...details?.assignees.length ? details.assignees.map((name) => el('li', '', name)) : details ? [el('li', 'muted', 'Nobody assigned.')] : loading ? [placeholderRow(50)] : []);
   $('labels').replaceChildren(...details?.labels.length ? details.labels.map((label) => {
     const chip = el('span', 'label', label.name);
     chip.style.setProperty('--label', '#' + label.color);
     return chip;
-  }) : details ? [el('span', 'muted', 'No labels.')] : []);
+  }) : details ? [el('span', 'muted', 'No labels.')] : loading ? placeholders(45) : []);
   const reviewed = $('reviewed');
   reviewed.replaceChildren();
   if (state.reviewed) {
@@ -190,14 +198,16 @@ export function render(state: OverviewState): void {
     prState.className = 'verdict pr-state pr-only ' + ended;
     prState.replaceChildren(icon(ended === 'merged' ? icons.merge : icons.closePullRequest), ended === 'merged' ? 'Merged' : 'Closed');
   }
-  $('review-box').hidden = !details?.open;
+  $('review-box').hidden = !details?.open && !loading;
+  $<HTMLTextAreaElement>('review').disabled = loading;
   $('bar-review').hidden = !details?.open;
   $('bar-pending').hidden = pendingCount === undefined;
   $('bar-pending').textContent = pendingCount + ' pending';
-  $('merge-box').hidden = !details;
+  $('merge-box').hidden = !details && !loading;
+  $('method').parentElement!.hidden = loading;
   if (details) {
     renderState(details);
-  }
+  } else if (loading) $('merge-status').replaceChildren(placeholderRow(55), placeholderRow(40));
   const next = new Set(state.viewed);
   for (const path of next) if (!received.viewed.has(path)) collapsed.set(path, true);
   for (const path of received.viewed) if (!next.has(path)) collapsed.set(path, false);
