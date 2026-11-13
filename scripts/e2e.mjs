@@ -153,6 +153,43 @@ const scenarios = [
       await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'pr-files.png') });
       step('Opening #201 checked it out and showed its diff');
+
+      await page.click('#refresh');
+      await page.locator('#notice', { hasText: 'Refreshed.' }).waitFor({ timeout: 30_000 });
+      await until('the Refresh button to settle', async () => !await page.$('#refresh.busy') && !await page.$('#refresh[disabled]'), 5_000);
+      step('Refresh said Refreshed. and the button settled');
+    },
+  },
+  {
+    name: 'reload',
+    async run(workbench, step) {
+      await palette(workbench, 'DiffGuide: Review local changes');
+      await reviewPage(workbench, 'body');
+      await palette(workbench, 'Focus on Pull Requests View');
+      await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
+      await reviewPage(workbench, 'text=Sample pull request');
+      step('Opened the local page and the page of #201');
+
+      const tab = (label) => workbench.locator(`.tabs-container .tab[aria-label*="${label}"]`).first();
+      const prTab = (await tab('201').getAttribute('aria-label')) ?? '';
+      // The page holds keyboard focus, which swallows the palette shortcut.
+      await workbench.click('.part.sidebar .composite.title');
+      const loaded = await workbench.evaluate(() => performance.timeOrigin);
+      await palette(workbench, 'Developer: Reload Window');
+      await until('the window to reload', async () => await workbench.evaluate(() => performance.timeOrigin) !== loaded && await workbench.$('.monaco-workbench .tabs-container .tab'), 60_000);
+      step('Reloaded the window');
+
+      await reviewPage(workbench, 'text=Sample pull request');
+      await workbench.screenshot({ path: join(out, 'reload-pr.png') });
+      step(`The PR page opened again in its tab (${prTab})`);
+
+      await tab('Local ·').click();
+      await until('the local page after the reload', async () => {
+        for (const frame of workbench.frames()) if (await frame.$('#view-files') && !await frame.$('text=Sample pull request')) return frame;
+        return undefined;
+      });
+      await workbench.screenshot({ path: join(out, 'reload-local.png') });
+      step('The local page opened again in its tab');
     },
   },
 ];
