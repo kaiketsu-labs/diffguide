@@ -170,6 +170,7 @@ export const readme: OverviewState = {
 };
 
 const filesMessage: ExtensionMessage = { files, selection: { range: { kind: 'all' }, whitespace: false }, atHead: true };
+const { conversation: _conversation, ...withoutConversation } = pullRequest;
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
@@ -180,6 +181,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
   local: scene(local, [{ shot: 'local.png' }]),
+  // The page shows before GitHub sends the conversation; Merge waits for its merge state.
+  conversationLoading: scene(withoutConversation, [
+    { expect: '#merge[disabled]', shot: 'conversation-loading.png' },
+    { send: { state: pullRequest }, absent: '#merge[disabled]' },
+  ], { saved: { view: 'overview' } }),
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },
     width: 1100, height: 900, steps: [{ scrollTo: '#files', shot: 'readme.png' }] },

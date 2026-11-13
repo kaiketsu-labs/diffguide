@@ -75,7 +75,8 @@ export function setBusy(value: boolean): void {
   ui.busy = value;
   for (const review of reviewButtons) review.disabled = value || (ui.author && review.hasAttribute('data-reviewer'));
   const merge = received.current?.conversation?.merge;
-  $<HTMLButtonElement>('merge').disabled = value || received.current?.details?.mergeable === 'no' || (merge?.state === 'blocked' && !merge.canBypass && !merge.mergeQueue);
+  const mergeLoading = merge === undefined && received.current?.conversationError === undefined;
+  $<HTMLButtonElement>('merge').disabled = value || mergeLoading || received.current?.details?.mergeable === 'no' || (merge?.state === 'blocked' && !merge.canBypass && !merge.mergeQueue);
   for (const action of document.querySelectorAll<HTMLButtonElement>('[data-pr-action]')) action.disabled = value;
 }
 

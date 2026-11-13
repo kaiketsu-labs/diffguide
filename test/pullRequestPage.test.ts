@@ -64,3 +64,27 @@ test('the page asks GitHub for linked changes while its other reads are still ou
   answerConversation?.();
   assert.equal((await reading).linked?.length, 0);
 });
+
+test('the page shows before GitHub sends the conversation, and redraws with it once it arrives', async () => {
+  let answerConversation: (() => void) | undefined;
+  let head = '';
+  const { head: commit, controller } = await page(async (method) => {
+    if (method === 'conversation') {
+      await new Promise<void>((resolve) => { answerConversation = resolve; });
+      return conversation(head);
+    }
+    if (method === 'overview') return { details: details(), threads: remoteThreads(['a.ts']) };
+    if (method === 'listFiles') return [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }];
+    if (method === 'crossReferences') return [];
+    return undefined;
+  });
+  head = commit;
+  const first = await Promise.race([controller.read(), new Promise<undefined>((resolve) => setTimeout(resolve, 1000))]);
+  assert.ok(first !== undefined, 'the page waited for the conversation');
+  assert.equal(first.conversation, undefined);
+  assert.ok(first.details !== undefined);
+  const redrawn = new Promise<void>((resolve) => { controller.onDidChange(() => { resolve(); }); });
+  answerConversation?.();
+  await redrawn;
+  assert.equal((await controller.read()).conversation?.viewerLogin, 'bench');
+});

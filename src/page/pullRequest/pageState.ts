@@ -32,7 +32,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
     fileReviews.reviewed(provider, repository, pullRequest.number, all),
     diff.readBase().then((base) => fileReviews.readRanges(repository, pullRequest.number, base)).catch(() => []),
   ]);
-  const [readDetails, readThreads, analysis, loadedConversation, review] = await Promise.all([remote.details(), remote.threads(), readAnalysis(parts), remote.conversation(), host.reviewView(host.picks())]);
+  const [readDetails, readThreads, analysis, loadedConversation, review] = await Promise.all([remote.details(), remote.threads(), readAnalysis(parts), remote.shownConversation(), host.reviewView(host.picks())]);
   const { written } = remote;
   const loadedDetails = readDetails instanceof Error ? readDetails : {
     ...readDetails, title: written.apply('title', readDetails.title), draft: written.apply('draft', readDetails.draft), open: written.apply('open', readDetails.open),
@@ -41,7 +41,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const githubHtml = [
     ...readDetails instanceof Error ? [] : [readDetails.bodyHtml],
     ...readThreads instanceof Error ? [] : readThreads.flatMap((thread) => thread.comments.map((comment) => comment.bodyHtml)),
-    ...loadedConversation instanceof Error ? [] : loadedConversation.timeline.flatMap((item) => 'bodyHtml' in item ? [item.bodyHtml] : []),
+    ...loadedConversation === undefined || loadedConversation instanceof Error ? [] : loadedConversation.timeline.flatMap((item) => 'bodyHtml' in item ? [item.bodyHtml] : []),
   ];
   await prepareHighlighting([
     ...opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]),
@@ -51,7 +51,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const highlightedThreads = loadedThreads instanceof Error ? loadedThreads
     : loadedThreads.map((thread) => ({ ...thread, comments: thread.comments.map((comment) => ({ ...comment, bodyHtml: githubCodeHtml(comment.bodyHtml, thread.path) })) }));
   const highlightedDetails = loadedDetails instanceof Error ? loadedDetails : { ...loadedDetails, bodyHtml: githubCodeHtml(loadedDetails.bodyHtml) };
-  const highlightedConversation = loadedConversation instanceof Error ? loadedConversation : {
+  const highlightedConversation = loadedConversation === undefined || loadedConversation instanceof Error ? loadedConversation : {
     ...loadedConversation, timeline: loadedConversation.timeline.map((item) => 'bodyHtml' in item ? { ...item, bodyHtml: githubCodeHtml(item.bodyHtml) } : item),
   };
   const summary = loadedDetails instanceof Error ? diff.current() : { ...diff.current(), title: loadedDetails.title, draft: loadedDetails.draft };
@@ -62,7 +62,7 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
     const newAnswer = answers.get(thread.id);
     return { ...thread, ...(done === undefined ? {} : { applied: done }), ...(newAnswer === undefined ? {} : { newAnswer }) };
   });
-  const pushedHead = loadedConversation instanceof Error ? undefined : loadedConversation.merge.headOid;
+  const pushedHead = loadedConversation === undefined || loadedConversation instanceof Error ? undefined : loadedConversation.merge.headOid;
   const [unpushed, local] = await Promise.all([pushedHead === undefined ? [] : unpushedCommits(folder, pushedHead), localChanges(folder, pushedHead)]);
   const linkedNow = await linkedRows;
   const { conflictQuestion } = edits;
