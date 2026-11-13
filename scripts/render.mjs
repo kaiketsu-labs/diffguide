@@ -88,11 +88,19 @@ for (const name of names) {
   await page.waitForTimeout(300);
   const shots = [];
   for (const step of scene.steps) {
+    if (step.send) await page.evaluate((m) => window.postMessage(m, '*'), step.send);
     if (step.click) await page.click(step.click);
     if (step.scroll !== undefined) await page.evaluate((y) => window.scrollTo(0, y), step.scroll);
     if (step.scrollTo) await page.evaluate((selector) => document.querySelector(selector)?.scrollIntoView({ block: 'start' }), step.scrollTo);
     if (step.hover) await page.hover(step.hover);
     await page.waitForTimeout(step.wait ?? 200);
+    if (step.expect) {
+      const found = await page.$(step.expect);
+      const text = found ? await found.textContent() : null;
+      if (!found) errors.push(`expected ${step.expect}`);
+      else if (step.text !== undefined && !text?.includes(step.text)) errors.push(`expected ${step.expect} to contain "${step.text}", got "${text?.trim()}"`);
+    }
+    if (step.absent && await page.$(step.absent)) errors.push(`expected no ${step.absent}`);
     if (step.shot) { await page.screenshot({ path: join(out, step.shot), fullPage: step.full === true }); shots.push(join(out, step.shot)); }
   }
   await writeFile(join(out, `${name}.posted.json`), JSON.stringify(await page.evaluate(() => window.__posted), null, 1));
