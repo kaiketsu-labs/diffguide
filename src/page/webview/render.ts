@@ -169,7 +169,9 @@ export function render(state: OverviewState): void {
   for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.hidden = ui.author;
   document.querySelector<HTMLButtonElement>('[data-event="comment"]')?.classList.toggle('primary', ui.author);
   $('review-box').querySelector<HTMLButtonElement>('[data-event="comment"]')!.title = ui.author ? 'This is your PR, so you can only comment.' : '';
-  const pendingCount = details?.pendingComments;
+  // The details' count comes from a separate read that can lag the threads the pending list shows, so count what the list shows.
+  const pendingCount = details?.pendingComments === undefined ? undefined
+    : (state.github ?? []).reduce((sum, thread) => sum + thread.messages.filter((message) => message.pending).length, 0);
   $('discard-review').hidden = pendingCount === undefined;
   $('pending-note').hidden = pendingCount === undefined;
   $('pending-note').textContent = pendingCount + ' pending comment' + (pendingCount === 1 ? '' : 's');
