@@ -183,4 +183,5 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.pickerOptions) { ui.pickerOptions = data.pickerOptions; ui.pickerError = undefined; renderPicker(); }
   if (data.pickerError !== undefined) { ui.pickerError = data.pickerError; renderPicker(); }
   if (data.idle) setBusy(false);
+  if (data.refreshed) { const refresh = $<HTMLButtonElement>('refresh'); refresh.disabled = false; refresh.classList.remove('busy'); }
 }

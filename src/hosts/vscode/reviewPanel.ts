@@ -321,8 +321,9 @@ export async function showPullRequestOverview(
         }
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
         else if (action === 'refresh') {
-          actions.refresh();
           sendFiles();
+          const problem = await actions.refresh();
+          post(problem === undefined ? { refreshed: true, notice: { text: 'Refreshed.' } } : { refreshed: true, error: 'Refresh failed: ' + problem });
         } else if (action === 'pr') await vscode.env.openExternal(vscode.Uri.parse(state.url));
         else if (action === 'thread' && typeof id === 'string') await actions.revealThread(id);
         else if (action === 'viewed' && typeof path === 'string' && typeof viewed === 'boolean') await marking(actions.setViewed(path, viewed));
@@ -401,7 +402,7 @@ export async function showPullRequestOverview(
           } finally {
             // GitHub writes can succeed before a later step or the response fails.
             // Re-read authoritative state even when the action rejects.
-            actions.refresh();
+            void actions.refresh();
             redraw();
             busy = false;
             post({ idle: true });
@@ -415,7 +416,7 @@ export async function showPullRequestOverview(
   let shownProblem: string | undefined;
   const sync = pollWhileFocused(30_000, () => panel.visible, async () => {
     const { reload, files, problem } = await actions.pollGitHub();
-    if (reload) actions.refresh();
+    if (reload) void actions.refresh();
     if (files) sendFiles();
     if (problem !== undefined && problem !== shownProblem) post({ error: problem });
     shownProblem = problem;

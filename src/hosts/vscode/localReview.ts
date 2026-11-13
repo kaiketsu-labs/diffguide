@@ -379,7 +379,7 @@ export class LocalReview implements vscode.Disposable {
         this.#marksChanged.fire();
       },
       pollGitHub: async () => ({ reload: false, files: false }),
-      refresh: () => undefined,
+      refresh: () => Promise.resolve(undefined),
       retry: () => undefined,
       dismissConflictQuestion: () => undefined,
       stopAnalysis: () => undefined,
