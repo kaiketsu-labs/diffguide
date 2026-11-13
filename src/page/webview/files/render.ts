@@ -235,6 +235,8 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   head.append(chevron, ...themeIcon ? [iconNode(themeIcon)] : [], name, badge, ...localMark(file.path), stats, ...chips, comments, mode, headTools(full, commentFile, open), label, headTools(close));
   box.append(head);
   const diff = el('div', 'diff');
+  // Off-screen diffs skip layout and paint; their row count sizes them until first drawn.
+  diff.style.setProperty('--diff-rows', String(file.hunks.reduce((rows, hunk) => rows + hunk.lines.length + 1, 0)));
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
   const fileThreads = wholeFileBlock(file.path, threads, placed, true);
   if (fileThreads) diff.append(fileThreads);
