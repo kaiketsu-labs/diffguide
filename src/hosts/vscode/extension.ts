@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { createReviewBridge } from '../../agents/claude/bridge.js';
 import type { ReviewBridge, ReviewStore } from '../../core/contracts.js';
 import type { Forge, WorkspaceRepository } from '../../core/forge.js';
+import { listWorktrees } from '../../core/git/worktrees.js';
 import { FileReviews } from '../../core/reviewedFiles.js';
 import { createReviewStore } from '../../core/store.js';
 import { signInToGitHub, useGitHubHost, watchGitHubSessions } from '../../forges/github/githubApi.js';
@@ -132,11 +133,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!await stat(folder).then((info) => info.isDirectory(), () => false)) return;
         return (await localSessions.get(folder)).review.open();
       }
-      await checkouts.list();
-      const found = checkouts.opened.find(({ session }) => `${session.metadata.repository}#${session.metadata.pullRequest.number}` === key);
-      if (found === undefined) return;
-      const { checkout, session } = found;
-      await showOverview(checkout, await checkout.connect(), session.metadata.repository, session.metadata.pullRequest, session.metadata.role);
+      // Sessions reopen in the background after a reload, so the PR is found by its worktree, not among open sessions.
+      for (const checkout of await checkouts.list()) {
+        const found = (await listWorktrees(checkout.storageRoot, checkout.root)).find(({ metadata }) => `${metadata.repository}#${metadata.pullRequest.number}` === key);
+        if (found === undefined) continue;
+        const { repository, pullRequest, role } = found.metadata;
+        return showOverview(checkout, await checkout.connect(), repository, pullRequest, role);
+      }
     }));
     context.subscriptions.push(bridge, launchers, vscode.commands.registerCommand('diffGuide.showFocusedClaude', () => {
       const document = vscode.window.activeTextEditor?.document;
