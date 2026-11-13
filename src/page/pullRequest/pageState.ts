@@ -2,6 +2,7 @@ import { prepareHighlighting } from '../../core/codePreview.js';
 import { localChanges, unpushedCommits } from '../../core/conflicts.js';
 import { git } from '../../core/git/worktrees.js';
 import { buildOverviewState } from '../overviewState.js';
+import { githubCodeFilePaths, githubCodeHtml } from '../preview/githubCode.js';
 import { fenceFilePaths, markdownHtml } from '../preview/markdown.js';
 import type { AnalysisView, OverviewState } from '../protocol.js';
 import type { PageParts } from './context.js';
@@ -36,9 +37,24 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
     ...readDetails, title: written.apply('title', readDetails.title), draft: written.apply('draft', readDetails.draft), open: written.apply('open', readDetails.open),
   };
   const loadedThreads = readThreads instanceof Error ? readThreads : readThreads.map((thread) => ({ ...thread, resolved: written.apply(`resolved:${thread.id}`, thread.resolved) }));
-  await prepareHighlighting(opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]));
+  const githubHtml = [
+    ...readDetails instanceof Error ? [] : [readDetails.bodyHtml],
+    ...readThreads instanceof Error ? [] : readThreads.flatMap((thread) => thread.comments.map((comment) => comment.bodyHtml)),
+    ...loadedConversation instanceof Error ? [] : loadedConversation.timeline.flatMap((item) => 'bodyHtml' in item ? [item.bodyHtml] : []),
+  ];
+  await prepareHighlighting([
+    ...opened.session.store.threads.flatMap((thread) => [thread.anchor.path, ...thread.messages.flatMap((entry) => fenceFilePaths(entry.text))]),
+    ...readThreads instanceof Error ? [] : readThreads.map((thread) => thread.path),
+    ...githubHtml.flatMap(githubCodeFilePaths),
+  ]);
+  const highlightedThreads = loadedThreads instanceof Error ? loadedThreads
+    : loadedThreads.map((thread) => ({ ...thread, comments: thread.comments.map((comment) => ({ ...comment, bodyHtml: githubCodeHtml(comment.bodyHtml, thread.path) })) }));
+  const highlightedDetails = loadedDetails instanceof Error ? loadedDetails : { ...loadedDetails, bodyHtml: githubCodeHtml(loadedDetails.bodyHtml) };
+  const highlightedConversation = loadedConversation instanceof Error ? loadedConversation : {
+    ...loadedConversation, timeline: loadedConversation.timeline.map((item) => 'bodyHtml' in item ? { ...item, bodyHtml: githubCodeHtml(item.bodyHtml) } : item),
+  };
   const summary = loadedDetails instanceof Error ? diff.current() : { ...diff.current(), title: loadedDetails.title, draft: loadedDetails.draft };
-  const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, loadedDetails, loadedThreads, analysis, loadedConversation, await opened.runner.context(), review);
+  const state = buildOverviewState(summary, opened, [...viewed], read, paths?.length, highlightedDetails, highlightedThreads, analysis, highlightedConversation, await opened.runner.context(), review);
   const answers = host.newAnswers();
   const threads = state.threads.map((thread) => {
     const done = edits.applied.get(thread.id);

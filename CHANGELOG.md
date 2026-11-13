@@ -6,7 +6,7 @@
 - Refresh on the review page spins while it reloads, then says "Refreshed." or shows why it failed.
 - Resolving a thread folds it, also after jumping to it from the code review card.
 - PR pages follow the base branch on GitHub: after a retarget, or when the base moves on, the diff matches GitHub's and comments no longer fail with "Filepath must be part of pull request". Refresh checks right away.
-- Suggested changes in GitHub comments show as a diff with removed and added lines, and code blocks keep GitHub's syntax colors.
+- Suggested changes in GitHub comments show as a diff with removed and added lines. Code in GitHub comments and suggestions uses the page's own syntax colors.
 - **Finish your review** counts the pending comments it lists.
 - In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.
 

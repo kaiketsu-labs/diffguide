@@ -1,9 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { prepareHighlighting } from '../core/codePreview.js';
 import { commitAndPush, commitFiles, fetchPullRequestHead, syncKeepingLocalCommits } from '../core/conflicts.js';
 import type { ChangeRequestConversation, ChangeRequestDetails, Forge, RemoteThread } from '../core/forge.js';
 import { git } from '../core/git/worktrees.js';
 import { applyLineSuggestions, type LineSuggestion, parseSuggestions } from '../core/suggestions.js';
+import { githubCodeFilePaths, githubCodeHtml } from './preview/githubCode.js';
 import type { OverviewActions, PickedSuggestion } from './protocol.js';
 
 /** What the review page's GitHub actions need from the page that runs them. */
@@ -120,7 +122,11 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       await context.useBase(picked);
       context.reload(true);
     },
-    renderMarkdown: (text) => provider.renderMarkdown(text),
+    renderMarkdown: async (text) => {
+      const html = await provider.renderMarkdown(text);
+      await prepareHighlighting(githubCodeFilePaths(html));
+      return githubCodeHtml(html);
+    },
     commitSuggestions: async (picked) => {
       if (context.claudeBusy()) throw new Error('Claude is working on this PR. Commit the suggestions when it is done.');
       const details = await context.details();
