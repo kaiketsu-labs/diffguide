@@ -100,9 +100,19 @@ export function showNotice(notice: NonNullable<ExtensionMessage['notice']>): voi
   noticeTimer = setTimeout(clearNotice, extension === undefined && notice.url === undefined ? 4000 : 8000);
 }
 
+/** The shown files are out of date; a notice with Refresh stays, under any other notice, until they reload. */
+let stale = false;
+
+export function setStale(on: boolean): void {
+  if (stale === on) return;
+  stale = on;
+  if (noticeTimer === undefined) clearNotice();
+}
+
 export function clearNotice(): void {
   clearTimeout(noticeTimer);
-  $('notice').replaceChildren();
+  noticeTimer = undefined;
+  $('notice').replaceChildren(...stale ? [el('span', '', 'The base branch moved on GitHub. Refresh to see the current changes.'), button('Refresh', () => { $('refresh').click(); }, 'primary small')] : []);
 }
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');

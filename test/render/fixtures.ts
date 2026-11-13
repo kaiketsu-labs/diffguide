@@ -186,6 +186,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   get since() { return reviewingScenes['since']!; },
   get submitted() { return reviewingScenes['submitted']!; },
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
+  get stale() { return reviewingScenes['stale']!; },
 };
 
 const pendingMessage = (id: string, body: string): GitHubMessage => ({
@@ -255,6 +256,7 @@ const githubMarkup: OverviewState = {
 export const reviewingScenes: Readonly<Record<string, Scene>> = {
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   pending: { state: reviewing, messages: [{ state: reviewing }, filesMessage], steps: [{ shot: 'pending.png', full: true }], saved: { view: 'overview' } },
+  stale: { state: reviewing, messages: [{ state: reviewing }, filesMessage, { stale: true }], steps: [{ shot: 'stale.png' }], saved: { view: 'files' } },
   githubMarkup: { state: githubMarkup, messages: [{ state: githubMarkup }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'github-markup.png' }], saved: { view: 'overview' } },
   since: { state: reviewing, messages: [{ state: reviewing }, { ...filesMessage, selection: { range: { kind: 'since' }, whitespace: false } }], steps: [{ shot: 'since.png' }], saved: { view: 'files' } },
 };

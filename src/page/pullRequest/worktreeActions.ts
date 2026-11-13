@@ -37,13 +37,15 @@ export function worktreeActions({ page, remote, diff, notOnCheckout, pushTarget 
       const { baseBranch, baseHead } = version;
       // GitHub diffs against the base's current tip, so a retarget or a moved base changes which files are in the PR.
       const retargeted = baseBranch !== undefined && baseBranch !== '' && baseBranch !== diff.baseBranch;
-      const baseMoved = baseBranch !== undefined && baseBranch !== '' && baseHead !== undefined && await followBase(folder, baseBranch, baseHead);
+      if (baseBranch !== undefined && baseBranch !== '' && baseHead !== undefined) await followBase(folder, baseBranch, baseHead);
       if (retargeted) {
         diff.baseBranch = baseBranch;
         await opened.useBase(baseBranch);
       }
       const reload = (previous !== undefined && version !== previous) || remote.written.waiting || retargeted;
-      if (opened.runner.activity.running) return { reload, files: false };
+      const stale = await diff.baseChanged();
+      // While Claude works the files stay as they are; the page says they are out of date.
+      if (opened.runner.activity.running) return { reload, files: false, ...stale ? { stale } : {} };
       const before = await diff.readHead();
       shownHead ??= before;
       let problem: string | undefined;
@@ -54,7 +56,7 @@ export function worktreeActions({ page, remote, diff, notOnCheckout, pushTarget 
         await syncToPullRequestHead(folder, pullRequest.number, previous?.head).catch((error: unknown) => { problem = error instanceof Error ? error.message : String(error); });
       }
       const head = await diff.readHead();
-      const files = head !== shownHead || baseMoved || retargeted;
+      const files = head !== shownHead || stale;
       shownHead = head;
       return { reload: reload || files, files, ...(problem === undefined ? {} : { problem }) };
     },

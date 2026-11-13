@@ -421,9 +421,10 @@ export async function showPullRequestOverview(
   ];
   let shownProblem: string | undefined;
   const sync = pollWhileFocused(30_000, () => panel.visible, async () => {
-    const { reload, files, problem } = await actions.pollGitHub();
+    const { reload, files, problem, stale } = await actions.pollGitHub();
     if (reload) void actions.refresh();
     if (files) sendFiles();
+    if (stale === true) post({ stale: true });
     if (problem !== undefined && problem !== shownProblem) post({ error: problem });
     shownProblem = problem;
   });
