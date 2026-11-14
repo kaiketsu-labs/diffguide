@@ -12,6 +12,7 @@ import { guideState } from './guide/model.js';
 import { renderConnectButton, renderContextButton } from './header/connect.js';
 import { branchRef, copyRef, pullRequestChip, pullRequestFacts, renderLinked, renderState, verdict } from './header/pullRequest.js';
 import { baseButton, renderReviewers } from './header/reviewers.js';
+import { renderSync } from './header/sync.js';
 import { closeToolbarMenu } from './menus.js';
 import { renderRangeControls, requestFiles, sameRange } from './range.js';
 import { showReview } from './review/review.js';
@@ -66,6 +67,7 @@ export function render(state: OverviewState): void {
   noteWorking(received.current, state);
   received.current = state;
   queueMicrotask(renderAnswers);
+  renderSync(state);
   for (const thread of state.threads) if (archiving.get(thread.id) === (thread.archived === true)) archiving.delete(thread.id);
   $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
   $('title').textContent = state.heading ?? state.title;

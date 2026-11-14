@@ -104,7 +104,7 @@ export class ClaudeRunner implements AgentRunner {
     let error: string | undefined;
     try {
       await this.options.hold?.();
-      error = await this.#spawn({ prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, mode: this.options.role === 'author' ? 'auto' : 'acceptEdits' });
+      error = await this.#spawn({ prompt: task.prompt, label: task.label, allowedTools: task.allowedTools, mode: this.options.role === 'author' ? 'auto' : 'acceptEdits', ...task.cwd === undefined ? {} : { cwd: task.cwd } });
     } catch (failure: unknown) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
@@ -124,7 +124,7 @@ export class ClaudeRunner implements AgentRunner {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const { sessionId, resume } = await this.#session();
     if (!resume) await writePrivateJson(this.#sessionPath, { sessionId });
-    return this.#command(executable, shell, [...await this.#flags(mcpPath, [], 'auto'), ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId])]);
+    return this.#command(executable, shell, [...await this.#flags(mcpPath, [], 'auto', this.options.cwd), ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId])], this.options.cwd);
   }
 
   /** Send comments Claude did not pick up again, and those of a stopped run it did not answer, and clear the last error. */
@@ -232,8 +232,8 @@ export class ClaudeRunner implements AgentRunner {
   }
 
   /** Flags every run of this PR's conversation shares: DiffGuide's tools, the extra folders, and on someone else's PR no checkout config. */
-  async #flags(mcpPath: string, allowedTools: readonly string[], mode: 'auto' | 'acceptEdits'): Promise<string[]> {
-    const folders = (await this.options.folders?.() ?? []).filter((folder) => folder !== this.options.cwd);
+  async #flags(mcpPath: string, allowedTools: readonly string[], mode: 'auto' | 'acceptEdits', cwd: string): Promise<string[]> {
+    const folders = (await this.options.folders?.() ?? []).filter((folder) => folder !== cwd);
     const guarded = await this.options.readOnly?.();
     return [
       '--mcp-config', mcpPath, '--allowedTools', 'mcp__diffguide', ...allowedTools,
@@ -255,34 +255,36 @@ export class ClaudeRunner implements AgentRunner {
   }
 
   /** Start Claude directly, or through the login shell so the user's own `claude` setup applies. On someone else's PR, Git hooks stay off, since the PR's author controls the checkout. */
-  #command(executable: string, shell: string | undefined, args: readonly string[]): AgentLaunch {
+  #command(executable: string, shell: string | undefined, args: readonly string[], cwd: string): AgentLaunch {
     const env = this.options.role === 'reviewer' ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null' } : {};
     return shell === undefined
-      ? { command: executable, args, cwd: this.options.cwd, env }
-      : { command: shell, args: ['-l', '-i', '-c', '"$0" "$@"', executable, ...args], cwd: this.options.cwd, env };
+      ? { command: executable, args, cwd, env }
+      : { command: shell, args: ['-l', '-i', '-c', '"$0" "$@"', executable, ...args], cwd, env };
   }
 
-  /** Run Claude once in the PR's conversation; resolves with an error message, or undefined on success. */
-  async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly mode: 'auto' | 'acceptEdits' }): Promise<string | undefined> {
+  /** Run Claude once in the PR's conversation, or with `cwd` in a new one that is not kept; resolves with an error message, or undefined on success. */
+  async #spawn(run: { readonly prompt: string; readonly label: string; readonly allowedTools: readonly string[]; readonly mode: 'auto' | 'acceptEdits'; readonly cwd?: string }): Promise<string | undefined> {
     const { executable, mcpPath, shell } = await this.options.resolve();
     const sessionPath = this.#sessionPath;
-    const { sessionId, resume: resumed } = await this.#session();
+    const kept = run.cwd === undefined;
+    const cwd = run.cwd ?? this.options.cwd;
+    const { sessionId, resume: resumed } = kept ? await this.#session() : { sessionId: randomUUID(), resume: false };
     if (this.#disposed || this.#stopping) return 'Stopped.';
     const resume = resumed ? sessionId : undefined;
     const args = [
-      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...await this.#flags(mcpPath, run.allowedTools, run.mode),
+      '-p', run.prompt, '--output-format', 'stream-json', '--verbose', ...await this.#flags(mcpPath, run.allowedTools, run.mode, cwd),
       ...(resume === undefined ? ['--session-id', sessionId] : ['--resume', sessionId]),
     ];
     this.#reply = undefined;
     this.options.log(`Starting Claude for ${run.label} (${resume === undefined ? 'new' : 'resumed'} conversation ${sessionId})`);
-    const launch = this.#command(executable, shell, args);
+    const launch = this.#command(executable, shell, args, cwd);
     const child = (this.options.spawn ?? spawnProcess)(launch.command, launch.args, { cwd: launch.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...launch.env }, detached: true });
     this.#child = child;
     let stderr = '';
     child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
     let result: string | undefined | null = null;
     let saving: Promise<void> = Promise.resolve();
-    const steps = new StepLog(this.options.cwd);
+    const steps = new StepLog(cwd);
     let tokens: number | undefined;
     let window: number | undefined;
     const startedAt = this.#activity.progress?.startedAt ?? Date.now();
@@ -295,7 +297,7 @@ export class ClaudeRunner implements AgentRunner {
       if (message.type === 'assistant') {
         for (const block of contentBlocks(message)) {
           if (block.type === 'tool_use' && typeof block.name === 'string') {
-            const step = describeTool(block.name, block.input, this.options.cwd);
+            const step = describeTool(block.name, block.input, cwd);
             this.options.log(`→ ${step}`);
             this.#set({ ...this.#activity, step });
           } else if (block.type === 'thinking') {
@@ -310,7 +312,7 @@ export class ClaudeRunner implements AgentRunner {
       if (message.type === 'result') {
         result = message.is_error === true ? clean(typeof message.result === 'string' ? message.result : 'Claude reported an error.', 200) : undefined;
         window = contextWindow(message) ?? window;
-        if (result === undefined && (resume === undefined || tokens !== undefined)) {
+        if (kept && result === undefined && (resume === undefined || tokens !== undefined)) {
           const context = tokens === undefined ? this.#context : { tokens, ...window === undefined ? {} : { window } };
           if (context !== undefined) this.#context = context;
           saving = writePrivateJson(sessionPath, { sessionId, ...context === undefined ? {} : { context } });

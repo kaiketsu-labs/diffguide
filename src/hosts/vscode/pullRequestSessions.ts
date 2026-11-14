@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import * as vscode from 'vscode';
 import { createReviewBridge } from '../../agents/claude/bridge.js';
 import { ClaudeRunner, type ClaudeRunnerOptions } from '../../agents/claude/claudeRunner.js';
@@ -229,6 +229,9 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     };
     /** The worktree before Claude's current run, to find its commits or undo its throwaway changes. */
     let before: Awaited<ReturnType<typeof worktreeSnapshot>> | undefined;
+    /** Files you saved in the worktree during Claude's run, which the cleanup on someone else's PR keeps. */
+    let saved = new Set<string>();
+    let watchingSaves: vscode.Disposable | undefined;
     const owner = `${repository}#${number}`;
     /** Locks this run holds: its own worktree, and linked worktrees Claude opened; released when the run ends. */
     const held = new Map<string, () => Promise<void>>();
@@ -307,15 +310,25 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
       prepare: async () => {
         if (!await catchUpWithPullRequest(worktree, number)) log('Could not reach GitHub for the PR\'s latest commit; Claude works on the worktree as it is.');
         before = await worktreeSnapshot(worktree);
+        saved = new Set();
+        watchingSaves?.dispose();
+        watchingSaves = vscode.workspace.onDidSaveTextDocument((document) => {
+          const path = relative(worktree, document.uri.fsPath);
+          if (document.uri.scheme === 'file' && path !== '' && !path.startsWith('..') && !isAbsolute(path)) saved.add(path);
+        });
       },
       stopped: () => { stopping?.abort(); },
-      released: releaseAll,
+      released: async () => {
+        watchingSaves?.dispose();
+        watchingSaves = undefined;
+        await releaseAll();
+      },
       finish: async (events) => {
         const start = before;
         before = undefined;
         if (start === undefined) return;
         if (metadata.role === 'reviewer') {
-          if (start.clean) await discardSince(worktree, start.head);
+          if (start.clean) await discardSince(worktree, start.head, [...saved]);
           else log('Kept the worktree as it is: it had uncommitted changes before Claude started.');
           return;
         }

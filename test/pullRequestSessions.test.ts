@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach } from 'node:test';
@@ -14,7 +14,7 @@ import { readPublications } from '../src/core/pullRequestComments.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
 import { pullRequestFileUri } from '../src/hosts/vscode/pullRequestDiff.js';
 import { PullRequestSessions } from '../src/hosts/vscode/pullRequestSessions.js';
-import { commands, extensionContext, resetFakeEditor, resetFakeWindow, Uri, window } from './fakes/vscode.js';
+import { commands, editorEvents, extensionContext, resetFakeEditor, resetFakeWindow, Uri, window } from './fakes/vscode.js';
 
 const executeFile = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
@@ -162,6 +162,37 @@ test('a thread whose Claude run the user stopped reads Stopped until Retry', asy
   assert.ok(opened.runner.activity.running);
   assert.match(opened.session.activity?.(thread.id) ?? '', /^Claude · /u);
   await opened.runner.stop();
+});
+
+test('after Claude\'s run on someone else\'s PR, the files Claude changed go and the ones you saved meanwhile stay', async () => {
+  const { storage, source, worktree, context } = await fixture();
+  const { EventEmitter } = await import('node:events');
+  const { PassThrough } = await import('node:stream');
+  const sessions = new PullRequestSessions(context, storage, source, connect, {
+    resolve: async () => ({ executable: '/bin/claude', mcpPath: '/data/mcp.json' }),
+    spawn: (() => {
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null, kill: () => true });
+      void (async () => {
+        await writeFile(path.join(worktree, 'feature.ts'), 'export const feature = 2;\n');
+        await writeFile(path.join(worktree, 'base.ts'), 'export const base = 2;\n');
+        editorEvents.saved.fire({ uri: Uri.file(path.join(worktree, 'base.ts')) } as unknown as vscode.TextDocument);
+        child.stdout.end(`${JSON.stringify({ type: 'result', subtype: 'success', is_error: false })}\n`);
+        child.stderr.end();
+        setImmediate(() => child.emit('close', 0));
+      })();
+      return child;
+    }) as never,
+  });
+  cleanup.push(async () => { sessions.dispose(); });
+  const opened = await sessions.open('acme/app', 5);
+  await opened.session.store.submit({
+    path: 'feature.ts', startLine: 1, endLine: 1, selectedText: 'export const feature = 1;',
+    contextBefore: '', contextAfter: '', documentHash: 'a'.repeat(64), side: 'working', baseRevision: 'b'.repeat(40),
+  }, 'Try 2', 'ask');
+  await until(() => opened.runner.activity.running);
+  await until(() => !opened.runner.activity.running);
+  assert.equal(await readFile(path.join(worktree, 'feature.ts'), 'utf8'), 'export const feature = 1;\n');
+  assert.equal(await readFile(path.join(worktree, 'base.ts'), 'utf8'), 'export const base = 2;\n');
 });
 
 test('restores PR reviews created from this checkout and ignores other checkouts', async () => {

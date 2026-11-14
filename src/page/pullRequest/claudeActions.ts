@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentTask } from '../../core/agent.js';
 import { conflictTask, prepareConflictFix } from '../../core/conflicts.js';
+import { withScratchWorktree } from '../../core/git/scratch.js';
 import { git } from '../../core/git/worktrees.js';
 import { maximumReplyLength } from '../../core/limits.js';
 import { draftReplyTask, githubReplyTask } from '../../core/pullRequestComments.js';
@@ -54,12 +55,13 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
       const loaded = await remote.currentDetails();
       if (loaded.mergeable !== 'no' || !loaded.canEdit) throw new Error('GitHub reports no conflicts you can fix on this PR.');
       const { baseBranch } = diff;
-      const base = await prepareConflictFix(folder, pullRequest.number, baseBranch);
-      const head = (await git(folder, ['rev-parse', 'HEAD'])).trim();
+      const { head, base } = await prepareConflictFix(folder, pullRequest.number, baseBranch);
       edits.conflictQuestion = undefined;
       const pushTo = pushTarget(loaded);
-      const { error, reply } = await opened.runner.runTask(conflictTask({ base, baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }));
-      const pushedNothing = (await git(folder, ['rev-parse', 'HEAD'])).trim() === head;
+      const { error, reply, pushedNothing } = await withScratchWorktree(folder, head, async (scratch) => {
+        const result = await opened.runner.runTask({ ...conflictTask({ base, baseBranch, headBranch: pullRequest.headBranch, pushTo, ...(answer === undefined ? {} : { answer }) }), cwd: scratch });
+        return { ...result, pushedNothing: (await git(scratch, ['rev-parse', 'HEAD'])).trim() === head };
+      });
       if (error === undefined && pushedNothing && reply !== undefined) edits.conflictQuestion = reply;
       remote.changedOnGitHub();
       if (error !== undefined) throw new Error(`Claude did not fix the conflicts: ${error}`);

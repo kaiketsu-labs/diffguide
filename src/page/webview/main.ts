@@ -3,6 +3,7 @@ import { reviewers } from '../../core/contracts.js';
 import type { ReviewEvent } from '../../core/forge.js';
 import { blockBrowserShortcuts } from '../browserShortcuts.js';
 import type { ExtensionMessage } from '../protocol.js';
+import { removeWorktreeQuestion } from '../removeWorktree.js';
 import { attachMentions } from './conversation/mentions.js';
 import { renderConversation } from './conversation/timeline.js';
 import { $, closestTo, relativeTime } from './dom.js';
@@ -65,8 +66,7 @@ refresh.addEventListener('click', () => {
 $('stop-claude').addEventListener('click', stopClaude);
 $('connect').addEventListener('click', openConnectMenu);
 $('context').addEventListener('click', openContextMenu);
-$('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree',
-  'Remove the worktree for ' + (received.current?.number === undefined ? 'this PR' : '#' + received.current.number) + '? Its local comments are deleted too. Git refuses if it has uncommitted changes.',
+$('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree', removeWorktreeQuestion(received.current?.number, received.current?.unpushed?.length ?? 0),
   'Remove worktree', () => post({ action: 'remove-worktree' })));
 // Re-rendered working chips join the page clock instead of restarting their animation.
 document.addEventListener('animationstart', (event) => {
@@ -260,6 +260,18 @@ $('conflict-send').addEventListener('click', () => {
   answer.value = '';
 });
 $('conflict-cancel').addEventListener('click', () => post({ action: 'dismiss-conflict-question' }));
+$('sync-send').addEventListener('click', () => {
+  const answer = $<HTMLTextAreaElement>('sync-answer');
+  if (!answer.value.trim()) { answer.focus(); return; }
+  $('error').textContent = '';
+  post({ action: 'sync', text: answer.value });
+  answer.value = '';
+  $('sync-ask').hidden = true;
+});
+$('sync-cancel').addEventListener('click', () => {
+  $('sync-ask').hidden = true;
+  post({ action: 'dismiss-sync-question' });
+});
 $('fix-conflicts').addEventListener('click', () => {
   $('error').textContent = '';
   $<HTMLButtonElement>('fix-conflicts').disabled = true;

@@ -406,6 +406,10 @@ export class LocalReview implements vscode.Disposable {
       refresh: () => Promise.resolve(undefined),
       retry: () => undefined,
       dismissConflictQuestion: () => undefined,
+      undoSync: () => Promise.reject(new Error('There is no sync to undo.')),
+      dismissSyncUndo: () => undefined,
+      answerSync: () => undefined,
+      dismissSyncQuestion: () => undefined,
       stopAnalysis: () => undefined,
       review: async (picks) => {
         await savePicks(this.context.globalState, this.root, picks);

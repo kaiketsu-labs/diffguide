@@ -93,6 +93,8 @@ export interface AgentTask {
   readonly prompt: string;
   /** Tools Claude may use without asking, beyond DiffGuide's own. */
   readonly allowedTools: readonly string[];
+  /** A folder to run in instead of the checkout, such as a scratch worktree; the run gets a new conversation that is not kept. */
+  readonly cwd?: string;
 }
 
 /** How to start this PR's Claude conversation interactively, such as in a terminal. */

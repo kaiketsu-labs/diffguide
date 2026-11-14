@@ -187,17 +187,33 @@ const opening = openingOverviewState({
   number: pullRequest.number ?? 1, title: pullRequest.heading ?? '', url: pullRequest.url, author: pullRequest.author, draft: false,
   headBranch: pullRequest.headBranch, baseBranch: pullRequest.baseBranch, ...pullRequest.changes === undefined ? {} : { changes: pullRequest.changes },
 });
+const syncUndoText = 'Claude merged your edits to src/api/client.ts with GitHub\'s 2 new commits.';
+const syncQuestionHtml = '<p>GitHub\'s new commit renames <code>retryDelay</code> to <code>backoff</code> in <code>src/api/client.ts</code>, and your edit changes the same line to <code>retryDelay * 2</code>. Should the doubled delay apply to <code>backoff</code>, or keep GitHub\'s value?</p>';
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) => ({ ...hunk, lines: hunk.lines.map((line) => ({ ...line, html: line.html.replace(/<[^>]*>/gu, '') })) })) }));
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
   overview: scene(pullRequest, [{ shot: 'overview.png', full: true }], { saved: { view: 'overview' } }),
-  files: scene(pullRequest, [{ scrollTo: '#files', shot: 'files.png' }], { saved: { view: 'files' } }),
+  files: scene(pullRequest, [{ scrollTo: '#files', shot: 'files.png' }, { scroll: 0, click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' }], { saved: { view: 'files' } }),
   guide: scene(pullRequest, [{ shot: 'guide.png', full: true }], { saved: { view: 'guide' } }),
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
   local: scene(local, [{ shot: 'local.png' }]),
+  // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
+  syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [
+    { expect: '#notice', text: syncUndoText, shot: 'sync-undo.png' },
+    { send: { notice: { text: 'Refreshed.' } }, expect: '#notice', text: 'Refreshed.' },
+    { wait: 4500, expect: '#notice', text: syncUndoText },
+    { click: '#notice button:not(.icon-button)', absent: '#notice span' },
+  ], { saved: { view: 'files' } }),
+  // Claude could not merge on its own: its question shows above the tabs, and the notice's Show brings it into view.
+  syncQuestion: scene({ ...pullRequest, syncQuestion: syncQuestionHtml }, [
+    { send: { notice: { text: 'Claude needs your input to sync.', show: 'sync-question' } }, expect: '#notice', text: 'Claude needs your input to sync.' },
+    { expect: '#sync-ask:not([hidden]) #sync-reply', text: 'Should the doubled delay apply to' },
+    { click: '#notice button', absent: '#notice span', shot: 'sync-question.png' },
+    { click: '#sync-cancel', absent: '#sync-ask:not([hidden])' },
+  ], { saved: { view: 'overview' } }),
   // The page shows before GitHub sends the conversation; Merge waits for its merge state.
   conversationLoading: scene(withoutConversation, [
     { expect: '#merge[disabled]', shot: 'conversation-loading.png' },

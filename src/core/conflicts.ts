@@ -1,34 +1,32 @@
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { dirname, relative, resolve } from 'node:path';
 import type { AgentTask } from './agent.js';
+import { backUp } from './git/backups.js';
+import { fetchGitHubHead, syncWithPullRequest, waitMessage } from './git/sync.js';
 import { git } from './git/worktrees.js';
 
 /**
- * Bring a PR worktree to the PR's latest commit on GitHub and fetch its base branch; returns the base commit to merge.
- * Refuses a worktree with uncommitted changes or commits GitHub does not have, so a merge never builds on stale work.
+ * Fetch the PR's latest commit on GitHub and its base branch, for a conflict fix in a scratch worktree at that commit.
+ * The worktree stays as it is: its edits and local commits follow the fix at the next sync.
  */
-export async function prepareConflictFix(worktree: string, number: number, baseBranch: string): Promise<string> {
-  if ((await git(worktree, ['status', '--porcelain'])).trim() !== '') throw new Error('The PR worktree has uncommitted changes. Commit or discard them first.');
-  await syncToPullRequestHead(worktree, number);
+export async function prepareConflictFix(worktree: string, number: number, baseBranch: string): Promise<{ readonly head: string; readonly base: string }> {
+  const { head } = await fetchGitHubHead(worktree, number);
   await git(worktree, ['fetch', '--quiet', 'origin', baseBranch]);
-  return (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
+  return { head, base: (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim() };
 }
 
 /**
- * Move a PR worktree to the PR's latest commit on GitHub, keeping uncommitted edits; refuses when it has commits GitHub does not have.
+ * Move a PR worktree to the PR's latest commit on GitHub, replaying local commits and merging uncommitted edits onto it.
+ * Refuses a worktree whose commits GitHub's head already builds on, one whose changes clash with GitHub's, and one the sync has to wait for; all stay as they were.
  * `pushedHead` is a commit GitHub had as the PR's head, so a worktree still there may follow a force push.
  */
 export async function syncToPullRequestHead(worktree: string, number: number, pushedHead?: string): Promise<void> {
-  await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]);
-  const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
   const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
-  if (local === head) return;
-  const behind = local === pushedHead || await isAncestor(worktree, local, head);
-  if (!behind && await isAncestor(worktree, head, local)) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
-  if (!behind) throw new Error('The PR worktree has commits that are not on GitHub, and GitHub has newer commits they do not build on. Rebase them onto the PR\'s latest commit or drop them first.');
-  await git(worktree, ['checkout', '--quiet', '--detach', head]).catch((error: unknown) => {
-    const blocking = /would be overwritten/u.test(String(error)) ? String(error).split('\n').filter((line) => line.startsWith('\t')).map((line) => line.trim()) : [];
-    if (blocking.length === 0) throw error;
-    throw new Error(`GitHub has newer commits that change files with local edits: ${blocking.join(', ')}. Commit, push or discard them to update.`);
-  });
+  const result = await syncWithPullRequest(worktree, number, pushedHead);
+  if (result.outcome === 'waits') throw new Error(waitMessage(result.reason));
+  if (result.outcome === 'synced' && result.head !== local && await isAncestor(worktree, result.head, local)) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+  if (result.outcome === 'claude' && result.files.length === 0) throw new Error('The PR worktree has commits that are not on GitHub, and GitHub has newer commits they do not build on. Rebase them onto the PR\'s latest commit or drop them first.');
+  if (result.outcome === 'claude') throw new Error(`GitHub has newer commits that change files with local edits: ${result.files.join(', ')}. Commit, push or discard them to update.`);
 }
 
 /**
@@ -36,8 +34,9 @@ export async function syncToPullRequestHead(worktree: string, number: number, pu
  * Returns false when GitHub could not be reached, leaving the worktree as it is.
  */
 export async function catchUpWithPullRequest(worktree: string, number: number): Promise<boolean> {
-  if (!await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]).then(() => true, () => false)) return false;
-  const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
+  const fetched = await fetchGitHubHead(worktree, number).catch(() => undefined);
+  if (fetched === undefined) return false;
+  const { head } = fetched;
   if (!await git(worktree, ['merge-base', '--is-ancestor', head, 'HEAD']).then(() => true, () => false)) await syncToPullRequestHead(worktree, number);
   return true;
 }
@@ -47,8 +46,7 @@ export async function catchUpWithPullRequest(worktree: string, number: number): 
  * Returns that commit, and whether the worktree keeps such commits, built on it or on an older one, so a new commit waits to be pushed with them.
  */
 export async function syncKeepingLocalCommits(worktree: string, number: number): Promise<{ readonly head: string; readonly ahead: boolean }> {
-  await git(worktree, ['fetch', '--quiet', 'origin', `pull/${number}/head`]);
-  const head = (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
+  const { head } = await fetchGitHubHead(worktree, number);
   const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
   if (local !== head && !await isAncestor(worktree, local, head)) return { head, ahead: true };
   await syncToPullRequestHead(worktree, number);
@@ -59,8 +57,7 @@ const isAncestor = (worktree: string, older: string, newer: string): Promise<boo
   git(worktree, ['merge-base', '--is-ancestor', older, newer]).then(() => true, () => false);
 /** The PR's latest commit on GitHub, fetched without moving the checkout. */
 export async function fetchPullRequestHead(folder: string, number: number): Promise<string> {
-  await git(folder, ['fetch', '--quiet', 'origin', `pull/${number}/head`]);
-  return (await git(folder, ['rev-parse', 'FETCH_HEAD'])).trim();
+  return (await fetchGitHubHead(folder, number)).head;
 }
 
 /** Commit files of a PR worktree without pushing. `hooksOff` skips Git hooks, for someone else's PR. */
@@ -71,19 +68,33 @@ export async function commitFiles(worktree: string, { path, message, hooksOff }:
   await git(worktree, [...hooks, 'commit', '--quiet', '--only', '-m', message, '--', ...paths]);
 }
 
+/** Git's message when the remote branch moved on since the last fetch. */
+const branchMoved = /\[rejected\].*\((fetch first|non-fast-forward)\)/u;
+
+/** Push HEAD to the PR's branch. When GitHub refuses because the PR moved, sync onto its new head once and push again; `number` is the PR's. */
+async function pushFollowing(worktree: string, number: number | undefined, { pushTo, headBranch, hooksOff }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean }): Promise<void> {
+  const push = (): Promise<string> => git(worktree, [...hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [], 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+  try {
+    await push();
+  } catch (error: unknown) {
+    if (number === undefined || !branchMoved.test(String(error))) throw error;
+    if ((await syncWithPullRequest(worktree, number)).outcome !== 'synced') throw error;
+    await push();
+  }
+}
+
 /**
- * Commit files of a PR worktree and push them to the PR's branch. A failed push takes the commit back and restores the files.
+ * Commit files of a PR worktree and push them to the PR's branch, syncing once when the PR moved meanwhile. A failed push takes the commit back and restores the files.
  * `hooksOff` skips Git hooks, for someone else's PR, whose author controls the checkout.
  */
-export async function commitAndPush(worktree: string, { path, message, pushTo, headBranch, hooksOff }: {
-  readonly path: string | readonly string[]; readonly message: string; readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean;
+export async function commitAndPush(worktree: string, { path, message, pushTo, headBranch, hooksOff, number }: {
+  readonly path: string | readonly string[]; readonly message: string; readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean; readonly number?: number;
 }): Promise<void> {
   if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
   const paths = typeof path === 'string' ? [path] : path;
-  const hooks = hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [];
   await commitFiles(worktree, { path: paths, message, hooksOff });
   try {
-    await git(worktree, [...hooks, 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+    await pushFollowing(worktree, number, { pushTo, headBranch, hooksOff });
   } catch (error: unknown) {
     await git(worktree, ['reset', '--quiet', '--soft', 'HEAD~1']);
     await git(worktree, ['restore', '--quiet', '--staged', '--worktree', '--', ...paths]);
@@ -91,10 +102,10 @@ export async function commitAndPush(worktree: string, { path, message, pushTo, h
   }
 }
 
-/** Push the worktree's commits to the PR's branch. `hooksOff` skips Git hooks, for someone else's PR. */
-export async function pushCommits(worktree: string, { pushTo, headBranch, hooksOff }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean }): Promise<void> {
+/** Push the worktree's commits to the PR's branch, syncing once when PR `number` moved meanwhile. `hooksOff` skips Git hooks, for someone else's PR. */
+export async function pushCommits(worktree: string, { pushTo, headBranch, hooksOff, number }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean; readonly number?: number }): Promise<void> {
   if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
-  await git(worktree, [...hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [], 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+  await pushFollowing(worktree, number, { pushTo, headBranch, hooksOff });
 }
 
 /** A worktree commit GitHub does not have yet, with what the range menu shows for it. */
@@ -165,10 +176,21 @@ export async function commitsSince(worktree: string, head: string): Promise<read
   });
 }
 
-/** Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file; ignored files stay. */
-export async function discardSince(worktree: string, head: string): Promise<void> {
+/**
+ * Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file into a backup first.
+ * Files in `keep`, relative to the worktree, such as the ones you saved during Claude's run, stay as they are; so do ignored files.
+ */
+export async function discardSince(worktree: string, head: string, keep: readonly string[] = []): Promise<void> {
+  await backUp(worktree, 'discarding Claude\'s run');
+  const inside = keep.map((path) => resolve(worktree, path)).filter((path) => !relative(worktree, path).startsWith('..'));
+  const kept = await Promise.all(inside.map(async (path) => ({ path, content: await readFile(path).catch(() => undefined), mode: (await stat(path).catch(() => undefined))?.mode })));
   await git(worktree, ['reset', '--quiet', '--hard', head]);
   await git(worktree, ['clean', '--quiet', '-d', '--force']);
+  for (const { path, content, mode } of kept) {
+    if (content === undefined) continue;
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, mode === undefined ? {} : { mode });
+  }
 }
 
 /** What to merge and where to push the result. */
@@ -185,14 +207,14 @@ export interface ConflictFix {
 /** The label of the conflict fix task, which the review page shows progress for. */
 export const conflictFixLabel = 'fixing merge conflicts';
 
-/** Ask Claude to merge the base, resolve the conflicts, commit and push; it may run only the Git commands this needs. */
+/** Ask Claude to merge the base, resolve the conflicts, commit and push from a scratch worktree; it may run only the Git commands this needs. */
 export function conflictTask({ base, baseBranch, headBranch, pushTo, answer }: ConflictFix): AgentTask {
   if (!/^[a-f\d]{40,64}$/u.test(base) || !isBranch(baseBranch) || !isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for fixing conflicts.');
   const push = `git push ${pushTo} HEAD:refs/heads/${headBranch}`;
   return {
     label: conflictFixLabel,
     prompt: [
-      `GitHub reports merge conflicts between this pull request and its base branch ${baseBranch}. The worktree is at the PR's latest commit, on a detached HEAD.`,
+      `GitHub reports merge conflicts between this pull request and its base branch ${baseBranch}. This folder is a scratch worktree at the PR's latest commit, on a detached HEAD.`,
       `Run \`git merge --no-edit ${base}\` to merge the base branch. Resolve every conflicted file so both sides' intent survives, then \`git add\` the files and \`git commit --no-edit\`.`,
       `Then run \`${push}\` to update the pull request.`,
       'Run only these Git commands. If a conflict needs a decision the code does not answer, run `git merge --abort`, push nothing, and explain what is needed.',

@@ -434,6 +434,7 @@ export class TabInputWebview {
 export const editorEvents = {
   opened: new EventEmitter<vscode.TextDocument>(),
   changed: new EventEmitter<vscode.TextDocumentChangeEvent>(),
+  saved: new EventEmitter<vscode.TextDocument>(),
   selection: new EventEmitter<vscode.TextEditorSelectionChangeEvent>(),
   visible: new EventEmitter<readonly vscode.TextEditor[]>(),
   focus: new EventEmitter<vscode.WindowState>(),
@@ -473,6 +474,7 @@ export const workspace = {
   beforeConfigurationUpdate: undefined as (() => Promise<void>) | undefined,
   onDidOpenTextDocument: editorEvents.opened.event,
   onDidChangeTextDocument: editorEvents.changed.event,
+  onDidSaveTextDocument: editorEvents.saved.event,
   watchers: [] as FakeFileSystemWatcher[],
   createFileSystemWatcher(pattern: RelativePattern): FakeFileSystemWatcher {
     const watcher = new FakeFileSystemWatcher(pattern);

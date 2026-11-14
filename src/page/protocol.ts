@@ -123,6 +123,10 @@ export interface OverviewState {
   readonly review?: ReviewView;
   /** Claude's question, as HTML, when it stopped fixing conflicts without pushing. */
   readonly conflictQuestion?: string;
+  /** Claude's question, as HTML, when it could not merge GitHub's new commits with local work. */
+  readonly syncQuestion?: string;
+  /** The notice offering Undo after Claude merged GitHub's new commits with local work; it stays until Undo, close or the next sync. */
+  readonly syncUndo?: string;
   /** Commits in the worktree that the PR's branch on GitHub does not have yet, oldest first. */
   readonly unpushed?: readonly LocalCommit[];
   /** Files the worktree changed beyond GitHub's head, by path: in unpushed commits, uncommitted, or both. */
@@ -230,6 +234,12 @@ export interface PageComment {
   readonly endLine: number;
   readonly text: string;
   readonly intent: CommentIntent;
+}
+
+/** A notice about a sync Claude worked on; `show` adds a button that scrolls to Claude's question. */
+export interface SyncNotice {
+  readonly text: string;
+  readonly show?: 'sync-question';
 }
 
 /** What the page's buttons do. */
@@ -353,6 +363,14 @@ export interface OverviewActions {
   fixConflicts(answer?: string): Promise<void>;
   /** Hide Claude's question about the conflicts. */
   dismissConflictQuestion(): void;
+  /** Put the checkout back to before the sync Claude resolved; resolves with the page's notice. */
+  undoSync(): Promise<string>;
+  /** Hide the notice offering Undo. */
+  dismissSyncUndo(): void;
+  /** Answer Claude's question about a sync; the next poll runs the sync again with it. */
+  answerSync(answer: string): void;
+  /** Hide Claude's question about a sync, without asking again until the checkout or GitHub's head changes. */
+  dismissSyncQuestion(): void;
   editTitle(title: string): Promise<void>;
   editBody(body: string): Promise<void>;
   /** The repository's users, teams and labels for the page's pickers. */
@@ -367,7 +385,8 @@ export interface OverviewActions {
   /** Re-read the page's state; resolves with the first failed read's message, or undefined. */
   refresh(): Promise<string | undefined>;
   /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
-  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string; readonly stale?: boolean }>;
+  /** `problem` is an error for the page; `waiting` says why the checkout stays as it is for now, and goes once a later poll gets through; `notice` reports what Claude's sync did. */
+  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string; readonly waiting?: string; readonly stale?: boolean; readonly notice?: SyncNotice }>;
   /** Open a linked PR's own review page. */
   openLinked(key: string): Promise<void>;
   /** Push Claude's commits in a linked worktree to its branch on GitHub. */
@@ -432,7 +451,7 @@ export type PageMessage =
   | { readonly action: 'merge' | 'auto-merge'; readonly method: MergeMethod; readonly headline?: string; readonly body?: string; readonly deleteBranch?: boolean }
   | { readonly action: 'edit-title'; readonly title: string }
   | { readonly action: 'update-branch'; readonly method: 'merge' | 'rebase' }
-  | { readonly action: 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' }
+  | { readonly action: 'close' | 'reopen' | 'delete-branch' | 'fix-conflicts' | 'dismiss-conflict-question' | 'undo-sync' | 'dismiss-sync-undo' | 'dismiss-sync-question' }
   | { readonly action: 'discard-review' | 'auto-merge-off' | 'enqueue' | 'dequeue' | 'revert' | 'restore-branch' | 'approve-runs' | 'branches' }
   | { readonly action: 'change-base'; readonly branch: string }
   | { readonly action: 'dismiss-review'; readonly login: string; readonly text: string }
@@ -446,7 +465,7 @@ export type PageMessage =
   | { readonly action: 'react'; readonly id: string; readonly content: ReactionContent; readonly on: boolean }
   | { readonly action: 'markdown'; readonly form: string; readonly text: string }
   | { readonly action: 'commit-suggestions'; readonly picked: readonly PickedSuggestion[] }
-  | { readonly action: 'fix-conflicts'; readonly text: string }
+  | { readonly action: 'fix-conflicts' | 'sync'; readonly text: string }
   | { readonly action: 'edit-body'; readonly body: string }
   | { readonly action: 'picker-options' | 'claude-conversations' }
   | ({ readonly action: 'connect-claude' } & AgentChoice)
@@ -488,7 +507,7 @@ export interface ExtensionMessage {
   readonly probe?: { readonly id: string; readonly found: boolean };
   readonly error?: string;
   /** A passing hint that clears itself; `extension` offers to search language extensions for that file extension. */
-  readonly notice?: { readonly text: string; readonly extension?: string; readonly url?: string };
+  readonly notice?: { readonly text: string; readonly extension?: string; readonly url?: string; readonly show?: SyncNotice['show'] };
   /** The form whose send failed, so the page can enable it again. */
   readonly form?: string | undefined;
   /** The form whose send succeeded, or 'review'. */

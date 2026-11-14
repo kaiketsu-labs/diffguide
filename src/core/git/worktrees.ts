@@ -3,6 +3,8 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, stat, utimes } from '
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ChangeRequestSummary, Forge } from '../forge.js';
 import { readPrivateJson, writePrivateJson } from '../privateFiles.js';
+import { backUp, dropBackups } from './backups.js';
+import { recordGitHubHead } from './sync.js';
 
 /** Whether the user wrote the PR (Claude may implement) or reviews someone else's (Claude only suggests). */
 export type PullRequestRole = 'author' | 'reviewer';
@@ -19,12 +21,22 @@ export interface PullRequestWorktree {
 
 const baseRemote = 'origin';
 
+/** The Git command in `args`, after global options such as `-c core.hooksPath=/dev/null`. */
+function subcommand(args: readonly string[]): string {
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at] ?? '';
+    if (arg === '-c' || arg === '-C') at++;
+    else if (!arg.startsWith('-')) return arg;
+  }
+  return '';
+}
+
 /** Run Git without a shell and surface its error output on failure. */
-export function git(cwd: string, args: readonly string[]): Promise<string> {
+export function git(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, ...env === undefined ? {} : { env: { ...process.env, ...env } } }, (error, stdout, stderr) => {
       if (error === null) resolve(stdout);
-      else reject(new Error(`git ${args[0] ?? ''} failed: ${stderr.trim().slice(0, 400) || error.message}`));
+      else reject(new Error(`git ${subcommand(args)} failed: ${stderr.trim().slice(0, 400) || error.message}`));
     });
   });
 }
@@ -139,6 +151,7 @@ export async function ensureWorktree(
   await git(sourceRoot, ['worktree', 'add', '--detach', folder]);
   try {
     await provider.checkout(pullRequest.number, folder);
+    await recordGitHubHead(folder, pullRequest.number, (await git(folder, ['rev-parse', 'HEAD'])).trim());
     await git(folder, ['fetch', '--quiet', baseRemote, pullRequest.baseBranch]);
   } catch (error: unknown) {
     await git(sourceRoot, ['worktree', 'remove', '--force', folder]).catch(() => undefined);
@@ -149,11 +162,18 @@ export async function ensureWorktree(
   return folder;
 }
 
-/** Remove a PR worktree and its local comments; Git refuses while it has uncommitted changes. */
+/**
+ * Remove a PR worktree and its local comments; Git refuses while it has uncommitted changes.
+ * Unpushed commits go into a backup that outlives the worktree; a worktree with nothing to lose takes its backups along.
+ */
 export async function removeWorktree(sourceRoot: string, storageRoot: string, repository: string, number: number): Promise<void> {
   const folder = worktreePath(storageRoot, repository, number);
   const exists = await stat(folder).then(() => true, () => false);
-  if (exists) await git(sourceRoot, ['worktree', 'remove', folder]);
+  if (exists) {
+    if (await isWorktreeDisposable(folder)) await dropBackups(folder);
+    else await backUp(folder, 'removing the worktree');
+    await git(sourceRoot, ['worktree', 'remove', folder]);
+  }
   await rm(metadataPath(folder), { force: true });
   await rm(reviewDataPath(folder), { recursive: true, force: true });
 }

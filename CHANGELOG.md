@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- A PR page no longer shows an error when GitHub is out of reach, Git cannot sign in, another Git command holds the checkout, or you are in the middle of a merge or rebase. The checkout stays as it is, a short notice says why, and DiffGuide syncs on a later check.
+- When GitHub's new commits clash with your local edits or commits, Claude merges them in a scratch copy and the page applies the result once no conflict markers are left and your checkout did not change meanwhile. A notice offers Undo until you close it or the next sync. When Claude needs a decision, its question shows above the tabs with an answer box, and your checkout stays as it was.
+- A failed push on someone else's PR names the push in its error, instead of "git -c failed".
+- The Remove worktree confirm, on the page and in the sidebar, says how many commits GitHub does not have and that a backup keeps them for 14 days.
+- A push GitHub rejects because the PR moved on, from Push, a committed suggestion or Commit suggestions, now syncs onto the new commits and pushes again once.
+- After Claude's run on someone else's PR, the cleanup discards only Claude's files: files you saved in VS Code during the run stay.
+- Fix conflicts runs in a scratch copy at GitHub's latest commit, so it works with uncommitted edits and unpushed commits in the checkout, which follow at the next sync.
+- A PR page keeps its checkout at GitHub's latest commit while you have local work. Uncommitted edits, staged or not, are merged onto the new commits, even in files GitHub changed, and local commits are replayed on top, also after a force push. Your own checkout follows the same way instead of asking you to pull. Only edits that clash line by line with GitHub's still stop the update, and the checkout then stays as it was.
+- Remove worktree no longer loses unpushed commits, and the cleanup after Claude's run on someone else's PR no longer deletes files you changed during the run. DiffGuide saves a backup of the checkout under `refs/diffguide/backup/` first and keeps it for 14 days.
 - PR pages open before GitHub sends the description, reviewers and checks. Pulsing bars hold their places, and review and merge wait until GitHub answers.
 - A PR's changed files show right away the first time they are read, without syntax colors; the colors follow file by file, the files on screen first, without redrawing the page.
 - The local review page also shows changed files before their syntax colors.
