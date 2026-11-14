@@ -109,15 +109,27 @@ async function pageRun(browser, dump) {
     await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
     return { handled, painted: performance.now() - start };
   }, message);
-  const filesMessages = dump.messages.filter((message) => 'files' in message);
-  const filesMessage = filesMessages[0];
+  const filesMessage = dump.messages.find((message) => 'files' in message);
+  const colorsMessages = dump.messages.filter((message) => 'colors' in message);
   const stateMessage = { state: JSON.parse(dump.html.match(/<script[^>]*id="initial"[^>]*>([\s\S]*?)<\/script>/u)?.[1] ?? 'null')?.state };
   // GitHub's file list comes before the files, so the page has its Viewed marks and draws the files when they arrive.
   const listed = dump.messages.find((message) => message.state && !message.state.reviewedPending);
   if (listed) await deliver(listed);
   const files = await deliver(filesMessage);
-  // The colored files replace the uncolored ones when they came in two messages.
-  const colored = filesMessages.length > 1 ? await deliver(filesMessages.at(-1)) : undefined;
+  // Color batches fill in the drawn lines over several frames; `colored` ends at the first frame without changes to the files.
+  const colored = colorsMessages.length === 0 ? undefined : await page.evaluate(async (batches) => {
+    let changes = 0;
+    new MutationObserver((records) => { changes += records.length; }).observe(document.getElementById('files'), { childList: true, subtree: true });
+    const start = performance.now();
+    let handled = 0;
+    for (const data of batches) {
+      const at = performance.now();
+      window.dispatchEvent(new MessageEvent('message', { data }));
+      handled += performance.now() - at;
+    }
+    for (let seen = -1; seen !== changes;) { seen = changes; await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0))); }
+    return { handled, painted: performance.now() - start };
+  }, colorsMessages);
   const viewed = await page.evaluate(async () => {
     const box = document.querySelector('.file .viewed input');
     const start = performance.now();

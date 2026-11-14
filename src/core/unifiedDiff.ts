@@ -48,14 +48,20 @@ interface WholeFile { readonly lines: readonly string[]; readonly html: readonly
 /** Files longer than this keep per-hunk colors, since `codePreviewHtml` leaves them plain. */
 const maxWholeFileLength = 200_000;
 
+/** Colors the files that lack them, starting when called; `onBatch` gets each run of newly colored files as it is done, and the result is every file. */
+export type ColorFiles = (onBatch?: (files: readonly FileDiff[]) => void) => Promise<readonly FileDiff[]>;
+
+/** How much coloring work goes into one batch, so the first files on the page get colors early. */
+const colorBatchMs = 100;
+
 /** A PR worktree's tracked changes against its base, highlighted per line; yields between files so a large PR does not block the extension host. */
 export async function readPullRequestDiff(worktree: string, base: string, options: DiffOptions = {}): Promise<readonly FileDiff[]> {
   const { files, colored } = await readPullRequestDiffPlainFirst(worktree, base, options);
   return colored === undefined ? files : await colored();
 }
 
-/** The diff as `readPullRequestDiff` reads it, with `files` from known colors only; `colored` is set when coloring the rest takes highlighting, which starts when it is called. */
-export async function readPullRequestDiffPlainFirst(worktree: string, base: string, options: DiffOptions = {}): Promise<{ files: readonly FileDiff[]; colored?: () => Promise<readonly FileDiff[]> }> {
+/** The diff as `readPullRequestDiff` reads it, with `files` from known colors only; `colored` is set when coloring the rest takes highlighting. */
+export async function readPullRequestDiffPlainFirst(worktree: string, base: string, options: DiffOptions = {}): Promise<{ files: readonly FileDiff[]; colored?: ColorFiles }> {
   const output = await diffOutput(worktree, base, options);
   const preparing = prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
   const raw = parseRawDiff(output);
@@ -73,25 +79,49 @@ export async function readPullRequestDiffPlainFirst(worktree: string, base: stri
     const diff = highlightFile(file, highlightLines, sources.get(file), colorize);
     return generated.has(file.path) ? { ...diff, generated: true } : diff;
   };
-  let missed = false;
-  const known: Colorize = (code, filePath) => {
-    const html = knownPreviewHtml(code, filePath);
-    if (html !== undefined) return html;
-    missed = true;
-    return escapeCode(code);
-  };
-  const files = raw.map((file) => build(file, known));
-  if (!missed) return { files };
-  const colored = async (): Promise<readonly FileDiff[]> => {
+  const plain = raw.map((file) => {
+    const { colorize, missed } = knownColors();
+    const diff = build(file, colorize);
+    return missed() ? { diff, color: () => build(file, codePreviewHtml) } : { diff };
+  });
+  const files = plain.map(({ diff }) => diff);
+  if (plain.every(({ color }) => color === undefined)) return { files };
+  const colored: ColorFiles = async (onBatch) => {
     await preparing;
-    const result: FileDiff[] = [];
-    for (const file of raw) {
-      result.push(build(file, codePreviewHtml));
-      await new Promise((resolve) => { setImmediate(resolve); });
-    }
-    return result;
+    return await colorInBatches(plain.map(({ diff, color }) => color ?? diff), onBatch);
   };
   return { files, colored };
+}
+
+/** A colorizer that only uses colors already known, and whether it met code without them. */
+export function knownColors(): { colorize: Colorize; missed: () => boolean } {
+  let missed = false;
+  return {
+    colorize: (code, filePath) => {
+      const html = knownPreviewHtml(code, filePath);
+      if (html !== undefined) return html;
+      missed = true;
+      return escapeCode(code);
+    },
+    missed: () => missed,
+  };
+}
+
+/** Builds the files given as functions in order, yielding between them, and hands `onBatch` each run built within `colorBatchMs`. */
+export async function colorInBatches(files: readonly (FileDiff | (() => FileDiff))[], onBatch?: (files: readonly FileDiff[]) => void): Promise<readonly FileDiff[]> {
+  const result: FileDiff[] = [];
+  let batch: FileDiff[] = [];
+  let since = performance.now();
+  for (const file of files) {
+    if (typeof file !== 'function') { result.push(file); continue; }
+    const built = file();
+    result.push(built);
+    batch.push(built);
+    if (performance.now() - since >= colorBatchMs) { onBatch?.(batch); batch = []; since = performance.now(); }
+    await new Promise((resolve) => { setImmediate(resolve); });
+  }
+  if (batch.length > 0) onBatch?.(batch);
+  return result;
 }
 
 function diffOutput(worktree: string, base: string, { to, ignoreWhitespace }: DiffOptions = {}): Promise<string> {
@@ -220,7 +250,7 @@ function parseRawDiff(output: string): readonly RawFile[] {
 }
 
 /** Markup for code in a file: `codePreviewHtml`, or a stand-in that must not run the highlighter. */
-type Colorize = (code: string, filePath: string) => string;
+export type Colorize = (code: string, filePath: string) => string;
 
 function highlightFile(file: RawFile, highlight = highlightLines, sources: FileSources = {}, colorize: Colorize = codePreviewHtml): FileDiff {
   let additions = 0;

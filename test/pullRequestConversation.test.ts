@@ -240,7 +240,7 @@ test('hands only a conversation comment with text to the agent, with a known int
   panel.dispose();
 });
 
-test('sends the files uncolored first and the colored ones after, unless a newer read replaced them', async () => {
+test('sends the files uncolored first and their colors in batches after, unless a newer read replaced them', async () => {
   resetFakeWindow();
   const state: OverviewState = {
     title: 'PR', author: 'alice', headBranch: 'feature', baseBranch: 'main', url: 'https://github.com/acme/app/pull/7', viewed: [], read: [], threads: [],
@@ -251,9 +251,10 @@ test('sends the files uncolored first and the colored ones after, unless a newer
   let colorings = 0;
   const releases: (() => void)[] = [];
   const actions = {
-    readFiles: async () => ({ files: [file('a')], selection, atHead: true, colored: async () => {
+    readFiles: async () => ({ files: [file('a')], selection, atHead: true, colored: async (onBatch?: (files: readonly ReturnType<typeof file>[]) => void) => {
       colorings++;
       await new Promise<void>((resolve) => { releases.push(resolve); });
+      onBatch?.([file('<span class="tm-ff0000">a</span>')]);
       return [file('<span class="tm-ff0000">a</span>')];
     } }),
     refresh: () => undefined,
@@ -261,14 +262,17 @@ test('sends the files uncolored first and the colored ones after, unless a newer
   await showPullRequestOverview('plain-first-test', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
   const panel = window.panels.at(-1)!;
   const tick = async () => { await new Promise((resolve) => setTimeout(resolve, 20)); };
-  const sentFiles = () => panel.sent.flatMap((sent) => 'files' in (sent as object) ? [(sent as { files: ReturnType<typeof file>[] }).files[0]?.hunks[0]?.lines[0]?.html] : []);
+  const sentFiles = () => panel.sent.flatMap((sent) => {
+    const { files, colors } = sent as { files?: ReturnType<typeof file>[]; colors?: ReturnType<typeof file>[] };
+    return (files ?? colors ?? []).slice(0, 1).map((each) => (colors ? 'colors ' : '') + each.hunks[0]?.lines[0]?.html);
+  });
   panel.receive({ action: 'ready' });
   await tick();
   assert.deepEqual(sentFiles(), ['a']);
   assert.equal(colorings, 1);
   releases.shift()?.();
   await tick();
-  assert.deepEqual(sentFiles(), ['a', '<span class="tm-ff0000">a</span>']);
+  assert.deepEqual(sentFiles(), ['a', 'colors <span class="tm-ff0000">a</span>']);
 
   panel.receive({ action: 'files', range: { kind: 'all' }, whitespace: false });
   await tick();
@@ -276,6 +280,6 @@ test('sends the files uncolored first and the colored ones after, unless a newer
   await tick();
   for (const release of releases.splice(0)) release();
   await tick();
-  assert.deepEqual(sentFiles(), ['a', '<span class="tm-ff0000">a</span>', 'a', 'a', '<span class="tm-ff0000">a</span>'], 'the first read\'s colors arrived after the second read');
+  assert.deepEqual(sentFiles(), ['a', 'colors <span class="tm-ff0000">a</span>', 'a', 'a', 'colors <span class="tm-ff0000">a</span>'], 'the first read\'s colors arrived after the second read');
   panel.dispose();
 });
