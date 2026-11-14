@@ -2,7 +2,7 @@ import { copyFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: { extension: 'src/hosts/vscode/extension.ts', channel: 'src/agents/claude/channel.ts', 'hook-waiter': 'src/agents/claude/hookWaiter.ts', 'edit-guard': 'src/agents/claude/editGuardHook.ts', 'live-connect': 'src/agents/claude/liveConnect.ts' },
+  entryPoints: { extension: 'src/hosts/vscode/extension.ts', channel: 'src/agents/claude/channel.ts', 'hook-waiter': 'src/agents/claude/hookWaiter.ts', 'edit-guard': 'src/agents/claude/editGuardHook.ts', 'live-connect': 'src/agents/claude/liveConnect.ts', 'highlight-worker': 'src/hosts/vscode/highlightWorker.ts' },
   outdir: 'dist',
   outExtension: { '.js': '.cjs' },
   bundle: true,

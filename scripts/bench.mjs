@@ -71,6 +71,7 @@ await build({
   entryPoints: ['test/bench/host.ts'], outfile: '.bench/host.cjs', alias: { vscode: resolve('test/fakes/vscode.ts') }, external: ['vscode-oniguruma'],
   loader: { '.md': 'text' }, bundle: true, platform: 'node', target: 'node20', format: 'cjs', logLevel: 'error',
 });
+await build({ entryPoints: ['src/hosts/vscode/highlightWorker.ts'], outfile: '.bench/highlight-worker.cjs', external: ['vscode-oniguruma'], bundle: true, platform: 'node', target: 'node20', format: 'cjs', logLevel: 'error' });
 await build({ entryPoints: ['src/page/webview/main.ts'], outfile: '.bench/overview.js', bundle: true, platform: 'browser', target: 'chrome120', format: 'iife', loader: { '.md': 'text' }, logLevel: 'error' });
 const script = await readFile('.bench/overview.js', 'utf8');
 

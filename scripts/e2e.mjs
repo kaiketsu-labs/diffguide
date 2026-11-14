@@ -117,6 +117,8 @@ const scenarios = [
       await page.click('#view-files');
       const line = 'td.num.pick[data-path="src/app.ts"][data-side="new"]';
       await page.waitForSelector(line, { timeout: 15_000 });
+      await page.waitForSelector('.file[data-path="src/app.ts"] td.code span', { timeout: 15_000 });
+      step('The diff got its syntax colors');
       const cell = await until('line 5 of src/app.ts', async () => {
         for (const each of await page.$$(line)) if ((await each.textContent())?.trim() === '5') return each;
         return undefined;
