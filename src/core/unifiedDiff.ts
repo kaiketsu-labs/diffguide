@@ -306,17 +306,17 @@ function fromWholeFile(side: readonly RawLine[], lineNumber: (line: RawLine) => 
 }
 
 /** A whole file's lines, highlighted, for showing context the diff left out. */
-export function highlightSource(text: string, filePath: string): readonly string[] {
-  return highlightLines((text.endsWith('\n') ? text.slice(0, -1) : text).split('\n'), filePath);
+export function highlightSource(text: string, filePath: string, colorize: Colorize = codePreviewHtml): readonly string[] {
+  return highlightLines((text.endsWith('\n') ? text.slice(0, -1) : text).split('\n'), filePath, colorize);
 }
 
 /** A file outside `git diff` as one hunk: every line added for a new untracked file, or every line context for an unchanged one. */
-export function wholeFileDiff(path: string, content: Buffer, change: 'added' | 'unchanged'): FileDiff {
+export function wholeFileDiff(path: string, content: Buffer, change: 'added' | 'unchanged', colorize: Colorize = codePreviewHtml): FileDiff {
   const empty = { path, change, additions: 0, deletions: 0, hunks: [] };
   if (content.includes(0)) return { ...empty, binary: true };
   const text = content.toString('utf8');
   if (text === '') return { ...empty, binary: false };
-  const html = highlightSource(text, path);
+  const html = highlightSource(text, path, colorize);
   const kind = change === 'added' ? 'add' : 'context';
   const lines = html.map((line, index): DiffLine => ({ kind, ...change === 'added' ? {} : { oldLine: index + 1 }, newLine: index + 1, html: line }));
   const header = change === 'added' ? `@@ -0,0 +1,${lines.length} @@` : `@@ -1,${lines.length} +1,${lines.length} @@`;
