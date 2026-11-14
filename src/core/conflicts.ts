@@ -1,6 +1,6 @@
 import type { AgentTask } from './agent.js';
 import { backUp } from './git/backups.js';
-import { fetchGitHubHead, syncWithPullRequest } from './git/sync.js';
+import { fetchGitHubHead, syncWithPullRequest, waitMessage } from './git/sync.js';
 import { git } from './git/worktrees.js';
 
 /**
@@ -17,12 +17,13 @@ export async function prepareConflictFix(worktree: string, number: number, baseB
 
 /**
  * Move a PR worktree to the PR's latest commit on GitHub, replaying local commits and merging uncommitted edits onto it.
- * Refuses a worktree whose commits GitHub's head already builds on, and one whose changes clash with GitHub's; both stay as they were.
+ * Refuses a worktree whose commits GitHub's head already builds on, one whose changes clash with GitHub's, and one the sync has to wait for; all stay as they were.
  * `pushedHead` is a commit GitHub had as the PR's head, so a worktree still there may follow a force push.
  */
 export async function syncToPullRequestHead(worktree: string, number: number, pushedHead?: string): Promise<void> {
   const local = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
   const result = await syncWithPullRequest(worktree, number, pushedHead);
+  if (result.outcome === 'waits') throw new Error(waitMessage(result.reason));
   if (result.outcome === 'synced' && result.head !== local && await isAncestor(worktree, result.head, local)) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
   if (result.outcome === 'claude' && result.files.length === 0) throw new Error('The PR worktree has commits that are not on GitHub, and GitHub has newer commits they do not build on. Rebase them onto the PR\'s latest commit or drop them first.');
   if (result.outcome === 'claude') throw new Error(`GitHub has newer commits that change files with local edits: ${result.files.join(', ')}. Commit, push or discard them to update.`);

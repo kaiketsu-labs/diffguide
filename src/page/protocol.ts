@@ -367,7 +367,8 @@ export interface OverviewActions {
   /** Re-read the page's state; resolves with the first failed read's message, or undefined. */
   refresh(): Promise<string | undefined>;
   /** Ask GitHub whether the PR changed and move the worktree to a new head when that keeps local work; `problem` says why it stayed. */
-  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string; readonly stale?: boolean }>;
+  /** `problem` is an error for the page; `waiting` says why the checkout stays as it is for now, and goes once a later poll gets through. */
+  pollGitHub(): Promise<{ readonly reload: boolean; readonly files: boolean; readonly problem?: string; readonly waiting?: string; readonly stale?: boolean }>;
   /** Open a linked PR's own review page. */
   openLinked(key: string): Promise<void>;
   /** Push Claude's commits in a linked worktree to its branch on GitHub. */

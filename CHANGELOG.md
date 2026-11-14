@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A PR page no longer shows an error when GitHub is out of reach, Git cannot sign in, another Git command holds the checkout, or you are in the middle of a merge or rebase. The checkout stays as it is, a short notice says why, and DiffGuide syncs on a later check.
 - A PR page keeps its checkout at GitHub's latest commit while you have local work. Uncommitted edits, staged or not, are merged onto the new commits, even in files GitHub changed, and local commits are replayed on top, also after a force push. Your own checkout follows the same way instead of asking you to pull. Only edits that clash line by line with GitHub's still stop the update, and the checkout then stays as it was.
 - Remove worktree no longer loses unpushed commits, and the cleanup after Claude's run on someone else's PR no longer deletes files you changed during the run. DiffGuide saves a backup of the checkout under `refs/diffguide/backup/` first and keeps it for 14 days.
 - PR pages open before GitHub sends the description, reviewers and checks. Pulsing bars hold their places, and review and merge wait until GitHub answers.

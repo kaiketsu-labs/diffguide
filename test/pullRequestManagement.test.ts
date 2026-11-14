@@ -264,6 +264,20 @@ for (const [problem, reply] of [[undefined, { refreshed: true, notice: { text: '
   });
 }
 
+test('a poll that has to wait says why in a notice, not as an error', async () => {
+  resetFakeWindow();
+  const waiting = 'GitHub is out of reach, so this checkout stays at the last commit fetched. DiffGuide tries again on its own.';
+  const actions = {
+    refresh: async () => undefined, readFiles: () => new Promise(() => undefined), pollGitHub: async () => ({ reload: false, files: false, waiting }),
+  } as unknown as OverviewActions;
+  await showPullRequestOverview('poll-waits', async () => base, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  await tick();
+  assert.deepEqual(panel.sent.filter((m) => (m as { notice?: unknown }).notice !== undefined), [{ notice: { text: waiting } }]);
+  assert.ok(!panel.sent.some((m) => (m as { error?: unknown }).error !== undefined));
+  panel.dispose();
+});
+
 test('a page reads its files while its state still loads, and sends that read once the page is ready', async () => {
   resetFakeWindow();
   const order: string[] = [];

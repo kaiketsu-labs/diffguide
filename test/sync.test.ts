@@ -7,7 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import { commitAndPush, discardSince, prepareConflictFix, worktreeSnapshot } from '../src/core/conflicts.js';
 import { snapshot } from '../src/core/git/backups.js';
-import { recordGitHubHead, syncWithPullRequest } from '../src/core/git/sync.js';
+import { recordGitHubHead, syncWithPullRequest, waitMessage } from '../src/core/git/sync.js';
 import { removeWorktree, worktreePath } from '../src/core/git/worktrees.js';
 
 // Every cell of docs/SYNC.md's decision table against a real checkout and a fake GitHub repository.
@@ -157,15 +157,7 @@ function expected(local: Local, remote: Remote): Outcome {
 }
 
 /** Cells that fail today, by `<local> / <remote>`. */
-const gaps = new Set([
-  'index.lock held for a moment / GitHub added commits',
-  'index.lock held for a moment / GitHub force-pushed',
-  'index.lock held for a moment / GitHub force-pushed before the first poll',
-  'your merge in progress / GitHub added commits',
-  'your merge in progress / GitHub force-pushed',
-  'your merge in progress / GitHub force-pushed before the first poll',
-  ...locals.map((local) => `${local.name} / offline`),
-]);
+const gaps = new Set<string>([]);
 
 const show = (worktree: string, spec: string): Promise<string> => git(worktree, 'show', spec);
 const read = (worktree: string, file: string): Promise<string> => readFile(path.join(worktree, file), 'utf8');
@@ -280,4 +272,12 @@ action('Fix conflicts with uncommitted edits keeps them and proceeds', async (t)
   await writeFile(path.join(worktree, 'c.txt'), 'mine\n');
   await prepareConflictFix(worktree, 7, 'main');
   assert.equal(await readFile(path.join(worktree, 'c.txt'), 'utf8'), 'mine\n');
+});
+
+action('a failed Git sign-in waits and says why', async (t) => {
+  const { worktree } = await fixture(t);
+  await git(worktree, 'remote', 'set-url', 'origin', 'ssh://git@github.invalid/acme/app.git');
+  await git(worktree, 'config', 'core.sshCommand', 'sh -c \'echo "git@github.invalid: Permission denied (publickey)." >&2; exit 255\' --');
+  assert.deepEqual(await syncWithPullRequest(worktree, 7), { outcome: 'waits', reason: 'sign-in' });
+  assert.match(waitMessage('sign-in'), /could not sign in/u);
 });

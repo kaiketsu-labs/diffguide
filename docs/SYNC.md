@@ -51,7 +51,7 @@ The first two rows are fixed: both now save a backup first (`src/core/git/backup
 | `conflicts.ts:24`, `worktreeActions.ts:56` | Force push seen on the first poll after the page opens: `previous` is unset, so the old head is unknown and the worktree reads as diverged | Same as the row above |
 | `conflicts.ts:30` | GitHub changed files that have local edits | "Commit, push or discard them to update." |
 | `conflicts.ts:9` | Fix conflicts with uncommitted changes | "Commit or discard them first." |
-| `worktreeActions.ts:40` | `followBase` fetch fails (offline, auth) and is not caught, so the whole poll fails | Raw `git fetch failed` |
+| `worktreeActions.ts:40` | `followBase` fetch fails (offline, auth) and is not caught, so the whole poll fails and the head never syncs | Nothing: `pollWhileFocused` drops the error |
 | `conflicts.ts:20` via `worktreeActions.ts:56` | PR head fetch fails (offline, auth) | Raw `git fetch failed` |
 | `suggestionActions.ts:27`, `pullRequestPageActions.ts:136` | Apply or commit a suggestion on a file with local edits | "has uncommitted changes. Commit or discard them first." |
 | `pullRequestPageActions.ts:140` | Commit suggestions while unpushed commits changed those files | "Push or rebase the unpushed commits first." |
@@ -98,9 +98,9 @@ If Claude cannot resolve, it stops with a question, as Fix conflicts does now. T
 
 ## Status
 
-Built (`src/core/git/sync.ts`, `src/core/git/backups.ts`): backups, fast-forward with edits, 3-way merge of staged and unstaged edits, replay of local commits, force pushes, your own checkout. The sync records GitHub's head in `refs/diffguide/github/pr-<n>` at every fetch, so it can tell local commits from replaced ones.
+Built (`src/core/git/sync.ts`, `src/core/git/backups.ts`): backups, fast-forward with edits, 3-way merge of staged and unstaged edits, replay of local commits, force pushes, your own checkout. Waiting without an error: offline, failed Git sign-in, `index.lock` held (retried for about 5 s first), and your own merge, rebase, cherry-pick or revert. The page says why in a notice that hides after 4 s and shows again only when the reason changes. The sync records GitHub's head in `refs/diffguide/github/pr-<n>` at every fetch, so it can tell local commits from replaced ones.
 
-Pending: waiting instead of failing when offline, while Git holds `index.lock`, and during your own merge; Claude's step (a clash now leaves the checkout as it was and shows which files clash); a rejected push syncing and pushing again; Fix conflicts with uncommitted edits; discarding only Claude's files after its run on someone else's PR.
+Pending: Claude's step (a clash now leaves the checkout as it was and shows which files clash); a rejected push syncing and pushing again; Fix conflicts with uncommitted edits; discarding only Claude's files after its run on someone else's PR.
 
 Known limits:
 
@@ -108,6 +108,8 @@ Known limits:
 - On your own checkout, the branch moves but `origin/<branch>` stays until the next fetch, so VS Code may show it as ahead meanwhile. Not yet checked in VS Code.
 - A worktree made before this change has no recorded head. A force push seen on its page's first check still stops with the old message; later checks have the head.
 - `merge-tree` with trees as inputs is checked on Git 2.50.1 only.
+- A merge left in a PR worktree by an interrupted conflict fix from before this change counts as yours, so the sync waits for it. Claude's step moves conflict fixes out of the checkout, so new runs cannot leave one.
+- When the GitHub API itself is out of reach, the poll stops before the sync and shows nothing, as before.
 
 ## Proof
 

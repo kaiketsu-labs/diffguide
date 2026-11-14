@@ -346,3 +346,18 @@ test('the poll brings your own checkout to GitHub\'s new commits, merging edits 
   assert.equal(await revParse('--abbrev-ref', 'HEAD'), 'feature');
   assert.equal(await readFile(path.join(source, 'feature.ts'), 'utf8'), 'remote\ntwo\nthree\nmine\n');
 });
+
+test('the poll says why the checkout waits when GitHub is out of reach, instead of reporting a problem', async (t) => {
+  const { source, storage } = await fixture(t);
+  const folder = await ensureWorktree(source, storage, provider([]), 'acme/app', pullRequest, 'reviewer');
+  await git(folder, ['remote', 'set-url', 'origin', path.join(storage, 'missing')]);
+  const version = { head: 'f'.repeat(40), updatedAt: '', baseBranch: 'main', baseHead: 'e'.repeat(40) };
+  const opened = { runner: { activity: { running: false } }, session: { store: { threads: [] } }, useBase: async () => undefined };
+  const host = { listRepositoryFiles: async () => [], fileIcons: async () => undefined };
+  const page = { provider: { version: async () => version }, pullRequest, folder, role: 'reviewer', opened, host, revealed: new Set(), onCheckout: false };
+  const diff = new DiffView(page as unknown as PageParts['page'], async () => undefined);
+  const { pollGitHub } = worktreeActions({ page, diff, remote: { written: { waiting: false } } } as unknown as PageParts);
+  const result = await pollGitHub();
+  assert.equal(result.problem, undefined);
+  assert.match(result.waiting ?? '', /^GitHub is out of reach/u);
+});
