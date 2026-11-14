@@ -7,6 +7,7 @@
 - The local review page also shows changed files before their syntax colors.
 - Syntax colors of a large diff arrive about twice as fast: several threads color the files, and the extension host stays free meanwhile.
 - A large PR's files no longer freeze the page while they are drawn: the first screen shows at once and the other diffs follow over the next frames. Folded files draw their diff when unfolded.
+- A PR's tab opens right away the first time you open it, while its worktree is made. Before, the tab waited about a second or more for GitHub's fetches.
 - The pull request sidebar shows its rows without waiting for GitHub or Git. Review progress and unpushed commits of checked-out PRs fill in when they are read.
 - A PR page no longer stays on "Loading changes…" when GitHub's file list arrives while the page opens.
 - A commit's changes in a thread show before their syntax colors. Claude's guide and code review start without waiting for colors.

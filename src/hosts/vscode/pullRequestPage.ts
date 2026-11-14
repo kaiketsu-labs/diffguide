@@ -4,9 +4,10 @@ import { readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunn
 import type { AgentChoice } from '../../core/agent.js';
 import type { ChangeRequestSummary, Forge, WorkspaceRepository } from '../../core/forge.js';
 import { isWorkspaceRelativePath } from '../../core/git/git.js';
-import { ensureWorktree, type PullRequestRole, removeWorktree, worktreePath } from '../../core/git/worktrees.js';
+import { ensureWorktree, hasWorktree, type PullRequestRole, removeWorktree, worktreePath } from '../../core/git/worktrees.js';
 import { FileReviews } from '../../core/reviewedFiles.js';
 import { parsePullRequestLink } from '../../forges/github/remotes.js';
+import { openingOverviewState } from '../../page/overviewState.js';
 import type { OverviewReveal } from '../../page/protocol.js';
 import type { PageHost } from '../../page/pullRequest/context.js';
 import { pullRequestPageController } from '../../page/pullRequest/controller.js';
@@ -19,7 +20,7 @@ import { listRepositoryFiles, localClaudeStatus, toDisposable, wholeFile } from 
 import type { LocalSession } from './localSessions.js';
 import { openPullRequestFile, readBaseContent } from './pullRequestDiff.js';
 import { checkoutDataPath } from './pullRequestSessions.js';
-import { isPageOpen, revealOpenPage, showPullRequestOverview } from './reviewPanel.js';
+import { closeOpeningPage, isPageOpen, revealOpenPage, showOpeningPage, showPullRequestOverview } from './reviewPanel.js';
 
 /**
  * Show a PR's review page. `onCheckout` opens your own PR on that checkout instead of a worktree, in its local page's tab:
@@ -37,6 +38,18 @@ export function pullRequestPages(
   /** Review marks of your PRs open on checkouts, by checkout folder. */
   const checkoutFileReviews = new Map<string, FileReviews>();
   const showOverview: ShowOverview = async (checkout, provider, repository, pullRequest, role, reveal, onCheckout) => {
+    const pageKey = `${repository}#${pullRequest.number}`;
+    // A new worktree waits for GitHub's fetches, so its tab shows from the PR's summary meanwhile.
+    if (onCheckout === undefined && !isPageOpen(pageKey) && !await hasWorktree(checkout.storageRoot, repository, pullRequest.number)
+      && !showOpeningPage(pageKey, openingOverviewState(pullRequest), context.extensionUri)) return;
+    try {
+      await openPage(checkout, provider, repository, pullRequest, role, reveal, onCheckout);
+    } catch (error: unknown) {
+      closeOpeningPage(pageKey);
+      throw error;
+    }
+  };
+  const openPage: ShowOverview = async (checkout, provider, repository, pullRequest, role, reveal, onCheckout) => {
     const { storageRoot, sessions: pullRequestSessions } = checkout;
     if (onCheckout === undefined) await ensureWorktree(checkout.root, storageRoot, provider, repository, pullRequest, role);
     const opened = onCheckout === undefined ? await pullRequestSessions.open(repository, pullRequest.number)
