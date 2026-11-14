@@ -11,7 +11,7 @@ import { cleanUpWorktrees } from '../src/core/git/worktreeCleanup.js';
 import type { PageParts } from '../src/page/pullRequest/context.js';
 import { DiffView } from '../src/page/pullRequest/diffView.js';
 import { worktreeActions } from '../src/page/pullRequest/worktreeActions.js';
-import { createReviewData, ensureWorktree, followBase, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, recordWorktreeBase, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
+import { createReviewData, ensureWorktree, followBase, git as runGit, hasWorktree, migrateWorktrees, readPullRequestBase, readWorktree, recordWorktreeBase, removeWorktree, repositoryStorage, reviewDataPath, worktreePath } from '../src/core/git/worktrees.js';
 import { mockPullRequestProvider } from '../src/forges/mockPullRequests.js';
 import { openPullRequestFile, parsePullRequestFileUri, pullRequestFileUri, registerPullRequestDiffs } from '../src/hosts/vscode/pullRequestDiff.js';
 import { commands, Uri, workspace } from './fakes/vscode.js';
@@ -415,4 +415,11 @@ test('the poll asks Claude when GitHub\'s commits clash with your edits, runs it
   await actions.pollGitHub();
   assert.equal(prompts.length, 2, 'Undo keeps the checkout without GitHub\'s head');
   assert.equal(await content(), 'mine\ntwo\n');
+});
+
+test('a failed Git command names its subcommand, also after -c options', async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), 'diffguide-git-'));
+  t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
+  await assert.rejects(runGit(scratch, ['-c', 'core.hooksPath=/dev/null', 'push', '--quiet', 'origin', 'HEAD:refs/heads/x']), /^Error: git push failed: /u);
+  await assert.rejects(runGit(scratch, ['rev-parse', 'HEAD']), /^Error: git rev-parse failed: /u);
 });

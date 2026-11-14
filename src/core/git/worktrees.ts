@@ -21,12 +21,22 @@ export interface PullRequestWorktree {
 
 const baseRemote = 'origin';
 
+/** The Git command in `args`, after global options such as `-c core.hooksPath=/dev/null`. */
+function subcommand(args: readonly string[]): string {
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at] ?? '';
+    if (arg === '-c' || arg === '-C') at++;
+    else if (!arg.startsWith('-')) return arg;
+  }
+  return '';
+}
+
 /** Run Git without a shell and surface its error output on failure. */
 export function git(cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024, ...env === undefined ? {} : { env: { ...process.env, ...env } } }, (error, stdout, stderr) => {
       if (error === null) resolve(stdout);
-      else reject(new Error(`git ${args[0] ?? ''} failed: ${stderr.trim().slice(0, 400) || error.message}`));
+      else reject(new Error(`git ${subcommand(args)} failed: ${stderr.trim().slice(0, 400) || error.message}`));
     });
   });
 }

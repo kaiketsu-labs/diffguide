@@ -4,6 +4,7 @@
 
 - A PR page no longer shows an error when GitHub is out of reach, Git cannot sign in, another Git command holds the checkout, or you are in the middle of a merge or rebase. The checkout stays as it is, a short notice says why, and DiffGuide syncs on a later check.
 - When GitHub's new commits clash with your local edits or commits, Claude merges them in a scratch copy and the page applies the result once no conflict markers are left and your checkout did not change meanwhile. A notice offers Undo until you close it or the next sync. When Claude needs a decision, its question shows above the tabs with an answer box, and your checkout stays as it was.
+- A failed push on someone else's PR names the push in its error, instead of "git -c failed".
 - The Remove worktree confirm, on the page and in the sidebar, says how many commits GitHub does not have and that a backup keeps them for 14 days.
 - A push GitHub rejects because the PR moved on, from Push, a committed suggestion or Commit suggestions, now syncs onto the new commits and pushes again once.
 - After Claude's run on someone else's PR, the cleanup discards only Claude's files: files you saved in VS Code during the run stay.
