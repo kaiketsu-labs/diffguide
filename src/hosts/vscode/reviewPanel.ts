@@ -85,7 +85,10 @@ export async function showPullRequestOverview(
   /** The files, read while the state loads so they are ready when the page is; the page's first file request takes them. */
   let early: Promise<FilesView> | undefined = (async () => await actions.readFiles())();
   early.catch(() => undefined);
-  let state = await read();
+  /** Whether the state changed during the first read, which may lack that change; the page then redraws once it listens. */
+  let changedEarly = false;
+  const firstRead = onDidChange(() => { changedEarly = true; });
+  let state = await read().finally(() => { firstRead.dispose(); });
   const restoredPanel = restored.get(key);
   restored.delete(key);
   const adopted = restoredPanel ?? (adopt === undefined ? undefined : panels.get(adopt)?.detach());
@@ -446,6 +449,7 @@ export async function showPullRequestOverview(
   subscriptions.push(sync, panel.onDidChangeViewState(({ webviewPanel }) => { if (webviewPanel.visible) sync.now(); }));
   if (onDidChangeFiles !== undefined) subscriptions.push(onDidChangeFiles(() => { sendFiles(); }));
   sync.now();
+  if (changedEarly) redraw();
   const release = (): void => {
     if (timer !== undefined) clearTimeout(timer);
     for (const subscription of subscriptions) subscription.dispose();
