@@ -41,6 +41,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - `frameMain` runs inside the HTML preview frame from its source text, so it must not use anything outside its own body.
 - The CSS lives in a template string in `page/html.ts`: no backticks or `${` in it. Its rules sit on long lines; change them with Edit on a unique selector, not scripted rewrites.
 - Redraw only what changed. `renderFiles([paths])` rebuilds those files' boxes; `renderFiles('state')` rebuilds files whose state changed. A full `renderFiles()` is for global changes such as layout, and costs about 100 ms on a 40-file PR.
+- The page shows before GitHub answers and files show before their colors. Once shown, files must not tick Viewed or hide, so they wait for GitHub's file list. Keep every file's lines in the DOM so find-in-page reaches them; draw them over frames, not on scroll.
 - Update the page right away for the user's own toggles (Viewed, read marks) and let the extension's next state confirm them. A round trip waits for a 150 ms debounce and a state re-read.
 
 ## UI
@@ -77,6 +78,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 
 - `npm ci --ignore-scripts` installs dependencies, `npm run build` bundles, and `npm run package` builds the installable VSIX.
 - `npm run typecheck` (under a second) and `npm test` (about 12 s) check types and run the tests. Run them without asking. `npm test -- anchors review` runs only the test files whose names contain `anchors` or `review`; run the full suite before handing over. A project Stop hook runs the type check when a turn changed TypeScript.
+- `npm run bench` times the review page and sidebar on fixed fixtures (the `bench` skill).
 - `npm run render` screenshots the review page in the user's theme (the `render` skill). `make install` packages and installs the VSIX (the `install` skill).
 - Use Python through `uv run` if a supporting media task requires it.
 
@@ -85,7 +87,8 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - Every bug fix and feature ships with a test that fails without the change; undo the change once to see it fail. Use the cheapest layer that sees the behavior: a unit test (`npm test`) for core and page logic and for host message handling against `test/fakes/vscode.ts`; a render scene with `expect`, `text` and `absent` checks (and `send` for host replies) for what the page shows and does; an `scripts/e2e.mjs` scenario for flows that need real VS Code, such as commands, tabs, reloads and the sidebar. Only real GitHub and authenticated Claude stay manual; list those checks as pending in the PR.
 - The user tries changes in the installed extension, not the debug host. Reloading the window loads nothing new until you run `npm run package` and `code --install-extension diffguide-<version>.vsix --force`. An install also swaps `dist/overview.js` under open windows, so pages opened before a reload pair old HTML with the new script and break; after every install, tell the user to reload all windows.
 - Before handing over a webview change, run `npm run render` and look at the screenshots of the exact build you install. Add a scene to `test/render/fixtures.ts` when none shows the change; a failed check fails the run like a script error. Default colors hide border and contrast problems; the screenshot also catches script errors.
-- Measure latency claims on a large sample diff, before and after, instead of estimating.
+- Measure latency claims with `npm run bench` (the `bench` skill), before and after, instead of estimating.
+- A change that shows something before a read finishes can race that read. Run `npm run e2e` several times; one passing run proves nothing.
 - Verify user-facing flows with end-to-end clicks in VS Code and controlled agent simulation, including the actual failure scenario. `npm run e2e:docker` runs `scripts/e2e.mjs` in headless VS Code: local review page, comment with Ask, a simulated agent answer through the bridge, Resolve, a mock PR page with Refresh, and a window reload that must bring both pages back. `npm run e2e` runs it in a visible window. Extend that script for new flows. PR flows against GitHub and authenticated Claude stay manual.
 - Distinguish automated logic, process simulation, observed native UI and authenticated Claude evidence. Keep unverified flows pending; do not claim completion from unit tests or a simulated walkthrough alone.
 
