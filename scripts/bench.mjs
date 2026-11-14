@@ -1,5 +1,5 @@
 // Times the review page's user waits on fixed fixtures and compares runs.
-// Usage: npm run bench -- [--runs 7] [--label name] [--scale 1] [--fixture typical|large]...
+// Usage: npm run bench -- [--runs 7] [--label name] [--scale 1] [--fixture typical|large|sidebar]...
 //        npm run bench -- --compare .bench/before.json .bench/after.json
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -64,13 +64,14 @@ const runs = Number(option('--runs', '7'));
 const label = option('--label', execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim());
 const scale = Number(option('--scale', '1'));
 const chosen = options('--fixture');
-const names = chosen.length ? chosen : Object.keys(fixtures);
+const names = chosen.length ? chosen : [...Object.keys(fixtures), 'sidebar'];
 await mkdir('.bench', { recursive: true });
 
 await build({
   entryPoints: ['test/bench/host.ts'], outfile: '.bench/host.cjs', alias: { vscode: resolve('test/fakes/vscode.ts') }, external: ['vscode-oniguruma'],
   loader: { '.md': 'text' }, bundle: true, platform: 'node', target: 'node20', format: 'cjs', logLevel: 'error',
 });
+await build({ entryPoints: ['test/bench/sidebar.ts'], outfile: '.bench/sidebar.cjs', alias: { vscode: resolve('test/fakes/vscode.ts') }, loader: { '.md': 'text' }, bundle: true, platform: 'node', target: 'node20', format: 'cjs', logLevel: 'error' });
 await build({ entryPoints: ['src/hosts/vscode/highlightWorker.ts'], outfile: '.bench/highlight-worker.cjs', external: ['vscode-oniguruma'], bundle: true, platform: 'node', target: 'node20', format: 'cjs', logLevel: 'error' });
 await build({ entryPoints: ['src/page/webview/main.ts'], outfile: '.bench/overview.js', bundle: true, platform: 'browser', target: 'chrome120', format: 'iife', loader: { '.md': 'text' }, logLevel: 'error' });
 const script = await readFile('.bench/overview.js', 'utf8');
@@ -169,6 +170,19 @@ async function pageRun(browser, dump) {
 const report = { label, scale, runs, date: new Date().toISOString(), fixtures: {} };
 const browser = await chromium.launch();
 for (const name of names) {
+  if (name === 'sidebar') {
+    const sidebars = [];
+    for (let run = 0; run < runs; run++) {
+      const child = spawnSync(process.execPath, ['.bench/sidebar.cjs'], { env: { ...process.env, BENCH_OPTIONS: JSON.stringify({ source: process.cwd(), scale }) }, encoding: 'utf8' });
+      if (child.status !== 0) throw new Error(`sidebar bench failed: ${child.stderr}`);
+      sidebars.push(JSON.parse(child.stdout));
+    }
+    report.fixtures.sidebar = aggregate(sidebars);
+    const rows = [['metric', 'p50', 'p95']];
+    for (const [key, value] of Object.entries(report.fixtures.sidebar)) rows.push([key, format(value.median), format(value.p95)]);
+    console.log(`\nsidebar: 9 PRs, 3 checked out, ${runs} runs, GitHub latency ×${scale}\n${table(rows)}`);
+    continue;
+  }
   const fixture = fixtures[name];
   const dumpPath = resolve(`.bench/${name}.page.json`);
   hostRun(fixture, 150, dumpPath);
