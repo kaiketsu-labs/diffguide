@@ -7,6 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import { backUp, backupDays, listBackups } from '../src/core/git/backups.js';
 import { removeWorktree, worktreePath } from '../src/core/git/worktrees.js';
+import { removeWorktreeQuestion } from '../src/page/removeWorktree.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> =>
@@ -89,4 +90,10 @@ test('removing a worktree with nothing to lose takes its backups along', async (
   assert.equal((await listBackups(folder)).length, 1);
   await removeWorktree(source, storage, 'acme/app', 3);
   assert.equal(await git(source, 'for-each-ref', 'refs/diffguide/'), '');
+});
+
+test('the Remove worktree confirm names unpushed commits and how long their backup stays', () => {
+  assert.equal(removeWorktreeQuestion(7, 0), 'Remove the worktree for #7? Its local comments are deleted too. Git refuses if it has uncommitted changes.');
+  assert.match(removeWorktreeQuestion(7, 1), /It has 1 commit GitHub does not have; DiffGuide keeps it in a backup for (\d+) days\./u);
+  assert.match(removeWorktreeQuestion(undefined, 2), new RegExp(`^Remove the worktree for this PR\\? .* It has 2 commits GitHub does not have; DiffGuide keeps them in a backup for ${backupDays} days\\.`, 'u'));
 });

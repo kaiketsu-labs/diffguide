@@ -103,7 +103,7 @@ Fix conflicts also runs in a scratch worktree, at GitHub's head, and pushes from
 
 Built (`src/core/git/sync.ts`, `src/core/git/backups.ts`): backups, fast-forward with edits, 3-way merge of staged and unstaged edits, replay of local commits, force pushes, your own checkout. Waiting without an error: offline, failed Git sign-in, `index.lock` held (retried for about 5 s first), and your own merge, rebase, cherry-pick or revert. The page says why in a notice that hides after 4 s and shows again only when the reason changes. The sync records GitHub's head in `refs/diffguide/github/pr-<n>` at every fetch, so it can tell local commits from replaced ones.
 
-Claude's step: clashing commits and edits are merged by Claude in a scratch worktree and applied after the checks, with Undo. Fix conflicts runs in a scratch worktree and accepts uncommitted edits. A push rejected because the PR moved syncs and pushes again once. After Claude's run on someone else's PR, files saved in VS Code during the run stay; the rest is discarded after a backup.
+Claude's step: clashing commits and edits are merged by Claude in a scratch worktree and applied after the checks, with Undo. Fix conflicts runs in a scratch worktree and accepts uncommitted edits. A push rejected because the PR moved syncs and pushes again once. After Claude's run on someone else's PR, files saved in VS Code during the run stay; the rest is discarded after a backup. The Remove worktree confirm names the commits GitHub does not have and their 14-day backup.
 
 Known limits:
 

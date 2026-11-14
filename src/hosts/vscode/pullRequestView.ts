@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { parsePullRequestLink } from '../../forges/github/remotes.js';
+import { removeWorktreeQuestion } from '../../page/removeWorktree.js';
 import { pollWhileFocused } from './autoSync.js';
 import { legendProvider, pinMime, pullRequestKey, rowDecorationProvider, type Node, type PullRequestCheckout, type PullRequestNode, type RepositoryNode } from './pullRequestItems.js';
 import { PullRequestTree } from './pullRequestTree.js';
@@ -126,10 +127,8 @@ export function registerPullRequestView(
     vscode.commands.registerCommand('diffGuide.removePullRequestWorktree', async (node: unknown) => {
       if (!isPullRequestNode(node)) return;
       const confirm = 'Remove worktree';
-      const answer = await vscode.window.showWarningMessage(
-        `Remove the worktree for #${node.pullRequest.number}? Its local comments are deleted too. Git refuses if it has uncommitted changes.`,
-        { modal: true }, confirm,
-      );
+      const local = await node.listing.worktrees.localChanges(node.listing.repository.name, node.pullRequest.number, node.pullRequest.headOid).catch(() => undefined);
+      const answer = await vscode.window.showWarningMessage(removeWorktreeQuestion(node.pullRequest.number, local?.commits ?? 0), { modal: true }, confirm);
       if (answer !== confirm) return;
       try {
         await node.listing.worktrees.remove(node.listing.repository.name, node.pullRequest.number);

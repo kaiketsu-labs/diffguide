@@ -195,7 +195,7 @@ const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) =
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
   overview: scene(pullRequest, [{ shot: 'overview.png', full: true }], { saved: { view: 'overview' } }),
-  files: scene(pullRequest, [{ scrollTo: '#files', shot: 'files.png' }], { saved: { view: 'files' } }),
+  files: scene(pullRequest, [{ scrollTo: '#files', shot: 'files.png' }, { scroll: 0, click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' }], { saved: { view: 'files' } }),
   guide: scene(pullRequest, [{ shot: 'guide.png', full: true }], { saved: { view: 'guide' } }),
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
