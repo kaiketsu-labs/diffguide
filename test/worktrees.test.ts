@@ -315,3 +315,34 @@ test('the poll follows a retargeted base: the diff reads against it and the page
   assert.deepEqual((await diff.read()).files.map((file) => file.path), []);
   assert.deepEqual(await pollGitHub(), { reload: false, files: false });
 });
+
+test('the poll brings your own checkout to GitHub\'s new commits, merging edits to other lines of the same file', async (t) => {
+  const { source } = await fixture(t);
+  const origin = path.join(path.dirname(source), 'origin');
+  const commitOnGitHub = async (text: string): Promise<string> => {
+    await git(origin, ['switch', '--quiet', 'feature']);
+    await writeFile(path.join(origin, 'feature.ts'), text);
+    await git(origin, ['commit', '--quiet', '-am', text.split('\n')[0] ?? '']);
+    await git(origin, ['update-ref', 'refs/pull/5/head', 'feature']);
+    await git(origin, ['switch', '--quiet', 'main']);
+    return (await executeFile('git', ['-C', origin, 'rev-parse', 'feature'], { encoding: 'utf8' })).stdout.trim();
+  };
+  await commitOnGitHub('one\ntwo\nthree\nfour\n');
+  await git(source, ['fetch', '--quiet', 'origin']);
+  await git(source, ['switch', '--quiet', 'feature']);
+  await writeFile(path.join(source, 'feature.ts'), 'one\ntwo\nthree\nmine\n');
+  const head = await commitOnGitHub('remote\ntwo\nthree\nfour\n');
+  const baseHead = (await executeFile('git', ['-C', origin, 'rev-parse', 'main'], { encoding: 'utf8' })).stdout.trim();
+
+  const opened = { runner: { activity: { running: false } }, session: { store: { threads: [] } }, useBase: async () => undefined };
+  const host = { listRepositoryFiles: async () => [], fileIcons: async () => undefined };
+  const page = { provider: { version: async () => ({ head, updatedAt: '', baseBranch: 'main', baseHead }) }, pullRequest, folder: source, role: 'author', opened, host, revealed: new Set(), onCheckout: true };
+  const diff = new DiffView(page as unknown as PageParts['page'], async () => undefined);
+  const { pollGitHub } = worktreeActions({ page, diff, remote: { written: { waiting: false } } } as unknown as PageParts);
+
+  assert.deepEqual(await pollGitHub(), { reload: true, files: true });
+  const revParse = async (...args: string[]): Promise<string> => (await executeFile('git', ['-C', source, 'rev-parse', ...args], { encoding: 'utf8' })).stdout.trim();
+  assert.equal(await revParse('feature'), head);
+  assert.equal(await revParse('--abbrev-ref', 'HEAD'), 'feature');
+  assert.equal(await readFile(path.join(source, 'feature.ts'), 'utf8'), 'remote\ntwo\nthree\nmine\n');
+});

@@ -57,6 +57,15 @@ export async function backUp(checkout: string, reason: string, now = Date.now())
   return ref;
 }
 
+/** Put a checkout back to a backup: its HEAD, its index (or HEAD's files when it had conflicts), and its working files, which win over later edits. */
+export async function restoreBackup(checkout: string, ref: string): Promise<void> {
+  const [head, index] = (await git(checkout, ['rev-list', '--parents', '--no-walk', ref])).trim().split(' ').slice(1);
+  if (head === undefined) throw new Error(`${ref} is not a DiffGuide backup.`);
+  await git(checkout, ['update-ref', '-m', 'DiffGuide: restore a backup', 'HEAD', head]);
+  await git(checkout, ['read-tree', '--reset', '-u', `${ref}^{tree}`]);
+  await git(checkout, ['read-tree', `${index ?? head}^{tree}`]);
+}
+
 /** Delete every backup of a checkout, for a worktree removed with nothing left to lose. */
 export async function dropBackups(checkout: string): Promise<void> {
   for (const { ref } of await listBackups(checkout)) await git(checkout, ['update-ref', '-d', ref]);

@@ -1,5 +1,6 @@
-import { pushCommits, syncToPullRequestHead } from '../../core/conflicts.js';
+import { pushCommits } from '../../core/conflicts.js';
 import type { ChangeRequestVersion } from '../../core/forge.js';
+import { syncWithPullRequest } from '../../core/git/sync.js';
 import { followBase, git } from '../../core/git/worktrees.js';
 import { readPullRequestDiffPlainFirst } from '../../core/unifiedDiff.js';
 import type { OverviewActions } from '../protocol.js';
@@ -50,10 +51,13 @@ export function worktreeActions({ page, remote, diff, notOnCheckout, pushTarget 
       shownHead ??= before;
       let problem: string | undefined;
       const ahead = await git(folder, ['merge-base', '--is-ancestor', version.head, 'HEAD']).then(() => true, () => false);
-      if (version.head !== before && !ahead && page.onCheckout) {
-        problem = `GitHub has commits on ${pullRequest.headBranch} that this checkout does not. Pull them to see them here.`;
-      } else if (version.head !== before && !ahead) {
-        await syncToPullRequestHead(folder, pullRequest.number, previous?.head).catch((error: unknown) => { problem = error instanceof Error ? error.message : String(error); });
+      if (version.head !== before && !ahead) {
+        const result = await syncWithPullRequest(folder, pullRequest.number, previous?.head).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+        if (result instanceof Error) problem = result.message;
+        else if (result.outcome === 'claude') {
+          problem = result.files.length === 0 ? `GitHub rewrote ${pullRequest.headBranch}, and DiffGuide cannot tell which commits here are yours, so this checkout stays as it is.`
+            : `GitHub's new commits clash with changes here in ${result.files.join(', ')}, so this checkout stays as it is.`;
+        }
       }
       const head = await diff.readHead();
       const files = head !== shownHead || stale;

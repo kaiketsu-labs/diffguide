@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ChangeRequestSummary, Forge } from '../forge.js';
 import { readPrivateJson, writePrivateJson } from '../privateFiles.js';
 import { backUp, dropBackups } from './backups.js';
+import { recordGitHubHead } from './sync.js';
 
 /** Whether the user wrote the PR (Claude may implement) or reviews someone else's (Claude only suggests). */
 export type PullRequestRole = 'author' | 'reviewer';
@@ -140,6 +141,7 @@ export async function ensureWorktree(
   await git(sourceRoot, ['worktree', 'add', '--detach', folder]);
   try {
     await provider.checkout(pullRequest.number, folder);
+    await recordGitHubHead(folder, pullRequest.number, (await git(folder, ['rev-parse', 'HEAD'])).trim());
     await git(folder, ['fetch', '--quiet', baseRemote, pullRequest.baseBranch]);
   } catch (error: unknown) {
     await git(sourceRoot, ['worktree', 'remove', '--force', folder]).catch(() => undefined);
