@@ -5,7 +5,7 @@ description: Time the DiffGuide review page and PR sidebar on fixed fixtures and
 
 # Bench the review page
 
-`npm run bench` times the waits a user sees, on two pinned commit ranges of this repository (`typical`, 34 files; `large`, 235 files) and on the sidebar (9 PRs, 3 checked out). GitHub answers after latencies measured with `gh`, listed in `test/bench/forge.ts` and `test/bench/sidebar.ts`. Each host run is a fresh process, so caches start cold.
+`npm run bench` times the waits a user sees, on two pinned commit ranges of this repository (`typical`, 34 files; `large`, 235 files) on the sidebar (9 PRs, 3 checked out) and on the first open of a PR without a worktree (`firstOpen`). GitHub answers after latencies measured with `gh` and `git fetch`, listed in `test/bench/forge.ts`, `test/bench/sidebar.ts` and `test/bench/firstOpen.ts`. Each host run is a fresh process, so caches start cold.
 
 ```sh
 npm run bench -- --label before                  # all fixtures, 7 runs, writes .bench/before.json
@@ -25,6 +25,7 @@ npm run bench -- --compare .bench/before.json .bench/after.json
 - `host.*.git`, `host.*.github`: process and request counts. A change that should cut calls shows here.
 - `page.*`: the page script in Chromium, replaying the messages the fixture's host run sent. `files.painted` is the first screen, `files.drawn` all diffs, `longTaskMs` and `longestTask` the main-thread blocks over 50 ms, `nodes` the DOM size.
 - `saved.*`, `fresh.*` (sidebar): rows drawn with the last list saved and without.
+- `tab`, `files`, `opened` (firstOpen): from the sidebar click to the tab, the files and the end of the open, worktree included.
 
 ## Procedure
 

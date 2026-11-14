@@ -54,15 +54,8 @@ export interface OpenedReview {
   readonly commits: (threadId: string) => readonly WorktreeCommit[];
 }
 
-/** Collect a PR's overview from its summary, file progress and review session. */
-export function buildOverviewState(
-  pullRequest: ChangeRequestSummary, opened: OpenedReview, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
-  details?: ChangeRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
-  conversation?: ChangeRequestConversation | Error, claudeContext?: AgentContext, review?: ReviewView,
-): OverviewState {
-  const { session, runner } = opened;
-  const claude = agentStatus(runner.activity);
-  const intents = eventIntents(session.store.events);
+/** What a PR's summary gives its page. */
+function summaryState(pullRequest: ChangeRequestSummary): Pick<OverviewState, 'title' | 'number' | 'heading' | 'author' | 'headBranch' | 'baseBranch' | 'url' | 'createdAt' | 'updatedAt' | 'changes'> {
   return {
     title: `#${pullRequest.number} ${pullRequest.title}`,
     number: pullRequest.number,
@@ -74,6 +67,29 @@ export function buildOverviewState(
     ...(pullRequest.createdAt === undefined ? {} : { createdAt: pullRequest.createdAt }),
     ...(pullRequest.updatedAt === undefined ? {} : { updatedAt: pullRequest.updatedAt }),
     ...(pullRequest.changes === undefined ? {} : { changes: pullRequest.changes }),
+  };
+}
+
+/** A PR's page while its worktree is made: the summary, with the files and GitHub's answers still to come. */
+export function openingOverviewState(pullRequest: ChangeRequestSummary): OverviewState {
+  const claude = agentStatus({ running: false, threads: new Set(), skipped: 0 });
+  return {
+    ...summaryState(pullRequest), viewed: [], read: [], reviewedPending: true,
+    claude: { text: claude.text, running: false, retry: claude.retry }, analysis: { running: false, stale: false }, threads: [],
+  };
+}
+
+/** Collect a PR's overview from its summary, file progress and review session. */
+export function buildOverviewState(
+  pullRequest: ChangeRequestSummary, opened: OpenedReview, viewed: readonly string[], read: readonly ReadRange[], total: number | undefined,
+  details?: ChangeRequestDetails | Error, remote?: readonly RemoteThread[] | Error, analysis: AnalysisView = { running: false, stale: false },
+  conversation?: ChangeRequestConversation | Error, claudeContext?: AgentContext, review?: ReviewView,
+): OverviewState {
+  const { session, runner } = opened;
+  const claude = agentStatus(runner.activity);
+  const intents = eventIntents(session.store.events);
+  return {
+    ...summaryState(pullRequest),
     viewed,
     read,
     ...(total === undefined ? {} : { reviewed: { done: viewed.length, total } }),

@@ -80,7 +80,7 @@ export async function showPullRequestOverview(
   /** An open page whose tab this page takes over, such as the local review of the checkout a PR is open on. */
   adopt?: string,
 ): Promise<void> {
-  if (revealOpenPage(key, revealAt)) return;
+  if (!openingPages.has(key) && revealOpenPage(key, revealAt)) return;
   let reveal = revealAt;
   /** The files, read while the state loads so they are ready when the page is; the page's first file request takes them. */
   let early: Promise<FilesView> | undefined = (async () => await actions.readFiles())();
@@ -89,16 +89,21 @@ export async function showPullRequestOverview(
   let changedEarly = false;
   const firstRead = onDidChange(() => { changedEarly = true; });
   let state = await read().finally(() => { firstRead.dispose(); });
+  const opening = openingPages.get(key);
+  if (opening !== undefined) {
+    openingPages.delete(key);
+    opening.closing.dispose();
+    // The user closed the tab while the page got ready.
+    if (opening.closed) return;
+  }
   const restoredPanel = restored.get(key);
   restored.delete(key);
-  const adopted = restoredPanel ?? (adopt === undefined ? undefined : panels.get(adopt)?.detach());
+  const adopted = restoredPanel ?? opening?.panel ?? (adopt === undefined ? undefined : panels.get(adopt)?.detach());
   if (adopted !== undefined) adopted.title = state.title;
-  const panel = adopted ?? vscode.window.createWebviewPanel(reviewPageType, state.title, vscode.ViewColumn.Active,
-    { localResourceRoots: [], ...pageOptions(extensionUri), retainContextWhenHidden: true, enableFindWidget: true });
+  const panel = adopted ?? createReviewPanel(state.title, extensionUri);
   if (restoredPanel !== undefined) panel.webview.options = pageOptions(extensionUri);
   const pageKey = key;
-  const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
+  showState(panel, state, extensionUri);
   let colors = new Map<string, string>();
   let iconWrites = 0;
   /** Webview tabs show a theme icon's shape but drop its color, so once the page sends the theme's colors the tab gets an SVG drawn in them. */
@@ -462,6 +467,39 @@ const reviewPageType = 'diffGuide.pullRequestOverview';
 const pageOptions = (extensionUri: vscode.Uri): vscode.WebviewOptions => ({ enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'resources'), vscode.Uri.joinPath(extensionUri, 'dist')] });
 /** Tabs VS Code kept over a window reload, waiting for their page to open in them. */
 const restored = new Map<string, vscode.WebviewPanel>();
+/** Tabs shown from a PR's summary while its worktree is made, by page key; the PR's page takes them over. */
+const openingPages = new Map<string, { readonly panel: vscode.WebviewPanel; readonly closing: vscode.Disposable; closed: boolean }>();
+
+const createReviewPanel = (title: string, extensionUri: vscode.Uri): vscode.WebviewPanel => vscode.window.createWebviewPanel(reviewPageType, title, vscode.ViewColumn.Active,
+  { localResourceRoots: [], ...pageOptions(extensionUri), retainContextWhenHidden: true, enableFindWidget: true });
+
+function showState(panel: vscode.WebviewPanel, state: OverviewState, extensionUri: vscode.Uri): void {
+  const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
+}
+
+/** Show a tab with `state` until the page `key` opens in it; false when that page is opening already, which then opens in the tab shown. */
+export function showOpeningPage(key: string, state: OverviewState, extensionUri: vscode.Uri): boolean {
+  const shown = openingPages.get(key);
+  if (shown !== undefined && !shown.closed) {
+    shown.panel.reveal();
+    return false;
+  }
+  const panel = createReviewPanel(state.title, extensionUri);
+  showState(panel, state, extensionUri);
+  // A closed tab stays listed until its page reads it, so that page opens in no tab or in the one shown since.
+  const opening = { panel, closed: false, closing: panel.onDidDispose(() => { opening.closed = true; }) };
+  openingPages.set(key, opening);
+  return shown === undefined;
+}
+
+/** Close the tab `showOpeningPage` showed, for a page that cannot open. */
+export function closeOpeningPage(key: string): void {
+  const opening = openingPages.get(key);
+  openingPages.delete(key);
+  opening?.closing.dispose();
+  opening?.panel.dispose();
+}
 
 /**
  * Reopen review pages in the tabs VS Code kept over a window reload. `open` opens the page a key names and

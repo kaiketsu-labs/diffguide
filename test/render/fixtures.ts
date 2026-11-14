@@ -1,4 +1,5 @@
 import type { DiffLine, FileDiff } from '../../src/core/unifiedDiff.js';
+import { openingOverviewState } from '../../src/page/overviewState.js';
 import type { ExtensionMessage, OverviewState } from '../../src/page/protocol.js';
 import { githubCodeHtml } from '../../src/page/preview/githubCode.js';
 
@@ -182,6 +183,10 @@ const { details: _details, github: _github, ...withoutDetails } = withoutConvers
 const { reviewed: _reviewed, ...withoutReviewed } = pullRequest;
 const listPending: OverviewState = { ...withoutReviewed, reviewedPending: true };
 const { linked: _linked, ...withoutLinked } = pullRequest;
+const opening = openingOverviewState({
+  number: pullRequest.number ?? 1, title: pullRequest.heading ?? '', url: pullRequest.url, author: pullRequest.author, draft: false,
+  headBranch: pullRequest.headBranch, baseBranch: pullRequest.baseBranch, ...pullRequest.changes === undefined ? {} : { changes: pullRequest.changes },
+});
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) => ({ ...hunk, lines: hunk.lines.map((line) => ({ ...line, html: line.html.replace(/<[^>]*>/gu, '') })) })) }));
 
@@ -224,6 +229,9 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { scrollTo: '.file[data-path="src/many/file250.ts"]', wait: 60, expect: '.file[data-path="src/many/file250.ts"] table', absent: '.file[data-path="src/many/file299.ts"] table', shot: 'drawn-over-frames.png' },
     { wait: 5000, expect: '.file[data-path="src/many/file299.ts"] table', absent: '.file[data-path="src/many/file001.ts"] table' },
   ] },
+  // A PR without a worktree shows from its summary while the worktree is made, before the page loads in the same tab.
+  opening: { state: opening, messages: [], saved: { view: 'overview' }, steps: [{ expect: '#reviewed .skeleton', shot: 'opening.png' }] },
+  openingFiles: { state: opening, messages: [], saved: { view: 'files' }, steps: [{ expect: '#files', text: 'Loading changes…', shot: 'opening-files.png' }] },
   // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
   linkedLoading: scene(withoutLinked, [
     { expect: '#linked:not([hidden]) .skeleton', shot: 'linked-loading.png' },

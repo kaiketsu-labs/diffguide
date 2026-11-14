@@ -155,6 +155,10 @@ const scenarios = [
       await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'pr-files.png') });
       step('Opening #201 checked it out and showed its diff');
+      // The tab shown while the worktree is made is the one the page opens in.
+      const tabs = await workbench.locator('.tabs-container .tab[aria-label*="201"]').count();
+      if (tabs !== 1) throw new Error(`expected one tab for #201, found ${tabs}`);
+      step('The page of #201 opened in the tab shown while its worktree was made');
 
       await page.click('#refresh');
       await page.locator('#notice', { hasText: 'Refreshed.' }).waitFor({ timeout: 30_000 });
