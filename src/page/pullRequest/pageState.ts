@@ -69,9 +69,10 @@ export async function readPageState(parts: PageParts, linked: LinkedCard, listed
   const pushedHead = loadedConversation === undefined || loadedConversation instanceof Error ? undefined : loadedConversation.merge.headOid;
   const [unpushed, local] = await Promise.all([pushedHead === undefined ? [] : unpushedCommits(folder, pushedHead), localChanges(folder, pushedHead)]);
   const linkedNow = await linkedRows;
-  const { conflictQuestion } = edits;
+  const { conflictQuestion, syncQuestion, syncUndo } = edits;
   return {
     ...state, threads, ...(listed === undefined ? { reviewedPending: true as const } : {}), ...(conflictQuestion === undefined ? {} : { conflictQuestion: markdownHtml(conflictQuestion) }), ...(unpushed.length === 0 ? {} : { unpushed }),
+    ...(syncQuestion === undefined ? {} : { syncQuestion: markdownHtml(syncQuestion) }), ...(syncUndo === undefined ? {} : { syncUndo: syncUndo.text }),
     ...(local.files.size === 0 ? {} : { local: Object.fromEntries(local.files) }), ...(linkedNow === undefined ? {} : { linked: linkedNow }),
   };
 }

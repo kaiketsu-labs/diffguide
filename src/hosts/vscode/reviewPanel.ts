@@ -246,6 +246,15 @@ export async function showPullRequestOverview(
           await actions.discardSuggestion(id);
           sendFiles();
         } else if (action === 'dismiss-conflict-question') actions.dismissConflictQuestion();
+        else if (action === 'undo-sync') {
+          post({ notice: { text: await actions.undoSync() } });
+          sendFiles();
+        } else if (action === 'dismiss-sync-undo') actions.dismissSyncUndo();
+        else if (action === 'dismiss-sync-question') actions.dismissSyncQuestion();
+        else if (action === 'sync' && isText(text)) {
+          actions.answerSync(text.trim());
+          sync.now();
+        }
         else if (action === 'fix-conflicts' && (text === undefined || isText(text))) {
           void actions.fixConflicts(text?.trim()).catch((error: unknown) => { post({ error: error instanceof Error ? error.message : String(error) }); });
         }
@@ -445,7 +454,7 @@ export async function showPullRequestOverview(
   let shownProblem: string | undefined;
   let shownWaiting: string | undefined;
   const sync = pollWhileFocused(30_000, () => panel.visible, async () => {
-    const { reload, files, problem, waiting, stale } = await actions.pollGitHub();
+    const { reload, files, problem, waiting, stale, notice } = await actions.pollGitHub();
     if (reload) void actions.refresh();
     if (files) sendFiles();
     if (stale === true) post({ stale: true });
@@ -453,6 +462,7 @@ export async function showPullRequestOverview(
     shownProblem = problem;
     if (waiting !== undefined && waiting !== shownWaiting) post({ notice: { text: waiting } });
     shownWaiting = waiting;
+    if (notice !== undefined) post({ notice });
   });
   subscriptions.push(sync, panel.onDidChangeViewState(({ webviewPanel }) => { if (webviewPanel.visible) sync.now(); }));
   if (onDidChangeFiles !== undefined) subscriptions.push(onDidChangeFiles(() => { sendFiles(); }));

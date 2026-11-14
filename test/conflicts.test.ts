@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import type { AgentTask, AgentTaskResult } from '../src/core/agent.js';
 import { catchUpWithPullRequest, commitAndPush, commitFiles, commitsSince, conflictTask, discardSince, localChanges, prepareConflictFix, pushCommits, syncKeepingLocalCommits, syncToPullRequestHead, unpushedCommits, worktreeSnapshot } from '../src/core/conflicts.js';
+import type { PageParts } from '../src/page/pullRequest/context.js';
+import { claudeActions } from '../src/page/pullRequest/claudeActions.js';
 
 const run = promisify(execFile);
 const git = async (root: string, ...args: string[]): Promise<string> => (await run('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgSign=false', ...args])).stdout.trim();
@@ -38,18 +41,38 @@ async function fixture(t: test.TestContext): Promise<{ origin: string; worktree:
   return { origin, worktree, older, latest, base };
 }
 
-test('brings the worktree to the PR\'s latest commit and returns the base to merge', async (t) => {
-  const { worktree, latest, base } = await fixture(t);
-  assert.equal(await prepareConflictFix(worktree, 7, 'main'), base);
-  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), latest);
+test('returns the PR\'s latest commit and the base to merge, and leaves the worktree, its edits and its commits as they are', async (t) => {
+  const { worktree, older, latest, base } = await fixture(t);
+  await writeFile(path.join(worktree, 'a.txt'), 'unsaved\n');
+  await git(worktree, 'commit', '--quiet', '--allow-empty', '-m', 'local only');
+  const local = await git(worktree, 'rev-parse', 'HEAD');
+  assert.deepEqual(await prepareConflictFix(worktree, 7, 'main'), { head: latest, base });
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), local);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD^'), older);
+  assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'unsaved\n');
 });
 
-test('refuses a worktree with uncommitted changes or commits GitHub does not have', async (t) => {
-  const { worktree } = await fixture(t);
+test('Fix conflicts runs Claude in a scratch worktree at the PR\'s latest commit and keeps its question', async (t) => {
+  const { worktree, latest } = await fixture(t);
   await writeFile(path.join(worktree, 'a.txt'), 'unsaved\n');
-  await assert.rejects(prepareConflictFix(worktree, 7, 'main'), /uncommitted changes/u);
-  await git(worktree, 'commit', '--quiet', '-am', 'local only');
-  await assert.rejects(prepareConflictFix(worktree, 7, 'main'), /not on GitHub/u);
+  const tasks: AgentTask[] = [];
+  const runTask = async (task: AgentTask): Promise<AgentTaskResult> => {
+    tasks.push(task);
+    assert.ok(task.cwd !== undefined && task.cwd !== worktree);
+    assert.equal(await git(task.cwd, 'rev-parse', 'HEAD'), latest);
+    return { reply: 'Which side wins in a.txt?' };
+  };
+  const edits = { conflictQuestion: undefined as string | undefined };
+  const parts = {
+    page: { pullRequest: { number: 7, headBranch: 'feature' }, folder: worktree, opened: { runner: { runTask } }, host: {} },
+    remote: { currentDetails: async () => ({ mergeable: 'no', canEdit: true }), changedOnGitHub: () => undefined },
+    diff: { baseBranch: 'main' }, edits, findThread: () => undefined, notOnCheckout: () => undefined, pushTarget: () => 'origin',
+  };
+  await claudeActions(parts as unknown as PageParts).fixConflicts();
+  assert.equal(tasks.length, 1);
+  assert.equal(edits.conflictQuestion, 'Which side wins in a.txt?');
+  assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), 'unsaved\n');
+  assert.equal((await git(worktree, 'worktree', 'list', '--porcelain')).split('\n').filter((line) => line.startsWith('worktree ')).length, 1);
 });
 
 test('lets Claude push only the PR branch, and rejects names that could be read as options', () => {

@@ -198,6 +198,24 @@ test('runs a task in the PR conversation with its own tools, and keeps Git hooks
   }
 });
 
+test('runs a task in another folder in a new conversation, and keeps the PR\'s conversation for the next run', async (t) => {
+  const { instance, children } = await runner('reviewer', t);
+  const kept = await instance.launch();
+  const sessionId = kept.args[kept.args.indexOf('--session-id') + 1];
+  const done = instance.runTask({ label: 'merging GitHub\'s new commits', prompt: 'Resolve.', allowedTools: [], cwd: '/scratch' });
+  await until(() => children.length === 1);
+  const child = children[0];
+  assert.ok(child !== undefined);
+  assert.equal(child.cwd, '/scratch');
+  assert.ok(!child.args.includes('--resume'));
+  assert.notEqual(child.args[child.args.indexOf('--session-id') + 1], sessionId);
+  child.send({ type: 'result', subtype: 'success', is_error: false });
+  await child.exit(0);
+  await done;
+  const again = await instance.launch();
+  assert.equal(again.args[again.args.indexOf('--resume') + 1], sessionId);
+});
+
 test('does not loop on comments Claude skipped, and sends them again on retry', async (t) => {
   const { instance, store, children } = await runner('reviewer', t);
   store.setPending([event('one')]);

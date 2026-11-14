@@ -1,7 +1,8 @@
 /** Busy state, the page notice, and the agent's working motion. */
 import type { AgentProgress, AgentStep } from '../../core/agent.js';
 import type { ExtensionMessage, OverviewState, PageMessage } from '../protocol.js';
-import { $, button, checkStates, detailsLoading, el, labels, stateIcon } from './dom.js';
+import { icons } from '../icons.js';
+import { $, button, checkStates, detailsLoading, el, icon, labels, stateIcon } from './dom.js';
 import { orbCanvas, stepMotion } from './orb.js';
 import { received, ui } from './state.js';
 import { post } from './transport.js';
@@ -96,10 +97,26 @@ export function showNotice(notice: NonNullable<ExtensionMessage['notice']>): voi
   const { extension } = notice;
   const link = el('a', '', 'Open on GitHub');
   if (notice.url !== undefined) link.href = notice.url;
+  const show = notice.show === undefined ? [] : [button('Show', () => { showSyncQuestion(); clearNotice(); }, 'small')];
   box.replaceChildren(el('span', '', notice.text), ...extension === undefined ? [] : [button('Find extension', () => { post({ action: 'find-extension', extension }); clearNotice(); }, 'small')],
-    ...notice.url === undefined ? [] : [link]);
+    ...notice.url === undefined ? [] : [link], ...show);
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(clearNotice, extension === undefined && notice.url === undefined ? 4000 : 8000);
+  noticeTimer = setTimeout(clearNotice, extension === undefined && notice.url === undefined && show.length === 0 ? 4000 : 8000);
+}
+
+/** Bring Claude's question about a sync into view, with the cursor in its answer box. */
+function showSyncQuestion(): void {
+  $('sync-ask').scrollIntoView({ block: 'center' });
+  $('sync-answer').focus();
+}
+
+/** The notice offering Undo after Claude merged a sync; it stays, over the stale notice and under any other notice, until Undo, close or the next sync. */
+let syncUndo: string | undefined;
+
+export function setSyncUndo(text: string | undefined): void {
+  if (syncUndo === text) return;
+  syncUndo = text;
+  if (noticeTimer === undefined) clearNotice();
 }
 
 /** The shown files are out of date; a notice with Refresh stays, under any other notice, until they reload. */
@@ -114,7 +131,14 @@ export function setStale(on: boolean): void {
 export function clearNotice(): void {
   clearTimeout(noticeTimer);
   noticeTimer = undefined;
-  $('notice').replaceChildren(...stale ? [el('span', '', 'The base branch moved on GitHub. Refresh to see the current changes.'), button('Refresh', () => { $('refresh').click(); }, 'primary small')] : []);
+  const dismiss = (message: PageMessage): void => { setSyncUndo(undefined); post(message); };
+  const close = el('button', 'icon-button');
+  close.append(icon(icons.close));
+  close.setAttribute('aria-label', 'Close');
+  close.addEventListener('click', () => { dismiss({ action: 'dismiss-sync-undo' }); });
+  $('notice').replaceChildren(...syncUndo !== undefined
+    ? [el('span', '', syncUndo), button('Undo', () => { dismiss({ action: 'undo-sync' }); }, 'small'), close]
+    : stale ? [el('span', '', 'The base branch moved on GitHub. Refresh to see the current changes.'), button('Refresh', () => { $('refresh').click(); }, 'primary small')] : []);
 }
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');

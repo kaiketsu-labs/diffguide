@@ -37,7 +37,7 @@ export function pullRequestPageController(page: PullRequestPage): PageController
     .then((paths) => { listed = { paths }; remote.changed(); });
   const diff = new DiffView(page, async () => (await remote.currentConversation()).lastReviewedCommit);
   const parts: PageParts = {
-    page, remote, diff, edits: { applied: new Map(), undo: new Map(), conflictQuestion: undefined },
+    page, remote, diff, edits: { applied: new Map(), undo: new Map(), conflictQuestion: undefined, syncQuestion: undefined, syncUndo: undefined },
     findThread: (id) => {
       const thread = opened.session.store.threads.find((candidate) => candidate.id === id);
       if (thread === undefined) throw new Error('This thread no longer exists.');

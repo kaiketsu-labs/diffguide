@@ -4,15 +4,13 @@ import { fetchGitHubHead, syncWithPullRequest, waitMessage } from './git/sync.js
 import { git } from './git/worktrees.js';
 
 /**
- * Bring a PR worktree to the PR's latest commit on GitHub and fetch its base branch; returns the base commit to merge.
- * Refuses a worktree with uncommitted changes or commits GitHub does not have, so a merge never builds on stale work.
+ * Fetch the PR's latest commit on GitHub and its base branch, for a conflict fix in a scratch worktree at that commit.
+ * The worktree stays as it is: its edits and local commits follow the fix at the next sync.
  */
-export async function prepareConflictFix(worktree: string, number: number, baseBranch: string): Promise<string> {
-  if ((await git(worktree, ['status', '--porcelain'])).trim() !== '') throw new Error('The PR worktree has uncommitted changes. Commit or discard them first.');
-  await syncToPullRequestHead(worktree, number);
-  if ((await git(worktree, ['rev-parse', 'HEAD'])).trim() !== (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim()) throw new Error('The PR worktree has commits that are not on GitHub. Push or drop them first.');
+export async function prepareConflictFix(worktree: string, number: number, baseBranch: string): Promise<{ readonly head: string; readonly base: string }> {
+  const { head } = await fetchGitHubHead(worktree, number);
   await git(worktree, ['fetch', '--quiet', 'origin', baseBranch]);
-  return (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim();
+  return { head, base: (await git(worktree, ['rev-parse', 'FETCH_HEAD'])).trim() };
 }
 
 /**
@@ -183,14 +181,14 @@ export interface ConflictFix {
 /** The label of the conflict fix task, which the review page shows progress for. */
 export const conflictFixLabel = 'fixing merge conflicts';
 
-/** Ask Claude to merge the base, resolve the conflicts, commit and push; it may run only the Git commands this needs. */
+/** Ask Claude to merge the base, resolve the conflicts, commit and push from a scratch worktree; it may run only the Git commands this needs. */
 export function conflictTask({ base, baseBranch, headBranch, pushTo, answer }: ConflictFix): AgentTask {
   if (!/^[a-f\d]{40,64}$/u.test(base) || !isBranch(baseBranch) || !isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for fixing conflicts.');
   const push = `git push ${pushTo} HEAD:refs/heads/${headBranch}`;
   return {
     label: conflictFixLabel,
     prompt: [
-      `GitHub reports merge conflicts between this pull request and its base branch ${baseBranch}. The worktree is at the PR's latest commit, on a detached HEAD.`,
+      `GitHub reports merge conflicts between this pull request and its base branch ${baseBranch}. This folder is a scratch worktree at the PR's latest commit, on a detached HEAD.`,
       `Run \`git merge --no-edit ${base}\` to merge the base branch. Resolve every conflicted file so both sides' intent survives, then \`git add\` the files and \`git commit --no-edit\`.`,
       `Then run \`${push}\` to update the pull request.`,
       'Run only these Git commands. If a conflict needs a decision the code does not answer, run `git merge --abort`, push nothing, and explain what is needed.',

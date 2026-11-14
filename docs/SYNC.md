@@ -9,7 +9,7 @@ DiffGuide moves code in three kinds of checkout: PR worktrees under `.claude/wor
 1. Back up before every Git write. DiffGuide saves HEAD, the index, the working tree and untracked files under `refs/diffguide/backup/<checkout>/<time>` before it moves anything. Ignored files are never touched, so they need no backup.
 2. Dry-run before touching files. `git merge-tree --write-tree` decides whether a merge or rebase applies cleanly without changing the checkout.
 3. Try the deterministic steps in a fixed order: fast-forward, then clean 3-way merge of edits, then clean rebase of local commits. Claude resolves only what is left.
-4. Claude resolves in a scratch worktree made from the backup, never in the checkout you edit. Its result is applied only when it has no conflict markers, its files parse, and your checkout has not changed since the backup.
+4. Claude resolves in a scratch worktree made after the backup, never in the checkout you edit. Its result is applied only when `git diff --check` finds no conflict markers and your checkout has not changed since the backup.
 5. A failed step restores the backup and leaves a page notice with one action. A transient failure (offline, lock held) waits and retries without a notice.
 6. Review data follows code through `anchors.ts`. A thread or read mark whose code no longer matches lapses; it never moves to other lines.
 
@@ -88,19 +88,24 @@ Actions outside polling follow the same steps:
 
 ## Claude's step
 
-Claude gets a scratch worktree at the backup commit, the target head, and the list of conflicted files. Its task is the current `conflictTask` with the same narrow tool list. DiffGuide then checks:
+Each clashing step (a local commit, or the uncommitted edits) goes to Claude in a scratch worktree under the system temp folder: the step's new parent is checked out and the clashing files hold diff3 conflict markers from `git merge-tree`. Claude runs in a new conversation that is not kept, may read history with `git diff`, `log`, `show` and `status`, and edits only those files. DiffGuide then checks:
 
-- No `<<<<<<<`, `=======` or `>>>>>>>` lines remain in the resolved files.
-- Each resolved file parses with the TextMate grammar the page already loads, or with `tsc --noEmit` when the repository has a `tsconfig.json`.
-- Your checkout's state equals the backup. When it does not, DiffGuide waits and retries the whole sync from a new backup.
+- `git diff --check` finds no leftover conflict marker in the resolved files. As in Git, nothing parses the files.
+- Your checkout still matches the snapshot the sync started from. When it does not, nothing is written and the next poll starts over.
 
-If Claude cannot resolve, it stops with a question, as Fix conflicts does now. The checkout stays as before the sync, and the page shows the question with an answer box.
+Only the clashing files are taken from Claude's copy. A staged edit that clashes leaves GitHub's version in the index, so the resolved file shows as unstaged. The page's notice offers Undo, which backs up the checkout and restores the backup taken before the sync; the page then leaves GitHub's head alone until it moves again.
+
+Claude asks by leaving the files unchanged with a reply. The checkout stays as before the sync, the question shows above the tabs with an answer box, and Sync runs the sync again with the answer. A result that keeps markers, or a failed run, shows a notice and leaves the checkout as it was. Either way, polls do not ask Claude again until the checkout or GitHub's head changes.
+
+Fix conflicts also runs in a scratch worktree, at GitHub's head, and pushes from there. The checkout's edits and local commits follow at the next sync.
 
 ## Status
 
 Built (`src/core/git/sync.ts`, `src/core/git/backups.ts`): backups, fast-forward with edits, 3-way merge of staged and unstaged edits, replay of local commits, force pushes, your own checkout. Waiting without an error: offline, failed Git sign-in, `index.lock` held (retried for about 5 s first), and your own merge, rebase, cherry-pick or revert. The page says why in a notice that hides after 4 s and shows again only when the reason changes. The sync records GitHub's head in `refs/diffguide/github/pr-<n>` at every fetch, so it can tell local commits from replaced ones.
 
-Pending: Claude's step (a clash now leaves the checkout as it was and shows which files clash); a rejected push syncing and pushing again; Fix conflicts with uncommitted edits; discarding only Claude's files after its run on someone else's PR.
+Claude's step: clashing commits and edits are merged by Claude in a scratch worktree and applied after the checks, with Undo. Fix conflicts runs in a scratch worktree and accepts uncommitted edits.
+
+Pending: a rejected push syncing and pushing again; discarding only Claude's files after its run on someone else's PR.
 
 Known limits:
 
@@ -108,7 +113,10 @@ Known limits:
 - On your own checkout, the branch moves but `origin/<branch>` stays until the next fetch, so VS Code may show it as ahead meanwhile. Not yet checked in VS Code.
 - A worktree made before this change has no recorded head. A force push seen on its page's first check still stops with the old message; later checks have the head.
 - `merge-tree` with trees as inputs is checked on Git 2.50.1 only.
-- A merge left in a PR worktree by an interrupted conflict fix from before this change counts as yours, so the sync waits for it. Claude's step moves conflict fixes out of the checkout, so new runs cannot leave one.
+- A merge left in a PR worktree by an interrupted conflict fix from before this change counts as yours, so the sync waits for it. Conflict fixes now run in a scratch worktree, so new runs cannot leave one.
+- Nothing checks that Claude's resolved files parse; Git does not either. TypeScript 7 has no JavaScript API to bundle, and TextMate grammars report no errors.
+- An edit saved while Claude resolves discards Claude's result; the next poll asks Claude again from the new state.
+- A clashing staged edit with no clash in the working files syncs without Claude and without the Undo notice; the backup still holds the staged version.
 - When the GitHub API itself is out of reach, the poll stops before the sync and shows nothing, as before.
 
 ## Proof
@@ -126,5 +134,8 @@ Known limits:
 
 - Claude's resolution is applied once the checks pass. The page notice offers Undo, which restores the backup.
 - Your own checkout follows the same rules as PR worktrees. The page no longer says "Pull them".
-- On someone else's PR, DiffGuide backs up, then discards only the files Claude changed during its run.
+- On someone else's PR, DiffGuide backs up, then discards only the files Claude changed during its run: every file changed during the run except those you saved in a VS Code editor meanwhile.
+- Claude's checks are Git's: no leftover conflict markers. No parse check.
+- Claude's question shows inline above the tabs, not as a modal, with a notice whose Show button brings it into view.
+- The Undo notice stays until Undo, close or the next sync. Undo backs up first, so edits made after the sync stay in a backup.
 - Backup refs live 14 days, and the page menu lists recent ones for restore. Removing a worktree deletes its backups only when it held no edits and no unpushed commits; otherwise they stay for the full 14 days.

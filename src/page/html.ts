@@ -334,6 +334,7 @@ tr.annotation td{padding:var(--space-4) 10px}.annotation-box{display:flex;gap:va
 <p id="error" role="alert"></p>
 <p id="notice" role="status"></p>
 <div id="answers" class="answers" role="status" hidden></div>
+<div id="sync-ask" class="thread analysis" hidden><div class="strip">Claude needs your input to sync</div><div id="sync-reply" class="msg-text"></div><textarea id="sync-answer" aria-label="Your answer" placeholder="Your answer"></textarea><div class="row composer-actions"><span class="muted gap">Your checkout stays as it was until Claude finishes.</span><button id="sync-cancel" class="quiet">${icons.close}Cancel</button><button id="sync-send" class="agent">${icons.agentFix}Sync</button></div></div>
 <aside id="peek" hidden aria-label="Definition"><div id="peek-resize" title="Drag to resize. Double-click to reset."></div><div class="peek-head">
 <button id="peek-back" title="Back" aria-label="Back">${icons.back}</button>
 <button id="peek-forward" title="Forward" aria-label="Forward">${icons.forward}</button>

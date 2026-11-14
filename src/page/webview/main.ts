@@ -260,6 +260,18 @@ $('conflict-send').addEventListener('click', () => {
   answer.value = '';
 });
 $('conflict-cancel').addEventListener('click', () => post({ action: 'dismiss-conflict-question' }));
+$('sync-send').addEventListener('click', () => {
+  const answer = $<HTMLTextAreaElement>('sync-answer');
+  if (!answer.value.trim()) { answer.focus(); return; }
+  $('error').textContent = '';
+  post({ action: 'sync', text: answer.value });
+  answer.value = '';
+  $('sync-ask').hidden = true;
+});
+$('sync-cancel').addEventListener('click', () => {
+  $('sync-ask').hidden = true;
+  post({ action: 'dismiss-sync-question' });
+});
 $('fix-conflicts').addEventListener('click', () => {
   $('error').textContent = '';
   $<HTMLButtonElement>('fix-conflicts').disabled = true;

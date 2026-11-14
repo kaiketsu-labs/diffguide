@@ -80,6 +80,10 @@ export interface PageEdits {
   readonly undo: Map<string, { readonly path: string; readonly before: string; readonly after: string }>;
   /** What Claude asked when it last stopped fixing conflicts without pushing. */
   conflictQuestion: string | undefined;
+  /** What Claude asked when it could not merge GitHub's new commits with local work. */
+  syncQuestion: string | undefined;
+  /** The last sync Claude resolved, for Undo: its notice, the backup to restore, and GitHub's head it moved to. */
+  syncUndo: { readonly text: string; readonly backup: string; readonly head: string; readonly commits: number } | undefined;
 }
 
 /** The parts of an open PR page that its action groups share. */

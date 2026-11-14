@@ -7,7 +7,8 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import { commitAndPush, discardSince, prepareConflictFix, worktreeSnapshot } from '../src/core/conflicts.js';
 import { snapshot } from '../src/core/git/backups.js';
-import { recordGitHubHead, syncWithPullRequest, waitMessage } from '../src/core/git/sync.js';
+import type { AgentTask } from '../src/core/agent.js';
+import { recordGitHubHead, type SyncResolver, syncWithPullRequest, undoSync, waitMessage } from '../src/core/git/sync.js';
 import { removeWorktree, worktreePath } from '../src/core/git/worktrees.js';
 
 // Every cell of docs/SYNC.md's decision table against a real checkout and a fake GitHub repository.
@@ -86,7 +87,7 @@ async function lost(repository: string, worktree: string | undefined, before: Ma
     ...[...before.files].filter(([, blob]) => !reachable.has(blob)).map(([file]) => file)];
 }
 
-type Outcome = 'synced' | 'waits' | 'claude' | 'error';
+type Outcome = Awaited<ReturnType<typeof syncWithPullRequest>>['outcome'] | 'error';
 
 /** The poll path, as `worktreeActions.pollGitHub` runs it: an error becomes the page's red problem line. */
 async function sync(worktree: string, pushedHead: string | undefined): Promise<{ outcome: Outcome; error?: string }> {
@@ -214,7 +215,6 @@ for (const local of locals) {
 
 /** Actions outside polling that write to the checkout. */
 const actionGaps = new Set([
-  'Fix conflicts with uncommitted edits keeps them and proceeds',
   'a push GitHub rejects because the PR moved syncs and pushes again',
   'after Claude\'s run on someone else\'s PR, files you changed meanwhile stay in place',
 ]);
@@ -280,4 +280,135 @@ action('a failed Git sign-in waits and says why', async (t) => {
   await git(worktree, 'config', 'core.sshCommand', 'sh -c \'echo "git@github.invalid: Permission denied (publickey)." >&2; exit 255\' --');
   assert.deepEqual(await syncWithPullRequest(worktree, 7), { outcome: 'waits', reason: 'sign-in' });
   assert.match(waitMessage('sign-in'), /could not sign in/u);
+});
+
+/** Claude in tests: `edit` changes the scratch worktree's files and returns Claude's reply. */
+function agent(edit: (scratch: string, task: AgentTask) => Promise<string | undefined>): SyncResolver & { readonly tasks: AgentTask[] } {
+  const tasks: AgentTask[] = [];
+  return {
+    tasks,
+    run: async (task) => {
+      tasks.push(task);
+      assert.ok(task.cwd !== undefined, 'Claude works outside the checkout');
+      const reply = await edit(task.cwd, task);
+      return reply === undefined ? {} : { reply };
+    },
+  };
+}
+
+const worktrees = async (worktree: string): Promise<number> => (await git(worktree, 'worktree', 'list', '--porcelain')).split('\n').filter((line) => line.startsWith('worktree ')).length;
+
+test('resolve: Claude merges edits to the same line in a scratch worktree, and Undo puts the checkout back', async (t) => {
+  const repos = await fixture(t);
+  const { worktree } = repos;
+  const githubHead = await git(worktree, 'rev-parse', 'HEAD');
+  await writeFile(path.join(worktree, 'a.txt'), lines('mine'));
+  await pushOnGitHub(repos.origin, { force: false });
+  const claude = agent(async (scratch) => {
+    assert.notEqual(scratch, worktree);
+    assert.equal(await read(worktree, 'a.txt'), lines('mine'), 'the checkout stays as it was while Claude works');
+    assert.match(await read(scratch, 'a.txt'), /^<<<<<<< .*\nremote\n\|\|\|\|\|\|\| .*\none\n=======\nmine\n>>>>>>> /u);
+    assert.equal(await read(scratch, 'n.txt'), 'from github\n');
+    await writeFile(path.join(scratch, 'a.txt'), lines('remote and mine'));
+    return 'a.txt: kept both.';
+  });
+  const result = await syncWithPullRequest(worktree, 7, githubHead, claude);
+  assert.equal(result.outcome, 'synced');
+  assert.ok(result.outcome === 'synced' && result.resolved !== undefined);
+  assert.deepEqual({ files: result.resolved.files, commits: result.resolved.commits }, { files: ['a.txt'], commits: 1 });
+  assert.match(claude.tasks[0]?.prompt ?? '', /clash with uncommitted edits\. .*: a\.txt\./u);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), await git(repos.origin, 'rev-parse', 'refs/pull/7/head'));
+  assert.equal(await read(worktree, 'a.txt'), lines('remote and mine'));
+  assert.equal(await git(worktree, 'status', '--porcelain'), 'M a.txt');
+  assert.equal(await worktrees(worktree), 1, 'the scratch worktree is gone');
+
+  const resolved = await material(worktree, githubHead);
+  await undoSync(worktree, result.resolved.backup);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), githubHead);
+  assert.equal(await read(worktree, 'a.txt'), lines('mine'));
+  assert.deepEqual(await lost(worktree, worktree, resolved), [], 'Undo keeps the resolved files in a backup');
+});
+
+test('resolve: Claude replays a local commit whose change clashes', async (t) => {
+  const repos = await fixture(t);
+  const { worktree } = repos;
+  const githubHead = await git(worktree, 'rev-parse', 'HEAD');
+  await writeFile(path.join(worktree, 'a.txt'), lines('mine'));
+  await git(worktree, 'commit', '--quiet', '-am', 'local');
+  await pushOnGitHub(repos.origin, { force: true });
+  const claude = agent(async (scratch) => { await writeFile(path.join(scratch, 'a.txt'), lines('remote and mine')); return undefined; });
+  const result = await syncWithPullRequest(worktree, 7, githubHead, claude);
+  assert.equal(result.outcome, 'synced');
+  assert.match(claude.tasks[0]?.prompt ?? '', /clash with the local commit "local"/u);
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD^'), await git(repos.origin, 'rev-parse', 'refs/pull/7/head'));
+  assert.equal(await git(worktree, 'log', '-1', '--format=%s'), 'local');
+  assert.equal(await show(worktree, 'HEAD:a.txt'), lines('remote and mine').trimEnd());
+  assert.equal(await git(worktree, 'status', '--porcelain'), '');
+});
+
+test('resolve: a staged edit that clashes leaves GitHub\'s version in the index and Claude\'s in the file', async (t) => {
+  const repos = await fixture(t);
+  const { worktree } = repos;
+  await writeFile(path.join(worktree, 'a.txt'), lines('mine'));
+  await git(worktree, 'add', 'a.txt');
+  await pushOnGitHub(repos.origin, { force: false });
+  const result = await syncWithPullRequest(worktree, 7, undefined, agent(async (scratch) => { await writeFile(path.join(scratch, 'a.txt'), lines('remote and mine')); return undefined; }));
+  assert.equal(result.outcome, 'synced');
+  assert.equal(await show(worktree, ':a.txt'), lines('remote').trimEnd());
+  assert.equal(await read(worktree, 'a.txt'), lines('remote and mine'));
+});
+
+test('resolve: Claude\'s question leaves the checkout as it was, and the same state does not ask Claude again', async (t) => {
+  const repos = await fixture(t);
+  const { worktree } = repos;
+  await writeFile(path.join(worktree, 'a.txt'), lines('mine'));
+  const state = { head: await git(worktree, 'rev-parse', 'HEAD'), files: await snapshot(worktree) };
+  await pushOnGitHub(repos.origin, { force: false });
+  const claude = agent(async () => 'Which first line wins?');
+  const result = await syncWithPullRequest(worktree, 7, undefined, claude);
+  assert.equal(result.outcome, 'question');
+  assert.ok(result.outcome === 'question');
+  assert.equal(result.question, 'Which first line wins?');
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), state.head);
+  assert.deepEqual(await snapshot(worktree), state.files);
+  assert.deepEqual(await syncWithPullRequest(worktree, 7, undefined, { ...claude, tried: result.attempt }), { outcome: 'claude', head: result.head, files: ['a.txt'], tried: true });
+  assert.equal(claude.tasks.length, 1);
+  const answered = agent(async (scratch, task) => { assert.match(task.prompt, /They answered:\n\nKeep mine\.$/u); await writeFile(path.join(scratch, 'a.txt'), lines('mine')); return undefined; });
+  assert.equal((await syncWithPullRequest(worktree, 7, undefined, { ...answered, answer: 'Keep mine.' })).outcome, 'synced');
+});
+
+test('resolve: a result with conflict markers left, or Claude\'s error, leaves the checkout as it was', async (t) => {
+  const repos = await fixture(t);
+  const { worktree } = repos;
+  await writeFile(path.join(worktree, 'a.txt'), lines('mine'));
+  const state = { head: await git(worktree, 'rev-parse', 'HEAD'), files: await snapshot(worktree) };
+  await pushOnGitHub(repos.origin, { force: false });
+  const half = agent(async (scratch) => { await writeFile(path.join(scratch, 'a.txt'), `<<<<<<< ours\nremote\n=======\nmine\n>>>>>>> theirs\n${lines('x').slice(2)}`); return 'Done.'; });
+  const rejected = await syncWithPullRequest(worktree, 7, undefined, half);
+  assert.equal(rejected.outcome, 'rejected');
+  assert.ok(rejected.outcome === 'rejected');
+  assert.deepEqual(rejected.files, ['a.txt']);
+  const failed = await syncWithPullRequest(worktree, 7, undefined, { run: async () => ({ error: 'Claude is not signed in.' }) });
+  assert.ok(failed.outcome === 'rejected');
+  assert.equal(failed.error, 'Claude is not signed in.');
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), state.head);
+  assert.deepEqual(await snapshot(worktree), state.files);
+  assert.equal(await worktrees(worktree), 1);
+});
+
+test('resolve: an edit saved while Claude works keeps the checkout as it was, and the next sync starts over', async (t) => {
+  const repos = await fixture(t);
+  const { worktree } = repos;
+  await writeFile(path.join(worktree, 'a.txt'), lines('mine'));
+  const head = await git(worktree, 'rev-parse', 'HEAD');
+  await pushOnGitHub(repos.origin, { force: false });
+  const claude = agent(async (scratch) => {
+    await writeFile(path.join(worktree, 'b.txt'), 'saved meanwhile\n');
+    await writeFile(path.join(scratch, 'a.txt'), lines('remote and mine'));
+    return undefined;
+  });
+  assert.deepEqual(await syncWithPullRequest(worktree, 7, undefined, claude), { outcome: 'again' });
+  assert.equal(await git(worktree, 'rev-parse', 'HEAD'), head);
+  assert.equal(await read(worktree, 'a.txt'), lines('mine'));
+  assert.equal(await read(worktree, 'b.txt'), 'saved meanwhile\n');
 });

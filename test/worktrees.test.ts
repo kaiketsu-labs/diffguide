@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import type { AgentTask, AgentTaskResult } from '../src/core/agent.js';
 import type { ChangeRequestSummary, Forge } from '../src/core/forge.js';
 import { cleanUpWorktrees } from '../src/core/git/worktreeCleanup.js';
 import type { PageParts } from '../src/page/pullRequest/context.js';
@@ -338,7 +339,7 @@ test('the poll brings your own checkout to GitHub\'s new commits, merging edits 
   const host = { listRepositoryFiles: async () => [], fileIcons: async () => undefined };
   const page = { provider: { version: async () => ({ head, updatedAt: '', baseBranch: 'main', baseHead }) }, pullRequest, folder: source, role: 'author', opened, host, revealed: new Set(), onCheckout: true };
   const diff = new DiffView(page as unknown as PageParts['page'], async () => undefined);
-  const { pollGitHub } = worktreeActions({ page, diff, remote: { written: { waiting: false } } } as unknown as PageParts);
+  const { pollGitHub } = worktreeActions({ page, diff, edits: {}, remote: { written: { waiting: false } } } as unknown as PageParts);
 
   assert.deepEqual(await pollGitHub(), { reload: true, files: true });
   const revParse = async (...args: string[]): Promise<string> => (await executeFile('git', ['-C', source, 'rev-parse', ...args], { encoding: 'utf8' })).stdout.trim();
@@ -360,4 +361,58 @@ test('the poll says why the checkout waits when GitHub is out of reach, instead 
   const result = await pollGitHub();
   assert.equal(result.problem, undefined);
   assert.match(result.waiting ?? '', /^GitHub is out of reach/u);
+});
+
+test('the poll asks Claude when GitHub\'s commits clash with your edits, runs it again with your answer, and stays put after Undo', async (t) => {
+  const { source } = await fixture(t);
+  const origin = path.join(path.dirname(source), 'origin');
+  const commitOnGitHub = async (text: string): Promise<string> => {
+    await git(origin, ['switch', '--quiet', 'feature']);
+    await writeFile(path.join(origin, 'feature.ts'), text);
+    await git(origin, ['commit', '--quiet', '-am', text.split('\n')[0] ?? '']);
+    await git(origin, ['update-ref', 'refs/pull/5/head', 'feature']);
+    await git(origin, ['switch', '--quiet', 'main']);
+    return (await executeFile('git', ['-C', origin, 'rev-parse', 'feature'], { encoding: 'utf8' })).stdout.trim();
+  };
+  await commitOnGitHub('one\ntwo\n');
+  await git(source, ['fetch', '--quiet', 'origin']);
+  await git(source, ['switch', '--quiet', 'feature']);
+  const local = (await executeFile('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).stdout.trim();
+  await writeFile(path.join(source, 'feature.ts'), 'mine\ntwo\n');
+  const head = await commitOnGitHub('remote\ntwo\n');
+  const baseHead = (await executeFile('git', ['-C', origin, 'rev-parse', 'main'], { encoding: 'utf8' })).stdout.trim();
+
+  const prompts: string[] = [];
+  const runTask = async (task: AgentTask): Promise<AgentTaskResult> => {
+    prompts.push(task.prompt);
+    if (prompts.length === 1) return { reply: 'Which first line wins?' };
+    await writeFile(path.join(task.cwd ?? '', 'feature.ts'), 'remote mine\ntwo\n');
+    return {};
+  };
+  const opened = { runner: { activity: { running: false }, runTask }, session: { store: { threads: [] } }, useBase: async () => undefined };
+  const host = { listRepositoryFiles: async () => [], fileIcons: async () => undefined };
+  const page = { provider: { version: async () => ({ head, updatedAt: '', baseBranch: 'main', baseHead }) }, pullRequest, folder: source, role: 'author', opened, host, revealed: new Set(), onCheckout: true };
+  const diff = new DiffView(page as unknown as PageParts['page'], async () => undefined);
+  const edits = { applied: new Map(), undo: new Map(), conflictQuestion: undefined, syncQuestion: undefined as string | undefined, syncUndo: undefined as { text: string } | undefined };
+  const actions = worktreeActions({ page, diff, edits, remote: { written: { waiting: false }, changed: () => undefined } } as unknown as PageParts);
+  const content = (): Promise<string> => readFile(path.join(source, 'feature.ts'), 'utf8');
+
+  assert.deepEqual((await actions.pollGitHub()).notice, { text: 'Claude needs your input to sync.', show: 'sync-question' });
+  assert.equal(edits.syncQuestion, 'Which first line wins?');
+  assert.equal(await content(), 'mine\ntwo\n');
+  assert.equal((await actions.pollGitHub()).notice, undefined);
+  assert.equal(prompts.length, 1, 'the same state does not ask Claude again');
+
+  actions.answerSync('Keep both.');
+  await actions.pollGitHub();
+  assert.match(prompts[1] ?? '', /They answered:\n\nKeep both\.$/u);
+  assert.equal(await content(), 'remote mine\ntwo\n');
+  assert.equal(edits.syncUndo?.text, 'Claude merged your edits to feature.ts with GitHub\'s 1 new commit.');
+
+  assert.equal(await actions.undoSync(), 'Undid the sync. Your checkout is as it was, without GitHub\'s 1 new commit.');
+  assert.equal(await content(), 'mine\ntwo\n');
+  assert.equal((await executeFile('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).stdout.trim(), local);
+  await actions.pollGitHub();
+  assert.equal(prompts.length, 2, 'Undo keeps the checkout without GitHub\'s head');
+  assert.equal(await content(), 'mine\ntwo\n');
 });
