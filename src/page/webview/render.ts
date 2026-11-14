@@ -7,7 +7,7 @@ import { isWriter, reactionsRow, toolButton } from './conversation/comment.js';
 import { renderConversation } from './conversation/timeline.js';
 import { $, detailsLoading, el, icon, placeholders, setLabel, stateIcon } from './dom.js';
 import { showListToggle } from './files/filters.js';
-import { renderFiles } from './files/render.js';
+import { drawPendingDiffs, renderFiles } from './files/render.js';
 import { guideState } from './guide/model.js';
 import { renderConnectButton, renderContextButton } from './header/connect.js';
 import { branchRef, copyRef, pullRequestChip, pullRequestFacts, renderLinked, renderState, verdict } from './header/pullRequest.js';
@@ -41,6 +41,7 @@ export function onShortcut(event: KeyboardEvent): void {
   };
   if (event.key === 'j' || event.key === 'k') step('#files .file', event.key === 'j');
   else if (event.key === 'n' || event.key === 'p') {
+    drawPendingDiffs();
     const nodes = [...document.querySelectorAll<HTMLElement>('#files details.thread')];
     const middle = window.innerHeight / 2;
     const index = nodes.findIndex((node) => node.getBoundingClientRect().top > middle + 1);
