@@ -12,6 +12,7 @@ import { anchorFromText } from '../src/core/anchors.js';
 import type { ReviewBridge, ReviewStore } from '../src/core/contracts.js';
 import { getHeadRevision } from '../src/core/git/git.js';
 import { checkoutLabel, groupByRepository, listLocalCheckouts, type LocalCheckout, matchesFilter, parseWorktreeList } from '../src/core/git/localCheckouts.js';
+import { useEditorHighlighter } from '../src/core/codePreview.js';
 import { createReviewStore } from '../src/core/store.js';
 import { wholeFileDiff } from '../src/core/unifiedDiff.js';
 import { LocalFilesView } from '../src/hosts/vscode/localFilesView.js';
@@ -109,6 +110,27 @@ test('shows changed and untracked files, and unchanged files only while they hav
 
   await store.resolve(thread.id, true);
   assert.equal((await review.readFiles()).files.some((file) => file.path === 'src/kept.ts'), false);
+});
+
+test('shows changed and untracked files before their colors, and hands the colors over after', async (t) => {
+  let calls = 0;
+  useEditorHighlighter({ prepare: async () => undefined, styles: () => '', highlight: (code: string) => { calls++; return `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`; } });
+  t.after(() => { useEditorHighlighter(undefined); });
+  const { review } = await fixture();
+  const htmlOf = (files: readonly { path: string; hunks: readonly { lines: readonly { html: string }[] }[] }[]) => files.map((file) => [file.path, file.hunks.flatMap((hunk) => hunk.lines.map((line) => line.html.includes('<span')))]);
+
+  const cold = await review.readFiles();
+  assert.equal(calls, 0, 'the uncolored files ran the highlighter');
+  assert.deepEqual(htmlOf(cold.files), [['new.ts', [false, false]], ['src/changed.ts', [false, false]]]);
+  assert.ok(cold.colored !== undefined);
+  const batches: string[] = [];
+  const colored = await cold.colored((files) => { batches.push(...files.map((file) => file.path)); });
+  assert.deepEqual(batches.sort(), ['new.ts', 'src/changed.ts']);
+  assert.deepEqual(htmlOf(colored), [['new.ts', [true, true]], ['src/changed.ts', [true, true]]]);
+
+  const warm = await review.readFiles();
+  assert.equal(warm.colored, undefined);
+  assert.deepEqual(htmlOf(warm.files), htmlOf(colored));
 });
 
 test('comments from the page go to the workspace review at HEAD, only on files the page shows', async () => {

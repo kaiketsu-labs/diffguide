@@ -12,7 +12,7 @@ import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../cor
 import { git } from '../../core/git/worktrees.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
 import { applySuggestion, parseSuggestions } from '../../core/suggestions.js';
-import { type FileDiff, highlightSource, readPullRequestDiff, wholeFileDiff } from '../../core/unifiedDiff.js';
+import { type ColorFiles, colorInBatches, type FileDiff, highlightSource, knownColors, readPullRequestDiffPlainFirst, wholeFileDiff } from '../../core/unifiedDiff.js';
 import { mediaType } from '../../page/media.js';
 import { eventIntents, threadView } from '../../page/overviewState.js';
 import { readFilePreview, readMediaSides } from '../../page/preview/fileContent.js';
@@ -42,13 +42,30 @@ export function listRepositoryFiles(root: string): Promise<readonly string[]> {
   return gitPaths(root, ['ls-files', '--cached', '--others', '--exclude-standard']);
 }
 
-/** A file shown whole, or undefined when it is not a readable file. */
-export async function wholeFile(root: string, path: string, change: 'added' | 'unchanged'): Promise<FileDiff | undefined> {
+/** What a file shown whole holds: undefined when it is not a readable file, `large` past `maxWholeFileBytes`. */
+async function wholeFileContent(root: string, path: string): Promise<Buffer | 'large' | undefined> {
   const file = join(root, path);
   const info = await stat(file).catch(() => undefined);
   if (info?.isFile() !== true) return undefined;
-  if (info.size > maxWholeFileBytes) return { path, change, binary: true, additions: 0, deletions: 0, hunks: [] };
-  return wholeFileDiff(path, await readFile(file), change);
+  return info.size > maxWholeFileBytes ? 'large' : await readFile(file);
+}
+
+const largeFile = (path: string, change: 'added' | 'unchanged'): FileDiff => ({ path, change, binary: true, additions: 0, deletions: 0, hunks: [] });
+
+/** A file shown whole, or undefined when it is not a readable file. */
+export async function wholeFile(root: string, path: string, change: 'added' | 'unchanged'): Promise<FileDiff | undefined> {
+  const content = await wholeFileContent(root, path);
+  return content === undefined ? undefined : content === 'large' ? largeFile(path, change) : wholeFileDiff(path, content, change);
+}
+
+/** A file shown whole from colors already known, with `color` to build it colored when some were missing. */
+async function wholeFilePlainFirst(root: string, path: string, change: 'added' | 'unchanged'): Promise<{ diff: FileDiff; color?: () => FileDiff } | undefined> {
+  const content = await wholeFileContent(root, path);
+  if (content === undefined) return undefined;
+  if (content === 'large') return { diff: largeFile(path, change) };
+  const { colorize, missed } = knownColors();
+  const diff = wholeFileDiff(path, content, change, colorize);
+  return missed() ? { diff, color: () => wholeFileDiff(path, content, change) } : { diff };
 }
 
 /** What Claude's connection shows on the page: whether comments reach a session, and how many wait. */
@@ -201,26 +218,33 @@ export class LocalReview implements vscode.Disposable {
   async readFiles(select?: DiffSelection): Promise<FilesView> {
     const whitespace = select?.whitespace ?? this.#selection.whitespace;
     const head = await getHeadRevision(this.root);
-    const [tracked, untracked, repositoryFiles] = await Promise.all([
-      head === undefined ? [] : readPullRequestDiff(this.root, head, { ignoreWhitespace: whitespace }),
+    const [{ files: tracked, colored: trackedColored }, untracked, repositoryFiles] = await Promise.all([
+      head === undefined ? { files: [] as FileDiff[], colored: undefined } : readPullRequestDiffPlainFirst(this.root, head, { ignoreWhitespace: whitespace }),
       head === undefined ? listRepositoryFiles(this.root) : gitPaths(this.root, ['ls-files', '--others', '--exclude-standard']),
       listRepositoryFiles(this.root).catch(() => []),
     ]);
     const changed = new Set([...tracked.map((file) => file.path), ...untracked]);
     const threadPaths = this.store.threads.filter((thread) => !thread.resolved && thread.anchor.scope !== 'pullRequest').map((thread) => thread.anchor.path);
     const extras = [...new Set([...this.#extras(), ...threadPaths])].filter((path) => !changed.has(path));
-    await prepareHighlighting([...untracked, ...extras]);
-    const whole = await Promise.all([
-      ...untracked.map((path) => wholeFile(this.root, path, 'added')),
-      ...extras.map((path) => wholeFile(this.root, path, 'unchanged')),
-    ]);
-    const files = [...tracked, ...whole.filter((file) => file !== undefined)].sort((a, b) => a.path.localeCompare(b.path));
+    const preparing = prepareHighlighting([...untracked, ...extras]);
+    const whole = (await Promise.all([
+      ...untracked.map((path) => wholeFilePlainFirst(this.root, path, 'added')),
+      ...extras.map((path) => wholeFilePlainFirst(this.root, path, 'unchanged')),
+    ])).filter((file) => file !== undefined);
+    const byPath = (a: FileDiff, b: FileDiff): number => a.path.localeCompare(b.path);
+    const files = [...tracked, ...whole.map(({ diff }) => diff)].sort(byPath);
     this.#shown = files;
     this.#selection = { range: { kind: 'all' }, whitespace };
     // Viewed marks and progress count the files shown, so the page's state is read again for them.
     this.#marksChanged.fire();
     const icons = await readFileIcons([...new Set([...repositoryFiles, ...files.map((file) => file.path)])]).catch(() => undefined);
-    return { files, repositoryFiles, selection: this.#selection, atHead: true, ...icons === undefined ? {} : { icons } };
+    const colored: ColorFiles | undefined = trackedColored === undefined && whole.every(({ color }) => color === undefined) ? undefined : async (onBatch) => {
+      const trackedDone = trackedColored === undefined ? tracked : await trackedColored(onBatch);
+      await preparing;
+      const wholeDone = await colorInBatches(whole.map(({ diff, color }) => color ?? diff), onBatch);
+      return [...trackedDone, ...wholeDone].sort(byPath);
+    };
+    return { files, repositoryFiles, selection: this.#selection, atHead: true, ...icons === undefined ? {} : { icons }, ...colored === undefined ? {} : { colored } };
   }
 
   async #read(): Promise<OverviewState> {
