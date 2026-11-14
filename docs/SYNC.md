@@ -110,7 +110,7 @@ Known limits:
 - Replayed commits are not signed, even with `commit.gpgSign`: `git commit-tree` ignores that setting (checked on Git 2.50.1).
 - On your own checkout, the branch moves but `origin/<branch>` stays until the next fetch, so VS Code may show it as ahead meanwhile. Not yet checked in VS Code.
 - A worktree made before this change has no recorded head. A force push seen on its page's first check still stops with the old message; later checks have the head.
-- `merge-tree` with trees as inputs is checked on Git 2.50.1 only.
+- The sync needs Git 2.40 or newer for `merge-tree --merge-base`; Git 2.39 fails with "unknown option `merge-base'". `merge-tree` with trees as inputs is checked on Git 2.47.3 and 2.50.1.
 - A merge left in a PR worktree by an interrupted conflict fix from before this change counts as yours, so the sync waits for it. Conflict fixes now run in a scratch worktree, so new runs cannot leave one.
 - Nothing checks that Claude's resolved files parse; Git does not either. TypeScript 7 has no JavaScript API to bundle, and TextMate grammars report no errors.
 - An edit saved while Claude resolves discards Claude's result; the next poll asks Claude again from the new state.
