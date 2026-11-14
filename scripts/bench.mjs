@@ -103,34 +103,53 @@ async function pageRun(browser, dump) {
     const ready = window.__posted.find(([, message]) => message.action === 'ready');
     return { ready: ready[0] - start, painted: performance.now() - start };
   }, script);
-  const deliver = (message) => page.evaluate(async (data) => {
-    const start = performance.now();
-    window.dispatchEvent(new MessageEvent('message', { data }));
-    const handled = performance.now() - start;
-    await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
-    return { handled, painted: performance.now() - start };
-  }, message);
   const filesMessage = dump.messages.find((message) => 'files' in message);
   const colorsMessages = dump.messages.filter((message) => 'colors' in message);
   const stateMessage = { state: JSON.parse(dump.html.match(/<script[^>]*id="initial"[^>]*>([\s\S]*?)<\/script>/u)?.[1] ?? 'null')?.state };
   // GitHub's file list comes before the files, so the page has its Viewed marks and draws the files when they arrive.
   const listed = dump.messages.find((message) => message.state && !message.state.reviewedPending);
-  if (listed) await deliver(listed);
-  const files = await deliver(filesMessage);
-  // Color batches fill in the drawn lines over several frames; `colored` ends at the first frame without changes to the files.
-  const colored = colorsMessages.length === 0 ? undefined : await page.evaluate(async (batches) => {
+  // The messages go into the page first, so handing them over is not timed as the page's work, and long tasks count from here.
+  await page.evaluate(async (messages) => {
+    window.__messages = messages;
+    await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
+    window.__long.length = 0;
+  }, { listed, files: filesMessage, colors: colorsMessages, state: stateMessage });
+  const deliver = (name) => page.evaluate(async (key) => {
+    const start = performance.now();
+    window.dispatchEvent(new MessageEvent('message', { data: window.__messages[key] }));
+    const handled = performance.now() - start;
+    await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
+    return { handled, painted: performance.now() - start };
+  }, name);
+  /** Frames until the files list stops changing, as diffs and colors fill in over several. */
+  const settle = () => page.evaluate(async () => {
+    let changes = 0;
+    const observer = new MutationObserver((records) => { changes += records.length; });
+    observer.observe(document.getElementById('files'), { childList: true, subtree: true });
+    const start = performance.now();
+    for (let seen = -1; seen !== changes;) { seen = changes; await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0))); }
+    observer.disconnect();
+    return performance.now() - start;
+  });
+  if (listed) await deliver('listed');
+  const files = { ...await deliver('files'), drawn: 0 };
+  // Diffs below the first screen are drawn over the next frames; `drawn` ends at the first frame without changes to the files.
+  files.drawn = files.painted + await settle();
+  // Color batches come one by one, as VS Code delivers them, and fill in the drawn lines over several frames.
+  const colored = colorsMessages.length === 0 ? undefined : await page.evaluate(async () => {
     let changes = 0;
     new MutationObserver((records) => { changes += records.length; }).observe(document.getElementById('files'), { childList: true, subtree: true });
     const start = performance.now();
     let handled = 0;
-    for (const data of batches) {
+    for (const data of window.__messages.colors) {
       const at = performance.now();
       window.dispatchEvent(new MessageEvent('message', { data }));
       handled += performance.now() - at;
+      await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
     }
     for (let seen = -1; seen !== changes;) { seen = changes; await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0))); }
     return { handled, painted: performance.now() - start };
-  }, colorsMessages);
+  });
   const viewed = await page.evaluate(async () => {
     const box = document.querySelector('.file .viewed input');
     const start = performance.now();
@@ -139,12 +158,12 @@ async function pageRun(browser, dump) {
     await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
     return { handled, painted: performance.now() - start };
   });
-  const state = stateMessage.state ? await deliver(stateMessage) : undefined;
+  const state = stateMessage.state ? await deliver('state') : undefined;
   const long = await page.evaluate(() => window.__long);
   const nodes = await page.evaluate(() => document.getElementsByTagName('*').length);
   await page.close();
   if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
-  return { boot, files, ...colored ? { colored } : {}, viewed, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), nodes };
+  return { boot, files, ...colored ? { colored } : {}, viewed, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), longestTask: Math.max(0, ...long), nodes };
 }
 
 const report = { label, scale, runs, date: new Date().toISOString(), fixtures: {} };

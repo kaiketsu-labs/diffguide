@@ -16,7 +16,7 @@ import type { Composer, Thread } from '../types.js';
 import { linesFit } from './filters.js';
 import { annotationBox, annotationsOf, loadContext, unmarkRead } from './marks.js';
 import { folderOf, openFolders } from './nav.js';
-import { renderFiles } from './render.js';
+import { drawPendingDiffs, renderFiles } from './render.js';
 import { code, num } from './selection.js';
 
 /** Unchanged new-side lines between hunks; `offset` maps them to old-side lines. */
@@ -58,6 +58,7 @@ export function jump(thread: Thread): void {
     save();
     renderFiles();
   }
+  drawPendingDiffs();
   const target = document.getElementById('thread-' + thread.id) as HTMLDetailsElement | null;
   if (!target) return;
   const outer = target.parentElement?.closest<HTMLDetailsElement>('details.thread');

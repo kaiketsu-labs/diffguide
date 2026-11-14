@@ -10,7 +10,7 @@ import { collapsed, hiddenTypes, prefs, received, save } from '../state.js';
 import { renderNavThreads, renderThreadList } from '../threads/list.js';
 import { allThreads, isArchived } from '../threads/model.js';
 import { threadOpen } from '../threads/threadBox.js';
-import { renderFiles } from './render.js';
+import { drawPendingDiffs, renderFiles } from './render.js';
 
 /** Whether lines on `side` can take comments, read marks and threads in the shown range. */
 export function linesFit(side: DiffSide): boolean {
@@ -74,6 +74,7 @@ export function allFolded(): boolean {
 
 /** Display settings you set once: whitespace, folders and where comments show. */
 export function openViewMenu(): void {
+  drawPendingDiffs();
   const commentsOpen = document.querySelector('details.thread[open]') !== null;
   const notes = (received.current?.threads ?? []).filter((thread) => thread.origin === 'analysis' && (prefs.showArchived || !isArchived(thread))).length;
   const rows = [

@@ -21,6 +21,53 @@ import { expanded, table } from './table.js';
 
 const fileKeys = new Map<string, string>();
 
+/** File boxes whose diff is still to draw, in page order; a full redraw of a large PR draws them over the next frames instead of in one long task. */
+const undrawn = new Map<HTMLElement, () => void>();
+let drawing = false;
+/** A full redraw draws diffs at once for this long, which covers a typical PR, and leaves the rest to later frames. */
+const firstDrawMs = 8;
+/** Work per later frame. */
+const frameDrawMs = 10;
+
+function drawDiff(box: HTMLElement): void {
+  const draw = undrawn.get(box);
+  undrawn.delete(box);
+  if (draw && box.isConnected) draw();
+}
+
+/** Draw every diff still waiting, for code that looks up a thread, a draft or a line right away. */
+export function drawPendingDiffs(): void {
+  for (const box of [...undrawn.keys()]) drawDiff(box);
+}
+
+function drawOverFrames(): void {
+  if (drawing || !undrawn.size) return;
+  drawing = true;
+  requestAnimationFrame(() => {
+    drawing = false;
+    const start = performance.now();
+    // The reader may have scrolled or jumped to a file that still waits.
+    drawDiffsOnScreen();
+    for (const box of undrawn.keys()) {
+      if (performance.now() - start >= frameDrawMs) break;
+      drawDiff(box);
+    }
+    drawOverFrames();
+  });
+}
+
+/** Draw the waiting diffs that are on screen now, so the reader never sees an empty box. */
+function drawDiffsOnScreen(): void {
+  // All positions are read before any diff is drawn, since each draw would make the next read lay out the page again.
+  const onScreen: HTMLElement[] = [];
+  for (const box of undrawn.keys()) {
+    const rect = box.getBoundingClientRect();
+    if (rect.top >= window.innerHeight) break;
+    if (rect.bottom > 0) onScreen.push(box);
+  }
+  for (const box of onScreen) drawDiff(box);
+}
+
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 export function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(prefs.layout === name));
@@ -36,7 +83,7 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
   if (ui.focusThread !== undefined) {
     const id = ui.focusThread;
     ui.focusThread = undefined;
-    requestAnimationFrame(() => { document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
+    requestAnimationFrame(() => { drawPendingDiffs(); document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
   }
   if (prefs.view === 'guide') { keepView(() => renderGuide(only)); return; }
   const opened = filteredFiles(openedFiles());
@@ -58,9 +105,10 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
   const threadsOf = (path: string): Thread[] => threadsByFile.get(path) ?? [];
   const changed = only === 'state' ? visible.map((file) => file.path).filter((path) => fileKeys.get(path) !== fileKey(path, threadsOf(path))) : only;
   const targets = changed && boxes.size === visible.length ? [...new Set(changed.filter((path): path is string => path !== undefined))] : undefined;
-  const draw = (file: FileDiff): HTMLElement => {
+  const started = performance.now();
+  const draw = (file: FileDiff, wait = false): HTMLElement => {
     fileKeys.set(file.path, fileKey(file.path, threadsOf(file.path)));
-    return fileBox(file, threadsOf(file.path));
+    return fileBox(file, threadsOf(file.path), wait && performance.now() - started >= firstDrawMs);
   };
   const redrawn = targets?.every((path) => boxes.has(path)) ? targets.flatMap((path) => boxes.get(path) ?? []) : undefined;
   keepView(() => {
@@ -72,6 +120,7 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
     } else {
       container.replaceChildren();
       fileKeys.clear();
+      undrawn.clear();
       if (!shownFiles.length) container.append(el('p', 'muted', changes.length || openedFiles().length ? 'No files match the filter.' : received.current?.localMode ? 'No uncommitted changes. Pick a file in the Local view to review it.' : received.diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(received.diffRange) + '.'));
       const append = (parent: HTMLElement, folder: FileFolder<FileDiff>, depth: number): void => {
         for (const child of folder.folders) {
@@ -84,16 +133,18 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
           put(parent, depth, node);
           if (!isCollapsed) append(rail, child, depth + 1);
         }
-        for (const file of folder.files) put(parent, depth, draw(file));
+        for (const file of folder.files) put(parent, depth, draw(file, true));
       };
       const put = (parent: HTMLElement, depth: number, child: HTMLElement): void => { parent.append(depth === 0 ? child : railItem(child)); };
       if (prefs.folders) append(container, tree, 0);
-      else for (const file of shownChanges) container.append(draw(file));
-      for (const file of opened) container.append(draw(file));
+      else for (const file of shownChanges) container.append(draw(file, true));
+      for (const file of opened) container.append(draw(file, true));
     }
     if (prefs.folders) updateFolderProgress(tree);
     for (const frame of container.querySelectorAll<HTMLIFrameElement>('iframe.html-preview')) layoutMargin(frame, frameTops.get(frame.dataset.path ?? '') ?? {});
   }, container, redrawn);
+  drawDiffsOnScreen();
+  drawOverFrames();
   markCurrentNavFile();
 }
 
@@ -132,13 +183,21 @@ export function keepView(draw: () => void, container = $('files'), redrawn: read
   draw();
   restoreFrames(container, frames);
   for (const node of container.querySelectorAll<HTMLElement>('[data-scroll-key]')) node.scrollTop = scrolls.get(node.dataset.scrollKey) ?? 0;
+  // The draft may sit in a diff that is not drawn yet.
+  const draft = (key: string): HTMLTextAreaElement | null => {
+    const selector = '[data-draft="' + CSS.escape(key) + '"]';
+    const found = container.querySelector<HTMLTextAreaElement>(selector);
+    if (found || !undrawn.size) return found;
+    drawPendingDiffs();
+    return container.querySelector<HTMLTextAreaElement>(selector);
+  };
   if (focus) {
-    const area = container.querySelector<HTMLTextAreaElement>('[data-draft="' + CSS.escape(focus.key) + '"]');
+    const area = draft(focus.key);
     if (area) { area.focus({ preventScroll: true }); area.setSelectionRange(focus.start, focus.end); }
   }
   window.scrollTo(0, scroll);
   if (ui.focusNext) {
-    const area = container.querySelector<HTMLTextAreaElement>('[data-draft="' + CSS.escape(ui.focusNext) + '"]');
+    const area = draft(ui.focusNext);
     ui.focusNext = undefined;
     area?.focus();
   }
@@ -174,7 +233,8 @@ export function isLarge(file: FileDiff): boolean {
   return file.additions + file.deletions > 1500;
 }
 
-function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
+/** A file's box; with `wait`, a diff table is left for `drawOverFrames`. */
+function fileBox(file: FileDiff, threads: readonly Thread[], wait = false): HTMLElement {
   const isCollapsed = collapsed.get(file.path) === true;
   const box = el('div', 'file' + (isCollapsed ? ' collapsed' : ''));
   box.dataset.path = file.path;
@@ -240,17 +300,28 @@ function fileBox(file: FileDiff, threads: readonly Thread[]): HTMLElement {
   const placed = new Set(threads.filter((thread) => !standalone(thread)).map((thread) => thread.id));
   const fileThreads = wholeFileBlock(file.path, threads, placed, true);
   if (fileThreads) diff.append(fileThreads);
+  const outsideThreads = (): void => {
+    const outside = threads.filter((thread) => !placed.has(thread.id));
+    if (!outside.length) return;
+    const block = el('div', 'outside');
+    block.append(el('div', 'muted', 'Comments on lines this diff does not show'), ...outside.map(threadBox));
+    diff.insertBefore(block, fileThreads?.nextSibling ?? diff.firstChild);
+  };
   if (showPreview && kind === 'media') diff.append(mediaNode(file));
   else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, placed));
   else if (!file.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
-  else diff.append(table(file, threads, placed));
-  const outside = threads.filter((thread) => !placed.has(thread.id));
-  if (outside.length) {
-    const block = el('div', 'outside');
-    block.append(el('div', 'muted', 'Comments on lines this diff does not show'), ...outside.map(threadBox));
-    diff.insertBefore(block, fileThreads?.nextSibling ?? diff.firstChild);
+  else if (!isCollapsed) {
+    // The table reads the file as it is when drawn, since its syntax colors may arrive in between.
+    const drawTable = (): void => {
+      diff.append(table(received.files?.find((each) => each.path === file.path) ?? file, threads, placed));
+      outsideThreads();
+    };
+    if (wait) undrawn.set(box, drawTable);
+    else drawTable();
   }
+  // A folded file draws no table of lines; unfolding redraws its box.
+  if (showPreview || file.binary || !file.hunks.length) outsideThreads();
   box.append(diff);
   return box;
 }

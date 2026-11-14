@@ -51,6 +51,12 @@ const file = (path: string): FileDiff => ({
   ] }],
 });
 
+/** A PR too large to draw in one frame: its diffs below the first screen are drawn over the next frames. */
+const manyFiles: FileDiff[] = Array.from({ length: 300 }, (_, index) => ({
+  ...file(`src/many/file${String(index).padStart(3, '0')}.ts`), ...index === 1 ? { generated: true as const } : {},
+  hunks: [{ header: '@@ -1,400 +1,400 @@', lines: lines(1, 400, 'context', (n) => `  <span class="hljs-keyword">const</span> value${n} = compute(${n});`) }],
+}));
+
 const files = [file('src/auth/user.ts'), file('src/auth/token.ts'), file('src/api/client.ts'), file('README.md')];
 
 const thread = (id: string, path: string, line: number, title: string, minutes: number, resolved = false): OverviewState['threads'][number] => ({
@@ -209,6 +215,14 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { scrollTo: '#files', absent: '#files td.code span', shot: 'colors-later.png' },
     { send: { colors: files.slice(0, 2) }, expect: '.file[data-path="src/auth/token.ts"] td.code .hljs-keyword' }, { absent: '.file[data-path="src/api/client.ts"] td.code span' },
     { send: { colors: files.slice(2) }, expect: '.file[data-path="src/api/client.ts"] td.code .hljs-keyword', shot: 'colors-arrived.png' },
+  ] },
+  // A large PR shows its first screen at once and draws the other diffs over the next frames; a folded file draws none.
+  drawnOverFrames: { state: pullRequest, messages: [{ state: pullRequest }], saved: { view: 'files' }, steps: [
+    { send: { ...filesMessage, files: manyFiles }, wait: 60, expect: '.file[data-path="src/many/file000.ts"] table', absent: '.file[data-path="src/many/file299.ts"] table' },
+    { expect: '.file[data-path="src/many/file299.ts"] .file-head' },
+    // Jumping to a file that still waits draws it right away.
+    { scrollTo: '.file[data-path="src/many/file250.ts"]', wait: 60, expect: '.file[data-path="src/many/file250.ts"] table', absent: '.file[data-path="src/many/file299.ts"] table', shot: 'drawn-over-frames.png' },
+    { wait: 5000, expect: '.file[data-path="src/many/file299.ts"] table', absent: '.file[data-path="src/many/file001.ts"] table' },
   ] },
   // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
   linkedLoading: scene(withoutLinked, [
