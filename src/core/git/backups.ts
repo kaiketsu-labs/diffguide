@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { git } from './worktrees.js';
@@ -28,7 +28,8 @@ export async function snapshot(checkout: string): Promise<{ readonly files: stri
   const scratch = await mkdtemp(join(tmpdir(), 'diffguide-backup-'));
   try {
     const copy = join(scratch, 'index');
-    await copyFile(index, copy).catch(() => undefined);
+    // Git rehashes files saved in the index's own second; a copy with a newer time would trust their stale stat instead.
+    await copyFile(index, copy).then(async () => { const { atime, mtime } = await stat(index); await utimes(copy, atime, mtime); }).catch(() => undefined);
     await git(checkout, ['add', '--all'], { GIT_INDEX_FILE: copy });
     const files = (await git(checkout, ['write-tree'], { GIT_INDEX_FILE: copy })).trim();
     const conflicted = (await git(checkout, ['ls-files', '--unmerged'])).trim() !== '';

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { backUp, backupDays, listBackups } from '../src/core/git/backups.js';
+import { backUp, backupDays, listBackups, snapshot } from '../src/core/git/backups.js';
 import { removeWorktree, worktreePath } from '../src/core/git/worktrees.js';
 import { removeWorktreeQuestion } from '../src/page/removeWorktree.js';
 
@@ -62,6 +62,21 @@ test('backs up without a configured Git identity and during a merge with conflic
   assert.ok(ref !== undefined);
   assert.match(await git(root, 'show', `${ref}:a.txt`), /<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other/u);
   assert.equal(await git(root, 'rev-list', '--count', '--no-walk', `${ref}^@`), '1');
+});
+
+test('sees an edit of the same size saved in the second Git last wrote the index', async (t) => {
+  const root = await repository(t);
+  // Git builds without nanosecond times, as on Linux, compare whole seconds and size only.
+  await git(root, 'config', 'core.checkStat', 'minimal');
+  await git(root, 'config', 'core.trustctime', 'false');
+  const second = new Date(Date.now() - 60_000);
+  await utimes(path.join(root, 'a.txt'), second, second);
+  await git(root, 'update-index', '--refresh');
+  await writeFile(path.join(root, 'a.txt'), 'two\n');
+  await utimes(path.join(root, 'a.txt'), second, second);
+  await utimes(path.join(root, '.git', 'index'), second, second);
+  const { files } = await snapshot(root);
+  assert.equal(await git(root, 'show', `${files}:a.txt`), 'two');
 });
 
 test(`prunes a checkout's backups older than ${backupDays} days`, async (t) => {
