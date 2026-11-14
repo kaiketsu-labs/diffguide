@@ -67,7 +67,7 @@ async function editorHighlighter(): Promise<TextMateHighlighter | undefined> {
     }
   }
   const rules = await readThemeRules(join(app, 'theme-defaults/themes/dark_modern.json'));
-  return new TextMateHighlighter(contributions, { rules: rules ?? [] }, require.resolve('vscode-oniguruma/release/onig.wasm'));
+  return new TextMateHighlighter(contributions, { rules: rules ?? [] }, require.resolve('vscode-oniguruma/release/onig.wasm'), join(__dirname, 'highlight-worker.cjs'));
 }
 
 /** Clone this repository and check out `head` as a PR worktree whose `origin/main` is `base`. */

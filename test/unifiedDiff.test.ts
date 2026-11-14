@@ -163,3 +163,32 @@ test('hands the colors over in batches as files finish, so the first files get c
   assert.deepEqual(batches, [['a.ts'], ['b.ts']]);
   assert.ok(all.every((file) => file.hunks[0]?.lines[0]?.html.includes('<span')));
 });
+
+test('colors a diff off this thread when the highlighter can, without running it here', async (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-ahead-'));
+  const span = (code: string): string => `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`;
+  let here = 0;
+  const asked: string[][] = [];
+  useEditorHighlighter({
+    prepare: async () => undefined, styles: () => '', highlight: (code: string) => { here++; return span(code); },
+    highlightAll: async (sources) => { asked.push(sources.map((source) => source.filePath)); return sources.map(({ code }) => span(code)); },
+  });
+  t.after(() => { useEditorHighlighter(undefined); rmSync(repo, { recursive: true, force: true }); });
+  const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  writeFileSync(join(repo, 'a.ts'), 'const a = 1;\nconst b = 2;\n');
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'a.ts'), 'const a = 1;\nconst b = 3;\n');
+  writeFileSync(join(repo, 'b.ts'), 'export {};\n');
+  git('add', '.');
+
+  const { colored } = await readPullRequestDiffPlainFirst(repo, base);
+  assert.ok(colored !== undefined);
+  const files = await colored();
+  assert.equal(here, 0, 'the diff was colored on this thread');
+  // The changed file asks for its old and new version whole, the added file for its one hunk.
+  assert.deepEqual(asked, [['a.ts', 'a.ts'], ['b.ts']]);
+  assert.ok(files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines)).every((line) => line.html.includes('<span')));
+});

@@ -12,7 +12,7 @@ import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../cor
 import { git } from '../../core/git/worktrees.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
 import { applySuggestion, parseSuggestions } from '../../core/suggestions.js';
-import { type ColorFiles, colorInBatches, type FileDiff, highlightSource, knownColors, readPullRequestDiffPlainFirst, wholeFileDiff } from '../../core/unifiedDiff.js';
+import { type ColorFiles, colorInBatches, type FileDiff, highlightSource, knownColors, readPullRequestDiffPlainFirst, type Uncolored, wholeFileCode, wholeFileDiff } from '../../core/unifiedDiff.js';
 import { mediaType } from '../../page/media.js';
 import { eventIntents, threadView } from '../../page/overviewState.js';
 import { readFilePreview, readMediaSides } from '../../page/preview/fileContent.js';
@@ -59,13 +59,13 @@ export async function wholeFile(root: string, path: string, change: 'added' | 'u
 }
 
 /** A file shown whole from colors already known, with `color` to build it colored when some were missing. */
-async function wholeFilePlainFirst(root: string, path: string, change: 'added' | 'unchanged'): Promise<{ diff: FileDiff; color?: () => FileDiff } | undefined> {
+async function wholeFilePlainFirst(root: string, path: string, change: 'added' | 'unchanged'): Promise<{ diff: FileDiff; color?: Uncolored } | undefined> {
   const content = await wholeFileContent(root, path);
   if (content === undefined) return undefined;
   if (content === 'large') return { diff: largeFile(path, change) };
   const { colorize, missed } = knownColors();
   const diff = wholeFileDiff(path, content, change, colorize);
-  return missed() ? { diff, color: () => wholeFileDiff(path, content, change) } : { diff };
+  return missed() ? { diff, color: { sources: wholeFileCode(path, content), build: () => wholeFileDiff(path, content, change) } } : { diff };
 }
 
 /** What Claude's connection shows on the page: whether comments reach a session, and how many wait. */
