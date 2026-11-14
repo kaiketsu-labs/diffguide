@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Remove worktree no longer loses unpushed commits, and the cleanup after Claude's run on someone else's PR no longer deletes files you changed during the run. DiffGuide saves a backup of the checkout under `refs/diffguide/backup/` first and keeps it for 14 days.
 - PR pages open before GitHub sends the description, reviewers and checks. Pulsing bars hold their places, and review and merge wait until GitHub answers.
 - A PR's changed files show right away the first time they are read, without syntax colors; the colors follow file by file, the files on screen first, without redrawing the page.
 - The local review page also shows changed files before their syntax colors.

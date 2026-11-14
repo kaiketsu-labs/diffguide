@@ -1,4 +1,5 @@
 import type { AgentTask } from './agent.js';
+import { backUp } from './git/backups.js';
 import { git } from './git/worktrees.js';
 
 /**
@@ -165,8 +166,9 @@ export async function commitsSince(worktree: string, head: string): Promise<read
   });
 }
 
-/** Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file; ignored files stay. */
+/** Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file into a backup first; ignored files stay. */
 export async function discardSince(worktree: string, head: string): Promise<void> {
+  await backUp(worktree, 'discarding Claude\'s run');
   await git(worktree, ['reset', '--quiet', '--hard', head]);
   await git(worktree, ['clean', '--quiet', '-d', '--force']);
 }
