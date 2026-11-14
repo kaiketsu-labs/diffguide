@@ -295,8 +295,8 @@ export interface OverviewActions {
   openTerminal(): Promise<void>;
   /** Push the worktree's commits to the PR's branch. */
   push(): Promise<void>;
-  /** The changes of one commit in the worktree, for a preview in the thread that made it. */
-  readCommit(oid: string): Promise<readonly FileDiff[]>;
+  /** The changes of one commit in the worktree, for a preview in the thread that made it; `colored` as in `FilesView`. */
+  readCommit(oid: string): Promise<Pick<FilesView, 'files' | 'colored'>>;
   retry(): void;
   /** Stop Claude's current run on this PR; resolves once it ended. */
   stopClaude(): Promise<void>;

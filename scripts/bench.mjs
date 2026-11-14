@@ -11,10 +11,10 @@ const args = process.argv.slice(2);
 const option = (name, fallback) => { const at = args.indexOf(name); return at < 0 ? fallback : args.splice(at, 2)[1]; };
 const options = (name) => { const found = []; for (let at = args.indexOf(name); at >= 0; at = args.indexOf(name)) found.push(args.splice(at, 2)[1]); return found; };
 
-/** Commit ranges of this repository that stand in for PRs; pinned so every run reads the same diff. */
+/** Commit ranges of this repository that stand in for PRs; pinned so every run reads the same diff. `commit` is the one a thread unfolds. */
 const fixtures = {
-  typical: { base: '79b6c6088a24601fb6ba51f2eaa9ef1a20801fa5', head: 'f25ee0a3166720673f61f5bbdaa2f62fef3e4dc6' },
-  large: { base: 'c6f292673870a9c39bcf13fa9a928249b41589cc', head: 'f25ee0a3166720673f61f5bbdaa2f62fef3e4dc6' },
+  typical: { base: '79b6c6088a24601fb6ba51f2eaa9ef1a20801fa5', head: 'f25ee0a3166720673f61f5bbdaa2f62fef3e4dc6', commit: 'e8c868460278bf2da926fab7b62980d20ac436cc' },
+  large: { base: 'c6f292673870a9c39bcf13fa9a928249b41589cc', head: 'f25ee0a3166720673f61f5bbdaa2f62fef3e4dc6', commit: 'c08cb2c8f78976747b23db24d9c3ac91ce5ef561' },
 };
 
 const quantile = (values, q) => { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.round(q * (sorted.length - 1)))]; };

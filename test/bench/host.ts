@@ -101,7 +101,7 @@ interface Window { readonly from: number; readonly to: number }
 const between = <T extends { start: number }>(list: readonly T[], { from, to }: Window): T[] => list.filter((call) => call.start >= from && call.start <= to);
 
 async function main(): Promise<void> {
-  const options = JSON.parse(process.env['BENCH_OPTIONS'] ?? '{}') as { source: string; base: string; head: string; boot: number; scale: number };
+  const options = JSON.parse(process.env['BENCH_OPTIONS'] ?? '{}') as { source: string; base: string; head: string; commit: string; boot: number; scale: number };
   const highlighter = await editorHighlighter();
   useEditorHighlighter(highlighter);
   const { storage, folder, paths } = await fixture(options.source, options.base, options.head);
@@ -122,8 +122,8 @@ async function main(): Promise<void> {
   const opened = {
     session: { store, key: 'bench', publication: () => undefined, activity: () => undefined },
     runner: { activity, onDidChange: quiet, context: async () => undefined },
-    analysis: { activity: idle, onDidChange: quiet, result: async () => undefined },
-    review: { activity: idle, onDidChange: quiet, result: async () => undefined },
+    analysis: { activity: idle, onDidChange: quiet, result: async () => undefined, start: () => undefined },
+    review: { activity: idle, onDidChange: quiet, result: async () => undefined, start: () => undefined },
     commits: () => [], dataPath: join(storage, 'data'), useBase: async () => undefined,
   } as unknown as PageSession;
   const host: PageHost = {
@@ -232,10 +232,28 @@ async function main(): Promise<void> {
   const refreshed = await refresh();
 
   panel.dispose();
+  const actions = pullRequestPageController({ provider: counting, repository: 'bench/repo', pullRequest, role: 'reviewer', folder, opened, fileReviews, revealed: new Set(), onCheckout: false, host }).actions;
+  /** Unfold a commit in a thread: until its changes show, and until they have their colors. The colors of the PR's files are known by now. */
+  const commitPreview = async (): Promise<Record<string, unknown>> => {
+    const from = clock();
+    const read = await actions.readCommit(options.commit);
+    const files = clock() - from;
+    await read.colored?.();
+    return { files, colored: clock() - from };
+  };
+  const commit = await commitPreview();
+  /** Start Claude's guide build before the files have their colors, as right after opening the page: until Claude gets the changes. */
+  const guide = async (): Promise<Record<string, unknown>> => {
+    useEditorHighlighter(highlighter);
+    const from = clock();
+    await actions.analyze();
+    return { started: clock() - from };
+  };
   const warm = await open();
+  const analyze = await guide();
   (warm['panelObject'] as FakePanel).dispose();
   for (const result of [cold, warm]) { delete result['panelObject']; delete result['from']; }
-  process.stdout.write(JSON.stringify({ highlighter: highlighter === undefined ? 'highlight.js' : 'textmate', files: paths.length, cold, warm, viewed: tick, refresh: refreshed, coldTimeline }) + '\n');
+  process.stdout.write(JSON.stringify({ highlighter: highlighter === undefined ? 'highlight.js' : 'textmate', files: paths.length, cold, warm, viewed: tick, refresh: refreshed, commit, analyze, coldTimeline }) + '\n');
   process.exit(0);
 }
 
