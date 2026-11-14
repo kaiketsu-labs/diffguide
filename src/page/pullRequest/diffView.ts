@@ -6,7 +6,7 @@ import type { CodeAnchor } from '../../core/contracts.js';
 import type { ChangeRequestSummary } from '../../core/forge.js';
 import { isWorkspaceRelativePath } from '../../core/git/git.js';
 import { git, readPullRequestBase } from '../../core/git/worktrees.js';
-import { type FileDiff, readPullRequestDiffPlainFirst, savedCodeDiff } from '../../core/unifiedDiff.js';
+import { type ColorFiles, type FileDiff, readPullRequestDiffPlainFirst, savedCodeDiff } from '../../core/unifiedDiff.js';
 import type { DiffSelection, FilesView, PageComment } from '../protocol.js';
 import type { PullRequestPage } from './context.js';
 
@@ -100,8 +100,8 @@ export class DiffView {
     this.#shownBase = range.kind === 'all' ? base : undefined;
     const [whole, repositoryFiles] = await Promise.all([range.kind === 'all' ? this.#threadFiles(this.#paths) : [], host.listRepositoryFiles(folder).catch(() => [])]);
     const icons = await host.fileIcons([...new Set([...repositoryFiles, ...this.#paths, ...whole.map((file) => file.path)])]).catch(() => undefined);
-    const withColors = colored === undefined ? undefined : async (): Promise<FileDiff[]> => {
-      const done = await colored();
+    const withColors: ColorFiles | undefined = colored === undefined ? undefined : async (onBatch) => {
+      const done = await colored(onBatch);
       if (this.#files === files) this.#files = done;
       return [...done, ...whole];
     };

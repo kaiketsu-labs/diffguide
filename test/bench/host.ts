@@ -145,6 +145,8 @@ async function main(): Promise<void> {
     while (!has()) await new Promise<void>((resolve) => { waiters.add(resolve); });
     return clock();
   };
+  /** When each message reached the page. */
+  const sentAt = new WeakMap<object, number>();
   let created: ((panel: FakePanel) => void) | undefined;
   const createPanel = fake.createWebviewPanel.bind(fake);
   fake.createWebviewPanel = () => {
@@ -152,6 +154,7 @@ async function main(): Promise<void> {
     const post = panel.webview.postMessage;
     panel.webview.postMessage = async (sent: unknown) => {
       const result = await post(sent);
+      sentAt.set(sent as object, clock());
       for (const wake of [...waiters]) { waiters.delete(wake); wake(); }
       return result;
     };
@@ -178,13 +181,14 @@ async function main(): Promise<void> {
     const panel = await shown;
     const filesAt = await message(panel, 'files', 0);
     const filesMessage = panel.sent.find((sent) => 'files' in (sent as object));
-    // Files without any color span came before their colors; `colored` is when the colored files reached the page.
-    const coloredAt = JSON.stringify(filesMessage).includes('<span') ? filesAt : await message(panel, 'files', panel.sent.indexOf(filesMessage) + 1);
     await settle();
     const window = { from, to: clock() };
+    // Files without color spans came before their colors, which reach the page in batches.
+    const colors = panel.sent.filter((sent) => 'colors' in (sent as object));
+    const at = (sent: unknown): number => sent === undefined ? filesAt : sentAt.get(sent as object) ?? NaN;
     return {
-      from, panel: panelAt - from, files: filesAt - from, colored: coloredAt - from, settled: window.to - from,
-      htmlBytes: panel.webview.html.length, filesBytes: JSON.stringify(filesMessage).length,
+      from, panel: panelAt - from, files: filesAt - from, firstColors: at(colors[0]) - from, colored: at(colors.at(-1)) - from, colorBatches: colors.length, settled: window.to - from,
+      htmlBytes: panel.webview.html.length, filesBytes: JSON.stringify(filesMessage).length, colorsBytes: colors.reduce((sum: number, sent) => sum + JSON.stringify(sent).length, 0),
       git: between(gitCalls, window).length, github: between(calls, window).map((call) => call.method),
       panelObject: panel,
     };

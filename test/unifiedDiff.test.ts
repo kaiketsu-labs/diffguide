@@ -137,3 +137,29 @@ test('reads a diff uncolored first and colors it after, unless the colors are al
   assert.equal(warm.colored, undefined);
   assert.deepEqual(lines(warm.files), lines(colored));
 });
+
+test('hands the colors over in batches as files finish, so the first files get colors before the rest', async (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-batches-'));
+  // Each file takes longer than a batch, so each file is its own batch.
+  const slow = (code: string): string => {
+    const until = performance.now() + 120;
+    while (performance.now() < until) { /* busy */ }
+    return `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`;
+  };
+  useEditorHighlighter({ prepare: async () => undefined, styles: () => '', highlight: slow });
+  t.after(() => { useEditorHighlighter(undefined); rmSync(repo, { recursive: true, force: true }); });
+  const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('commit', '--quiet', '--allow-empty', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'a.ts'), 'export const a = 1;\n');
+  writeFileSync(join(repo, 'b.ts'), 'export const b = 2;\n');
+  git('add', '.');
+
+  const { colored } = await readPullRequestDiffPlainFirst(repo, base);
+  assert.ok(colored !== undefined);
+  const batches: string[][] = [];
+  const all = await colored((files) => { batches.push(files.map((file) => file.path)); });
+  assert.deepEqual(batches, [['a.ts'], ['b.ts']]);
+  assert.ok(all.every((file) => file.hunks[0]?.lines[0]?.html.includes('<span')));
+});

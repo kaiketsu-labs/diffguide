@@ -120,8 +120,7 @@ export async function showPullRequestOverview(
       reveal = undefined;
       if (colored === undefined || read !== filesReads) return;
       // The uncolored files stay on the page if coloring fails.
-      const withColors = await colored().catch(() => undefined);
-      if (withColors !== undefined && read === filesReads) post({ files: withColors, selection, atHead });
+      await colored((batch) => { if (read === filesReads) post({ colors: batch }); }).catch(() => undefined);
     }, (error: unknown) => {
       post({ filesError: error instanceof Error ? error.message : String(error) });
     });

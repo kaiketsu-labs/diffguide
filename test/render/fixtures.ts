@@ -177,6 +177,7 @@ const { reviewed: _reviewed, ...withoutReviewed } = pullRequest;
 const listPending: OverviewState = { ...withoutReviewed, reviewedPending: true };
 const { linked: _linked, ...withoutLinked } = pullRequest;
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
+const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) => ({ ...hunk, lines: hunk.lines.map((line) => ({ ...line, html: line.html.replace(/<[^>]*>/gu, '') })) })) }));
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
@@ -203,6 +204,12 @@ export const scenes: Readonly<Record<string, Scene>> = {
       { expect: '#reviewed .skeleton' }, { absent: '#files .file', shot: 'list-loading.png' },
       { send: { state: pullRequest }, expect: '#files .file' }, { absent: '#reviewed .skeleton' },
     ] },
+  // Files show before their syntax colors; the colors come in batches and fill in the drawn lines.
+  colorsLater: { state: pullRequest, messages: [{ state: pullRequest }, { ...filesMessage, files: uncolored }], saved: { view: 'files' }, steps: [
+    { scrollTo: '#files', absent: '#files td.code span', shot: 'colors-later.png' },
+    { send: { colors: files.slice(0, 2) }, expect: '.file[data-path="src/auth/token.ts"] td.code .hljs-keyword' }, { absent: '.file[data-path="src/api/client.ts"] td.code span' },
+    { send: { colors: files.slice(2) }, expect: '.file[data-path="src/api/client.ts"] td.code .hljs-keyword', shot: 'colors-arrived.png' },
+  ] },
   // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
   linkedLoading: scene(withoutLinked, [
     { expect: '#linked:not([hidden]) .skeleton', shot: 'linked-loading.png' },
