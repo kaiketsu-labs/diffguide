@@ -1,3 +1,5 @@
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { dirname, relative, resolve } from 'node:path';
 import type { AgentTask } from './agent.js';
 import { backUp } from './git/backups.js';
 import { fetchGitHubHead, syncWithPullRequest, waitMessage } from './git/sync.js';
@@ -66,19 +68,33 @@ export async function commitFiles(worktree: string, { path, message, hooksOff }:
   await git(worktree, [...hooks, 'commit', '--quiet', '--only', '-m', message, '--', ...paths]);
 }
 
+/** Git's message when the remote branch moved on since the last fetch. */
+const branchMoved = /\[rejected\].*\((fetch first|non-fast-forward)\)/u;
+
+/** Push HEAD to the PR's branch. When GitHub refuses because the PR moved, sync onto its new head once and push again; `number` is the PR's. */
+async function pushFollowing(worktree: string, number: number | undefined, { pushTo, headBranch, hooksOff }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean }): Promise<void> {
+  const push = (): Promise<string> => git(worktree, [...hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [], 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+  try {
+    await push();
+  } catch (error: unknown) {
+    if (number === undefined || !branchMoved.test(String(error))) throw error;
+    if ((await syncWithPullRequest(worktree, number)).outcome !== 'synced') throw error;
+    await push();
+  }
+}
+
 /**
- * Commit files of a PR worktree and push them to the PR's branch. A failed push takes the commit back and restores the files.
+ * Commit files of a PR worktree and push them to the PR's branch, syncing once when the PR moved meanwhile. A failed push takes the commit back and restores the files.
  * `hooksOff` skips Git hooks, for someone else's PR, whose author controls the checkout.
  */
-export async function commitAndPush(worktree: string, { path, message, pushTo, headBranch, hooksOff }: {
-  readonly path: string | readonly string[]; readonly message: string; readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean;
+export async function commitAndPush(worktree: string, { path, message, pushTo, headBranch, hooksOff, number }: {
+  readonly path: string | readonly string[]; readonly message: string; readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean; readonly number?: number;
 }): Promise<void> {
   if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
   const paths = typeof path === 'string' ? [path] : path;
-  const hooks = hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [];
   await commitFiles(worktree, { path: paths, message, hooksOff });
   try {
-    await git(worktree, [...hooks, 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+    await pushFollowing(worktree, number, { pushTo, headBranch, hooksOff });
   } catch (error: unknown) {
     await git(worktree, ['reset', '--quiet', '--soft', 'HEAD~1']);
     await git(worktree, ['restore', '--quiet', '--staged', '--worktree', '--', ...paths]);
@@ -86,10 +102,10 @@ export async function commitAndPush(worktree: string, { path, message, pushTo, h
   }
 }
 
-/** Push the worktree's commits to the PR's branch. `hooksOff` skips Git hooks, for someone else's PR. */
-export async function pushCommits(worktree: string, { pushTo, headBranch, hooksOff }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean }): Promise<void> {
+/** Push the worktree's commits to the PR's branch, syncing once when PR `number` moved meanwhile. `hooksOff` skips Git hooks, for someone else's PR. */
+export async function pushCommits(worktree: string, { pushTo, headBranch, hooksOff, number }: { readonly pushTo: string; readonly headBranch: string; readonly hooksOff: boolean; readonly number?: number }): Promise<void> {
   if (!isPushTarget(pushTo, headBranch)) throw new Error('Unsupported branch or remote for pushing.');
-  await git(worktree, [...hooksOff ? ['-c', 'core.hooksPath=/dev/null'] : [], 'push', '--quiet', pushTo, `HEAD:refs/heads/${headBranch}`]);
+  await pushFollowing(worktree, number, { pushTo, headBranch, hooksOff });
 }
 
 /** A worktree commit GitHub does not have yet, with what the range menu shows for it. */
@@ -160,11 +176,21 @@ export async function commitsSince(worktree: string, head: string): Promise<read
   });
 }
 
-/** Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file into a backup first; ignored files stay. */
-export async function discardSince(worktree: string, head: string): Promise<void> {
+/**
+ * Put a worktree back to `head`, dropping later commits and every uncommitted or untracked file into a backup first.
+ * Files in `keep`, relative to the worktree, such as the ones you saved during Claude's run, stay as they are; so do ignored files.
+ */
+export async function discardSince(worktree: string, head: string, keep: readonly string[] = []): Promise<void> {
   await backUp(worktree, 'discarding Claude\'s run');
+  const inside = keep.map((path) => resolve(worktree, path)).filter((path) => !relative(worktree, path).startsWith('..'));
+  const kept = await Promise.all(inside.map(async (path) => ({ path, content: await readFile(path).catch(() => undefined), mode: (await stat(path).catch(() => undefined))?.mode })));
   await git(worktree, ['reset', '--quiet', '--hard', head]);
   await git(worktree, ['clean', '--quiet', '-d', '--force']);
+  for (const { path, content, mode } of kept) {
+    if (content === undefined) continue;
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, mode === undefined ? {} : { mode });
+  }
 }
 
 /** What to merge and where to push the result. */

@@ -56,7 +56,7 @@ export function worktreeActions({ page, remote, diff, edits, notOnCheckout, push
       if (opened.runner.activity.running) throw new Error('Claude is working on this PR. Push when it is done.');
       const loaded = await remote.currentDetails();
       if (!loaded.canEdit) throw new Error('You cannot push to this PR.');
-      await pushCommits(folder, { pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer' });
+      await pushCommits(folder, { pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, hooksOff: role === 'reviewer', number: pullRequest.number });
       remote.changedOnGitHub();
     },
     readCommit: async (oid) => {

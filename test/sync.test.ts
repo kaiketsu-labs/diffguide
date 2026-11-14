@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { commitAndPush, discardSince, prepareConflictFix, worktreeSnapshot } from '../src/core/conflicts.js';
+import { commitAndPush, discardSince, prepareConflictFix, pushCommits, worktreeSnapshot } from '../src/core/conflicts.js';
 import { snapshot } from '../src/core/git/backups.js';
 import type { AgentTask } from '../src/core/agent.js';
 import { recordGitHubHead, type SyncResolver, syncWithPullRequest, undoSync, waitMessage } from '../src/core/git/sync.js';
@@ -214,10 +214,7 @@ for (const local of locals) {
 }
 
 /** Actions outside polling that write to the checkout. */
-const actionGaps = new Set([
-  'a push GitHub rejects because the PR moved syncs and pushes again',
-  'after Claude\'s run on someone else\'s PR, files you changed meanwhile stay in place',
-]);
+const actionGaps = new Set<string>();
 
 const action = (name: string, body: (t: test.TestContext) => Promise<void>): void => {
   test(`action: ${name}`, { todo: actionGaps.has(name) ? 'gap' : false }, body);
@@ -239,8 +236,13 @@ action('after Claude\'s run on someone else\'s PR, files you changed meanwhile s
   const start = await worktreeSnapshot(worktree);
   await writeFile(path.join(worktree, 'a.txt'), lines('claude'));
   await writeFile(path.join(worktree, 'b.txt'), 'mine\n');
-  await discardSince(worktree, start.head);
+  await mkdir(path.join(worktree, 'new'));
+  await writeFile(path.join(worktree, 'new', 'c.txt'), 'mine\n');
+  await discardSince(worktree, start.head, ['b.txt', 'new/c.txt', '../outside.txt']);
   assert.equal(await readFile(path.join(worktree, 'b.txt'), 'utf8'), 'mine\n');
+  assert.equal(await readFile(path.join(worktree, 'new', 'c.txt'), 'utf8'), 'mine\n');
+  assert.equal(await readFile(path.join(worktree, 'a.txt'), 'utf8'), lines('one'), 'Claude\'s file goes');
+  assert.equal(await stat(path.join(path.dirname(worktree), 'outside.txt')).then(() => true, () => false), false);
 });
 
 action('Remove worktree keeps unpushed commits', async (t) => {
@@ -262,9 +264,20 @@ action('a push GitHub rejects because the PR moved syncs and pushes again', asyn
   const { origin, worktree } = await fixture(t);
   await pushOnGitHub(origin, { force: false });
   await writeFile(path.join(worktree, 'b.txt'), 'suggested\n');
-  await commitAndPush(worktree, { path: 'b.txt', message: 'Apply suggestion from code review', pushTo: 'origin', headBranch: 'feature', hooksOff: true });
+  await commitAndPush(worktree, { path: 'b.txt', message: 'Apply suggestion from code review', pushTo: 'origin', headBranch: 'feature', hooksOff: true, number: 7 });
   assert.equal(await git(origin, 'show', 'feature:b.txt'), 'suggested');
   assert.equal(await git(origin, 'show', 'feature:n.txt'), 'from github');
+  await git(origin, 'switch', '--quiet', 'feature');
+  await writeFile(path.join(origin, 'm.txt'), 'more from github\n');
+  await git(origin, 'add', 'm.txt');
+  await git(origin, 'commit', '--quiet', '-m', 'even more');
+  await git(origin, 'update-ref', 'refs/pull/7/head', 'feature');
+  await git(origin, 'switch', '--quiet', 'main');
+  await writeFile(path.join(worktree, 'c.txt'), 'pushed later\n');
+  await git(worktree, 'add', 'c.txt');
+  await git(worktree, 'commit', '--quiet', '-m', 'unpushed');
+  await pushCommits(worktree, { pushTo: 'origin', headBranch: 'feature', hooksOff: true, number: 7 });
+  assert.equal(await git(origin, 'show', 'feature:c.txt'), 'pushed later');
 });
 
 action('Fix conflicts with uncommitted edits keeps them and proceeds', async (t) => {

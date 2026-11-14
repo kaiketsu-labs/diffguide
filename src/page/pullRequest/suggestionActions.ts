@@ -35,7 +35,7 @@ export function suggestionActions({ page, remote, diff, edits, findThread, pushT
       if (!loaded.canEdit) undo.set(id, { path: anchor.path, before, after });
       else if (ahead) await commitFiles(folder, commit);
       else {
-        await commitAndPush(folder, { ...commit, pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch });
+        await commitAndPush(folder, { ...commit, pushTo: pushTarget(loaded), headBranch: pullRequest.headBranch, number: pullRequest.number });
         remote.changedOnGitHub();
       }
       applied.set(id, { message, option, done: !loaded.canEdit ? 'applied' : ahead ? 'committed' : 'pushed' });

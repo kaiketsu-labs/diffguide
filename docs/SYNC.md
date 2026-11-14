@@ -103,9 +103,7 @@ Fix conflicts also runs in a scratch worktree, at GitHub's head, and pushes from
 
 Built (`src/core/git/sync.ts`, `src/core/git/backups.ts`): backups, fast-forward with edits, 3-way merge of staged and unstaged edits, replay of local commits, force pushes, your own checkout. Waiting without an error: offline, failed Git sign-in, `index.lock` held (retried for about 5 s first), and your own merge, rebase, cherry-pick or revert. The page says why in a notice that hides after 4 s and shows again only when the reason changes. The sync records GitHub's head in `refs/diffguide/github/pr-<n>` at every fetch, so it can tell local commits from replaced ones.
 
-Claude's step: clashing commits and edits are merged by Claude in a scratch worktree and applied after the checks, with Undo. Fix conflicts runs in a scratch worktree and accepts uncommitted edits.
-
-Pending: a rejected push syncing and pushing again; discarding only Claude's files after its run on someone else's PR.
+Claude's step: clashing commits and edits are merged by Claude in a scratch worktree and applied after the checks, with Undo. Fix conflicts runs in a scratch worktree and accepts uncommitted edits. A push rejected because the PR moved syncs and pushes again once. After Claude's run on someone else's PR, files saved in VS Code during the run stay; the rest is discarded after a backup.
 
 Known limits:
 
@@ -134,7 +132,7 @@ Known limits:
 
 - Claude's resolution is applied once the checks pass. The page notice offers Undo, which restores the backup.
 - Your own checkout follows the same rules as PR worktrees. The page no longer says "Pull them".
-- On someone else's PR, DiffGuide backs up, then discards only the files Claude changed during its run: every file changed during the run except those you saved in a VS Code editor meanwhile.
+- On someone else's PR, DiffGuide backs up, then discards only the files Claude changed during its run: every file changed during the run except those you saved in a VS Code editor meanwhile. Edits made in a terminal during the run are discarded, and stay in the backup.
 - Claude's checks are Git's: no leftover conflict markers. No parse check.
 - Claude's question shows inline above the tabs, not as a modal, with a notice whose Show button brings it into view.
 - The Undo notice stays until Undo, close or the next sync. Undo backs up first, so edits made after the sync stay in a backup.

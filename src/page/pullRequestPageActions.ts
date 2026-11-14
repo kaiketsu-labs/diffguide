@@ -152,7 +152,7 @@ export function githubPageActions(context: PageContext): GitHubPageActions {
       }
       const commit = { path: paths, message: picked.length === 1 ? 'Apply suggestion from code review' : 'Apply suggestions from code review', hooksOff: context.hooksOff };
       if (ahead) await commitFiles(context.folder, commit);
-      else await commitAndPush(context.folder, { ...commit, pushTo: context.pushTarget(details), headBranch: context.headBranch });
+      else await commitAndPush(context.folder, { ...commit, pushTo: context.pushTarget(details), headBranch: context.headBranch, number: context.number });
       context.reload(true);
     },
   };
