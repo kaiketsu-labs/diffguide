@@ -245,7 +245,12 @@ export async function showPullRequestOverview(
           await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
         }
         else if (action === 'commit-diff' && isOid(oid) && state.threads.some((thread) => thread.commits?.some((commit) => commit.oid === oid))) {
-          try { post({ commitDiff: { oid, files: await actions.readCommit(oid) } }); } catch (error: unknown) { post({ commitDiff: { oid, error: error instanceof Error ? error.message : String(error) } }); }
+          try {
+            const { files, colored } = await actions.readCommit(oid);
+            post({ commitDiff: { oid, files } });
+            // The uncolored changes stay in the preview if coloring fails.
+            if (colored !== undefined) void colored().then((done) => { post({ commitDiff: { oid, files: done } }); }, () => undefined);
+          } catch (error: unknown) { post({ commitDiff: { oid, error: error instanceof Error ? error.message : String(error) } }); }
         }
         else if (action === 'files' && typeof whitespace === 'boolean') {
           const commits = [

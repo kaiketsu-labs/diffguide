@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { useEditorHighlighter } from '../src/core/codePreview.js';
 import type { Forge } from '../src/core/forge.js';
 import { worktreePath } from '../src/core/git/worktrees.js';
 import { FileReviews } from '../src/core/reviewedFiles.js';
@@ -26,20 +27,23 @@ async function page(answer: (method: string) => Promise<unknown>) {
   const head = git('rev-parse', 'HEAD');
   const forge = new Proxy({}, { get: (_, method: string) => method === 'then' ? undefined : () => answer(method) }) as Forge;
   const idle = { running: false };
+  /** What the page handed Claude's guide build and code review. */
+  const started: { files: readonly { hunks: readonly { lines: readonly { html: string }[] }[] }[] }[] = [];
+  const start = (input: (typeof started)[number]): void => { started.push(input); };
   const quiet = () => ({ dispose: () => undefined });
   const opened = {
     session: { store: await createReviewStore(join(storage, 'store.json'), folder), key: 'k', publication: () => undefined },
     runner: { activity: { running: false, threads: new Set() }, onDidChange: quiet, context: async () => undefined },
-    analysis: { activity: idle, result: async () => undefined }, review: { activity: idle, result: async () => undefined },
+    analysis: { activity: idle, result: async () => undefined, start }, review: { activity: idle, result: async () => undefined, start },
     commits: () => [], dataPath: join(storage, 'data'), useBase: async () => undefined,
   } as unknown as PageSession;
   const host = {
     fileIcons: async () => undefined, listRepositoryFiles: async () => [], wholeFile: async () => undefined, readBaseContent: async () => '',
-    newAnswers: () => new Map(), picks: () => [], reviewView: async (picked) => ({ running: false, picked }), refreshSidebar: () => undefined,
+    newAnswers: () => new Map(), picks: () => [], savePicks: async () => undefined, reviewView: async (picked) => ({ running: false, picked }), refreshSidebar: () => undefined,
     workspaceRepositories: async () => new Map(), parseLink: () => undefined,
   } as Partial<PageHost> as PageHost;
   const pullRequest = { number: 1, title: 'PR', url: 'https://github.com/o/r/pull/1', author: 'a', draft: false, headBranch: 'b', baseBranch: 'main', createdAt: '', updatedAt: '' };
-  return { head, controller: pullRequestPageController({ provider: forge, repository: 'o/r', pullRequest, role: 'reviewer', folder, opened, fileReviews: new FileReviews(storage), revealed: new Set(), onCheckout: false, host }) };
+  return { head, folder, git, started, controller: pullRequestPageController({ provider: forge, repository: 'o/r', pullRequest, role: 'reviewer', folder, opened, fileReviews: new FileReviews(storage), revealed: new Set(), onCheckout: false, host }) };
 }
 
 test('the page asks GitHub for linked changes while its other reads are still out', async () => {
@@ -154,4 +158,27 @@ test('the page shows before GitHub sends the linked changes, and redraws with th
   answerMentions?.();
   await redrawn;
   assert.deepEqual((await controller.read()).linked, []);
+});
+
+test('a commit preview and the changes Claude reads do not wait for syntax colors', async (t) => {
+  let colorings = 0;
+  useEditorHighlighter({ prepare: async () => undefined, styles: () => '', highlight: (code: string) => { colorings++; return `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`; } });
+  t.after(() => { useEditorHighlighter(undefined); });
+  const { controller, folder, git, started } = await page(async (method) => method === 'listFiles' ? [] : undefined);
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  await writeFile(join(folder, 'a.ts'), 'export const a = 2;\n');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.test', 'commit', '-q', '-am', 'change');
+  const lines = (files: (typeof started)[number]['files']): string[] => files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines.map((line) => line.html)));
+
+  const commit = await controller.actions.readCommit(git('rev-parse', 'HEAD'));
+  assert.equal(colorings, 0, 'the commit preview waited for colors');
+  assert.deepEqual(lines(commit.files), ['export const a = 1;', 'export const a = 2;']);
+
+  await controller.actions.analyze();
+  await controller.actions.review([]);
+  assert.equal(colorings, 0, 'Claude waited for colors');
+  assert.deepEqual(started.map(({ files }) => lines(files)), [['export const a = 1;', 'export const a = 2;'], ['export const a = 1;', 'export const a = 2;']]);
+
+  assert.ok(commit.colored !== undefined);
+  assert.ok(lines(await commit.colored()).every((html) => html.includes('<span')));
 });
