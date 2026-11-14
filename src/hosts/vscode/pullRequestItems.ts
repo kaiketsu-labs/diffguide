@@ -265,14 +265,54 @@ export function allOpenItem(node: Extract<Node, { kind: 'allOpen' }>, byRole: bo
   return item;
 }
 
+/** What a checked-out PR's worktree has that GitHub does not. */
+export type LocalChanges = Awaited<ReturnType<PullRequestWorktrees['localChanges']>>;
+
 /** What a PR row reads from the tree, which caches it per PR. */
 export interface PullRequestRowLookups {
   isCheckedOut(node: PullRequestNode): Promise<boolean>;
-  progress(node: PullRequestNode): Promise<string | undefined>;
-  localOf(node: PullRequestNode): ReturnType<PullRequestWorktrees['localChanges']>;
+  /** "2/5 reviewed" as last read, or undefined until GitHub sent the PR's files; the tree redraws the row when a newer read differs. */
+  progress(node: PullRequestNode): string | undefined;
+  /** The worktree's local changes as last read, or undefined until Git answered; the tree redraws the row when a newer read differs. */
+  localOf(node: PullRequestNode): LocalChanges | undefined;
   isMerged(node: PullRequestNode): boolean;
-  /** Record whether the row shows commits to push, so a change redraws its repository rows. */
-  noteAhead(node: PullRequestNode, ahead: boolean): void;
+}
+
+/**
+ * Values read in the background per PR, so a row never waits for GitHub or Git: `get` gives the last value known and reads
+ * again after `forget`; `changed` runs with the value before when a read differs from it.
+ */
+export class Known<T> {
+  readonly #values = new Map<string, T>();
+  readonly #reads = new Map<string, Promise<void>>();
+
+  constructor(
+    private readonly read: (node: PullRequestNode) => Promise<T | undefined>,
+    private readonly signature: (value: T | undefined) => string,
+    private readonly changed: (node: PullRequestNode, before: T | undefined) => void,
+  ) {}
+
+  get(node: PullRequestNode): T | undefined {
+    const key = pullRequestKey(node);
+    if (!this.#reads.has(key)) {
+      const reading: Promise<void> = this.read(node).catch(() => undefined).then((value) => {
+        if (this.#reads.get(key) !== reading) return;
+        const before = this.#values.get(key);
+        if (this.signature(before) === this.signature(value)) return;
+        if (value === undefined) this.#values.delete(key);
+        else this.#values.set(key, value);
+        this.changed(node, before);
+      });
+      this.#reads.set(key, reading);
+    }
+    return this.#values.get(key);
+  }
+
+  /** Read one PR's value, or every value, again on its next `get`; the last value stays known meanwhile. */
+  forget(pullRequest?: string): void {
+    if (pullRequest === undefined) this.#reads.clear();
+    else this.#reads.delete(pullRequest);
+  }
 }
 
 export async function pullRequestItem(node: PullRequestNode, lookups: PullRequestRowLookups): Promise<vscode.TreeItem> {
@@ -282,12 +322,11 @@ export async function pullRequestItem(node: PullRequestNode, lookups: PullReques
   const item = new vscode.TreeItem(subject, vscode.TreeItemCollapsibleState.None);
   item.id = `pullRequest:${node.placement ?? node.role}:${node.listing.folder}:${pr.number}`;
   const claude = checkedOut ? node.listing.worktrees.claudeStatus(node.listing.repository.name, pr.number) : undefined;
-  const progress = checkedOut ? await lookups.progress(node) : undefined;
-  const local = checkedOut ? await lookups.localOf(node).catch(() => undefined) : undefined;
+  const progress = checkedOut ? lookups.progress(node) : undefined;
+  const local = checkedOut ? lookups.localOf(node) : undefined;
   const commits = local?.commits ?? 0;
   const edited = local === undefined ? 0 : [...local.files.values()].filter((change) => change !== 'unpushed').length;
   item.resourceUri = pullRequestRowUri(node.listing.repository.name, pr.number, checkedOut ? rowState({ commits, edited }) : undefined);
-  lookups.noteAhead(node, commits > 0);
   const merged = lookups.isMerged(node);
   const verdict = pr.review === undefined || merged ? undefined : verdicts[pr.review];
   const size = pr.changes === undefined ? undefined : `+${pr.changes.additions} −${pr.changes.deletions}`;

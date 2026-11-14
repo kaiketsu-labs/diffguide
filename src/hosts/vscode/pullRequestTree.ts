@@ -4,11 +4,10 @@ import type { PullRequestRole } from '../../core/git/worktrees.js';
 import { GitHubSignInRequired } from '../../forges/github/githubApi.js';
 import { parsePullRequestLink } from '../../forges/github/remotes.js';
 import {
-  allOpenItem, allOpenRootItem, authorKey, awaitingReviewKey, groupByKey, hiddenKey, limited, messageItem, parallelListings, pinKey, pinnedItem, pinnedKey,
+  allOpenItem, allOpenRootItem, authorKey, awaitingReviewKey, groupByKey, hiddenKey, Known, limited, messageItem, parallelListings, pinKey, pinnedItem, pinnedKey,
   pullRequestItem, pullRequestKey, pullRequestsOf, repositoryItem, roleItem, roles, sectionItem, snapshotKey,
-  type Listing, type Node, type Pin, type Placement, type PullRequestCheckout, type PullRequestNode, type PullRequestRowLookups, type Ready, type RepositoryNode, type Snapshot,
+  type Listing, type LocalChanges, type Node, type Pin, type Placement, type PullRequestCheckout, type PullRequestNode, type PullRequestRowLookups, type Ready, type RepositoryNode, type Snapshot,
 } from './pullRequestItems.js';
-import type { PullRequestWorktrees } from './pullRequestWorktrees.js';
 
 /** List each repository's open pull requests by the user's role in them. */
 export class PullRequestTree implements vscode.TreeDataProvider<Node> {
@@ -25,14 +24,26 @@ export class PullRequestTree implements vscode.TreeDataProvider<Node> {
   readonly #rows = new Map<string, Map<Placement, PullRequestNode>>();
   /** The repository rows shown per repository name, so a PR's change also redraws their "to push" count. */
   readonly #repositoryRows = new Map<string, Set<RepositoryNode>>();
-  /** Whether each PR row last showed commits to push, so only a change to that redraws its repository rows. */
-  readonly #aheadShown = new Map<string, boolean>();
   /** Each repository's open PRs, loaded once its All open group is expanded. */
   readonly #allOpen = new Map<string, Promise<readonly ChangeRequestSummary[]>>();
   /** Worktree and reviewed state per PR, read once per redraw. */
   readonly #checkedOut = new Map<string, Promise<boolean>>();
   readonly #reviewed = new Map<string, Promise<ReadonlySet<string>>>();
-  readonly #local = new Map<string, ReturnType<PullRequestWorktrees['localChanges']>>();
+  /** Review progress and local changes of checked-out PRs. GitHub and Git take up to seconds for them, so rows show without them and are redrawn. */
+  readonly #progress = new Known<string>(
+    async (node) => await this.#isCheckedOut(node) ? await this.#readProgress(node) : undefined,
+    (text) => text ?? '',
+    (node) => { this.#redrawRows(node); },
+  );
+  readonly #local = new Known<LocalChanges>(
+    async (node) => await this.#isCheckedOut(node) ? await node.listing.worktrees.localChanges(node.listing.repository.name, node.pullRequest.number, node.pullRequest.headOid) : undefined,
+    (local) => local === undefined ? '' : JSON.stringify([local.commits, [...local.files]]),
+    (node, before) => {
+      // The repository rows count the PRs with commits to push.
+      const ahead = (this.#local.get(node)?.commits ?? 0) > 0;
+      this.#redrawRows(node, ahead !== ((before?.commits ?? 0) > 0));
+    },
+  );
   /** PRs merged from this window; GitHub's search keeps listing them as open for a while. */
   readonly #merged = new Set<string>();
   /** Each listed repository's latest PR update at the last check. */
@@ -130,14 +141,16 @@ export class PullRequestTree implements vscode.TreeDataProvider<Node> {
     return row;
   }
 
-  /** How many of a repository row's PRs have commits not pushed to GitHub. */
-  async #toPushOf(listing: Ready, role: PullRequestRole | undefined): Promise<number> {
-    const ahead = await Promise.all((role === undefined ? roles : [role]).flatMap((each) => this.#sectionOf(listing, each).map(async (pullRequest) => {
-      const node: PullRequestNode = { kind: 'pullRequest', listing, role: each, pullRequest };
-      if (!await this.#isCheckedOut(node).catch(() => false)) return false;
-      return ((await this.#localOf(node).catch(() => undefined))?.commits ?? 0) > 0;
-    })));
-    return ahead.filter(Boolean).length;
+  /** How many of a repository row's PRs have commits not pushed to GitHub, as far as Git answered yet. */
+  #toPushOf(listing: Ready, role: PullRequestRole | undefined): number {
+    return (role === undefined ? roles : [role]).flatMap((each) => this.#sectionOf(listing, each)
+      .filter((pullRequest) => (this.#local.get({ kind: 'pullRequest', listing, role: each, pullRequest })?.commits ?? 0) > 0)).length;
+  }
+
+  /** Redraw a PR's rows after a background read, and with `repository` the rows of its repository. */
+  #redrawRows(node: PullRequestNode, repository = false): void {
+    const rows = [...this.#rows.get(pullRequestKey(node))?.values() ?? [], ...repository ? this.#repositoryRows.get(node.listing.repository.name) ?? [] : []];
+    if (rows.length > 0) this.#changed.fire(rows);
   }
 
   /** Whether Mine lists only PRs with pending review requests. */
@@ -308,12 +321,12 @@ export class PullRequestTree implements vscode.TreeDataProvider<Node> {
     if (pullRequest === undefined) {
       this.#checkedOut.clear();
       this.#reviewed.clear();
-      this.#local.clear();
     } else {
       this.#checkedOut.delete(pullRequest);
       this.#reviewed.delete(pullRequest);
-      this.#local.delete(pullRequest);
     }
+    this.#progress.forget(pullRequest);
+    this.#local.forget(pullRequest);
   }
 
   async getChildren(node?: Node): Promise<Node[]> {
@@ -355,7 +368,7 @@ export class PullRequestTree implements vscode.TreeDataProvider<Node> {
     switch (node.kind) {
       case 'pinned': return pinnedItem(node);
       case 'role': return roleItem(node, sectionOf);
-      case 'repository': return repositoryItem(node, sectionOf, await this.#toPushOf(node.listing, node.role));
+      case 'repository': return repositoryItem(node, sectionOf, this.#toPushOf(node.listing, node.role));
       case 'section': return sectionItem(node, sectionOf);
       case 'allOpenRoot': return allOpenRootItem(node, openCountOf);
       case 'allOpen': return allOpenItem(node, this.byRole, openCountOf);
@@ -366,15 +379,9 @@ export class PullRequestTree implements vscode.TreeDataProvider<Node> {
 
   readonly #rowLookups: PullRequestRowLookups = {
     isCheckedOut: (node) => this.#isCheckedOut(node),
-    progress: (node) => this.#progress(node),
-    localOf: (node) => this.#localOf(node),
+    progress: (node) => this.#progress.get(node),
+    localOf: (node) => this.#local.get(node),
     isMerged: (node) => this.#merged.has(pullRequestKey(node)),
-    noteAhead: (node, ahead) => {
-      const shown = this.#aheadShown.get(pullRequestKey(node));
-      this.#aheadShown.set(pullRequestKey(node), ahead);
-      const repositoryRows = this.#repositoryRows.get(node.listing.repository.name);
-      if (shown !== undefined && shown !== ahead && repositoryRows !== undefined) this.#changed.fire([...repositoryRows]);
-    },
   };
 
   #filesOf(node: PullRequestNode): Promise<readonly { readonly path: string }[]> {
@@ -390,22 +397,11 @@ export class PullRequestTree implements vscode.TreeDataProvider<Node> {
   }
 
   /** "2/5 reviewed" for a checked-out PR, or undefined while its files are unknown. */
-  async #progress(node: PullRequestNode): Promise<string | undefined> {
+  async #readProgress(node: PullRequestNode): Promise<string | undefined> {
     const files = await this.#filesOf(node).catch(() => undefined);
     if (files === undefined || files.length === 0) return undefined;
     const reviewed = await this.#reviewedOf(node).catch(() => undefined);
     return reviewed === undefined ? undefined : `${reviewed.size}/${files.length} reviewed`;
-  }
-
-  #localOf(node: PullRequestNode): ReturnType<PullRequestWorktrees['localChanges']> {
-    const key = pullRequestKey(node);
-    let local = this.#local.get(key);
-    if (local === undefined) {
-      local = node.listing.worktrees.localChanges(node.listing.repository.name, node.pullRequest.number, node.pullRequest.headOid);
-      local.catch(() => { this.#local.delete(key); });
-      this.#local.set(key, local);
-    }
-    return local;
   }
 
   #isCheckedOut(node: PullRequestNode): Promise<boolean> {

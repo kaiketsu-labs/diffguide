@@ -93,6 +93,13 @@ function recordingWorktrees(): PullRequestWorktrees & { opened: string[]; checke
 
 const noStatusChanges: vscode.Event<string | undefined> = () => ({ dispose: () => undefined });
 
+/** A row as the tree draws it once its background reads of GitHub and Git are in. */
+async function redrawn(provider: vscode.TreeDataProvider<unknown>, node: unknown): Promise<vscode.TreeItem> {
+  await provider.getTreeItem(node);
+  await settle();
+  return await provider.getTreeItem(node);
+}
+
 /** Expand a tree level and render its items. */
 async function level(provider: vscode.TreeDataProvider<unknown>, node?: unknown): Promise<{ node: unknown; item: vscode.TreeItem }[]> {
   const children = await provider.getChildren(node) ?? [];
@@ -257,12 +264,12 @@ test('groups PRs by role, opens a worktree on click and the browser from the inl
   assert.equal(env.opened.length, 1);
   assert.equal(worktrees.opened.length, 1);
 
-  assert.equal(reopened?.item.description, '#7 · octo · 0/2 reviewed');
+  assert.equal((await redrawn(tree, reopened?.node)).description, '#7 · octo · 0/2 reviewed');
 
   worktrees.reviewed.add('README.md');
   await commands.executeCommand('diffGuide.refreshPullRequests');
   const [progressed] = await level(tree, (await level(tree, (await level(tree))[0]?.node))[0]?.node);
-  assert.equal(progressed?.item.description, '#7 · octo · 1/2 reviewed');
+  assert.equal((await redrawn(tree, progressed?.node)).description, '#7 · octo · 1/2 reviewed');
 
   await commands.executeCommand('diffGuide.markPullRequestMerged', 'acme/app#7');
   const [merged] = await level(tree, repository?.node);
@@ -488,24 +495,71 @@ test('reads a PR\'s reviewed files once for its row, and redraws only that PR wh
   const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], status.event, settings, new FakeMemento());
   t.after(() => { view.dispose(); });
   const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
-  const redrawn: unknown[] = [];
-  tree.onDidChangeTreeData?.((node) => { redrawn.push(node); });
+  const fired: unknown[] = [];
+  tree.onDidChangeTreeData?.((node) => { fired.push(node); });
 
   const [repository] = await level(tree);
   const [section] = await level(tree, repository?.node);
   const [pr] = await level(tree, section?.node);
-  assert.equal(pr?.item.description, '#7 · 0/2 reviewed');
+  assert.equal(pr?.item.description, '#7', 'the row waited for GitHub');
+  await settle();
+  // The progress came in and redrew the row.
+  assert.deepEqual(fired, [[pr?.node]]);
+  assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · 0/2 reviewed');
   assert.deepEqual(await level(tree, pr?.node), []);
   assert.equal(reads, 1);
 
   worktrees.reviewed.add('a.ts');
   status.fire('acme/app#7');
-  assert.deepEqual(redrawn, [[pr?.node]]);
+  assert.deepEqual(fired, [[pr?.node], [pr?.node]]);
+  // The row keeps the progress it had until the new one is read.
+  assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · 0/2 reviewed');
+  await settle();
+  assert.deepEqual(fired, [[pr?.node], [pr?.node], [pr?.node]]);
   assert.equal((await tree.getTreeItem(pr?.node))?.description, '#7 · 1/2 reviewed');
   assert.equal(reads, 2);
 
   status.fire('acme/other#1');
-  assert.deepEqual(redrawn, [[pr?.node], undefined]);
+  assert.deepEqual(fired.at(-1), undefined);
+});
+
+test('shows the saved PR rows without waiting for GitHub or Git, then fills in progress and commits to push', async (t) => {
+  window.trees.length = 0;
+  let answer: () => void = () => undefined;
+  const slow = new Promise<void>((resolve) => { answer = resolve; });
+  const provider = {
+    readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
+    listMine: async () => [summary], listReviewRequested: async () => [], openCount: async () => 1,
+    listFiles: async () => { await slow; return [{ path: 'a.ts', additions: 1, deletions: 0, change: 'added' }]; },
+  } as unknown as Forge;
+  const worktrees = recordingWorktrees();
+  worktrees.checkedOut.add(7);
+  worktrees.localChanges = async () => { await slow; return { commits: 1, files: new Map() }; };
+  const settings = new FakeMemento();
+  await settings.update('diffGuide.groupBy', 'repository');
+  const view = registerPullRequestView(async () => [{ folder: 'app', connect: async () => provider, worktrees }], noStatusChanges, settings, new FakeMemento());
+  t.after(() => { view.dispose(); });
+  const tree = window.trees.at(-1)?.provider as vscode.TreeDataProvider<unknown>;
+  const fired: unknown[] = [];
+  tree.onDidChangeTreeData?.((node) => { fired.push(node); });
+  const shown = async () => {
+    const [repository] = await level(tree);
+    const [section] = await level(tree, repository?.node);
+    const [pr] = await level(tree, section?.node);
+    return { repository, pr };
+  };
+
+  const first = await Promise.race([shown(), new Promise<undefined>((resolve) => setTimeout(resolve, 500))]);
+  assert.ok(first !== undefined, 'the rows waited for GitHub or Git');
+  assert.deepEqual([first.repository?.item.description, first.pr?.item.description], ['acme · 1 mine', '#7']);
+  assert.equal(first.pr?.item.contextValue, 'diffGuide.pullRequest.checkedOut');
+
+  answer();
+  await settle();
+  // Git's answer redraws the PR and its repository, GitHub's the PR.
+  assert.deepEqual(fired, [[first.pr?.node, first.repository?.node], [first.pr?.node]]);
+  const filled = await shown();
+  assert.deepEqual([filled.repository?.item.description, filled.pr?.item.description], ['acme · 1 mine · 1 to push', '#7 · 0/1 reviewed']);
 });
 
 test('shows unpushed commits and uncommitted edits on a checked-out PR row', async (t) => {
@@ -533,7 +587,8 @@ test('shows unpushed commits and uncommitted edits on a checked-out PR row', asy
   const rows = async () => {
     const [repository] = await level(tree);
     const [section] = await level(tree, repository?.node);
-    return { repository, pr: (await level(tree, section?.node))[0] };
+    const [pr] = await level(tree, section?.node);
+    return { repository: { item: await redrawn(tree, repository?.node) }, pr: { node: pr?.node, item: await redrawn(tree, pr?.node) } };
   };
 
   const { repository, pr } = await rows();
