@@ -5,6 +5,7 @@ import { edits } from './conversation/comment.js';
 import { renderedPreviews } from './conversation/mentions.js';
 import { commentAsks, renderConversation } from './conversation/timeline.js';
 import { $, el } from './dom.js';
+import { applyColors, dropColors } from './files/colors.js';
 import { openFolders } from './files/nav.js';
 import { medias, previews } from './files/preview.js';
 import { isLarge, renderFiles } from './files/render.js';
@@ -44,7 +45,11 @@ function liveLogs(): LiveLog[] {
   });
 }
 
+/** Files that came before GitHub's Viewed marks, drawn once the state has them so files do not tick or hide after they show. */
+let heldFiles: ExtensionMessage | undefined;
+
 export function onExtensionMessage(data: ExtensionMessage): void {
+  if (data.files && !data.state && received.current?.reviewedPending) { heldFiles = data; return; }
   const live = data.state ? liveLogs() : [];
   if (data.state) render(data.state);
   for (const log of live) void hopIntoAvatar(log);
@@ -53,6 +58,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.icons) received.fileIcons = data.icons;
   if (data.repositoryFiles) received.repositoryFiles = data.repositoryFiles;
   if (data.files) {
+    dropColors();
     setStale(false);
     const changed = changedFiles(data.files, shownAs);
     received.files = data.files;
@@ -64,6 +70,11 @@ export function onExtensionMessage(data: ExtensionMessage): void {
       renderFiles(changed);
     }
     renderNavThreads();
+  }
+  if (data.colors) {
+    const byPath = new Map(data.colors.map((file) => [file.path, file]));
+    if (heldFiles?.files) heldFiles = { ...heldFiles, files: heldFiles.files.map((file) => byPath.get(file.path) ?? file) };
+    else applyColors(data.colors);
   }
   if (data.markdown) {
     const entry = renderedPreviews.get(data.markdown.form);
@@ -187,4 +198,9 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.stale) setStale(true);
   if (data.pageKey !== undefined) setPageKey(data.pageKey);
   if (data.refreshed) { const refresh = $<HTMLButtonElement>('refresh'); refresh.disabled = false; refresh.classList.remove('busy'); }
+  if (heldFiles && data.state && !data.state.reviewedPending) {
+    const held = heldFiles;
+    heldFiles = undefined;
+    onExtensionMessage(held);
+  }
 }

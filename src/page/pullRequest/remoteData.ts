@@ -14,24 +14,28 @@ export class RemoteData {
   #details: Promise<ChangeRequestDetails | Error> | undefined;
   #threads: Promise<readonly RemoteThread[] | Error> | undefined;
   #conversation: Promise<ChangeRequestConversation | Error> | undefined;
+  /** Which reads have finished; until then the page shows without them rather than wait for GitHub. */
+  #detailsRead = false;
+  #threadsRead = false;
+  #conversationRead = false;
 
   constructor(private readonly provider: Forge, private readonly number: number, private readonly refreshSidebar: () => void) {}
 
   readonly loadDetails = sharedPerTurn((): Promise<ChangeRequestDetails | Error> => {
     this.#details = this.provider.details(this.number).catch(asError);
-    void this.#details.then(() => { this.changed(); });
+    void this.#details.then(() => { this.#detailsRead = true; this.changed(); });
     return this.#details;
   });
 
   readonly loadConversation = sharedPerTurn((): Promise<ChangeRequestConversation | Error> => {
     this.#conversation = this.provider.conversation(this.number).catch(asError);
-    void this.#conversation.then(() => { this.changed(); });
+    void this.#conversation.then(() => { this.#conversationRead = true; this.changed(); });
     return this.#conversation;
   });
 
   readonly loadThreads = sharedPerTurn((): Promise<readonly RemoteThread[] | Error> => {
     this.#threads = this.provider.threads(this.number).catch(asError);
-    void this.#threads.then(() => { this.changed(); });
+    void this.#threads.then(() => { this.#threadsRead = true; this.changed(); });
     return this.#threads;
   });
 
@@ -49,6 +53,24 @@ export class RemoteData {
 
   conversation(): Promise<ChangeRequestConversation | Error> {
     return this.#conversation ?? this.loadConversation();
+  }
+
+  /** The details, or undefined before GitHub first sends them; `onDidChange` fires when they arrive. */
+  async shownDetails(): Promise<ChangeRequestDetails | Error | undefined> {
+    const reading = this.details();
+    return this.#detailsRead ? await reading : undefined;
+  }
+
+  /** The review threads, or undefined before GitHub first sends them; `onDidChange` fires when they arrive. */
+  async shownThreads(): Promise<readonly RemoteThread[] | Error | undefined> {
+    const reading = this.threads();
+    return this.#threadsRead ? await reading : undefined;
+  }
+
+  /** The conversation, or undefined before GitHub first sends it; `onDidChange` fires when it arrives. */
+  async shownConversation(): Promise<ChangeRequestConversation | Error | undefined> {
+    const reading = this.conversation();
+    return this.#conversationRead ? await reading : undefined;
   }
 
   async currentDetails(): Promise<ChangeRequestDetails> {
@@ -69,8 +91,8 @@ export class RemoteData {
     const both = this.provider.overview(this.number);
     this.#details = both.then(({ details: loaded }) => loaded, () => this.provider.details(this.number)).catch(asError);
     this.#threads = both.then(({ threads }) => threads, () => this.provider.threads(this.number)).catch(asError);
-    void this.#details.then(() => { this.changed(); });
-    void this.#threads.then(() => { this.changed(); });
+    void this.#details.then(() => { this.#detailsRead = true; this.changed(); });
+    void this.#threads.then(() => { this.#threadsRead = true; this.changed(); });
   }
 
   /** Reload the page's details and the sidebar after a change it lists, such as title, draft or open state. */
@@ -84,7 +106,7 @@ export class RemoteData {
   reloadBehind(): void {
     const nextDetails = this.provider.details(this.number).catch(asError);
     const nextConversation = this.provider.conversation(this.number).catch(asError);
-    void nextDetails.then(() => { this.#details = nextDetails; this.changed(); });
-    void nextConversation.then(() => { this.#conversation = nextConversation; this.changed(); });
+    void nextDetails.then(() => { this.#details = nextDetails; this.#detailsRead = true; this.changed(); });
+    void nextConversation.then(() => { this.#conversation = nextConversation; this.#conversationRead = true; this.changed(); });
   }
 }

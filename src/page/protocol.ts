@@ -6,7 +6,7 @@ import type { Analysis } from '../core/prAnalysis.js';
 import type { ReviewView } from '../core/review.js';
 import type { LineRange, ReadRange } from '../core/reviewedFiles.js';
 import { isSessionId } from '../core/sessionBinding.js';
-import type { FileDiff } from '../core/unifiedDiff.js';
+import type { ColorFiles, FileDiff } from '../core/unifiedDiff.js';
 import type { MediaPreview } from './media.js';
 import type { MarkdownBlock } from './preview/markdown.js';
 import type { PickedSelection } from './pullRequestEdits.js';
@@ -52,6 +52,8 @@ export interface OverviewState {
   readonly updatedAt?: string;
   readonly changes?: { readonly additions: number; readonly deletions: number; readonly files: number };
   readonly reviewed?: { readonly done: number; readonly total: number };
+  /** The code host's file list, which gives `reviewed` and its Viewed marks, has not arrived yet. */
+  readonly reviewedPending?: true;
   /** Paths of files marked reviewed. */
   readonly viewed: readonly string[];
   /** Line ranges marked read, collapsed in the diff. */
@@ -210,6 +212,8 @@ export interface FilesView {
   readonly icons?: FileIcons;
   /** Every file in the checkout, for the page's All files list. */
   readonly repositoryFiles?: readonly string[];
+  /** Colors the files in `files` that lack syntax colors; set when some do. */
+  readonly colored?: ColorFiles;
 }
 /** A GitHub suggestion picked for committing: the thread and its comment. */
 /** A suggestion option written from a local thread: pushed, committed after unpushed commits, or only applied to the worktree. */
@@ -291,8 +295,8 @@ export interface OverviewActions {
   openTerminal(): Promise<void>;
   /** Push the worktree's commits to the PR's branch. */
   push(): Promise<void>;
-  /** The changes of one commit in the worktree, for a preview in the thread that made it. */
-  readCommit(oid: string): Promise<readonly FileDiff[]>;
+  /** The changes of one commit in the worktree, for a preview in the thread that made it; `colored` as in `FilesView`. */
+  readCommit(oid: string): Promise<Pick<FilesView, 'files' | 'colored'>>;
   retry(): void;
   /** Stop Claude's current run on this PR; resolves once it ended. */
   stopClaude(): Promise<void>;
@@ -456,6 +460,8 @@ export interface ExtensionMessage {
   /** Claude's draft for a local thread's Publish form, or with `github` for a GitHub thread's Reply form. */
   readonly drafted?: { readonly thread: string; readonly text: string; readonly github?: true };
   readonly files?: readonly FileDiff[];
+  /** Files of the last `files` with their syntax colors, which replace the uncolored ones of the same path. */
+  readonly colors?: readonly FileDiff[];
   /** Theme icons for the page's files and the repository's. */
   readonly icons?: FileIcons;
   /** Every file in the checkout, for the All files list. */

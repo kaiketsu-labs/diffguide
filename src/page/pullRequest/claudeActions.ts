@@ -5,7 +5,7 @@ import { conflictTask, prepareConflictFix } from '../../core/conflicts.js';
 import { git } from '../../core/git/worktrees.js';
 import { maximumReplyLength } from '../../core/limits.js';
 import { draftReplyTask, githubReplyTask } from '../../core/pullRequestComments.js';
-import { readPullRequestDiff } from '../../core/unifiedDiff.js';
+import { type FileDiff, readPullRequestDiffPlainFirst } from '../../core/unifiedDiff.js';
 import type { OverviewActions } from '../protocol.js';
 import type { PageParts } from './context.js';
 
@@ -22,6 +22,8 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
     if (reply === undefined) throw new Error('Claude did not write a draft. Try again.');
     return reply.slice(0, maximumReplyLength);
   };
+  /** The PR's changes without syntax colors, which Claude's prompts strip anyway. */
+  const readChanges = async (): Promise<readonly FileDiff[]> => (await readPullRequestDiffPlainFirst(folder, await diff.readBase())).files;
   const about = `#${pullRequest.number} ${pullRequest.title} (${pullRequest.headBranch} into ${pullRequest.baseBranch})`;
   return {
     retry: () => { opened.runner.retry(); },
@@ -67,7 +69,7 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
       remote.changed();
     },
     analyze: async () => {
-      const [files, head] = await Promise.all([readPullRequestDiff(folder, await diff.readBase()), diff.readHead()]);
+      const [files, head] = await Promise.all([readChanges(), diff.readHead()]);
       opened.analysis.start({
         files, head, about,
         anchor: async ({ range }) => (await diff.anchor({ ...range, endLine: Math.min(range.endLine, range.startLine + 49) })).anchor,
@@ -76,7 +78,7 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
     stopAnalysis: () => { opened.analysis.stop(); },
     review: async (picks) => {
       await host.savePicks(picks);
-      const files = await readPullRequestDiff(folder, await diff.readBase());
+      const files = await readChanges();
       opened.review.start({
         files, reviewers: picks, about,
         anchor: async (range) => (await diff.anchor(range)).anchor,

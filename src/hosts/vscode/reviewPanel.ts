@@ -8,7 +8,7 @@ import { type ChangeRequestConversation, type CommentKind, type HideReason, type
 import { recheckRequest } from '../../core/review.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
-import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
+import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, type FilesView, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
 import { pollWhileFocused } from './autoSync.js';
 import { workingIcon } from './claudeStatus.js';
 import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestItems.js';
@@ -82,7 +82,13 @@ export async function showPullRequestOverview(
 ): Promise<void> {
   if (revealOpenPage(key, revealAt)) return;
   let reveal = revealAt;
-  let state = await read();
+  /** The files, read while the state loads so they are ready when the page is; the page's first file request takes them. */
+  let early: Promise<FilesView> | undefined = (async () => await actions.readFiles())();
+  early.catch(() => undefined);
+  /** Whether the state changed during the first read, which may lack that change; the page then redraws once it listens. */
+  let changedEarly = false;
+  const firstRead = onDidChange(() => { changedEarly = true; });
+  let state = await read().finally(() => { firstRead.dispose(); });
   const restoredPanel = restored.get(key);
   restored.delete(key);
   const adopted = restoredPanel ?? (adopt === undefined ? undefined : panels.get(adopt)?.detach());
@@ -107,10 +113,17 @@ export async function showPullRequestOverview(
   };
   updateTabIcon();
   const post = (message: ExtensionMessage): void => { void panel.webview.postMessage(message).then(undefined, () => undefined); };
+  let filesReads = 0;
   const sendFiles = (select?: DiffSelection): void => {
-    void actions.readFiles(select).then(({ files, selection, atHead, icons, repositoryFiles }) => {
+    const reading = select === undefined && early !== undefined ? early : actions.readFiles(select);
+    early = undefined;
+    const read = ++filesReads;
+    void reading.then(async ({ files, selection, atHead, icons, repositoryFiles, colored }) => {
       post({ files, selection, atHead, ...icons === undefined ? {} : { icons }, ...repositoryFiles === undefined ? {} : { repositoryFiles }, ...revealMessage(reveal) });
       reveal = undefined;
+      if (colored === undefined || read !== filesReads) return;
+      // The uncolored files stay on the page if coloring fails.
+      await colored((batch) => { if (read === filesReads) post({ colors: batch }); }).catch(() => undefined);
     }, (error: unknown) => {
       post({ filesError: error instanceof Error ? error.message : String(error) });
     });
@@ -235,7 +248,12 @@ export async function showPullRequestOverview(
           await vscode.commands.executeCommand('workbench.extensions.search', `ext:${extension}`);
         }
         else if (action === 'commit-diff' && isOid(oid) && state.threads.some((thread) => thread.commits?.some((commit) => commit.oid === oid))) {
-          try { post({ commitDiff: { oid, files: await actions.readCommit(oid) } }); } catch (error: unknown) { post({ commitDiff: { oid, error: error instanceof Error ? error.message : String(error) } }); }
+          try {
+            const { files, colored } = await actions.readCommit(oid);
+            post({ commitDiff: { oid, files } });
+            // The uncolored changes stay in the preview if coloring fails.
+            if (colored !== undefined) void colored().then((done) => { post({ commitDiff: { oid, files: done } }); }, () => undefined);
+          } catch (error: unknown) { post({ commitDiff: { oid, error: error instanceof Error ? error.message : String(error) } }); }
         }
         else if (action === 'files' && typeof whitespace === 'boolean') {
           const commits = [
@@ -431,6 +449,7 @@ export async function showPullRequestOverview(
   subscriptions.push(sync, panel.onDidChangeViewState(({ webviewPanel }) => { if (webviewPanel.visible) sync.now(); }));
   if (onDidChangeFiles !== undefined) subscriptions.push(onDidChangeFiles(() => { sendFiles(); }));
   sync.now();
+  if (changedEarly) redraw();
   const release = (): void => {
     if (timer !== undefined) clearTimeout(timer);
     for (const subscription of subscriptions) subscription.dispose();

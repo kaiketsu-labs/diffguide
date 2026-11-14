@@ -8,9 +8,13 @@ import { linesFit } from './filters.js';
 import { renderFiles } from './render.js';
 import { contextLines } from './table.js';
 
+/** The diff line each drawn code cell shows. */
+export const cellLines = new WeakMap<HTMLElement, DiffLine>();
+
 export function code(line: DiffLine, side: '' | 'add' | 'del'): HTMLTableCellElement {
   const cell = el('td', 'code' + (side ? ' ' + side : ''));
   cell.innerHTML = line.html;
+  cellLines.set(cell, line);
   if (line.kind !== 'del' && line.newLine !== undefined) cell.dataset.line = String(line.newLine);
   return cell;
 }

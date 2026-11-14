@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { parseUnifiedDiff, readPullRequestDiff, savedCodeDiff, splitHighlightedLines } from '../src/core/unifiedDiff.js';
+import { useEditorHighlighter } from '../src/core/codePreview.js';
+import { parseUnifiedDiff, readPullRequestDiff, readPullRequestDiffPlainFirst, savedCodeDiff, splitHighlightedLines } from '../src/core/unifiedDiff.js';
 
 const output = [
   'diff --git a/src/a.ts b/src/a.ts',
@@ -104,4 +105,90 @@ test('a deleted file shows the code saved with its comments at their original li
   assert.equal(file.saved, true);
   assert.deepEqual(file.hunks.map((hunk) => hunk.lines.map((line) => [line.oldLine, line.newLine])), [[[9, 9], [10, 10]], [[19, 19], [20, 20], [21, 21]]]);
   assert.match(file.hunks[1]?.lines[1]?.html ?? '', /d/u);
+});
+
+test('reads a diff uncolored first and colors it after, unless the colors are already known', async (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-plain-'));
+  let calls = 0;
+  useEditorHighlighter({ prepare: async () => undefined, styles: () => '', highlight: (code: string) => { calls++; return `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`; } });
+  t.after(() => { useEditorHighlighter(undefined); rmSync(repo, { recursive: true, force: true }); });
+  const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  writeFileSync(join(repo, 'a.ts'), 'const a = 1;\nconst b = 2;\n');
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'a.ts'), 'const a = 1;\nconst b = 3;\n');
+  writeFileSync(join(repo, 'b.ts'), 'export {};\n');
+  const lines = (files: readonly { hunks: readonly { lines: readonly { html: string }[] }[] }[]) => files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines.map((line) => line.html)));
+
+  const cold = await readPullRequestDiffPlainFirst(repo, base);
+  assert.equal(calls, 0, 'the uncolored files ran the highlighter');
+  assert.ok(lines(cold.files).every((html) => !html.includes('<span')));
+  assert.ok(cold.colored !== undefined);
+  const colored = await cold.colored();
+  assert.ok(calls > 0);
+  assert.ok(lines(colored).every((html) => html === '' || html.includes('<span')));
+  assert.deepEqual(colored.map((file) => file.path), cold.files.map((file) => file.path));
+
+  const before = calls;
+  const warm = await readPullRequestDiffPlainFirst(repo, base);
+  assert.equal(calls, before);
+  assert.equal(warm.colored, undefined);
+  assert.deepEqual(lines(warm.files), lines(colored));
+});
+
+test('hands the colors over in batches as files finish, so the first files get colors before the rest', async (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-batches-'));
+  // Each file takes longer than a batch, so each file is its own batch.
+  const slow = (code: string): string => {
+    const until = performance.now() + 120;
+    while (performance.now() < until) { /* busy */ }
+    return `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`;
+  };
+  useEditorHighlighter({ prepare: async () => undefined, styles: () => '', highlight: slow });
+  t.after(() => { useEditorHighlighter(undefined); rmSync(repo, { recursive: true, force: true }); });
+  const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('commit', '--quiet', '--allow-empty', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'a.ts'), 'export const a = 1;\n');
+  writeFileSync(join(repo, 'b.ts'), 'export const b = 2;\n');
+  git('add', '.');
+
+  const { colored } = await readPullRequestDiffPlainFirst(repo, base);
+  assert.ok(colored !== undefined);
+  const batches: string[][] = [];
+  const all = await colored((files) => { batches.push(files.map((file) => file.path)); });
+  assert.deepEqual(batches, [['a.ts'], ['b.ts']]);
+  assert.ok(all.every((file) => file.hunks[0]?.lines[0]?.html.includes('<span')));
+});
+
+test('colors a diff off this thread when the highlighter can, without running it here', async (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'diffguide-ahead-'));
+  const span = (code: string): string => `<span class="tm-ff0000">${code.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`;
+  let here = 0;
+  const asked: string[][] = [];
+  useEditorHighlighter({
+    prepare: async () => undefined, styles: () => '', highlight: (code: string) => { here++; return span(code); },
+    highlightAll: async (sources) => { asked.push(sources.map((source) => source.filePath)); return sources.map(({ code }) => span(code)); },
+  });
+  t.after(() => { useEditorHighlighter(undefined); rmSync(repo, { recursive: true, force: true }); });
+  const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  writeFileSync(join(repo, 'a.ts'), 'const a = 1;\nconst b = 2;\n');
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'a.ts'), 'const a = 1;\nconst b = 3;\n');
+  writeFileSync(join(repo, 'b.ts'), 'export {};\n');
+  git('add', '.');
+
+  const { colored } = await readPullRequestDiffPlainFirst(repo, base);
+  assert.ok(colored !== undefined);
+  const files = await colored();
+  assert.equal(here, 0, 'the diff was colored on this thread');
+  // The changed file asks for its old and new version whole, the added file for its one hunk.
+  assert.deepEqual(asked, [['a.ts', 'a.ts'], ['b.ts']]);
+  assert.ok(files.flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines)).every((line) => line.html.includes('<span')));
 });

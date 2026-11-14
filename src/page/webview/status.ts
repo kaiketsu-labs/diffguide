@@ -1,7 +1,7 @@
 /** Busy state, the page notice, and the agent's working motion. */
 import type { AgentProgress, AgentStep } from '../../core/agent.js';
 import type { ExtensionMessage, OverviewState, PageMessage } from '../protocol.js';
-import { $, button, checkStates, el, labels, stateIcon } from './dom.js';
+import { $, button, checkStates, detailsLoading, el, labels, stateIcon } from './dom.js';
 import { orbCanvas, stepMotion } from './orb.js';
 import { received, ui } from './state.js';
 import { post } from './transport.js';
@@ -73,9 +73,11 @@ export function status(key: ReviewerState | CheckState, name: string, url?: stri
 
 export function setBusy(value: boolean): void {
   ui.busy = value;
-  for (const review of reviewButtons) review.disabled = value || (ui.author && review.hasAttribute('data-reviewer'));
+  const loading = detailsLoading(received.current);
+  for (const review of reviewButtons) review.disabled = value || loading || (ui.author && review.hasAttribute('data-reviewer'));
   const merge = received.current?.conversation?.merge;
-  $<HTMLButtonElement>('merge').disabled = value || received.current?.details?.mergeable === 'no' || (merge?.state === 'blocked' && !merge.canBypass && !merge.mergeQueue);
+  const mergeLoading = merge === undefined && received.current?.conversationError === undefined;
+  $<HTMLButtonElement>('merge').disabled = value || loading || mergeLoading || received.current?.details?.mergeable === 'no' || (merge?.state === 'blocked' && !merge.canBypass && !merge.mergeQueue);
   for (const action of document.querySelectorAll<HTMLButtonElement>('[data-pr-action]')) action.disabled = value;
 }
 

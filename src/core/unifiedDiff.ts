@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { capturedCodeContext } from './anchors.js';
-import { codePreviewHtml, escapeCode, prepareHighlighting } from './codePreview.js';
+import { type CodeSource, codePreviewHtml, colorAhead, escapeCode, knownPreviewHtml, prepareHighlighting } from './codePreview.js';
 import type { CodeAnchor } from './contracts.js';
 import { git } from './git/worktrees.js';
 
@@ -48,24 +48,86 @@ interface WholeFile { readonly lines: readonly string[]; readonly html: readonly
 /** Files longer than this keep per-hunk colors, since `codePreviewHtml` leaves them plain. */
 const maxWholeFileLength = 200_000;
 
+/** Colors the files that lack them, starting when called; `onBatch` gets each run of newly colored files as it is done, and the result is every file. */
+export type ColorFiles = (onBatch?: (files: readonly FileDiff[]) => void) => Promise<readonly FileDiff[]>;
+
+/** How much coloring work goes into one batch, so the first files on the page get colors early. */
+const colorBatchMs = 100;
+
 /** A PR worktree's tracked changes against its base, highlighted per line; yields between files so a large PR does not block the extension host. */
 export async function readPullRequestDiff(worktree: string, base: string, options: DiffOptions = {}): Promise<readonly FileDiff[]> {
+  const { files, colored } = await readPullRequestDiffPlainFirst(worktree, base, options);
+  return colored === undefined ? files : await colored();
+}
+
+/** The diff as `readPullRequestDiff` reads it, with `files` from known colors only; `colored` is set when coloring the rest takes highlighting. */
+export async function readPullRequestDiffPlainFirst(worktree: string, base: string, options: DiffOptions = {}): Promise<{ files: readonly FileDiff[]; colored?: ColorFiles }> {
   const output = await diffOutput(worktree, base, options);
-  await prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
+  const preparing = prepareHighlighting([...output.matchAll(/^\+\+\+ b\/(.+)$/gmu)].map((match) => match[1] ?? ''));
   const raw = parseRawDiff(output);
   const oldPaths = raw.filter((file) => wholeFileColors(file) && file.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'del'))).map((file) => file.oldPath ?? file.path);
   const oldContents = await readBlobs(worktree, base, oldPaths).catch(() => new Map<string, string>());
   const { to } = options;
   const newContents = to === undefined ? undefined : await readBlobs(worktree, to, raw.filter(wholeFileColors).map((file) => file.path)).catch(() => new Map<string, string>());
   const generated = await generatedPaths(worktree, raw.map((file) => file.path));
-  const files: FileDiff[] = [];
+  const sources = new Map<RawFile, FileSources>();
   for (const file of raw) {
     const current = !wholeFileColors(file) ? undefined : newContents !== undefined ? newContents.get(file.path) : await readFile(path.join(worktree, file.path), 'utf8').catch(() => undefined);
-    const diff = highlightFile(file, highlightLines, { old: oldContents.get(file.oldPath ?? file.path), new: current });
-    files.push(generated.has(file.path) ? { ...diff, generated: true } : diff);
+    sources.set(file, { old: oldContents.get(file.oldPath ?? file.path), new: current });
+  }
+  const build = (file: RawFile, colorize: Colorize): FileDiff => {
+    const diff = highlightFile(file, highlightLines, sources.get(file), colorize);
+    return generated.has(file.path) ? { ...diff, generated: true } : diff;
+  };
+  const plain = raw.map((file) => {
+    const { colorize, missed } = knownColors();
+    const diff = build(file, colorize);
+    return missed() ? { diff, color: { sources: codeToColor(file, sources.get(file)), build: () => build(file, codePreviewHtml) } } : { diff };
+  });
+  const files = plain.map(({ diff }) => diff);
+  if (plain.every(({ color }) => color === undefined)) return { files };
+  const colored: ColorFiles = async (onBatch) => {
+    await preparing;
+    return await colorInBatches(plain.map(({ diff, color }) => color ?? diff), onBatch);
+  };
+  return { files, colored };
+}
+
+/** A colorizer that only uses colors already known, and whether it met code without them. */
+export function knownColors(): { colorize: Colorize; missed: () => boolean } {
+  let missed = false;
+  return {
+    colorize: (code, filePath) => {
+      const html = knownPreviewHtml(code, filePath);
+      if (html !== undefined) return html;
+      missed = true;
+      return escapeCode(code);
+    },
+    missed: () => missed,
+  };
+}
+
+/** A file still to color: `build` makes it, with the code in `sources` colored ahead where the highlighter works off this thread. */
+export interface Uncolored { readonly sources: readonly CodeSource[]; build(): FileDiff }
+
+/** Builds the uncolored files in order, yielding between them, and hands `onBatch` each run built within `colorBatchMs`. */
+export async function colorInBatches(files: readonly (FileDiff | Uncolored)[], onBatch?: (files: readonly FileDiff[]) => void): Promise<readonly FileDiff[]> {
+  const result: FileDiff[] = [];
+  let batch: FileDiff[] = [];
+  let since = performance.now();
+  // Every file's code is asked for at once, so the highlighter's threads stay busy while this one builds.
+  const ahead = files.map((file) => 'build' in file ? colorAhead(file.sources) : undefined);
+  for (const [index, file] of files.entries()) {
+    if (!('build' in file)) { result.push(file); continue; }
+    await ahead[index];
+    const built = file.build();
+    result.push(built);
+    batch.push(built);
+    if (performance.now() - since >= colorBatchMs) { onBatch?.(batch); batch = []; since = performance.now(); }
     await new Promise((resolve) => { setImmediate(resolve); });
   }
-  return files;
+  if (batch.length > 0) onBatch?.(batch);
+  return result;
 }
 
 function diffOutput(worktree: string, base: string, { to, ignoreWhitespace }: DiffOptions = {}): Promise<string> {
@@ -193,20 +255,23 @@ function parseRawDiff(output: string): readonly RawFile[] {
   return files.filter((entry) => entry.path !== '');
 }
 
-function highlightFile(file: RawFile, highlight = highlightLines, sources: FileSources = {}): FileDiff {
+/** Markup for code in a file: `codePreviewHtml`, or a stand-in that must not run the highlighter. */
+export type Colorize = (code: string, filePath: string) => string;
+
+function highlightFile(file: RawFile, highlight = highlightLines, sources: FileSources = {}, colorize: Colorize = codePreviewHtml): FileDiff {
   let additions = 0;
   let deletions = 0;
   const shown = file.hunks.flatMap((hunk) => hunk.lines);
   const lastOld = shown.reduce((last, line) => Math.max(last, line.oldLine ?? 0), 0);
   const lastNew = shown.reduce((last, line) => Math.max(last, line.newLine ?? 0), 0);
-  const oldFile = highlightWholeFile(sources.old, file.oldPath ?? file.path, lastOld);
-  const newFile = highlightWholeFile(sources.new, file.path, lastNew);
+  const oldFile = highlightWholeFile(sources.old, file.oldPath ?? file.path, lastOld, colorize);
+  const newFile = highlightWholeFile(sources.new, file.path, lastNew, colorize);
   const hunks = file.hunks.map(({ header, lines }) => {
     const oldSide = lines.filter((line) => line.kind !== 'add');
     const newSide = lines.filter((line) => line.kind !== 'del');
     const html = new Map<RawLine, string>();
-    const oldHtml = fromWholeFile(oldSide, (line) => line.oldLine, oldFile) ?? highlight(oldSide.map((line) => line.text), file.oldPath ?? file.path);
-    const newHtml = fromWholeFile(newSide, (line) => line.newLine, newFile) ?? highlight(newSide.map((line) => line.text), file.path);
+    const oldHtml = oldSide.length === 0 ? [] : fromWholeFile(oldSide, (line) => line.oldLine, oldFile) ?? highlight(oldSide.map((line) => line.text), file.oldPath ?? file.path, colorize);
+    const newHtml = newSide.length === 0 ? [] : fromWholeFile(newSide, (line) => line.newLine, newFile) ?? highlight(newSide.map((line) => line.text), file.path, colorize);
     oldSide.forEach((line, index) => { html.set(line, oldHtml[index] ?? ''); });
     newSide.forEach((line, index) => { html.set(line, newHtml[index] ?? ''); });
     return {
@@ -222,13 +287,30 @@ function highlightFile(file: RawFile, highlight = highlightLines, sources: FileS
   return { ...file, additions, deletions, hunks };
 }
 
-/** The file's highlighted lines up to `lastLine`, the last one a hunk shows; later code cannot change their colors. */
-function highlightWholeFile(text: string | undefined, filePath: string, lastLine: number): WholeFile | undefined {
+/** The code `highlightFile` colors first: each side whole when its content is given, else that side's lines of each hunk. */
+function codeToColor(file: RawFile, sources: FileSources = {}): CodeSource[] {
+  const shown = file.hunks.flatMap((hunk) => hunk.lines);
+  const side = (text: string | undefined, filePath: string, lineOf: (line: RawLine) => number | undefined, other: DiffLine['kind']): CodeSource[] => {
+    const whole = wholeSource(text, shown.reduce((last, line) => Math.max(last, lineOf(line) ?? 0), 0));
+    return whole !== undefined ? [{ code: whole.source, filePath }]
+      : file.hunks.map((hunk) => hunk.lines.filter((line) => line.kind !== other)).filter((lines) => lines.length > 0).map((lines) => ({ code: lines.map((line) => line.text).join('\n'), filePath }));
+  };
+  return [...side(sources.old, file.oldPath ?? file.path, (line) => line.oldLine, 'add'), ...side(sources.new, file.path, (line) => line.newLine, 'del')];
+}
+
+/** The file's lines up to `lastLine`, the last one a hunk shows, since later code cannot change their colors; undefined when too long to color whole. */
+function wholeSource(text: string | undefined, lastLine: number): { lines: string[]; source: string } | undefined {
   if (text === undefined) return undefined;
   const lines = text.split('\n').slice(0, lastLine);
   const source = lines.join('\n');
-  if (source.length > maxWholeFileLength) return undefined;
-  const html = codePreviewHtml(source, filePath);
+  return source.length > maxWholeFileLength ? undefined : { lines, source };
+}
+
+function highlightWholeFile(text: string | undefined, filePath: string, lastLine: number, colorize: Colorize): WholeFile | undefined {
+  const whole = wholeSource(text, lastLine);
+  if (whole === undefined) return undefined;
+  const { lines, source } = whole;
+  const html = colorize(source, filePath);
   if (html === escapeCode(source)) return undefined;
   return { lines, html: splitHighlightedLines(html) };
 }
@@ -247,17 +329,24 @@ function fromWholeFile(side: readonly RawLine[], lineNumber: (line: RawLine) => 
 }
 
 /** A whole file's lines, highlighted, for showing context the diff left out. */
-export function highlightSource(text: string, filePath: string): readonly string[] {
-  return highlightLines((text.endsWith('\n') ? text.slice(0, -1) : text).split('\n'), filePath);
+export function highlightSource(text: string, filePath: string, colorize: Colorize = codePreviewHtml): readonly string[] {
+  return highlightLines((text.endsWith('\n') ? text.slice(0, -1) : text).split('\n'), filePath, colorize);
 }
 
 /** A file outside `git diff` as one hunk: every line added for a new untracked file, or every line context for an unchanged one. */
-export function wholeFileDiff(path: string, content: Buffer, change: 'added' | 'unchanged'): FileDiff {
+/** The code `wholeFileDiff` colors for a file. */
+export function wholeFileCode(path: string, content: Buffer): CodeSource[] {
+  if (content.includes(0)) return [];
+  const text = content.toString('utf8');
+  return [{ code: text.endsWith('\n') ? text.slice(0, -1) : text, filePath: path }];
+}
+
+export function wholeFileDiff(path: string, content: Buffer, change: 'added' | 'unchanged', colorize: Colorize = codePreviewHtml): FileDiff {
   const empty = { path, change, additions: 0, deletions: 0, hunks: [] };
   if (content.includes(0)) return { ...empty, binary: true };
   const text = content.toString('utf8');
   if (text === '') return { ...empty, binary: false };
-  const html = highlightSource(text, path);
+  const html = highlightSource(text, path, colorize);
   const kind = change === 'added' ? 'add' : 'context';
   const lines = html.map((line, index): DiffLine => ({ kind, ...change === 'added' ? {} : { oldLine: index + 1 }, newLine: index + 1, html: line }));
   const header = change === 'added' ? `@@ -0,0 +1,${lines.length} @@` : `@@ -1,${lines.length} +1,${lines.length} @@`;
@@ -285,8 +374,8 @@ export function savedCodeDiff(path: string, anchors: readonly CodeAnchor[]): Fil
 }
 
 /** Highlight consecutive lines together, then cut the markup at line breaks. */
-function highlightLines(lines: readonly string[], filePath: string): readonly string[] {
-  return splitHighlightedLines(codePreviewHtml(lines.join('\n'), filePath));
+function highlightLines(lines: readonly string[], filePath: string, colorize: Colorize = codePreviewHtml): readonly string[] {
+  return splitHighlightedLines(colorize(lines.join('\n'), filePath));
 }
 
 /** Split highlight markup into lines, closing and reopening spans that cross a line break. */

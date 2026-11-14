@@ -263,3 +263,61 @@ for (const [problem, reply] of [[undefined, { refreshed: true, notice: { text: '
     panel.dispose();
   });
 }
+
+test('a page reads its files while its state still loads, and sends that read once the page is ready', async () => {
+  resetFakeWindow();
+  const order: string[] = [];
+  const actions = {
+    readFiles: async () => { order.push('files'); return { files: [], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }; },
+  } as unknown as OverviewActions;
+  const read = async () => { await new Promise((resolve) => setTimeout(resolve, 50)); order.push('state'); return base; };
+  await showPullRequestOverview('files-early', read, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'ready' });
+  await tick();
+  assert.deepEqual(order, ['files', 'state']);
+  assert.equal(panel.sent.filter((m) => 'files' in (m as object)).length, 1);
+  panel.dispose();
+});
+
+test('a commit preview shows its changes at once and gets their syntax colors after', async () => {
+  resetFakeWindow();
+  const oid = 'a'.repeat(40);
+  const file = (html: string) => ({ path: 'a.ts', change: 'modified', binary: false, additions: 1, deletions: 0, hunks: [{ header: '@@ -1 +1 @@', lines: [{ kind: 'add', newLine: 1, html }] }] });
+  let color: (() => void) | undefined;
+  const actions = { readCommit: async () => ({
+    files: [file('const a = 1;')],
+    colored: async () => { await new Promise<void>((resolve) => { color = resolve; }); return [file('<span class="tm-ff0000">const a = 1;</span>')]; },
+  }) } as unknown as OverviewActions;
+  const state = { ...base, threads: [{ commits: [{ oid, subject: 'change' }] }] } as unknown as OverviewState;
+  await showPullRequestOverview('commit-preview', async () => state, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  const previews = (): string[] => panel.sent.flatMap((message) => {
+    const { commitDiff } = message as { commitDiff?: { files?: { hunks: { lines: { html: string }[] }[] }[] } };
+    return commitDiff?.files === undefined ? [] : [commitDiff.files[0]?.hunks[0]?.lines[0]?.html ?? ''];
+  });
+  panel.receive({ action: 'commit-diff', oid }); await tick();
+  assert.deepEqual(previews(), ['const a = 1;']);
+  color?.(); await tick();
+  assert.deepEqual(previews(), ['const a = 1;', '<span class="tm-ff0000">const a = 1;</span>']);
+  panel.dispose();
+});
+
+test('a change during the page\'s first read redraws the page once it is open', async () => {
+  resetFakeWindow();
+  const changed = new EventEmitter<void>();
+  let reads = 0;
+  const read = async (): Promise<OverviewState> => {
+    const pending = reads++ === 0;
+    // GitHub's file list arrives while the first state is still being read.
+    if (pending) { await new Promise((resolve) => setTimeout(resolve, 20)); changed.fire(); await new Promise((resolve) => setTimeout(resolve, 20)); }
+    return { ...base, ...pending ? { reviewedPending: true as const } : {} };
+  };
+  await showPullRequestOverview('early-change', read, changed.event, {} as OverviewActions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  await tick();
+  const states = panel.sent.flatMap((message) => { const { state } = message as { state?: OverviewState }; return state === undefined ? [] : [state]; });
+  assert.equal(states.length, 1, 'the page was not redrawn');
+  assert.equal(states[0]?.reviewedPending, undefined);
+  panel.dispose();
+});

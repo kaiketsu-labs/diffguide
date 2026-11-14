@@ -18,6 +18,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - Hosts construct concrete forges and agents (`GitHubApiProvider`, `ClaudeRunner`) and pass them on as `Forge`, `AgentRunner`, `AgentCodeReview` and `AgentGuideAnalysis`. GitLab, other agents and a standalone host each add a folder under their layer.
 - Core types use neutral names (`ChangeRequestSummary`, `AgentActivity`). Wire formats, persisted values and UI copy keep their existing names, such as `'github'` thread sources.
 - `core/unifiedDiff.ts` parses `git diff` into highlighted hunks. `core/anchors.ts` captures and relocates code by content. `core/reviewedFiles.ts` stores Viewed files and read line ranges. `hosts/vscode/localReview.ts` feeds the page in local mode.
+- `hosts/vscode/textMateHighlighter.ts` colors code with VS Code's grammars and the user's theme. `highlightPool.ts` runs it on worker threads from `highlightWorker.ts` (bundled to `dist/highlight-worker.cjs`), so these three files must not import `vscode`.
 - `page/pullRequest/controller.ts` composes a PR page from `RemoteData` (GitHub reads), `DiffView` (the Files tab), `pageState.ts` and one action group per area (threads, GitHub, suggestions, Claude, worktree, files, linked changes). Anything that needs VS Code goes through `PageHost` in `context.ts`.
 
 ### Page script (`src/page/webview/`)

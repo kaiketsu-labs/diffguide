@@ -6,7 +6,7 @@ import { DiffView } from './diffView.js';
 import { type FileActions, fileActions } from './fileActions.js';
 import { type GitHubActions, githubActions } from './githubActions.js';
 import { LinkedCard, type LinkedActions } from './linked.js';
-import { readPageState } from './pageState.js';
+import { type ListedFiles, readPageState } from './pageState.js';
 import { RemoteData } from './remoteData.js';
 import { type SuggestionActions, suggestionActions } from './suggestionActions.js';
 import { type ThreadActions, threadActions } from './threadActions.js';
@@ -30,8 +30,11 @@ export interface PageController {
 
 export function pullRequestPageController(page: PullRequestPage): PageController {
   const { provider, pullRequest, opened, host } = page;
-  const listed = provider.listFiles(pullRequest.number).then((files) => files.map((file) => file.path), () => undefined);
   const remote = new RemoteData(provider, pullRequest.number, () => { host.refreshSidebar(); });
+  /** GitHub's file list once it has arrived; the page shows without it until then. */
+  let listed: ListedFiles | undefined;
+  void provider.listFiles(pullRequest.number).then((files) => files.map((file) => file.path), () => undefined)
+    .then((paths) => { listed = { paths }; remote.changed(); });
   const diff = new DiffView(page, async () => (await remote.currentConversation()).lastReviewedCommit);
   const parts: PageParts = {
     page, remote, diff, edits: { applied: new Map(), undo: new Map(), conflictQuestion: undefined },

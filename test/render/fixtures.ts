@@ -106,6 +106,7 @@ export const pullRequest: OverviewState = {
   },
   unpushed: [{ oid: 'f'.repeat(40), subject: 'Use the configured limit', author: 'claude', createdAt: ago(10), files: 1, additions: 2, deletions: 1 }],
   local: { 'src/api/client.ts': 'unpushed' },
+  linked: [],
 };
 
 /** The same PR while Claude works on a thread. */
@@ -170,7 +171,13 @@ export const readme: OverviewState = {
 };
 
 const filesMessage: ExtensionMessage = { files, selection: { range: { kind: 'all' }, whitespace: false }, atHead: true };
+const { conversation: _conversation, ...withoutConversation } = pullRequest;
+const { details: _details, github: _github, ...withoutDetails } = withoutConversation;
+const { reviewed: _reviewed, ...withoutReviewed } = pullRequest;
+const listPending: OverviewState = { ...withoutReviewed, reviewedPending: true };
+const { linked: _linked, ...withoutLinked } = pullRequest;
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
+const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) => ({ ...hunk, lines: hunk.lines.map((line) => ({ ...line, html: line.html.replace(/<[^>]*>/gu, '') })) })) }));
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
@@ -180,6 +187,34 @@ export const scenes: Readonly<Record<string, Scene>> = {
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
   local: scene(local, [{ shot: 'local.png' }]),
+  // The page shows before GitHub sends the conversation; Merge waits for its merge state.
+  conversationLoading: scene(withoutConversation, [
+    { expect: '#merge[disabled]', shot: 'conversation-loading.png' },
+    { send: { state: pullRequest }, absent: '#merge[disabled]' },
+  ], { saved: { view: 'overview' } }),
+  // The page shows before GitHub sends the details and threads; pulsing bars hold their places and review and merge wait.
+  detailsLoading: scene(withoutDetails, [
+    { expect: '#body .skeleton' }, { expect: '#reviewers .skeleton' }, { expect: '#merge-status .skeleton' }, { expect: '#threads .skeleton' },
+    { expect: '#merge[disabled]' }, { expect: '#review[disabled]' }, { expect: '[data-event="comment"][disabled]', shot: 'details-loading.png' },
+    { send: { state: pullRequest }, absent: '.skeleton' }, { absent: '#review[disabled]' },
+  ], { saved: { view: 'overview' } }),
+  // The page shows before GitHub sends its file list; the viewed count pulses and the files wait for GitHub's Viewed marks.
+  listLoading: { state: listPending, messages: [{ state: listPending }, filesMessage],
+    saved: { view: 'files' }, steps: [
+      { expect: '#reviewed .skeleton' }, { absent: '#files .file', shot: 'list-loading.png' },
+      { send: { state: pullRequest }, expect: '#files .file' }, { absent: '#reviewed .skeleton' },
+    ] },
+  // Files show before their syntax colors; the colors come in batches and fill in the drawn lines.
+  colorsLater: { state: pullRequest, messages: [{ state: pullRequest }, { ...filesMessage, files: uncolored }], saved: { view: 'files' }, steps: [
+    { scrollTo: '#files', absent: '#files td.code span', shot: 'colors-later.png' },
+    { send: { colors: files.slice(0, 2) }, expect: '.file[data-path="src/auth/token.ts"] td.code .hljs-keyword' }, { absent: '.file[data-path="src/api/client.ts"] td.code span' },
+    { send: { colors: files.slice(2) }, expect: '.file[data-path="src/api/client.ts"] td.code .hljs-keyword', shot: 'colors-arrived.png' },
+  ] },
+  // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
+  linkedLoading: scene(withoutLinked, [
+    { expect: '#linked:not([hidden]) .skeleton', shot: 'linked-loading.png' },
+    { send: { state: { ...withoutLinked, linked: [] } }, absent: '#linked .skeleton' }, { expect: '#linked-rows', text: 'No PRs in other repositories go with this one.' },
+  ], { saved: { view: 'overview' } }),
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },
     width: 1100, height: 900, steps: [{ scrollTo: '#files', shot: 'readme.png' }] },

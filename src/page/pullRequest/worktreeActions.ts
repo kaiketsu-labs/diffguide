@@ -1,7 +1,7 @@
 import { pushCommits, syncToPullRequestHead } from '../../core/conflicts.js';
 import type { ChangeRequestVersion } from '../../core/forge.js';
 import { followBase, git } from '../../core/git/worktrees.js';
-import { readPullRequestDiff } from '../../core/unifiedDiff.js';
+import { readPullRequestDiffPlainFirst } from '../../core/unifiedDiff.js';
 import type { OverviewActions } from '../protocol.js';
 import type { PageParts } from './context.js';
 
@@ -24,7 +24,7 @@ export function worktreeActions({ page, remote, diff, notOnCheckout, pushTarget 
     },
     readCommit: async (oid) => {
       await diff.haveCommit(oid);
-      return readPullRequestDiff(folder, (await git(folder, ['rev-parse', `${oid}^`])).trim(), { to: oid });
+      return readPullRequestDiffPlainFirst(folder, (await git(folder, ['rev-parse', `${oid}^`])).trim(), { to: oid });
     },
     removeWorktree: async () => {
       notOnCheckout('Remove worktree');

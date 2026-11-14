@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- PR pages open before GitHub sends the description, reviewers and checks. Pulsing bars hold their places, and review and merge wait until GitHub answers.
+- A PR's changed files show right away the first time they are read, without syntax colors; the colors follow file by file, the files on screen first, without redrawing the page.
+- The local review page also shows changed files before their syntax colors.
+- Syntax colors of a large diff arrive about twice as fast: several threads color the files, and the extension host stays free meanwhile.
+- A PR page no longer stays on "Loading changes…" when GitHub's file list arrives while the page opens.
+- A commit's changes in a thread show before their syntax colors. Claude's guide and code review start without waiting for colors.
+- PR pages no longer wait for GitHub's file list. The viewed count pulses until it arrives, and files show once GitHub's Viewed marks are known.
+- PR pages no longer wait for linked changes in other repositories. The Linked changes card pulses until GitHub answers.
 - Review pages reopen in their tabs after a window reload, instead of closing.
 - Refresh on the review page spins while it reloads, then says "Refreshed." or shows why it failed.
 - Resolving a thread folds it, also after jumping to it from the code review card.
