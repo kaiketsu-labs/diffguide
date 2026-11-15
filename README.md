@@ -12,6 +12,8 @@
 
 DiffGuide is a review page in VS Code for your local changes and your GitHub pull requests. Comment on a line, and your coding agent answers in the same thread or changes the code. You decide what to accept and when the review is done.
 
+PR pages have Overview and Code tabs. The header's More menu holds PR actions; the branch's unpushed chip holds Show changes and Push. Local review opens the code directly. [Page controls](docs/USAGE.md#the-whole-github-pr).
+
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide">Install</a> ·
   <a href="https://github.com/kaiketsu-labs/diffguide/blob/main/docs/USAGE.md">Guide</a> ·

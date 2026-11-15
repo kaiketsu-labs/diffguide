@@ -72,7 +72,7 @@ A comment captures its code when you send it. Replies keep the thread's original
 
 ## Code review
 
-**Review** in the files toolbar has Claude review the changes with review agents, on a PR's page and on a local page. The arrow beside it picks the agents; DiffGuide remembers the choice per repository.
+**Review** in Claude's chip menu has Claude review the changes with review agents, on a PR's page and on a local page. The arrow beside it picks the agents; DiffGuide remembers the choice per repository.
 
 | Agent | Reports | Evidence it needs |
 |---|---|---|
@@ -128,11 +128,15 @@ Lists your PRs and your review requests, including those sent to your teams, per
 
 ## The whole GitHub PR
 
+The PR page has Overview and Code tabs. Overview starts with the description and guide summary. Merge holds the checks, and Details unfolds Assignees, Labels, Milestone and Development. Code holds the files in Files or Guide order. Finish review opens its form on either tab. Local review opens the code directly, without tabs or Finish review.
+
 The review page covers GitHub's PR tabs: conversation with comments, reviews, reactions, edits and events; commits with per-commit diffs and changes since your last review; a file tree, file filters and hidden whitespace; check annotations and re-runs; and a merge box with branch protection, update branch, auto-merge, merge queue and revert.
+
+The header's More menu holds Open on GitHub, Remove worktree, Open in terminal and Link a PR. Open in terminal stops the PR's background Claude run and continues its conversation in VS Code's terminal. A conversation you connected keeps its terminal and connection choices in Claude's menu. The unpushed chip beside the branch holds Show changes and, when you can edit the PR, Push. Viewed progress appears only in the header.
 
 ## Linked changes
 
-A PR that needs changes in other repositories shows them in **Linked changes**: each linked PR's state, or the branch Claude made where there is none yet, with **Push** and **Push and open draft PR**. PRs link through GitHub mentions, dependency pins to a branch in the diff, Claude's edits or **Link a PR…**; **Unlink** hides one. Claude reads other repositories freely; its file edits there are limited to DiffGuide worktrees, one Claude run at a time per worktree.
+A PR with a linked PR shows **Linked changes** on Overview. Its rows show each linked PR's state and any branches Claude made in other repositories, with **Push** and **Push and open draft PR**. PRs link through GitHub mentions, dependency pins to a branch in the diff, Claude's edits or **Link a PR…** in More; **Unlink** hides one. Claude reads other repositories freely; its file edits there are limited to DiffGuide worktrees, one Claude run at a time per worktree.
 
 ## Settings
 

@@ -96,7 +96,7 @@ export interface Prefs {
 }
 export const prefs: Prefs = {
   layout: saved.layout === 'split' ? 'split' : 'unified',
-  view: saved.view === 'code' || saved.view === 'files' || saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'code' : 'overview',
+  view: initial.state.localMode === true || saved.view === 'code' || saved.view === 'files' || saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'code' : 'overview',
   order: saved.order ?? (saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : 'files'),
   allFiles: saved.allFiles ?? initial.state.localMode === true,
   listHidden: saved.listHidden === true,
@@ -175,8 +175,6 @@ export interface Ui {
   picker: Picker | undefined;
   pickerOptions: PickerOptions | undefined;
   pickerError: string | undefined;
-  /** Shown while the link field is open, so redraws keep it. */
-  linking: boolean;
   baseBranches: readonly string[] | string | undefined;
   /** Set from a Stop click until the state reports Claude idle, so redrawn Stop buttons stay disabled. */
   stoppingClaude: boolean;
@@ -208,7 +206,6 @@ export const ui: Ui = {
   picker: undefined,
   pickerOptions: undefined,
   pickerError: undefined,
-  linking: false,
   baseBranches: undefined,
   stoppingClaude: false,
   navFolded: true,

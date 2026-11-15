@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The header's More menu labels Open on GitHub, Remove worktree, Open in terminal and Link a PR. Remove worktree still asks before removing it. The PR's Claude terminal moved here; connected conversations keep their controls in Claude's menu.
+- An unpushed chip beside the branch holds Show changes and Push. Only editors see Push. Viewed progress appears in the header alone.
+- Overview starts with the description and guide summary. Linked changes appears only with a linked PR, checks appear once inside Merge, and Details unfolds Assignees, Labels, Milestone and Development. Merge remains secondary while its form is open.
+- Local review opens the code directly, without tabs or Finish review. Claude's chip sits in the header.
 - The review page has two tabs, Overview and Code. Code holds the files, and a Files / Guide switch at the top of its list sets their order. Pages that were on Files or Guide open on Code in that order.
 - Guide order keeps every line of every file on the page: lines far from a step's changes fold, and find-in-page still finds and opens them.
 - Guide order before a guide exists shows Build guide above the files. Rebuild and Stop sit on the guide's summary card instead of the toolbar.

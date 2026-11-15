@@ -32,12 +32,11 @@ export function renderFileNav(changes: readonly FileDiff[], opened: readonly Fil
   const head = el('button', 'nav-head');
   head.setAttribute('aria-expanded', String(!ui.navFolded));
   const total = (received.files ?? []).filter((file) => file.change !== 'unchanged').length;
-  const done = changes.filter((file) => received.viewed.has(file.path)).length;
   const query = prefs.fileFilter.trim().toLowerCase();
   const entries: NavEntry[] = prefs.allFiles ? repositoryEntries().filter((entry) => entry.file ? changes.includes(entry.file) || opened.includes(entry.file)
     : (!query || entry.path.toLowerCase().includes(query)) && !hiddenTypes.has(fileType(entry.path))) : [];
-  if (prefs.allFiles) head.append(chevronMark(ui.navFolded), (changes.length < total ? changes.length + ' of ' + total : total) + ' changed', el('span', 'muted', done + ' viewed · ' + entries.length + (entries.length === 1 ? ' file' : ' files')));
-  else head.append(chevronMark(ui.navFolded), (changes.length < total ? changes.length + ' of ' + total : changes.length) + (total === 1 ? ' file' : ' files'), el('span', 'muted', done + ' viewed'));
+  if (prefs.allFiles) head.append(chevronMark(ui.navFolded), (changes.length < total ? changes.length + ' of ' + total : total) + ' changed', el('span', 'muted', entries.length + (entries.length === 1 ? ' file' : ' files')));
+  else head.append(chevronMark(ui.navFolded), (changes.length < total ? changes.length + ' of ' + total : changes.length) + (total === 1 ? ' file' : ' files'));
   head.addEventListener('click', () => { ui.navFolded = !ui.navFolded; renderFileNav(changes, opened, threadsByFile); });
   const list = el('ul', 'nav-list');
   const redraw = (): void => { renderFileNav(changes, opened, threadsByFile); };

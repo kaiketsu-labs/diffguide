@@ -1,7 +1,6 @@
 /** Claude's chip in the header and its menu: state, live steps, review and new answers. */
-import { icons } from '../../icons.js';
 import type { OverviewState } from '../../protocol.js';
-import { $, el, icon } from '../dom.js';
+import { $, el } from '../dom.js';
 import { renderConnectButton, renderContextButton } from '../header/connect.js';
 import { reviewStatus } from '../review/review.js';
 import { ui } from '../state.js';
@@ -35,10 +34,6 @@ export function renderClaude(state: OverviewState): void {
   stop.hidden = !claude.running;
   if (!claude.running) { ui.stoppingClaude = false; stop.disabled = false; }
   $('retry').hidden = !claude.retry;
-  const terminal = $('terminal');
-  terminal.replaceChildren(icon(icons.terminal), el('span', 'label', 'Open in terminal'));
-  terminal.setAttribute('aria-label', 'Open in terminal');
-  terminal.dataset.tip = claude.running ? 'Stops the agent\'s background run, then continues its conversation in a terminal' : 'Continue this conversation with the agent in a terminal';
   renderConnectButton(claude.link);
   renderContextButton(claude);
   const review = reviewStatus();

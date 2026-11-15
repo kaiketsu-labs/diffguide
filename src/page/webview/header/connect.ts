@@ -50,8 +50,6 @@ export function openContextMenu(): void {
 /** The Claude button where you connect a conversation yourself; the terminal button is for a PR's own Claude. */
 export function renderConnectButton(link: OverviewState['claude']['link']): void {
   const connect = $('connect');
-  $('terminal').hidden = link !== undefined;
-  $('remove-worktree').closest('.menu-anchor')?.toggleAttribute('hidden', link !== undefined);
   connect.parentElement?.toggleAttribute('hidden', link === undefined);
   if (link === undefined) return;
   const label = link.terminal ? 'Open in terminal' : link.delivering ? 'Switch conversation' : 'Connect Claude';

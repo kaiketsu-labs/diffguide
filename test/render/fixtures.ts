@@ -224,6 +224,91 @@ const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) =
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
+  'header-actions': scene(pullRequest, [
+    { expect: '.head #reviewed', text: '1/4 viewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
+    { absent: '#files-bar #push' }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
+    { click: '#page-menu-button', expect: '#page-menu #pr', text: 'Open on GitHub' },
+    { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { shot: 'header-menu.png' },
+    { click: '#remove-worktree', expect: '.ask-menu .ask-text', text: '1 commit GitHub does not have', shot: 'header-remove.png' },
+    { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' },
+    { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus', shot: 'header-link.png' },
+    { click: '#title' }, { click: '#unpushed-chip', expect: '#unpushed-menu #show-unpushed', text: 'Show changes' },
+    { expect: '#unpushed-menu #push', text: 'Push', shot: 'header-unpushed.png' },
+    { click: '#show-unpushed', expect: '#view-code[aria-selected=true]' },
+  ], { saved: { view: 'code' } }),
+  'header-readonly': scene({ ...pullRequest, details: { ...pullRequest.details!, canEdit: false } }, [
+    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+  ], { saved: { view: 'code', order: 'guide' } }),
+  'header-permission-change': scene(pullRequest, [
+    { click: '#unpushed-chip', expect: '#push' },
+    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, canEdit: false } } }, absent: '#push' },
+    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+  ], { saved: { view: 'code' } }),
+  'header-connection-change': scene(pullRequest, [
+    { click: '#page-menu-button', expect: '#terminal' },
+    { send: { state: { ...pullRequest, claude: { ...pullRequest.claude, link: { delivering: true, terminal: true } } } }, absent: '#terminal' },
+    { absent: '#remove-worktree' }, { click: '#page-menu-button', absent: '#terminal' }, { absent: '#remove-worktree' },
+  ], { saved: { view: 'code' } }),
+  'header-placement': scene(pullRequest, [
+    { expect: '.head:not(#files-bar) #page-menu-button:visible' }, { absent: '#files-bar #page-menu-button' },
+    { expect: '.head:not(#files-bar) #reviewed', text: '1/4 viewed' }, { expect: '.byline #unpushed-chip:visible' },
+    { absent: '#files-bar #unpushed-chip' },
+  ], { saved: { view: 'code' } }),
+  'header-terminal': scene(pullRequest, [
+    { click: '#page-menu-button', expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' },
+  ], { saved: { view: 'code' } }),
+  'header-link-form': scene(pullRequest, [
+    { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus' },
+  ], { saved: { view: 'code' } }),
+  'header-progress': scene(pullRequest, [
+    { absent: '#file-nav > .nav-head:has-text("viewed")' },
+    { click: '#order-guide', absent: '#file-nav > .nav-head:has-text("viewed")' },
+  ], { saved: { view: 'code' } }),
+  'overview-order': scene(pullRequest, [
+    { expect: '#panel-overview .main-col > section:first-child #body' }, { below: ['#overview-guide', '#body'] },
+    { expect: '#overview-guide:visible', text: 'Risk sits in the token refresh path.' },
+  ], { saved: { view: 'overview' } }),
+  'overview-linked': scene(pullRequest, [
+    { absent: '#linked:visible' },
+    { send: { state: { ...pullRequest, linked: [{ key: 'acme/api#7', repository: 'acme/api', sources: ['manual'], unpushed: 0, local: false,
+      pullRequest: { number: 7, title: 'Handle empty responses', url: 'https://github.com/acme/api/pull/7', state: 'open', draft: false, headBranch: 'fix/empty', headOid: 'b'.repeat(40), canPush: false } }] } },
+      expect: '#linked:visible #linked-rows', text: '#7 Handle empty responses', shot: 'overview-linked.png' },
+    { send: { state: pullRequest }, absent: '#linked:visible' },
+  ], { saved: { view: 'overview' } }),
+  'overview-checks': scene(pullRequest, [
+    { expect: '#merge-box #checks li', count: 2 }, { absent: '#merge-status :has-text("failing check")' },
+    { absent: '#merge-status :has-text("All checks passed")' }, { expect: '#checks li:has-text("Pre-commit")', count: 1 },
+  ], { saved: { view: 'overview' } }),
+  'overview-details': scene(pullRequest, [
+    { absent: '#pick-assignees:visible' }, { absent: '#pick-labels:visible' }, { absent: '#pick-milestone:visible' },
+    { click: '#details-box > summary', expect: '#details-box #pick-assignees:visible' },
+    { expect: '#details-box #pick-labels:visible' }, { expect: '#details-box #pick-milestone:visible' }, { expect: '#details-box #development:visible' },
+  ], { saved: { view: 'overview' } }),
+  'overview-pick-assignees': scene(pullRequest, [
+    { click: '#details-box > summary' }, { click: '#pick-assignees', expect: '#details-box .picker input[placeholder="Filter people"]' },
+  ], { saved: { view: 'overview' } }),
+  'overview-pick-labels': scene(pullRequest, [
+    { click: '#details-box > summary' }, { click: '#pick-labels', expect: '#details-box .picker input[placeholder="Filter labels"]' },
+  ], { saved: { view: 'overview' } }),
+  'overview-pick-milestone': scene(pullRequest, [
+    { click: '#details-box > summary' }, { click: '#pick-milestone', expect: '#details-box .picker input[placeholder="Filter milestones"]' },
+  ], { saved: { view: 'overview' } }),
+  'overview-secondary-merge': scene(pullRequest, [
+    { click: '#merge', expect: '#merge-form:visible', absent: '#merge.primary' },
+  ], { saved: { view: 'overview' } }),
+  'overview-layout': scene(pullRequest, [
+    { expect: '#panel-overview .main-col > section:first-child #body' },
+    { below: ['#overview-guide', '#body'] }, { expect: '#overview-guide', text: 'Risk sits in the token refresh path.' },
+    { absent: '#linked:visible' }, { expect: '#merge-box #checks li', count: 2 },
+    { absent: '#merge-status :has-text("failing check")' }, { absent: '#merge-status :has-text("All checks passed")' },
+    { absent: '#pick-assignees:visible' }, { expect: '#details-summary', text: 'octo · bug · No milestone' }, { shot: 'overview-layout.png', full: true },
+    { click: '#details-box > summary', expect: '#details-box #pick-assignees:visible' },
+    { click: '#pick-assignees', expect: '#details-box .picker input[placeholder="Filter people"]' },
+    { click: '#pick-assignees' }, { click: '#pick-labels', expect: '#details-box .picker input[placeholder="Filter labels"]' },
+    { click: '#pick-labels' }, { click: '#pick-milestone', expect: '#details-box .picker input[placeholder="Filter milestones"]', shot: 'overview-details.png' },
+    { click: '#pick-milestone' }, { click: '#merge', absent: '#merge.primary', expect: '#merge-form:visible' },
+    { click: '#merge-cancel' }, { click: '#overview-guide button:has-text("Read in guide order")', expect: '#order-guide[aria-pressed=true]' },
+  ], { saved: { view: 'overview' } }),
   overview: scene(pullRequest, [{ absent: '#nav-toggle:visible' }, { absent: '#code-bar:visible' }, { expect: '#finish-review:visible', shot: 'overview.png', full: true }], { saved: { view: 'overview' } }),
   // A page saved before the Code tab remembers 'files' or 'guide' as its view; both open Code in that order.
   'code-files': scene(pullRequest, [
@@ -232,7 +317,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     // Every line of the three unviewed files; README.md is Viewed and folded in both orders.
     { expect: '#files tr:is(.context,.add,.del)', count: 78 },
     { scrollTo: '#files', shot: 'code-files.png' },
-    { scroll: 0, click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' },
+    { scroll: 0, click: '#page-menu-button' }, { click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' },
   ], { saved: { view: 'files' } }),
   'code-guide': scene(pullRequest, [
     { expect: '#view-code[aria-selected=true]' }, { expect: '#order-guide[aria-pressed=true]' }, { absent: '#view-guide' }, { absent: '#search-toggle:visible' },
@@ -291,8 +376,14 @@ export const scenes: Readonly<Record<string, Scene>> = {
   narrow: scene(pullRequest, [{ level: ['#view-code', '#finish-review'], shot: 'narrow.png' },
     // A long step shortens the chip instead of breaking the row.
     { send: { state: working }, stay: '#code-bar', level: ['#view-code', '#claude-chip'] }, { level: ['#view-code', '#finish-review'] },
-    { tallest: ['#finish-review', 26] }, { tallest: ['#show-unpushed', 26] }, { tallest: ['#claude-chip', 26] }, { after: ['#claude-chip', '#view-code'], shot: 'narrow-working.png' }], { saved: { view: 'files' }, width: 700, height: 900 }),
-  local: scene(local, [{ shot: 'local.png' }]),
+    { tallest: ['#finish-review', 26] }, { tallest: ['#claude-chip', 26] }, { after: ['#claude-chip', '#view-code'], shot: 'narrow-working.png' }], { saved: { view: 'files' }, width: 700, height: 900 }),
+  local: scene(local, [
+    { absent: '.tabs:visible' }, { absent: '#files-bar:visible' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' },
+    { expect: '#panel-files:visible .file', count: 4 }, { expect: '.head #claude-chip:visible' }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },
+    { shot: 'local.png' }, { click: '#claude-chip', expect: '#claude-menu:visible' },
+  ]),
+  'local-saved-overview': scene(local, [{ expect: '#panel-files:visible .file', count: 4 }, { absent: '#panel-overview:visible' }, { absent: '.tabs:visible' }], { saved: { view: 'overview' }, width: 700 }),
+  'local-header-chip': scene(local, [{ expect: '.head:not(#files-bar) #claude-chip:visible' }]),
   // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
   syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [
     { expect: '#notice', text: syncUndoText, shot: 'sync-undo.png' },
@@ -341,10 +432,10 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // A PR without a worktree shows from its summary while the worktree is made, before the page loads in the same tab.
   opening: { state: opening, messages: [], saved: { view: 'overview' }, steps: [{ expect: '#reviewed .skeleton', shot: 'opening.png' }] },
   openingFiles: { state: opening, messages: [], saved: { view: 'files' }, steps: [{ expect: '#files', text: 'Loading changes…', shot: 'opening-files.png' }] },
-  // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
+  // Linked changes waits for an actual PR.
   linkedLoading: scene(withoutLinked, [
-    { expect: '#linked:not([hidden]) .skeleton', shot: 'linked-loading.png' },
-    { send: { state: { ...withoutLinked, linked: [] } }, absent: '#linked .skeleton' }, { expect: '#linked-rows', text: 'No PRs in other repositories go with this one.' },
+    { absent: '#linked:visible', shot: 'linked-loading.png' },
+    { send: { state: { ...withoutLinked, linked: [] } }, absent: '#linked .skeleton' }, { absent: '#linked:visible' },
   ], { saved: { view: 'overview' } }),
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },

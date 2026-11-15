@@ -3,7 +3,6 @@ import { reviewers } from '../../core/contracts.js';
 import type { ReviewEvent } from '../../core/forge.js';
 import { blockBrowserShortcuts } from '../browserShortcuts.js';
 import type { ExtensionMessage } from '../protocol.js';
-import { removeWorktreeQuestion } from '../removeWorktree.js';
 import { closeClaudeMenu, toggleClaudeMenu } from './claude/panel.js';
 import { attachMentions } from './conversation/mentions.js';
 import { renderConversation } from './conversation/timeline.js';
@@ -16,11 +15,12 @@ import { paintDrag, pick } from './files/selection.js';
 import { guideState } from './guide/model.js';
 import { openConnectMenu, openContextMenu } from './header/connect.js';
 import { clickMerge, closeMergeForm, openMethodMenu, openUpdateMenu } from './header/merge.js';
-import { editBody, editTitle, renderLinked } from './header/pullRequest.js';
+import { openPageMenu, openUnpushedMenu } from './header/actions.js';
+import { editBody, editTitle } from './header/pullRequest.js';
 import { askInMenu, closePicker, closeToolbarMenu, openPicker, stopAsking } from './menus.js';
 import { onExtensionMessage } from './messages.js';
 import { closePeek, columnAt, lookupTarget, peeks, probeAt, renderPeek, showLink, showPeekWidth } from './peek.js';
-import { openRangeMenu, showUnpushed } from './range.js';
+import { openRangeMenu } from './range.js';
 import { onShortcut, render, setView } from './render.js';
 import { clickFinishReview, closeReviewForm, pickVerdict } from './review/finish.js';
 import { openReviewMenu } from './review/review.js';
@@ -57,8 +57,10 @@ document.addEventListener('mouseover', (event) => {
 }, { passive: true });
 document.addEventListener('scroll', hideThreadHover, { capture: true, passive: true });
 
-$('show-unpushed').addEventListener('click', showUnpushed);
-for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry']] as const) $(id).addEventListener('click', () => post({ action }));
+if (initial.state.localMode) $('refresh').before($('claude-anchor'));
+$('page-menu-button').addEventListener('click', openPageMenu);
+$('unpushed-chip').addEventListener('click', openUnpushedMenu);
+$('retry').addEventListener('click', () => post({ action: 'retry' }));
 const refresh = $<HTMLButtonElement>('refresh');
 refresh.addEventListener('click', () => {
   refresh.disabled = true;
@@ -68,8 +70,6 @@ refresh.addEventListener('click', () => {
 $('stop-claude').addEventListener('click', stopClaude);
 $('connect').addEventListener('click', openConnectMenu);
 $('context').addEventListener('click', openContextMenu);
-$('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree', removeWorktreeQuestion(received.current?.number, received.current?.unpushed?.length ?? 0),
-  'Remove worktree', () => post({ action: 'remove-worktree' })));
 // Re-rendered working chips join the page clock instead of restarting their animation.
 document.addEventListener('animationstart', (event) => {
   if (event.animationName !== 'orb' || !(event.target instanceof Element)) return;
@@ -279,7 +279,6 @@ $('fix-conflicts').addEventListener('click', () => {
   post({ action: 'fix-conflicts' });
 });
 $('edit-title').addEventListener('click', editTitle);
-$('link-pr').addEventListener('click', () => { ui.linking = true; if (received.current) renderLinked(received.current); });
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels', 'milestone'] as const) $('pick-' + what).addEventListener('click', () => openPicker(what));
 document.addEventListener('pointerdown', (event) => {

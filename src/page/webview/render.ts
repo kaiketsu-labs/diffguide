@@ -6,10 +6,10 @@ import { renderAnswers } from './answers.js';
 import { renderClaude } from './claude/panel.js';
 import { isWriter, reactionsRow, toolButton } from './conversation/comment.js';
 import { renderConversation } from './conversation/timeline.js';
-import { $, detailsLoading, el, icon, placeholders, setLabel, stateIcon } from './dom.js';
+import { $, button, detailsLoading, el, icon, placeholders, stateIcon } from './dom.js';
 import { openSearch, showListToggle } from './files/filters.js';
 import { drawPendingDiffs, renderFiles } from './files/render.js';
-import { guideState } from './guide/model.js';
+import { guideState, guideSummary } from './guide/model.js';
 import { branchRef, copyRef, pullRequestChip, pullRequestFacts, renderLinked, renderState, verdict } from './header/pullRequest.js';
 import { baseButton, renderReviewers } from './header/reviewers.js';
 import { renderSync } from './header/sync.js';
@@ -66,6 +66,8 @@ function placeholderRow(width: number): HTMLElement {
 
 export function render(state: OverviewState): void {
   noteWorking(received.current, state);
+  if (ui.toolbarMenu?.anchor === 'unpushed-chip' && (received.current?.details?.canEdit !== state.details?.canEdit || received.current?.unpushed?.length !== state.unpushed?.length)) closeToolbarMenu();
+  if (ui.toolbarMenu?.anchor === 'page-menu-button' && (received.current?.claude.link === undefined) !== (state.claude.link === undefined)) closeToolbarMenu();
   received.current = state;
   queueMicrotask(renderAnswers);
   renderSync(state);
@@ -87,6 +89,13 @@ export function render(state: OverviewState): void {
   if (!details) body.replaceChildren(...state.detailsError ? [el('span', 'muted', 'Could not load from GitHub: ' + state.detailsError)] : placeholders(70, 55));
   else if (!ui.editingBody && details.bodyHtml.trim()) body.innerHTML = details.bodyHtml;
   else if (!ui.editingBody) body.replaceChildren(el('span', 'muted', 'No description.'));
+  const overviewGuide = $('overview-guide');
+  overviewGuide.hidden = state.analysis.result === undefined;
+  if (state.analysis.result) {
+    const summary = guideSummary(state.analysis.result, buildGuide(state.analysis.result, received.files ?? []));
+    summary.querySelector('.section-head')?.append(button('Read in guide order', () => setView('code', 'guide'), 'small'));
+    overviewGuide.replaceChildren(summary);
+  }
   renderReviewers(state);
   const checks = $('checks');
   checks.replaceChildren();
@@ -144,6 +153,7 @@ export function render(state: OverviewState): void {
     chip.style.setProperty('--label', '#' + label.color);
     return chip;
   }) : details ? [el('span', 'muted', 'No labels.')] : loading ? placeholders(45) : []);
+  $('details-summary').textContent = details ? [details.assignees.join(', ') || 'Unassigned', details.labels.map((label) => label.name).join(', ') || 'No labels', details.milestone?.title ?? 'No milestone', ...linked.map((issue) => '#' + issue.number)].join(' · ') : '';
   const reviewed = $('reviewed');
   reviewed.replaceChildren();
   if (state.reviewed) {
@@ -159,10 +169,9 @@ export function render(state: OverviewState): void {
   }
   renderClaude(state);
   const unpushed = state.unpushed?.length ?? 0;
-  const push = $('push');
-  push.hidden = !unpushed || !details?.canEdit;
-  setLabel(push, 'Push ' + unpushed + (unpushed === 1 ? ' commit' : ' commits'));
-  $('show-unpushed').hidden = !unpushed;
+  $('unpushed-anchor').hidden = !unpushed;
+  $('unpushed-chip').replaceChildren(unpushed + ' unpushed', icon(icons.chevronDown));
+  if (!unpushed && ui.toolbarMenu?.anchor === 'unpushed-chip') closeToolbarMenu();
   renderThreadList();
   renderLinked(state);
   ui.author = !details || details.viewerIsAuthor;

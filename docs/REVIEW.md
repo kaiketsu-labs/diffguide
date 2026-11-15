@@ -1,5 +1,9 @@
 # Review findings and verification
 
+Option D layout verification, 15 November 2026: phases 5 to 7 move PR actions and unpushed commits into header menus, simplify Overview, and open local review directly on code. Render scenes check placement and picker behavior. Headless VS Code exercises these controls with mock PRs and controlled host states; its agent replies are simulated.
+
+Authenticated checks remain pending: opening a folded run with find-in-page; Guide order on a real PR with a guide built by Claude; committing picked suggestions; Claude's chip during a real run and code review; clearing new-answer counts while scrolling; submitting each Finish review verdict and Discard pending against GitHub. The header's PR terminal action also needs a live Claude handoff check. The horizontal More icon and the terms More, unpushed, Details and Read in guide order await the user's review.
+
 Reviewed on 20–21 October 2026. **Fixed** means a source change has been made. **Verified** requires recorded execution evidence; a static review or a staged demo does not establish it.
 
 Latest evidence: [0.4.7 UX review](UX-REVIEW-2026-10-21.md), including **210 passing automated tests**, an actual VS Code click-through with controlled agent replies, and responsive PR-preview checks. Earlier authenticated Claude and hook evidence remains in the [end-to-end report](QA-2026-10-21.md). These evidence types are recorded separately.

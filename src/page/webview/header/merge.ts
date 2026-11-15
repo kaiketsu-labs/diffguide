@@ -57,11 +57,11 @@ export function drawMergeButtons(): void {
   const form = mergeForm;
   const mergeButton = $('merge');
   setLabel(mergeButton, form?.auto === false ? 'Confirm ' + methodLabels[ui.mergeMethod].toLowerCase() : merge?.mergeQueue ? 'Merge when ready' : 'Merge');
-  mergeButton.classList.toggle('primary', form?.auto === false);
+  mergeButton.classList.remove('primary');
   mergeButton.hidden = form?.auto === true;
   const auto = $('auto-merge');
   setLabel(auto, form?.auto ? 'Confirm auto-merge' : 'Enable auto-merge');
-  auto.className = form?.auto ? 'primary' : 'quiet';
+  auto.className = form?.auto ? '' : 'quiet';
   auto.hidden = form ? !form.auto : !merge?.canEnableAutoMerge || merge.autoMerge !== undefined || merge.state === 'clean' || merge.mergeQueue;
   $('merge-cancel').hidden = !form;
   $('merge-delete-label').hidden = form?.auto !== false || received.current?.details?.branchDeletable !== true;
@@ -108,12 +108,6 @@ export function mergeChecklist(details: ChangeRequestDetails, conversation: Chan
   if (merge.reviewDecision === 'approved') add('ok', 'done', 'Approved');
   else if (merge.reviewDecision === 'changes') add('bad', 'failed', 'Changes requested');
   else if (merge.reviewDecision === 'required') add('wait', 'active', 'Review required');
-  const required = new Set(conversation.checks.filter((check) => check.required).map((check) => check.name));
-  const failing = details.checks.filter((check) => check.state === 'failure');
-  const running = details.checks.filter((check) => check.state === 'pending');
-  if (failing.length) add('bad', 'failed', failing.length + (failing.length === 1 ? ' failing check' : ' failing checks') + (failing.some((check) => required.has(check.name)) ? ', some required' : ''));
-  else if (running.length) add('wait', 'active', running.length + (running.length === 1 ? ' check running' : ' checks running'));
-  else if (details.checks.length) add('ok', 'done', 'All checks passed');
   if (details.mergeable === 'no') add('bad', 'failed', 'Conflicts with the base branch');
   else if (details.mergeable === 'unknown') add('wait', 'active', 'Checking for conflicts');
   if (merge.state === 'blocked') add('bad', 'failed', 'Merging is blocked' + (merge.canBypass ? '. You may merge anyway, bypassing the rules.' : '.'));

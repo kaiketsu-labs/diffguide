@@ -153,7 +153,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
     if (received.current) renderConversation(received.current, true);
     renderFiles([allThreads().find((thread) => thread.messages.some((entry) => 'id' in entry && entry.id === id))?.path]);
   }
-  if (data.done === 'link') { ui.linking = false; if (received.current) renderLinked(received.current); }
+  if (data.done === 'link') { closeToolbarMenu(); if (received.current) renderLinked(received.current); }
   if (data.done === 'body') { ui.editingBody = false; if (received.current) render(received.current); }
   if (data.done === 'file-composer') {
     sending.delete('file-composer');

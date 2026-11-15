@@ -115,7 +115,10 @@ const scenarios = [
       const page = await reviewPage(workbench, 'body');
       step('Review local changes opened the review page');
 
-      await page.click('#view-code');
+      if (await page.isVisible('#view-code') || await page.isVisible('#view-overview') || await page.isVisible('#finish-review')) throw new Error('Local mode still shows tabs or Finish review');
+      await page.waitForSelector('#panel-files:visible #code-bar', { timeout: 5_000 });
+      if (await page.isVisible('#panel-overview')) throw new Error('Local mode still shows Overview');
+      step('Local mode opened Code directly without tabs, Overview or Finish review');
       const line = 'td.num.pick[data-path="src/app.ts"][data-side="new"]';
       await page.waitForSelector(line, { timeout: 15_000 });
       await page.waitForSelector('.file[data-path="src/app.ts"] td.code span', { timeout: 15_000 });
@@ -158,6 +161,10 @@ const scenarios = [
 
       await row('Migrate auth to OAuth device flow').click();
       const page = await reviewPage(workbench, 'text=Sample pull request');
+      await page.evaluate(() => {
+        window.__layoutState = JSON.parse(document.querySelector('#initial').textContent).state;
+        window.addEventListener('message', (event) => { if (event.data?.state) window.__layoutState = event.data.state; });
+      });
       await page.click('#view-code');
       await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'pr-files.png') });
@@ -171,6 +178,75 @@ const scenarios = [
       await page.locator('#notice', { hasText: 'Refreshed.' }).waitFor({ timeout: 30_000 });
       await until('the Refresh button to settle', async () => !await page.$('#refresh.busy') && !await page.$('#refresh[disabled]'), 5_000);
       step('Refresh said Refreshed. and the button settled');
+
+      await page.click('#page-menu-button');
+      for (const [selector, text] of [['#pr', 'Open on GitHub'], ['#remove-worktree', 'Remove worktree'], ['#terminal', 'Open in terminal'], ['#link-pr', 'Link a PR']]) {
+        await page.locator(selector, { hasText: text }).waitFor({ timeout: 5_000 });
+      }
+      await workbench.screenshot({ path: join(out, 'pr-page-menu.png') });
+      await page.click('#remove-worktree');
+      await page.locator('.ask-menu', { hasText: 'Remove worktree' }).waitFor({ timeout: 5_000 });
+      await page.click('.ask-menu button:has-text("Cancel")');
+      await page.waitForSelector('.ask-menu', { state: 'detached', timeout: 5_000 });
+      await page.click('#page-menu-button');
+      await page.click('#link-pr');
+      await page.waitForSelector('.link-form input[aria-label="PR to link"]', { timeout: 5_000 });
+      const linkActionsAligned = await page.evaluate(() => {
+        const field = document.querySelector('.link-form input').getBoundingClientRect();
+        const confirm = document.querySelector('.link-form button:last-child').getBoundingClientRect();
+        return Math.abs(field.right - confirm.right) <= 1;
+      });
+      if (!linkActionsAligned) throw new Error('Link a PR actions do not align with the right of the field');
+      await page.press('.link-form input', 'Escape');
+      await page.waitForSelector('.link-form', { state: 'detached', timeout: 5_000 });
+      await page.press('#page-menu-button', 'Escape');
+      step('The header menu labeled its actions, Remove worktree kept its confirm, and Link a PR opened an inline form');
+
+      await page.click('#view-overview');
+      await page.waitForSelector('#merge-box #checks:visible', { timeout: 5_000 });
+      if (await page.locator('#checks').count() !== 1 || await page.isVisible('#linked')) throw new Error('Overview repeats checks or shows an empty Linked changes card');
+      await page.click('#details-box > summary');
+      for (const selector of ['#assignees', '#labels', '#milestone']) await page.waitForSelector('#details-box ' + selector, { timeout: 5_000 });
+      await workbench.screenshot({ path: join(out, 'pr-overview-details.png') });
+      step('Overview put checks inside Merge, hid empty Linked changes, and unfolded Details');
+
+      // Exercise editable layout from a controlled host state; the mock forge grants read access only.
+      const original = await page.evaluate(() => window.__layoutState);
+      await page.evaluate((state) => window.postMessage({ state: {
+        ...state,
+        unpushed: [{ oid: 'a'.repeat(40), subject: 'Layout fixture commit', author: 'e2e', createdAt: new Date().toISOString(), files: 1, additions: 1, deletions: 0 }],
+        analysis: { running: false, stale: false, result: { head: 'a'.repeat(40), createdAt: new Date().toISOString(), overview: 'Layout fixture guide summary.', files: [], groups: [] } },
+        details: { ...state.details, canEdit: false },
+      } }, '*'), original);
+      await page.waitForSelector('#unpushed-chip:visible', { timeout: 5_000 });
+      await page.click('#unpushed-chip');
+      await page.waitForSelector('#show-unpushed:visible', { timeout: 5_000 });
+      if (await page.isVisible('#push')) throw new Error('Read-only PR shows Push');
+      await page.press('#unpushed-chip', 'Escape');
+      await page.evaluate((state) => window.postMessage({ state: {
+        ...state,
+        details: { ...state.details, canEdit: true, assignees: ['e2e'], labels: [{ name: 'layout', color: 'abcdef' }], milestone: { number: 1, title: 'Layout' } },
+      } }, '*'), await page.evaluate(() => window.__layoutState));
+      await page.click('#unpushed-chip');
+      await page.waitForSelector('#push:visible', { timeout: 5_000 });
+      if (await page.locator('#files-bar #push, #files-bar #show-unpushed').count()) throw new Error('Unpushed actions remain in the tab row');
+      await workbench.screenshot({ path: join(out, 'pr-unpushed-menu.png') });
+      await page.press('#unpushed-chip', 'Escape');
+      const descriptionBeforeGuide = await page.evaluate(() => Boolean(document.querySelector('#body').compareDocumentPosition(document.querySelector('#overview-guide')) & Node.DOCUMENT_POSITION_FOLLOWING));
+      if (!descriptionBeforeGuide) throw new Error('Overview guide precedes the description');
+      await page.waitForSelector('#overview-guide:visible', { timeout: 5_000 });
+      for (const [what, placeholder, value] of [['assignees', 'Filter people', 'e2e'], ['labels', 'Filter labels', 'layout'], ['milestone', 'Filter milestones', 'Layout']]) {
+        await page.click('#pick-' + what);
+        const input = `.picker input[placeholder="${placeholder}"]`;
+        await page.waitForSelector(input, { timeout: 5_000 });
+        await page.fill(input, value);
+        await page.locator('#details-box .picker-row', { hasText: value }).waitFor({ timeout: 5_000 });
+        await page.press(input, 'Escape');
+        await page.waitForSelector(input, { state: 'detached', timeout: 5_000 });
+      }
+      await page.evaluate((state) => window.postMessage({ state }, '*'), original);
+      await page.click('#view-code');
+      step('Controlled host states kept Push permission-gated, placed unpushed actions by the branch, ordered description before guide, and opened all three Details pickers');
 
       // Finish review opens its form under the button and stays on Code.
       await page.click('#finish-review');
@@ -215,10 +291,12 @@ const scenarios = [
       step(`The PR page opened again in its tab (${prTab}), on Code in Guide order with the list hidden`);
 
       await tab('Local ·').click();
-      await until('the local page after the reload', async () => {
+      const local = await until('the local page after the reload', async () => {
         for (const frame of workbench.frames()) if (await frame.$('#view-code') && !await frame.$('text=Sample pull request')) return frame;
         return undefined;
       });
+      await local.waitForSelector('#panel-files:visible #code-bar', { timeout: 5_000 });
+      if (await local.isVisible('#view-code') || await local.isVisible('#view-overview') || await local.isVisible('#finish-review') || await local.isVisible('#panel-overview')) throw new Error('Reload restored local tabs, Overview or Finish review');
       await workbench.screenshot({ path: join(out, 'reload-local.png') });
       step('The local page opened again in its tab');
     },

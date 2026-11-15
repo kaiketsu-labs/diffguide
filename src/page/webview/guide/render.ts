@@ -156,7 +156,7 @@ function renderGuideNav(groups: readonly GuideGroup[]): void {
   const numbers = stepNumbers(groups);
   const head = el('button', 'nav-head');
   head.setAttribute('aria-expanded', String(!ui.navFolded));
-  head.append(chevronMark(ui.navFolded), steps.length + (steps.length === 1 ? ' step' : ' steps'), el('span', 'muted', steps.filter(stepViewed).length + ' viewed'));
+  head.append(chevronMark(ui.navFolded), steps.length + (steps.length === 1 ? ' step' : ' steps'));
   head.addEventListener('click', () => { ui.navFolded = !ui.navFolded; renderGuideNav(groups); });
   const list = el('ul', 'nav-list');
   for (const group of groups) {
