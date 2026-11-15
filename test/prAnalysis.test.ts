@@ -7,7 +7,7 @@ import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 import { type AnalysisOptions, PullRequestAnalysis, runStructuredClaude } from '../src/agents/claude/prAnalysisRunner.js';
 import type { CodeAnchor } from '../src/core/contracts.js';
-import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis } from '../src/core/prAnalysis.js';
+import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis, stepSpans, stepViewed } from '../src/core/prAnalysis.js';
 import { createReviewStore } from '../src/core/store.js';
 import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 import { settle } from './fakes/vscode.js';
@@ -95,6 +95,37 @@ test('marks a whole guide group read: only its unread lines, and Viewed for file
   const second = groupReadMarks(rest!, files, [...already, ...first.read], new Set(['src/b.ts']));
   assert.deepEqual(lines(second), [['src/a.ts', 'old', 7], ['src/b.ts', 'new', 2]]);
   assert.deepEqual(second.viewed, ['src/a.ts', 'logo.png']);
+});
+
+test('puts every diff line in exactly one guide step and folds lines far from its changes', () => {
+  const tail = ['diff --git a/src/c.ts b/src/c.ts', '--- a/src/c.ts', '+++ b/src/c.ts', '@@ -1,8 +1,8 @@', '-const a = 0;', '+const a = 1;', ...[2, 3, 4, 5, 6, 7, 8].map((n) => ' const n' + n + ' = ' + n + ';'), ''].join('\n');
+  const files = parseUnifiedDiff(diff + tail);
+  const blocks = changeBlocks(files);
+  const analysis = parseClaudeAnalysis({
+    overview: '', files: [],
+    groups: [{ severity: 'critical', title: 'Values', steps: [{ blocks: ['b1', 'b3'], note: 'Changes b.' }] }],
+  }, blocks, 'head1', '2026-11-03T00:00:00.000Z');
+  const guide = buildGuide(analysis, files);
+  const spans = stepSpans(guide, files);
+  const steps = guide.flatMap((group) => group.steps);
+  const of = (path: string, index = 0) => spans.get(steps.filter((step) => step.path === path)[index]?.key ?? '')?.map((span) => [span.hunk, span.from, span.to, span.folded]);
+  assert.deepEqual(of('src/a.ts'), [[0, 0, 4, false], [0, 9, 9, false]]);
+  assert.deepEqual(of('src/a.ts', 1), [[0, 5, 8, false]]);
+  assert.deepEqual(of('src/c.ts'), [[0, 0, 4, false], [0, 5, 8, true]]);
+  for (const file of files) {
+    const lines = file.hunks.reduce((sum, hunk) => sum + hunk.lines.length, 0);
+    const placed = steps.filter((step) => step.path === file.path).flatMap((step) => spans.get(step.key) ?? []).reduce((sum, span) => sum + span.to - span.from + 1, 0);
+    assert.equal(placed, lines, file.path);
+  }
+});
+
+test('shows a guide step viewed once its file is Viewed, even with unread lines', () => {
+  const files = parseUnifiedDiff(diff);
+  const [step] = buildGuide(parseClaudeAnalysis({ overview: '', files: [], groups: [] }, changeBlocks(files), 'head1', '2026-11-03T00:00:00.000Z'), files)[0]?.steps ?? [];
+  assert.ok(step);
+  const file = files.find((item) => item.path === step.path);
+  assert.equal(stepViewed(step, file, [], false), false);
+  assert.equal(stepViewed(step, file, [], true), true);
 });
 
 test('moves steps whose code changed to Unclassified and survives a round trip', () => {

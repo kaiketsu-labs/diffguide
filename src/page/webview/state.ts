@@ -8,13 +8,15 @@ import type { FileDiff } from '../../core/unifiedDiff.js';
 import type { DiffRange, DiffSide, FileIcons, OverviewState, PickTarget } from '../protocol.js';
 import { $ } from './dom.js';
 import { api } from './transport.js';
-import type { Ask, Composer, FileComposer, View } from './types.js';
+import type { Ask, Composer, FileComposer, Order, View } from './types.js';
 
 type Layout = 'unified' | 'split';
 export interface Saved {
   /** 'guided' is how pages saved before Files and Guide became tabs remember the guide. */
   readonly layout?: Layout | 'guided';
-  readonly view?: View;
+  /** 'files' and 'guide' are how pages saved before the Code tab remember it and its order. */
+  readonly view?: View | Order;
+  readonly order?: Order;
   /** Width of the definition panel in pixels, when the user resized it. */
   readonly peekWidth?: number | undefined;
   readonly folders?: boolean;
@@ -36,8 +38,6 @@ export interface Saved {
   readonly closedFiles?: readonly string[];
   readonly conversationDraft?: string;
   readonly conversationFolded?: boolean;
-  /** Collapsed threads leave the diff and show as marks beside their last line. */
-  readonly marginThreads?: boolean;
   /** The file list shows every repository file, not only the changes. */
   readonly allFiles?: boolean;
   readonly listHidden?: boolean;
@@ -66,8 +66,8 @@ export function setPageKey(key: string): void {
 }
 
 export function save(): void {
-  api.setState({ layout: prefs.layout, view: prefs.view, peekWidth: prefs.peekWidth, folders: prefs.folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer: prefs.composer, fileComposer: prefs.fileComposer, showArchived: prefs.showArchived, guideInFiles: prefs.guideInFiles, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
-    range: prefs.wantedRange ?? received.diffRange, whitespace: prefs.whitespace, filter: prefs.fileFilter, hideViewed: prefs.hideViewed, hiddenTypes: [...hiddenTypes], closedFiles: [...closedFiles], conversationDraft: prefs.conversationDraft, conversationFolded: prefs.conversationFolded, marginThreads: prefs.marginThreads, allFiles: prefs.allFiles, listHidden: prefs.listHidden, navWidth: prefs.navWidth, navThreadsHeight: prefs.navThreadsHeight, ...pageKey === undefined ? {} : { pageKey } });
+  api.setState({ layout: prefs.layout, view: prefs.view, order: prefs.order, peekWidth: prefs.peekWidth, folders: prefs.folders, collapsed: Object.fromEntries(collapsed), previewing: [...previewing], composer: prefs.composer, fileComposer: prefs.fileComposer, showArchived: prefs.showArchived, guideInFiles: prefs.guideInFiles, replies: Object.fromEntries(replies), publishing: Object.fromEntries(publishing),
+    range: prefs.wantedRange ?? received.diffRange, whitespace: prefs.whitespace, filter: prefs.fileFilter, hideViewed: prefs.hideViewed, hiddenTypes: [...hiddenTypes], closedFiles: [...closedFiles], conversationDraft: prefs.conversationDraft, conversationFolded: prefs.conversationFolded, allFiles: prefs.allFiles, listHidden: prefs.listHidden, navWidth: prefs.navWidth, navThreadsHeight: prefs.navThreadsHeight, ...pageKey === undefined ? {} : { pageKey } });
 }
 /** The open reviewer, assignee or label picker; it saves on close when `selected` differs from `initial`. */
 interface Picker { readonly what: PickTarget; readonly initial: ReadonlySet<string>; readonly selected: Set<string>; readonly node: HTMLElement; readonly list: HTMLElement }
@@ -75,6 +75,7 @@ interface Picker { readonly what: PickTarget; readonly initial: ReadonlySet<stri
 export interface Prefs {
   layout: Layout;
   view: View;
+  order: Order;
   /** Local pages list every repository file by default; PR pages list the changes. */
   allFiles: boolean;
   listHidden: boolean;
@@ -86,7 +87,6 @@ export interface Prefs {
   fileComposer: FileComposer | undefined;
   showArchived: boolean;
   guideInFiles: boolean;
-  marginThreads: boolean;
   wantedRange: DiffRange | undefined;
   whitespace: boolean;
   fileFilter: string;
@@ -96,7 +96,8 @@ export interface Prefs {
 }
 export const prefs: Prefs = {
   layout: saved.layout === 'split' ? 'split' : 'unified',
-  view: saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : saved.view === 'files' ? 'files' : 'overview',
+  view: saved.view === 'code' || saved.view === 'files' || saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'code' : 'overview',
+  order: saved.order ?? (saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : 'files'),
   allFiles: saved.allFiles ?? initial.state.localMode === true,
   listHidden: saved.listHidden === true,
   navWidth: saved.navWidth,
@@ -107,7 +108,6 @@ export const prefs: Prefs = {
   fileComposer: saved.fileComposer,
   showArchived: saved.showArchived === true,
   guideInFiles: saved.guideInFiles === true,
-  marginThreads: saved.marginThreads === true,
   wantedRange: saved.range?.kind === 'all' ? undefined : saved.range,
   whitespace: saved.whitespace === true,
   fileFilter: saved.filter ?? '',
@@ -115,6 +115,11 @@ export const prefs: Prefs = {
   conversationDraft: saved.conversationDraft ?? '',
   conversationFolded: saved.conversationFolded === true,
 };
+
+/** Whether the Code tab shows Claude's guide order; local pages have no guide. */
+export function guided(): boolean {
+  return prefs.view === 'code' && prefs.order === 'guide' && initial.state.localMode !== true;
+}
 
 export interface Received {
   /** Every file in the repository, for the All files list. */

@@ -295,11 +295,51 @@ export function buildGuide(analysis: Analysis, files: readonly FileDiff[]): Guid
   }));
 }
 
-/** A step is viewed once all its lines are read; a step without lines, such as a binary file, once its file is Viewed. */
+/** A step is viewed once its file is Viewed or all its lines are read. */
 export function stepViewed(step: GuideStep, file: FileDiff | undefined, ranges: readonly MarkedRange[], fileViewed: boolean): boolean {
   if (file === undefined) return false;
-  if (step.blocks.length === 0) return fileViewed;
+  if (fileViewed || step.blocks.length === 0) return fileViewed;
   return step.blocks.every((block) => rangeReadIds(file, ranges, block.range) !== undefined);
+}
+
+/** A run of one hunk's lines, `from` to `to` by index, in a guide step's box; a `folded` run lies more than three unchanged lines from a change. */
+export interface StepSpan { readonly hunk: number; readonly from: number; readonly to: number; readonly folded: boolean }
+
+/** Unchanged lines a step shows around its changes before the rest folds. */
+const stepContext = 3;
+
+/**
+ * Splits every file's diff lines among its guide steps by step key, so each line sits in exactly one step box and find-in-page reaches it once.
+ * A change goes to its own step, an unchanged line to the step of the nearest change in its hunk, the earlier one on a tie.
+ */
+export function stepSpans(groups: readonly GuideGroup[], files: readonly FileDiff[]): Map<string, StepSpan[]> {
+  const spans = new Map<string, StepSpan[]>();
+  const steps = groups.flatMap((group) => group.steps);
+  for (const file of files) {
+    const own = steps.filter((step) => step.path === file.path);
+    const fallback = own[0];
+    if (fallback === undefined) continue;
+    file.hunks.forEach((hunk, hunkIndex) => {
+      const owners = hunk.lines.map((_line, index) => own.find((step) => step.blocks.some((block) => block.hunk === hunkIndex && block.first <= index && index <= block.last)));
+      const changes = owners.flatMap((owner, index) => owner === undefined ? [] : [index]);
+      hunk.lines.forEach((_line, index) => {
+        let owner = owners[index];
+        let distance = 0;
+        if (owner === undefined) {
+          const nearest = changes.reduce<number | undefined>((best, at) => best === undefined || Math.abs(at - index) < Math.abs(best - index) ? at : best, undefined);
+          owner = nearest === undefined ? fallback : owners[nearest] ?? fallback;
+          distance = nearest === undefined ? Infinity : Math.abs(nearest - index);
+        }
+        const folded = distance > stepContext;
+        const list = spans.get(owner.key) ?? [];
+        spans.set(owner.key, list);
+        const last = list.at(-1);
+        if (last && last.hunk === hunkIndex && last.to === index - 1 && last.folded === folded) list[list.length - 1] = { ...last, to: index };
+        else list.push({ hunk: hunkIndex, from: index, to: index, folded });
+      });
+    });
+  }
+  return spans;
 }
 
 /** What marking a guide group read writes: its unread lines, and the files left fully read or with no lines to read. */

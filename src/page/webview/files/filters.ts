@@ -6,7 +6,7 @@ import { $, button, el, setTip } from '../dom.js';
 import { guideState } from '../guide/model.js';
 import { closeToolbarMenu, menuRow, openToolbarMenu } from '../menus.js';
 import { requestFiles } from '../range.js';
-import { collapsed, hiddenTypes, prefs, received, save } from '../state.js';
+import { collapsed, guided, hiddenTypes, prefs, received, save } from '../state.js';
 import { renderNavThreads, renderThreadList } from '../threads/list.js';
 import { allThreads, isArchived } from '../threads/model.js';
 import { threadOpen } from '../threads/threadBox.js';
@@ -43,13 +43,25 @@ export function applyFilters(): void {
   showListToggle();
 }
 
+/** Expand the file filter over the order switch and focus it. */
+export function openSearch(): void {
+  $('nav-order').classList.add('searching');
+  $('file-filter').focus();
+}
+
+/** Shrink the file filter back to its icon, which shows a dot while the filter text still narrows the list. */
+export function closeSearch(): void {
+  $('nav-order').classList.remove('searching');
+  $('search-toggle').classList.toggle('filtered', prefs.fileFilter.trim() !== '');
+}
+
 /** The file list's collapse icon, with a dot while a hidden list still filters the files. */
 export function showListToggle(): void {
-  $('files').parentElement?.classList.toggle('list-hidden', prefs.listHidden);
+  $('files-layout').classList.toggle('list-hidden', prefs.listHidden);
   const toggle = $('nav-toggle');
   setTip(toggle, prefs.listHidden ? 'Expand file list' : 'Collapse file list');
   toggle.setAttribute('aria-expanded', String(!prefs.listHidden));
-  toggle.classList.toggle('filtered', prefs.listHidden && prefs.view === 'files' && filtersOn());
+  toggle.classList.toggle('filtered', prefs.listHidden && prefs.view === 'code' && !guided() && filtersOn());
 }
 
 export function openFilterMenu(): void {
@@ -68,7 +80,7 @@ export function openFilterMenu(): void {
 
 /** Whether every file, or every guide step, is collapsed, so the fold button expands them. */
 export function allFolded(): boolean {
-  const keys = prefs.view === 'guide' ? (received.guide ?? []).flatMap((group) => group.steps.map((step) => guideState('step', step.key))) : (received.files ?? []).map((file) => file.path);
+  const keys = guided() ? (received.guide ?? []).flatMap((group) => group.steps.map((step) => guideState('step', step.key))) : (received.files ?? []).map((file) => file.path);
   return keys.length > 0 && keys.every((key) => collapsed.get(key) === true);
 }
 
@@ -78,17 +90,11 @@ export function openViewMenu(): void {
   const commentsOpen = document.querySelector('details.thread[open]') !== null;
   const notes = (received.current?.threads ?? []).filter((thread) => thread.origin === 'analysis' && (prefs.showArchived || !isArchived(thread))).length;
   const rows = [
-    ...prefs.view === 'files' ? [menuRow(['Hide whitespace changes'], prefs.whitespace, (on) => { closeToolbarMenu(); requestFiles(received.diffRange, on); }, false, icons.whitespace)] : [],
-    ...prefs.view === 'files' ? [menuRow(['Group files by folder'], prefs.folders, (on) => { prefs.folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
-    ...prefs.view === 'files' ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], prefs.allFiles, (on) => { prefs.allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
-    ...prefs.view === 'files' ? [menuRow(['Show guide comments', el('span', 'muted', String(notes))], prefs.guideInFiles, (on) => { prefs.guideInFiles = on; save(); renderFiles(); renderNavThreads(); }, false, icons.agentGuide)] : [],
+    ...!guided() ? [menuRow(['Hide whitespace changes'], prefs.whitespace, (on) => { closeToolbarMenu(); requestFiles(received.diffRange, on); }, false, icons.whitespace)] : [],
+    ...!guided() ? [menuRow(['Group files by folder'], prefs.folders, (on) => { prefs.folders = on; save(); renderFiles(); }, false, icons.tree)] : [],
+    ...!guided() ? [menuRow(['All files', el('span', 'muted', 'Show unchanged files too')], prefs.allFiles, (on) => { prefs.allFiles = on; save(); renderFiles(); }, false, icons.file)] : [],
+    ...!guided() ? [menuRow(['Show guide comments', el('span', 'muted', String(notes))], prefs.guideInFiles, (on) => { prefs.guideInFiles = on; save(); renderFiles(); renderNavThreads(); }, false, icons.agentGuide)] : [],
     menuRow(['Collapse all comments'], !commentsOpen, (on) => { for (const thread of allThreads()) threadOpen.set(thread.id, !on); renderFiles(); }, false, icons.comment),
-    menuRow(['Collapsed comments in the margin'], prefs.marginThreads, (on) => {
-      prefs.marginThreads = on;
-      if (on) for (const [id, open] of threadOpen) if (open) threadOpen.delete(id);
-      save();
-      renderFiles();
-    }, false, icons.margin),
   ];
   openToolbarMenu('view-menu', rows);
 }

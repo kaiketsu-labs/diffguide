@@ -160,12 +160,27 @@ async function pageRun(browser, dump) {
     await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
     return { handled, painted: performance.now() - start };
   });
+  // Files to Guide order and back, each to the first frame without changes to the files.
+  const order = await page.evaluate(async () => {
+    const pick = (name) => document.getElementById('order-' + name).click();
+    const time = async (name) => {
+      let changes = 0;
+      const observer = new MutationObserver((records) => { changes += records.length; });
+      observer.observe(document.getElementById('files'), { childList: true, subtree: true });
+      const start = performance.now();
+      pick(name);
+      for (let seen = -1; seen !== changes;) { seen = changes; await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0))); }
+      observer.disconnect();
+      return performance.now() - start;
+    };
+    return { guide: await time('guide'), files: await time('files') };
+  });
   const state = stateMessage.state ? await deliver('state') : undefined;
   const long = await page.evaluate(() => window.__long);
   const nodes = await page.evaluate(() => document.getElementsByTagName('*').length);
   await page.close();
   if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
-  return { boot, files, ...colored ? { colored } : {}, viewed, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), longestTask: Math.max(0, ...long), nodes };
+  return { boot, files, ...colored ? { colored } : {}, viewed, order, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), longestTask: Math.max(0, ...long), nodes };
 }
 
 const report = { label, scale, runs, date: new Date().toISOString(), fixtures: {} };

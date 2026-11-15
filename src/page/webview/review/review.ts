@@ -60,16 +60,15 @@ const dropLabels: Record<DropReason, [string, string]> = {
   unplaced: ['Not placed', 'Its lines are not in the diff'],
 };
 
-/** The code review's summary above the files: findings by rank, who ran, and every dropped candidate with its reason. */
+/** A running or failed review in Claude's card, and its summary above the files once done: findings by rank, who ran, and every dropped candidate with its reason. */
 function renderReviewCard(): void {
   const card = $('review-card');
   const review = received.current?.review;
   const result = review?.result;
   const live = review?.running || review?.error !== undefined ? review?.live : undefined;
-  card.hidden = result === undefined && live === undefined;
-  if (card.hidden) { card.replaceChildren(); return; }
-  const cards = live === undefined || review === undefined ? [] : [reviewLiveCard(live, review.running, review.error)];
-  if (result === undefined || review?.running) { card.replaceChildren(...cards); return; }
+  $('claude-review').replaceChildren(...live === undefined || review === undefined ? [] : [reviewLiveCard(live, review.running, review.error)]);
+  card.hidden = result === undefined || review?.running === true;
+  if (result === undefined || review?.running) { card.replaceChildren(); return; }
   const box = el('details', 'thread review review-card');
   box.open = collapsed.get('review-card') !== true;
   box.addEventListener('toggle', () => { collapsed.set('review-card', !box.open); save(); });
@@ -133,7 +132,7 @@ function renderReviewCard(): void {
     }
     box.append(dropped);
   }
-  card.replaceChildren(...cards, box);
+  card.replaceChildren(box);
 }
 
 const usageDuration = (ms: number): string => {
@@ -298,20 +297,21 @@ function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: rea
   return node;
 }
 
-/** The Review button, its reviewer menu and its status chip. */
+/** The Review button, its reviewer menu, and the review's live and finished cards. */
 export function showReview(): void {
   const review = received.current?.review;
   $('review-tools').hidden = review === undefined;
-  if (review === undefined) return;
+  if (review === undefined) { $('claude-review').replaceChildren(); return; }
   ui.reviewPicks = review.picked;
-  const start = $<HTMLButtonElement>('review');
+  const start = $<HTMLButtonElement>('agent-review');
   start.replaceChildren(icon(review.running ? icons.stop : icons.agentReview), review.running ? 'Stop review' : review.result ? 'Rerun review' : 'Review');
-  const status = $('review-status');
-  status.textContent = review.running ? 'Review · ' + stageLabels[review.live?.stage ?? 'triage'][0] : review.error ? 'Review failed' : '';
-  status.title = review.error ?? '';
-  status.className = review.running ? 'chip agent working' : review.error ? 'chip bad' : '';
-  status.hidden = !review.running && !review.error;
   renderReviewCard();
+}
+
+/** The review's stage while it runs, or that it failed, for the Claude chip. */
+export function reviewStatus(): string | undefined {
+  const review = received.current?.review;
+  return review?.running ? 'Review · ' + stageLabels[review.live?.stage ?? 'triage'][0] : review?.error ? 'Review failed' : undefined;
 }
 
 export function openReviewMenu(): void {

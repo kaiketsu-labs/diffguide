@@ -21,12 +21,13 @@ The command prints each PNG path. It exits 1 and lists page errors when the scri
 
 Scenes live in `test/render/fixtures.ts`, typed against `OverviewState` and `ExtensionMessage`, so the typecheck catches fixtures that drift from the page protocol.
 
-- `overview`, `files`, `guide`: a PR with GitHub details, checks, reviewers, Local threads and an unpushed commit, on each tab.
+- `overview`, `code-files`, `code-guide`: a PR with GitHub details, checks, reviewers, Local threads, a guide and an unpushed commit, on Overview and on Code in each order. Both Code scenes count the diff lines in the DOM, which must match.
+- `order-switch`, `guide-unbuilt`: switching orders, and Guide order before a guide exists.
 - `working`: the same PR while Claude runs.
-- `narrow`: the Files tab at 420 px.
+- `narrow`: Code in Files order at 700 px, half of a 1440 px window.
 - `local`: the local review page.
 
-When a change needs a state no scene shows, add a scene there instead of writing a script in `/tmp`. A step can `click` a selector, `scroll` or `scrollTo`, `wait` in ms, and take a `shot`, optionally `full` page. `saved` sets what `getState()` returns, such as `{ view: 'guide' }` or `{ marginThreads: true }`.
+When a change needs a state no scene shows, add a scene there instead of writing a script in `/tmp`. A step can `click` a selector, check `expect` with `text` or `count`, `scroll` or `scrollTo`, `wait` in ms, and take a `shot`, optionally `full` page. `saved` sets what `getState()` returns, such as `{ view: 'code', order: 'guide' }` or `{ marginThreads: true }`.
 
 ## Limits
 

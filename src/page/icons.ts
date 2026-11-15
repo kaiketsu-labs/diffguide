@@ -32,7 +32,7 @@ export const icons = {
 
   unified: line('<path d="M1.5 4h3M3 2.5v3M1.5 12h3M7 4h7.5M7 8h7.5M7 12h7.5"/>'),
   split: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11M3.75 8h2M10.25 8h2M11.25 7v2"/>'),
-  fileList: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11M3.5 5.5h1M3.5 8h1M3.5 10.5h1"/>'),
+  fileList: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6.5 2.5v11M3.25 5.5h1.5M3.25 8h1.5M3.25 10.5h1.5"/>'),
   collapseAll: line('<path d="M5 2.5h7A1.5 1.5 0 0 1 13.5 4v7"/><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M4.75 9.25h4"/>'),
   expandAll: line('<path d="M5 2.5h7A1.5 1.5 0 0 1 13.5 4v7"/><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M4.75 9.25h4M6.75 7.25v4"/>'),
   overview: line('<path d="M2 7.5L8 2.25l6 5.25M3.5 6.25v7.25h9V6.25M6.5 13.5v-3.5h3v3.5"/>'),
@@ -44,7 +44,6 @@ export const icons = {
   search: line('<circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5l4 4"/>'),
   whitespace: line('<path d="M2.5 9v3.5h11V9"/>'),
   tree: line('<path d="M2.5 3.5h11M4.5 3.5V12M4.5 8h3M4.5 12h3M9.5 8h4M9.5 12h4"/>'),
-  margin: line(`<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M5.5 2.5v11M8 6h4.5M8 8.5h3M8 11h4"/><circle ${solid} cx="3.5" cy="6" r="1"/><circle ${solid} cx="3.5" cy="9.5" r="1"/>`),
   chevronDown: line('<path d="M4 6l4 4 4-4"/>'),
   fold: line(ring + '<path d="M5 8h6"/>'),
   unfold: line(ring + '<path d="M5 8h6M8 5v6"/>'),

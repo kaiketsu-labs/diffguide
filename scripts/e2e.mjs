@@ -54,7 +54,8 @@ const port = await new Promise((done) => { const server = createServer().listen(
 const app = spawn(code, [
   '--user-data-dir', userData, '--extensions-dir', extensions, '--remote-debugging-port=' + port,
   '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', '--disable-telemetry', '--new-window', repo,
-  ...process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [],
+  // Docker gives a container 64 MB of /dev/shm, too little for the window to survive a reload.
+  ...process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] : [],
 ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, VSCODE_CLI: undefined, ELECTRON_RUN_AS_NODE: undefined } });
 let appLog = '';
 app.stdout.on('data', (chunk) => { appLog += chunk; });
@@ -101,7 +102,7 @@ const palette = async (workbench, title) => {
 };
 /** The review page frame that shows `selector`, so a page closed by an earlier scenario is skipped. */
 const reviewPage = (workbench, selector) => until('the review page', async () => {
-  for (const frame of workbench.frames()) if (await frame.$('#view-files') && await frame.$(selector)) return frame;
+  for (const frame of workbench.frames()) if (await frame.$('#view-code') && await frame.$(selector)) return frame;
   return undefined;
 }, 30_000);
 
@@ -114,7 +115,7 @@ const scenarios = [
       const page = await reviewPage(workbench, 'body');
       step('Review local changes opened the review page');
 
-      await page.click('#view-files');
+      await page.click('#view-code');
       const line = 'td.num.pick[data-path="src/app.ts"][data-side="new"]';
       await page.waitForSelector(line, { timeout: 15_000 });
       await page.waitForSelector('.file[data-path="src/app.ts"] td.code span', { timeout: 15_000 });
@@ -129,9 +130,15 @@ const scenarios = [
       await page.click('.composer-actions button:has-text("Ask")');
       step('Commented on src/app.ts:5 and sent it with Ask');
 
-      await page.waitForSelector('text=Simulated agent:', { timeout: 30_000 });
+      await page.waitForSelector('#files tr.inline .thread >> text=Simulated agent:', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'local-answered.png') });
-      step('The simulated agent answer appeared in the thread');
+      step('The simulated agent answer appeared in the thread under its line');
+
+      await page.click('#claude-chip');
+      await page.waitForSelector('#claude-menu:visible #claude-body .claude-head', { timeout: 5_000 });
+      await page.click('#claude-chip');
+      await page.waitForSelector('#claude-menu', { state: 'hidden', timeout: 5_000 });
+      step('The Claude chip opened and closed its menu');
 
       await page.click('button:has-text("Resolve")');
       await page.locator('.state:visible', { hasText: 'Resolved' }).first().waitFor({ timeout: 10_000 });
@@ -151,7 +158,7 @@ const scenarios = [
 
       await row('Migrate auth to OAuth device flow').click();
       const page = await reviewPage(workbench, 'text=Sample pull request');
-      await page.click('#view-files');
+      await page.click('#view-code');
       await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'pr-files.png') });
       step('Opening #201 checked it out and showed its diff');
@@ -164,6 +171,15 @@ const scenarios = [
       await page.locator('#notice', { hasText: 'Refreshed.' }).waitFor({ timeout: 30_000 });
       await until('the Refresh button to settle', async () => !await page.$('#refresh.busy') && !await page.$('#refresh[disabled]'), 5_000);
       step('Refresh said Refreshed. and the button settled');
+
+      // Finish review opens its form under the button and stays on Code.
+      await page.click('#finish-review');
+      await page.waitForSelector('#review-box:visible', { timeout: 5_000 });
+      await page.locator('#finish-label', { hasText: 'Submit comment' }).waitFor({ timeout: 5_000 });
+      if (!await page.isVisible('#panel-files') || await page.isVisible('#panel-overview')) throw new Error('Finish review left the Code tab');
+      await page.press('#review', 'Escape');
+      await page.waitForSelector('#review-box', { state: 'hidden', timeout: 5_000 });
+      step('Finish review opened its form on Code, named Submit comment, and Escape closed it');
     },
   },
   {
@@ -173,8 +189,13 @@ const scenarios = [
       await reviewPage(workbench, 'body');
       await palette(workbench, 'Focus on Pull Requests View');
       await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
-      await reviewPage(workbench, 'text=Sample pull request');
-      step('Opened the local page and the page of #201');
+      const before = await reviewPage(workbench, 'text=Sample pull request');
+      await before.click('#view-code');
+      await before.click('#order-guide');
+      await before.waitForSelector('#order-guide[aria-pressed=true]', { timeout: 5_000 });
+      await before.click('#nav-toggle');
+      await before.waitForSelector('#files-layout.list-hidden', { timeout: 5_000 });
+      step('Opened the local page and the page of #201, on Code in Guide order with the list hidden');
 
       const tab = (label) => workbench.locator(`.tabs-container .tab[aria-label*="${label}"]`).first();
       const prTab = (await tab('201').getAttribute('aria-label')) ?? '';
@@ -185,13 +206,17 @@ const scenarios = [
       await until('the window to reload', async () => await workbench.evaluate(() => performance.timeOrigin) !== loaded && await workbench.$('.monaco-workbench .tabs-container .tab'), 60_000);
       step('Reloaded the window');
 
-      await reviewPage(workbench, 'text=Sample pull request');
+      const after = await reviewPage(workbench, 'text=Sample pull request');
+      await after.waitForSelector('#view-code[aria-selected=true]', { timeout: 10_000 });
+      // The hidden list hides the order switch too.
+      await after.waitForSelector('#order-guide[aria-pressed=true]', { state: 'attached', timeout: 5_000 });
+      await after.waitForSelector('#files-layout.list-hidden', { timeout: 5_000 });
       await workbench.screenshot({ path: join(out, 'reload-pr.png') });
-      step(`The PR page opened again in its tab (${prTab})`);
+      step(`The PR page opened again in its tab (${prTab}), on Code in Guide order with the list hidden`);
 
       await tab('Local ·').click();
       await until('the local page after the reload', async () => {
-        for (const frame of workbench.frames()) if (await frame.$('#view-files') && !await frame.$('text=Sample pull request')) return frame;
+        for (const frame of workbench.frames()) if (await frame.$('#view-code') && !await frame.$('text=Sample pull request')) return frame;
         return undefined;
       });
       await workbench.screenshot({ path: join(out, 'reload-local.png') });

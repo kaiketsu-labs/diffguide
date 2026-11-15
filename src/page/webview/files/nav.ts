@@ -5,7 +5,7 @@ import type { FileDiff } from '../../../core/unifiedDiff.js';
 import { icons } from '../../icons.js';
 import type { FileIcon } from '../../protocol.js';
 import { $, button, chevronMark, el, icon, setTip, titled } from '../dom.js';
-import { closedFiles, collapsed, hiddenTypes, prefs, received, save, ui } from '../state.js';
+import { closedFiles, collapsed, guided, hiddenTypes, prefs, received, save, ui } from '../state.js';
 import { allThreads, inFiles } from '../threads/model.js';
 import { post } from '../transport.js';
 import type { Thread } from '../types.js';
@@ -153,11 +153,11 @@ let navTop: string | undefined;
 /** Highlight the navigator row of the file or guide step at the top of the view, the first one until any reaches it, and scroll the navigator to it when that changes; `rebuilt` after the rows were redrawn. */
 export function markCurrentNavFile(rebuilt = true): void {
   const line = (Number.parseFloat(document.body.style.getPropertyValue('--bar-height')) || 46) + 36;
-  const guided = prefs.view === 'guide';
+  const steps = guided() && received.current?.analysis.result !== undefined;
   let top: string | undefined;
-  for (const box of $('files').querySelectorAll<HTMLElement>(guided ? '.step-wrap[data-key]' : '.file[data-path]')) {
+  for (const box of $('files').querySelectorAll<HTMLElement>(steps ? '.step-wrap[data-key]' : '.file[data-path]')) {
     if (top !== undefined && box.getBoundingClientRect().top > line) break;
-    top = guided ? box.dataset.key : box.dataset.path;
+    top = steps ? box.dataset.key : box.dataset.path;
   }
   const moved = top !== navTop;
   if (!moved && !rebuilt) return;
@@ -165,7 +165,7 @@ export function markCurrentNavFile(rebuilt = true): void {
   const nav = $('file-nav');
   let currentRow: HTMLElement | undefined;
   for (const row of nav.querySelectorAll<HTMLElement>('.nav-file')) {
-    const isTop = top !== undefined && (guided ? row.dataset.navStep : row.dataset.navPath) === top;
+    const isTop = top !== undefined && (steps ? row.dataset.navStep : row.dataset.navPath) === top;
     row.setAttribute('aria-current', String(isTop));
     if (isTop) currentRow = row;
   }

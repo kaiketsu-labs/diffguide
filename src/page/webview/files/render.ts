@@ -4,10 +4,11 @@ import type { FileDiff } from '../../../core/unifiedDiff.js';
 import { icons } from '../../icons.js';
 import { toolButton } from '../conversation/comment.js';
 import { $, button, chevronMark, el, icon, setTip } from '../dom.js';
+import { guideIntro } from '../guide/model.js';
 import { railItem, railNode, renderGuide } from '../guide/render.js';
 import { rangeLabel, renderRangeControls } from '../range.js';
-import { showGuideTab } from '../render.js';
-import { collapsed, prefs, previewing, received, save, ui } from '../state.js';
+import { showCodeTab } from '../render.js';
+import { collapsed, guided, prefs, previewing, received, save, ui } from '../state.js';
 import { fileComposerBox, openFileComposer } from '../threads/composer.js';
 import { allThreads, inFiles, standalone } from '../threads/model.js';
 import { threadBox } from '../threads/threadBox.js';
@@ -71,11 +72,11 @@ function drawDiffsOnScreen(): void {
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 export function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(prefs.layout === name));
-  for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(prefs.view === name));
+  for (const name of ['overview', 'code'] as const) $('view-' + name).setAttribute('aria-selected', String(prefs.view === name));
   $('panel-overview').hidden = prefs.view !== 'overview';
   $('panel-files').hidden = prefs.view === 'overview';
   $('files-bar').classList.toggle('on-overview', prefs.view === 'overview');
-  showGuideTab();
+  showCodeTab();
   renderRangeControls();
   setTip($('fold-all'), allFolded() ? 'Expand all files' : 'Collapse all files');
   $('fold-all').innerHTML = allFolded() ? icons.expandAll : icons.collapseAll;
@@ -85,7 +86,7 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
     ui.focusThread = undefined;
     requestAnimationFrame(() => { drawPendingDiffs(); document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
   }
-  if (prefs.view === 'guide') { keepView(() => renderGuide(only)); return; }
+  if (guided() && received.current?.analysis.result) { keepView(() => renderGuide(only)); return; }
   const opened = filteredFiles(openedFiles());
   const changes = received.files.filter((file) => file.change !== 'unchanged');
   const shownChanges = filteredFiles(changes);
@@ -98,7 +99,6 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
     list.push(thread);
   }
   const tree = fileTree(shownChanges);
-  $('files').parentElement?.classList.remove('no-nav');
   renderFileNav(shownChanges, opened, threadsByFile);
   const visible = !prefs.folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
@@ -118,7 +118,7 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
         if (file) boxes.get(path)?.replaceWith(draw(file));
       }
     } else {
-      container.replaceChildren();
+      container.replaceChildren(...guided() ? [guideIntro()] : []);
       fileKeys.clear();
       undrawn.clear();
       if (!shownFiles.length) container.append(el('p', 'muted', changes.length || openedFiles().length ? 'No files match the filter.' : received.current?.localMode ? 'No uncommitted changes. Pick a file in the Local view to review it.' : received.diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(received.diffRange) + '.'));

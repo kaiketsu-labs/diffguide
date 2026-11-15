@@ -15,9 +15,10 @@ import { closeMergeForm } from './header/merge.js';
 import { closeTitleForm, renderLinked } from './header/pullRequest.js';
 import { renderBaseMenu, renderReviewers } from './header/reviewers.js';
 import { closeToolbarMenu, renderPicker } from './menus.js';
+import { closeReviewForm } from './review/finish.js';
 import { peeks, probes, renderPeek, showLink } from './peek.js';
 import { render, revealGroup, revealStep } from './render.js';
-import { closedFiles, collapsed, prefs, publishing, received, replies, save, setPageKey, ui } from './state.js';
+import { closedFiles, collapsed, guided, prefs, publishing, received, replies, save, setPageKey, ui } from './state.js';
 import { hopIntoAvatar, setBusy, setStale, showNotice } from './status.js';
 import { renderNavThreads } from './threads/list.js';
 import { allThreads, redrawThread } from './threads/model.js';
@@ -32,7 +33,7 @@ export const loading = new Set<string>();
 /** Paths whose diff differs from the one shown, or undefined when the file list or what it shows changed and every file needs drawing. */
 function changedFiles(next: readonly FileDiff[], shownAs: string): string[] | undefined {
   const shown = received.files;
-  if (prefs.view !== 'files' || shown === undefined || shownAs !== JSON.stringify([received.diffRange, prefs.whitespace, received.atHead])
+  if (prefs.view !== 'code' || guided() || shown === undefined || shownAs !== JSON.stringify([received.diffRange, prefs.whitespace, received.atHead])
     || shown.length !== next.length || next.some((file, index) => shown[index]?.path !== file.path)) return undefined;
   return next.filter((file, index) => JSON.stringify(file) !== JSON.stringify(shown[index])).map((file) => file.path);
 }
@@ -99,7 +100,8 @@ export function onExtensionMessage(data: ExtensionMessage): void {
     if (thread) jump(thread);
   }
   if (data.reveal && received.files) {
-    prefs.view = 'files';
+    prefs.view = 'code';
+    prefs.order = 'files';
     closedFiles.delete(data.reveal);
     collapsed.set(data.reveal, false);
     openFolders(data.reveal);
@@ -131,7 +133,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
     const thread = allThreads().find((each) => each.id === id);
     if (thread) redrawThread(thread);
   }
-  if (data.done === 'review') $<HTMLTextAreaElement>('review').value = '';
+  if (data.done === 'review') { $<HTMLTextAreaElement>('review').value = ''; closeReviewForm(); }
   if (data.done === 'merge') closeMergeForm();
   if (data.done === 'title') closeTitleForm();
   if (data.done === 'dismiss') { ui.dismissing = undefined; if (received.current) renderReviewers(received.current, true); }

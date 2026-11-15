@@ -3,25 +3,26 @@ import { buildGuide } from '../../core/prAnalysis.js';
 import { icons } from '../icons.js';
 import type { OverviewState } from '../protocol.js';
 import { renderAnswers } from './answers.js';
+import { renderClaude } from './claude/panel.js';
 import { isWriter, reactionsRow, toolButton } from './conversation/comment.js';
 import { renderConversation } from './conversation/timeline.js';
 import { $, detailsLoading, el, icon, placeholders, setLabel, stateIcon } from './dom.js';
-import { showListToggle } from './files/filters.js';
+import { openSearch, showListToggle } from './files/filters.js';
 import { drawPendingDiffs, renderFiles } from './files/render.js';
 import { guideState } from './guide/model.js';
-import { renderConnectButton, renderContextButton } from './header/connect.js';
 import { branchRef, copyRef, pullRequestChip, pullRequestFacts, renderLinked, renderState, verdict } from './header/pullRequest.js';
 import { baseButton, renderReviewers } from './header/reviewers.js';
 import { renderSync } from './header/sync.js';
 import { closeToolbarMenu } from './menus.js';
 import { renderRangeControls, requestFiles, sameRange } from './range.js';
 import { showReview } from './review/review.js';
-import { collapsed, prefs, received, save, ui } from './state.js';
-import { changePullRequest, noteWorking, runMotion, setBusy, showNotice, status, stepLog } from './status.js';
+import { collapsed, guided, prefs, received, save, ui } from './state.js';
+import { changePullRequest, noteWorking, setBusy, showNotice, status } from './status.js';
+import { closeReviewForm, pendingCount, showReviewForm } from './review/finish.js';
 import { renderNavThreads, renderPendingList, renderThreadList } from './threads/list.js';
 import { archiving } from './threads/model.js';
 import { renderBatch } from './threads/suggestions.js';
-import type { View } from './types.js';
+import type { Order, View } from './types.js';
 
 let guideStamp = '';
 
@@ -32,7 +33,7 @@ export function onShortcut(event: KeyboardEvent): void {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-  const top = $('files-bar').getBoundingClientRect().bottom + 4;
+  const top = (prefs.view === 'code' ? $('code-bar') : $('files-bar')).getBoundingClientRect().bottom + 4;
   const step = (selector: string, forward: boolean): void => {
     const nodes = [...document.querySelectorAll<HTMLElement>(selector)];
     const index = nodes.findIndex((node) => node.getBoundingClientRect().top > top + 1);
@@ -51,7 +52,7 @@ export function onShortcut(event: KeyboardEvent): void {
   } else if (event.key === 'v') {
     const box = [...document.querySelectorAll<HTMLElement>('#files .file')].find((node) => node.getBoundingClientRect().bottom > top);
     box?.querySelector<HTMLInputElement>('label.viewed input')?.click();
-  } else if (event.key === 't') { event.preventDefault(); $('file-filter').focus(); }
+  } else if (event.key === 't') { event.preventDefault(); openSearch(); }
   else if (event.key === '?') showNotice({ text: shortcuts });
   else return;
 }
@@ -156,22 +157,7 @@ export function render(state: OverviewState): void {
     bar.style.width = '160px';
     reviewed.append(bar);
   }
-  const claude = $('claude');
-  const terminal = $('terminal');
-  const stop = $<HTMLButtonElement>('stop-claude');
-  const progress = state.claude.running ? state.claude.progress : undefined;
-  claude.after(...$('context').parentElement ? [$('context').parentElement as HTMLElement] : [], stop, terminal);
-  if (progress === undefined) claude.replaceChildren(...state.claude.running ? [] : [icon(icons.orb)], state.claude.text);
-  else claude.replaceChildren(stepLog(progress.steps, progress.startedAt, stop, runMotion(progress)), terminal);
-  stop.hidden = !state.claude.running;
-  if (!state.claude.running) { ui.stoppingClaude = false; stop.disabled = false; }
-  claude.className = progress !== undefined ? 'claude-box' : state.claude.running ? 'chip agent working' : 'chip orb-chip';
-  $('retry').hidden = !state.claude.retry;
-  terminal.className = state.claude.running ? 'small' : 'quiet';
-  terminal.replaceChildren(icon(icons.terminal), state.claude.running ? 'Stop and open in terminal' : 'Open in terminal');
-  terminal.dataset.tip = state.claude.running ? 'Stops the agent\'s background run, then continues its conversation in a terminal' : 'Continue this PR\'s agent conversation in a terminal';
-  renderConnectButton(state.claude.link);
-  renderContextButton(state.claude);
+  renderClaude(state);
   const unpushed = state.unpushed?.length ?? 0;
   const push = $('push');
   push.hidden = !unpushed || !details?.canEdit;
@@ -181,16 +167,8 @@ export function render(state: OverviewState): void {
   renderLinked(state);
   ui.author = !details || details.viewerIsAuthor;
   setBusy(ui.busy);
-  for (const review of document.querySelectorAll<HTMLButtonElement>('[data-reviewer]')) review.hidden = ui.author;
-  document.querySelector<HTMLButtonElement>('[data-event="comment"]')?.classList.toggle('primary', ui.author);
-  $('review-box').querySelector<HTMLButtonElement>('[data-event="comment"]')!.title = ui.author ? 'This is your PR, so you can only comment.' : '';
-  // The details' count comes from a separate read that can lag the threads the pending list shows, so count what the list shows.
-  const pendingCount = details?.pendingComments === undefined ? undefined
-    : (state.github ?? []).reduce((sum, thread) => sum + thread.messages.filter((message) => message.pending).length, 0);
-  $('discard-review').hidden = pendingCount === undefined;
-  $('pending-note').hidden = pendingCount === undefined;
-  $('pending-note').textContent = pendingCount + ' pending comment' + (pendingCount === 1 ? '' : 's');
-  renderPendingList(pendingCount !== undefined);
+  renderPendingList(pendingCount() !== undefined);
+  showReviewForm();
   const badge = $('verdict');
   badge.hidden = !details;
   if (details) {
@@ -205,11 +183,9 @@ export function render(state: OverviewState): void {
     prState.className = 'verdict pr-state pr-only ' + ended;
     prState.replaceChildren(icon(ended === 'merged' ? icons.merge : icons.closePullRequest), ended === 'merged' ? 'Merged' : 'Closed');
   }
-  $('review-box').hidden = !details?.open && !loading;
   $<HTMLTextAreaElement>('review').disabled = loading;
   $('bar-review').hidden = !details?.open;
-  $('bar-pending').hidden = pendingCount === undefined;
-  $('bar-pending').textContent = pendingCount + ' pending';
+  if (!details?.open) closeReviewForm();
   $('merge-box').hidden = !details && !loading;
   $('method').parentElement!.hidden = loading;
   if (details) {
@@ -222,24 +198,17 @@ export function render(state: OverviewState): void {
   save();
   received.readRanges = state.read;
   const { analysis } = state;
-  const analyze = $<HTMLButtonElement>('analyze');
-  setLabel(analyze, analysis.running ? 'Stop' : analysis.result ? 'Rebuild guide' : 'Build guide');
-  const analysisStatus = $('analysis-status');
-  analysisStatus.textContent = analysis.running ? 'Guide · ' + (analysis.step ?? 'Working') : analysis.error ? 'Guide failed' : '';
-  analysisStatus.title = analysis.error ?? '';
-  analysisStatus.className = analysis.running ? 'chip agent working' : analysis.error ? 'chip bad' : '';
-  analysisStatus.hidden = !analysis.running && !analysis.error;
   showReview();
   const stamp = JSON.stringify([analysis.result?.createdAt, analysis.stale, analysis.behind, analysis.result ? analysis.stale && analysis.running : [analysis.running, analysis.error]]);
   if (stamp !== guideStamp) {
     guideStamp = stamp;
     received.guide = undefined;
-    if (prefs.view === 'guide') { renderFiles(); return; }
+    if (guided()) { renderFiles(); return; }
   }
   const localPaths = Object.keys(state.local ?? {}).sort().join('\0');
   if (localPaths !== shownLocalPaths) {
     shownLocalPaths = localPaths;
-    if (prefs.folders && prefs.view === 'files') { renderFiles(); return; }
+    if (prefs.folders && prefs.view === 'code' && !guided()) { renderFiles(); return; }
   }
   renderFiles('state');
 }
@@ -247,11 +216,12 @@ export function render(state: OverviewState): void {
 /** Paths with local work at the last full draw, so folder marks redraw when the set changes. */
 let shownLocalPaths = '';
 
-/** Switch tabs, keeping the tab bar where it is when the page is scrolled past the header. */
-export function setView(next: View): void {
+/** Switch tabs, and with `order` the Code tab's order, keeping the tab bar where it is when the page is scrolled past the header. */
+export function setView(next: View, order: Order = prefs.order): void {
   prefs.view = next;
+  prefs.order = order;
   closeToolbarMenu();
-  if (next === 'guide' && (received.diffRange.kind !== 'all' || prefs.whitespace)) requestFiles({ kind: 'all' }, false);
+  if (guided() && (received.diffRange.kind !== 'all' || prefs.whitespace)) requestFiles({ kind: 'all' }, false);
   save();
   renderFiles();
   renderNavThreads();
@@ -260,32 +230,21 @@ export function setView(next: View): void {
   if (window.scrollY > panelTop) window.scrollTo(0, panelTop);
 }
 
-/** Open the Overview tab at the review box with its summary focused. */
-export function finishReview(): void {
-  if (prefs.view !== 'overview') setView('overview');
-  const box = $('review-box');
-  box.scrollIntoView({ block: 'nearest' });
-  $<HTMLTextAreaElement>('review').focus({ preventScroll: true });
-}
-
-/** The Guide tab's count of steps once a guide exists; its icon moves while Claude builds it. Build guide shows only in the guide. */
-export function showGuideTab(): void {
+/** The Code tab's count of changed files, and the Guide order button, which moves while Claude builds the guide and warns when it is out of date. */
+export function showCodeTab(): void {
   const analysis = received.current?.analysis;
-  const count = $('guide-count');
-  const steps = analysis?.result?.groups.reduce((sum, group) => sum + group.steps.length, 0);
-  $('view-guide').classList.toggle('busy', analysis?.running === true);
+  $('order-guide').classList.toggle('busy', analysis?.running === true);
   $('guide-stale').hidden = analysis?.running === true || analysis?.result === undefined || !analysis.stale;
-  count.textContent = analysis?.running || steps === undefined ? '' : String(steps);
-  count.hidden = analysis?.running === true || steps === undefined;
   $('files-count').textContent = received.files ? String(received.files.filter((file) => file.change !== 'unchanged').length) : '';
-  for (const id of ['analyze', 'analysis-status', 'analyze-divider']) $(id).classList.toggle('off-view', prefs.view !== 'guide');
-  for (const id of ['range', 'nav-tools']) $(id).classList.toggle('off-view', prefs.view !== 'files');
+  for (const name of ['files', 'guide'] as const) $('order-' + name).setAttribute('aria-pressed', String(prefs.order === name));
+  $('nav-tools').classList.toggle('off-view', guided() && analysis?.result !== undefined);
   showListToggle();
 }
 
 /** Show the guided layout with a step's group and the step open, scrolled to it. */
 export function revealStep(key: string): void {
-  prefs.view = 'guide';
+  prefs.view = 'code';
+  prefs.order = 'guide';
   const result = received.current?.analysis.result;
   if (received.files && result) {
     received.guide ??= buildGuide(result, received.files);
@@ -302,7 +261,8 @@ export function revealStep(key: string): void {
 
 /** Show the guided layout with a section unfolded, scrolled to its head. */
 export function revealGroup(key: string): void {
-  prefs.view = 'guide';
+  prefs.view = 'code';
+  prefs.order = 'guide';
   collapsed.set(guideState('group', key), false);
   save();
   renderFiles();

@@ -8,7 +8,6 @@ import { received, ui } from './state.js';
 import { post } from './transport.js';
 import type { CheckState, LiveLog, ReviewerState, StepPick } from './types.js';
 
-export const reviewButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-event]')];
 
 export const elapsed = (since: number, until = Date.now()): string => {
   const seconds = Math.max(0, Math.floor((until - since) / 1000));
@@ -75,7 +74,8 @@ export function status(key: ReviewerState | CheckState, name: string, url?: stri
 export function setBusy(value: boolean): void {
   ui.busy = value;
   const loading = detailsLoading(received.current);
-  for (const review of reviewButtons) review.disabled = value || loading || (ui.author && review.hasAttribute('data-reviewer'));
+  // Finish review only submits while its form is open.
+  $<HTMLButtonElement>('finish-review').disabled = $('finish-review').getAttribute('aria-expanded') === 'true' && (value || loading);
   const merge = received.current?.conversation?.merge;
   const mergeLoading = merge === undefined && received.current?.conversationError === undefined;
   $<HTMLButtonElement>('merge').disabled = value || loading || mergeLoading || received.current?.details?.mergeable === 'no' || (merge?.state === 'blocked' && !merge.canBypass && !merge.mergeQueue);
