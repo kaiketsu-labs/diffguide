@@ -15,11 +15,15 @@ export interface Scene {
   readonly steps: readonly Step[];
 }
 
-/** Runs in order: send, click, scroll, hover, wait, then the checks, then shoot. `shot` names the PNG. */
+/** Runs in order: send, click, fill, press, scroll, hover, wait, then the checks, then shoot. `shot` names the PNG. */
 export interface Step {
   /** A host message to deliver, such as the state after an action the page posted. */
   readonly send?: ExtensionMessage;
   readonly click?: string;
+  /** A selector and the text to type into it, replacing what it holds. */
+  readonly fill?: readonly [string, string];
+  /** A key or chord for the focused element, in Playwright's names, such as `ControlOrMeta+F`. */
+  readonly press?: string;
   readonly hover?: string;
   readonly scroll?: number;
   readonly scrollTo?: string;
@@ -40,6 +44,8 @@ export interface Step {
   readonly after?: readonly [string, string];
   /** A selector and the most pixels tall it may be, such as a row that must not wrap. */
   readonly tallest?: readonly [string, number];
+  /** A selector, pseudo-element, CSS property and expected computed value. */
+  readonly css?: readonly [string, string, string, string];
   /** Two selectors whose vertical centers must line up, as on one row. */
   readonly level?: readonly [string, string];
   /** Two selectors: the first one's contents must lie within the second's box horizontally; the same selector twice catches text spilling out of its box. */
@@ -334,6 +340,35 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '.folded-body[hidden]', count: 6 },
     { click: '.folded-lines .fold-lines', expect: '.folded-body[hidden]', count: 5 },
   ], { saved: { view: 'guide' } }),
+  find: scene(pullRequest, [
+    { absent: '#find-box:visible' },
+    { send: { find: true }, stay: '#view-code', expect: '#files-bar #find-box:visible #find-input:focus' }, { after: ['#find-box', '#view-code'] }, { after: ['#claude-anchor', '#find-box'] },
+    { tallest: ['#find-box', 28] },
+    // The first match sits in folded lines, which open for it.
+    { fill: ['#find-input', 'compute(1);'], wait: 400, expect: '#find-count', text: '1 of ' }, { expect: '.folded-body[hidden]', count: 5, shot: 'find.png' },
+    { css: ['body', '::highlight(find-current)', 'text-decoration-line', 'underline'] },
+    { css: ['body', '::highlight(find-match)', 'text-decoration-line', 'underline'] },
+    { press: 'Shift+Enter', expect: '#find-count', text: ' of ' }, { absent: '#find-count:has-text("1 of ")' },
+    { fill: ['#find-input', 'no such text'], wait: 400, expect: '#find-box.missing #find-count', text: 'No results' },
+    { press: 'Escape', absent: '#find-box:visible' },
+  ], { saved: { view: 'guide' } }),
+  'find-typing': scene(pullRequest, [
+    { press: 'ControlOrMeta+F' },
+    { fill: ['#find-input', 'comp'], wait: 400, expect: '#find-count', text: ' of ' },
+    { scroll: 100 },
+    { fill: ['#find-input', 'compu'], stay: '#files', wait: 400 },
+    { fill: ['#find-input', 'comput'], stay: '#files', wait: 400 },
+    { fill: ['#find-input', 'compute'], stay: '#files', wait: 400, shot: 'find-typing.png' },
+  ], { saved: { view: 'code' } }),
+  'find-scroll': scene(pullRequest, [
+    { scroll: 900 },
+    { press: 'ControlOrMeta+F', stay: '#files', expect: '#find-input:focus' },
+    { fill: ['#find-input', 'compute(1);'], wait: 400, expect: '#find-count', text: ' of ' },
+    { scroll: 900 },
+    { press: 'ControlOrMeta+F', stay: '#files', expect: '#find-input:focus' },
+    { press: 'Escape' },
+    { press: 'ControlOrMeta+F', stay: '#files', expect: '#find-input:focus', shot: 'find-scroll.png' },
+  ], { saved: { view: 'code' } }),
   search: scene(pullRequest, [
     { expect: '#search-toggle.filtered' }, { absent: '#filter-box:visible' }, { expect: '#order-files:visible' },
     { click: '#search-toggle', expect: '#nav-order.searching #file-filter:focus' }, { absent: '#order-files:visible', shot: 'search-open.png' },
@@ -398,6 +433,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
     // A long step shortens the chip instead of breaking the row.
     { send: { state: working }, stay: '#code-bar', level: ['#view-code', '#claude-chip'] }, { level: ['#view-code', '#finish-review'] },
     { tallest: ['#finish-review', 26] }, { tallest: ['#claude-chip', 26] }, { after: ['#claude-chip', '#view-code'], shot: 'narrow-working.png' }], { saved: { view: 'files' }, width: 700, height: 900 }),
+  'find-narrow': scene(pullRequest, [
+    { send: { find: true }, expect: '#find-box:visible' }, { fill: ['#find-input', 'compute(1);'], wait: 400 },
+    { after: ['#find-box', '#view-code'] }, { after: ['#claude-anchor', '#find-box'] }, { after: ['#bar-review', '#claude-anchor'] }, { inside: ['#find-box', '#find-box'] }, { tallest: ['#files-bar', 60], shot: 'find-narrow.png' },
+  ], { saved: { view: 'code' }, width: 600 }),
+  'local-find': scene(local, [{ press: 'ControlOrMeta+F', stay: '#view-menu', expect: '#code-bar #find-box:visible #find-input:focus' }, { tallest: ['#find-box', 28], shot: 'local-find.png' }, { absent: '#files-bar #find-box' }]),
   local: scene(local, [
     { absent: '.tabs:visible' }, { absent: '#files-bar:visible' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' },
     { expect: '#panel-files:visible .file', count: 4 }, { expect: '.head #claude-chip:visible' }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },

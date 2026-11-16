@@ -92,6 +92,8 @@ for (const name of names) {
     const before = step.stay ? await top(step.stay) : undefined;
     if (step.send) await page.evaluate((m) => window.postMessage(m, '*'), step.send);
     if (step.click) await page.click(step.click);
+    if (step.fill) await page.fill(...step.fill);
+    if (step.press) await page.keyboard.press(step.press);
     if (step.scroll !== undefined) await page.evaluate((y) => window.scrollTo(0, y), step.scroll);
     if (step.scrollTo) await page.evaluate((selector) => document.querySelector(selector)?.scrollIntoView({ block: 'start' }), step.scrollTo);
     if (step.hover) await page.hover(step.hover);
@@ -129,6 +131,10 @@ for (const name of names) {
     if (step.tallest) {
       const height = await page.evaluate((s) => document.querySelector(s)?.getBoundingClientRect().height, step.tallest[0]);
       if (height === undefined || height > step.tallest[1]) errors.push(`expected ${step.tallest[0]} at most ${step.tallest[1]} px tall, got ${height}`);
+    }
+    if (step.css) {
+      const value = await page.evaluate(([selector, pseudo, property]) => getComputedStyle(document.querySelector(selector), pseudo).getPropertyValue(property), step.css);
+      if (value !== step.css[3]) errors.push(`expected ${step.css[0]} ${step.css[1]} ${step.css[2]} to be ${step.css[3]}, got ${value}`);
     }
     if (step.level) {
       const [a, b] = await page.evaluate((selectors) => selectors.map((s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && r.top + r.height / 2; }), step.level);

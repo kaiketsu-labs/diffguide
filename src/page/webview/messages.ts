@@ -9,6 +9,7 @@ import { applyColors, dropColors } from './files/colors.js';
 import { openFolders } from './files/nav.js';
 import { medias, previews } from './files/preview.js';
 import { isLarge, renderFiles } from './files/render.js';
+import { openFind } from './find.js';
 import { contextLines, jump } from './files/table.js';
 import { renderConnectMenu } from './header/connect.js';
 import { closeMergeForm } from './header/merge.js';
@@ -93,6 +94,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.context) { contextLines.set(data.context.path, data.context.lines); loading.delete(data.context.path); renderFiles([data.context.path]); }
   if (data.definition) { peeks.length = ui.peekAt + 1; peeks.push(data.definition); ui.peekAt = peeks.length - 1; renderPeek(); }
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
+  if (data.find && $('find-box').hidden) openFind();
   if (data.revealStep) revealStep(data.revealStep);
   if (data.revealGroup) revealGroup(data.revealGroup);
   if (data.revealThread) {

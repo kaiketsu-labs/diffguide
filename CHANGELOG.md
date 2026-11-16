@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Typing in Find keeps the page still when the match is already visible.
+- Opening or refocusing Find with Cmd/Ctrl+F preserves the page's scroll position.
+- Search matches have visible underlines, with a thicker underline on the current match. The find bar fits the toolbar height without shifting its controls.
+- Maximizing the panel works again while a review page is the active editor; before, the editor came straight back. ⌘/Ctrl+F now opens the page's own find bar in the tab row, or in the toolbar on the local page. Enter and Shift+Enter step through matches, and matches in folded lines unfold them.
 - Find-in-page now opens matching folded lines in Guide order. The page's hidden-element rule no longer hides those lines from native Find.
 - The header's More menu labels Open on GitHub, Remove worktree, Open in terminal and Link a PR. Remove worktree still asks before removing it. The PR's Claude terminal moved here; connected conversations keep their controls in Claude's menu.
 - An unpushed chip beside the branch holds Show changes and Push. Only editors see Push. Viewed progress appears in the header alone.

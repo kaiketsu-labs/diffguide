@@ -54,6 +54,8 @@ await writeFile(join(repo, 'src/app.ts'), before.map((line, index) => index === 
 const userSettings = process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/Code/User/settings.json') : join(homedir(), '.config/Code/User/settings.json');
 const theme = existsSync(userSettings) ? parse(await readFile(userSettings, 'utf8'))?.['workbench.colorTheme'] : undefined;
 await mkdir(join(userData, 'User'), { recursive: true });
+// A user shortcut for maximizing the panel, pressed while a review page has focus.
+await writeFile(join(userData, 'User/keybindings.json'), JSON.stringify([{ key: 'ctrl+alt+m', command: 'workbench.action.toggleMaximizedPanel' }]));
 await writeFile(join(userData, 'User/settings.json'), JSON.stringify({
   'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'workbench.tips.enabled': false,
   'update.mode': 'none', 'extensions.autoUpdate': false, 'telemetry.telemetryLevel': 'off', 'window.restoreWindows': 'none',
@@ -336,11 +338,11 @@ const scenarios = [
       await workbench.keyboard.press('Enter');
       try {
         await until('find-in-page to unfold its match', () => page.$$eval('.folded-body:not([hidden])', (bodies, text) => bodies.some((body) => body.textContent.includes(text)), target), 10_000);
-        step('A simulated guide retained all 78 lines and native find-in-page opened an unchanged folded run');
+        step('A simulated guide retained all 78 lines and the page\'s find opened an unchanged folded run');
       } catch (error) {
-        failures.push({ name: 'folded native find', step: 'Guide retained all 78 lines', error });
+        failures.push({ name: 'folded find', step: 'Guide retained all 78 lines', error });
         await workbench.screenshot({ path: join(out, 'pr-guide-find-failure.png') });
-        step('FAILED: native find-in-page did not open the folded match');
+        step('FAILED: the page\'s find did not open the folded match');
       }
       await workbench.keyboard.press('Escape');
       await workbench.screenshot({ path: join(out, 'pr-guide-find.png') });
@@ -412,6 +414,57 @@ const scenarios = [
       if (await local.isVisible('#view-code') || await local.isVisible('#view-overview') || await local.isVisible('#finish-review') || await local.isVisible('#panel-overview')) throw new Error('Reload restored local tabs, Overview or Finish review');
       await workbench.screenshot({ path: join(out, 'reload-local.png') });
       step('The local page opened again in its tab');
+    },
+  },
+  {
+    name: 'maximized panel',
+    async run(workbench, step) {
+      await palette(workbench, 'DiffGuide: Review local changes');
+      const page = await reviewPage(workbench, '#code-bar');
+      await page.click('#files .file-head .name');
+      // A maximize within the first second of opening the page comes undone as the page opens; this checks a page already open.
+      await new Promise((done) => setTimeout(done, 3_000));
+      await workbench.keyboard.press('Control+Alt+M');
+      // VS Code's find widget on a page kept alive while hidden made the editor come back right after the panel maximized.
+      const maximized = () => workbench.evaluate(() => {
+        const editor = document.querySelector('.part.editor');
+        return editor !== null && (getComputedStyle(editor).display === 'none' || editor.offsetHeight === 0 || document.querySelector('.monaco-workbench.nomaineditorarea') !== null);
+      });
+      await until('the panel to maximize', maximized, 5_000);
+      const end = Date.now() + 2_000;
+      while (Date.now() < end) {
+        if (!await maximized()) throw new Error('The panel did not stay maximized while the review page was the active editor');
+        await new Promise((done) => setTimeout(done, 100));
+      }
+      step('A maximize shortcut pressed on the review page kept the panel maximized');
+      await workbench.keyboard.press('Control+Alt+M');
+      await until('the panel to restore', async () => !await maximized(), 5_000);
+
+      await page.click('#files .file-head .name');
+      await workbench.keyboard.press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
+      await page.waitForSelector('#find-box:visible #find-input:focus', { timeout: 5_000 });
+      await new Promise((done) => setTimeout(done, 500));
+      // VS Code also receives the key; without DiffGuide's keybinding its own Find moved focus out of the page.
+      const focused = await workbench.evaluate(() => document.activeElement?.tagName);
+      if (focused !== 'IFRAME') throw new Error(`Cmd/Ctrl+F moved focus out of the review page, to ${focused}`);
+      step('Cmd/Ctrl+F opened the page\'s own find bar and kept focus in the page');
+      await page.fill('#find-input', 'src');
+      await new Promise((done) => setTimeout(done, 500));
+      const findScroll = await page.evaluate(() => { window.scrollTo(0, 900); return window.scrollY; });
+      await workbench.keyboard.press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
+      await new Promise((done) => setTimeout(done, 300));
+      const afterFind = await page.evaluate(() => window.scrollY);
+      if (afterFind !== findScroll) throw new Error(`Cmd/Ctrl+F scrolled the page from ${findScroll} to ${afterFind}`);
+      step('Repeating Cmd/Ctrl+F with a search query kept the page at its scroll position');
+      await page.fill('#find-input', 'valu');
+      await new Promise((done) => setTimeout(done, 300));
+      const typingScroll = await page.evaluate(() => { window.scrollBy(0, -10); return window.scrollY; });
+      await page.fill('#find-input', 'value');
+      await new Promise((done) => setTimeout(done, 300));
+      const afterTyping = await page.evaluate(() => window.scrollY);
+      if (afterTyping !== typingScroll) throw new Error(`Extending a visible search match scrolled the page from ${typingScroll} to ${afterTyping}`);
+      step('Extending the search query kept an already visible match in place');
+      await palette(workbench, 'View: Close Panel');
     },
   },
 ];

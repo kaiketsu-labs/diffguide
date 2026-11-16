@@ -10,6 +10,7 @@ import { $, closestTo, relativeTime } from './dom.js';
 import { allFolded, applyFilters, closeSearch, filtersOn, openFilterMenu, openSearch, openViewMenu, showListToggle } from './files/filters.js';
 import { markCurrentNavFile, markEndingFiles, openFolders, showNavThreadsHeight, showNavWidth } from './files/nav.js';
 import { frameMessage } from './files/preview.js';
+import { setupFind } from './find.js';
 import { frameParking, renderFiles } from './files/render.js';
 import { paintDrag, pick } from './files/selection.js';
 import { guideState } from './guide/model.js';
@@ -82,6 +83,7 @@ $('error').addEventListener('click', () => { $('error').textContent = ''; });
 document.addEventListener('pointerdown', (event) => { if (!(event.target instanceof Node && $('notice').contains(event.target))) clearNotice(); });
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });
 blockBrowserShortcuts();
+setupFind();
 document.addEventListener('mousemove', (event) => {
   ui.pointer = event;
   if (event.metaKey || event.ctrlKey) probeAt(event);
