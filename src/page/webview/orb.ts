@@ -102,8 +102,8 @@ export function stepMotion(verb: string): OrbMotion {
 }
 
 interface Tones { top: string; topHi: string; edge: string; eye: string; bot: string; botEdge: string; add: string; sweep: string; ground: string }
-const light: Tones = { top: '#1E8463', topHi: '#2A9D78', edge: '#125540', eye: '#FFFFFF', bot: '#A6ACA9', botEdge: '#767C79', add: '#7FCBAA', sweep: 'rgba(255,255,255,.75)', ground: 'rgba(10,30,25,.22)' };
-const dark: Tones = { top: '#3DB88C', topHi: '#4FC79A', edge: '#237A5C', eye: '#0B2A20', bot: '#6B7270', botEdge: '#4A504E', add: '#3F9677', sweep: 'rgba(255,255,255,.4)', ground: 'rgba(0,0,0,.35)' };
+const light: Tones = { top: '#1E8463', topHi: '#2A9D78', edge: '#125540', eye: '#FFFFFF', bot: '#8C9390', botEdge: '#666C69', add: '#7FCBAA', sweep: 'rgba(255,255,255,.75)', ground: 'rgba(10,30,25,.22)' };
+const dark: Tones = { top: '#3DB88C', topHi: '#4FC79A', edge: '#237A5C', eye: '#0B2A20', bot: '#959C99', botEdge: '#6B7270', add: '#3F9677', sweep: 'rgba(255,255,255,.4)', ground: 'rgba(0,0,0,.35)' };
 
 /** Light and high contrast light themes get the light pair; dark and high contrast dark get the dark one. */
 function currentTones(): Tones {
