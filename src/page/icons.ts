@@ -1,11 +1,18 @@
 /** A line icon: 1.25 px round strokes on a 16 × 16 grid, drawn in `currentColor`. */
 const line = (body: string): string => `<svg viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${body}</g></svg>`;
 
-/** A pixel icon: whole 1 px squares in `currentColor`. Only the orb and the DiffGuide mark use it. */
-const pixels = (d: string): string => `<svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="${d}"/></svg>`;
+/** A rounded box as one closed subpath, drawn clockwise. */
+const box = (x: number, y: number, w: number, h: number, r: number): string => `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${2 * r - w}a${r} ${r} 0 0 1 ${-r} ${-r}v${2 * r - h}a${r} ${r} 0 0 1 ${r} ${-r}z`;
+/** A rounded box drawn counterclockwise, so it cuts a hole in the box around it under any fill rule. */
+const hole = (x: number, y: number, w: number, h: number, r: number): string => `M${x + r} ${y}a${r} ${r} 0 0 0 ${-r} ${r}v${h - 2 * r}a${r} ${r} 0 0 0 ${r} ${r}h${w - 2 * r}a${r} ${r} 0 0 0 ${r} ${-r}v${2 * r - h}a${r} ${r} 0 0 0 ${-r} ${-r}z`;
 
-/** The orb, shrunk to the upper left, with a line badge lower right: an action the agent carries out. */
-const agent = (badge: string): string => `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" shape-rendering="crispEdges" d="M3 0h4v1h-4zM1 1h8v1h-8zM1 2h8v1h-8zM0 3h2v1h-2zM4 3h2v1h-2zM8 3h2v1h-2zM0 4h2v1h-2zM4 4h2v1h-2zM8 4h2v1h-2zM0 5h10v1h-10zM0 6h10v1h-10zM1 7h8v1h-8zM1 8h7v1h-7zM3 9h4v1h-4z"/><g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${badge}</g></svg>`;
+/** The Diff pair, DiffGuide's companion and mark: an added line over a removed line, a little out of step, its eyes cut out. */
+const pair = box(1, 2, 12, 7, 2) + box(3, 10, 12, 4, 1.5) + hole(4, 4, 2, 3, 1) + hole(8, 4, 2, 3, 1);
+/** A filled shape in `currentColor`. Only the Diff pair and its poses use it. */
+const shape = (d: string): string => `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
+
+/** The Diff pair, shrunk to the upper left, with a line badge lower right: an action the agent carries out. */
+const agent = (badge: string): string => `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" transform="translate(-.5 -.75) scale(.625)" d="${pair}"/><g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${badge}</g></svg>`;
 
 const solid = 'fill="currentColor" stroke="none"';
 const ring = '<circle cx="8" cy="8" r="6.5"/>';
@@ -19,10 +26,10 @@ const bookmark = 'M4 1.5h8a.5.5 0 0 1 .5.5v12.5L8 11.25 3.5 14.5V2a.5.5 0 0 1 .5
  */
 export const icons = {
   more: line(`<circle ${solid} cx="4" cy="8" r="1"/><circle ${solid} cx="8" cy="8" r="1"/><circle ${solid} cx="12" cy="8" r="1"/>`),
-  orb: pixels('M6 2h4v1h-4zM4 3h8v1h-8zM3 4h10v1h-10zM3 5h10v1h-10zM2 6h3v1h-3zM7 6h2v1h-2zM11 6h3v1h-3zM2 7h3v1h-3zM7 7h2v1h-2zM11 7h3v1h-3zM2 8h12v1h-12zM2 9h12v1h-12zM3 10h10v1h-10zM3 11h10v1h-10zM4 12h8v1h-8zM6 13h4v1h-4z'),
-  orbAsleep: pixels('M6 2h4v1h-4zM4 3h8v1h-8zM3 4h10v1h-10zM3 5h10v1h-10zM2 6h12v1h-12zM2 7h3v1h-3zM7 7h2v1h-2zM11 7h3v1h-3zM2 8h12v1h-12zM2 9h12v1h-12zM3 10h10v1h-10zM3 11h10v1h-10zM4 12h8v1h-8zM6 13h4v1h-4z'),
-  orbAway: pixels('M6 2h4v1h-4zM4 3h2v1h-2zM10 3h2v1h-2zM3 4h1v2h-1zM12 4h1v2h-1zM2 6h1v4h-1zM5 6h2v2h-2zM9 6h2v2h-2zM13 6h1v4h-1zM3 10h1v2h-1zM12 10h1v2h-1zM4 12h2v1h-2zM10 12h2v1h-2zM6 13h4v1h-4z'),
-  mark: pixels('M6 0h4v1h-4zM4 1h8v2h-8zM3 3h2v2h-2zM7 3h2v2h-2zM11 3h2v2h-2zM3 5h10v2h-10zM4 7h8v2h-8zM6 9h4v1h-4zM2 11h1v1h-1zM1 12h3v1h-3zM5 12h10v1h-10zM2 13h1v1h-1zM1 15h3v1h-3zM5 15h7v1h-7z'),
+  orb: shape(pair),
+  orbAsleep: shape(box(2, 2, 12, 7, 2) + box(2, 10, 12, 4, 1.5) + hole(5, 6, 2, 1, .5) + hole(9, 6, 2, 1, .5)),
+  orbAway: shape(box(1, 2, 12, 7, 2) + hole(2, 3, 10, 5, 1) + box(4, 4, 2, 3, 1) + box(8, 4, 2, 3, 1) + box(3, 10, 12, 4, 1.5) + hole(4, 11, 10, 2, .5)),
+  mark: shape(pair),
   agentAsk: agent('<path d="M10.6 10.4a1.45 1.45 0 1 1 2.05 1.3c-.4.2-.65.5-.65.9v.2M12 14.6v.01"/>'),
   agentImplement: agent('<path d="M10.25 10.25L8.5 12l1.75 1.75M13.75 10.25L15.5 12l-1.75 1.75"/>'),
   agentGuide: agent('<path d="M10 9.5h3.5l1.5 1.5-1.5 1.5H10zM12 12.5v3"/>'),

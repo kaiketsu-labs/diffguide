@@ -90,7 +90,7 @@ export function guideIntro(): HTMLElement {
     stop.append(icon(icons.stop));
     setTip(stop, 'Stop building the guide');
     controls.append(stop);
-    card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt, controls, () => ['lead']));
+    card.append(stepLog(analysis.progress.steps, analysis.progress.startedAt, controls, () => ['guiding']));
     return card;
   }
   const row = el('div', 'row');

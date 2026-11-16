@@ -7,9 +7,9 @@ DiffGuide draws its own icons. Every icon lives in [`src/page/icons.ts`](../src/
 - 16 × 16 viewBox. Keep shapes inside 1 to 15 so nothing touches the edge.
 - Line icons use `line(...)`: 1.25 px strokes, round caps and joins, no fill. Use `solid` only for small dots and the stop square.
 - Keep at least 1.5 px between an inner mark and its outline. A `!` or `?` must not touch its triangle or bubble.
-- Pixels mean the agent. Only the orb poses and the DiffGuide mark use `pixels(...)`, drawn on whole pixels. No other icon borrows that look.
-- Draw in `currentColor`. Color comes from the surrounding CSS (`color:`), never from the icon. Agent slate comes from the agent button or chip.
-- Anything the agent does uses `agent(...)`: the orb with a line badge for the action, through `agentButton` on the page. Ask is `agentAsk`, Implement `agentImplement`, Fix conflicts `agentFix`, the Guide `agentGuide`, Draft reply `agentDraft`.
+- Filled shapes mean the agent. Only the Diff pair (`pair`, its poses `orb`, `orbAsleep`, `orbAway`, and the DiffGuide `mark`) uses `shape(...)`: rounded bars with the eyes cut out as holes, drawn with `box` and `hole` so the holes survive the icon font. No other icon borrows that look.
+- Draw in `currentColor`. Color comes from the surrounding CSS (`color:`), never from the icon. Agent jade comes from the agent button or chip.
+- Anything the agent does uses `agent(...)`: the Diff pair shrunk to the upper left, with a line badge for the action, through `agentButton` on the page. Ask is `agentAsk`, Implement `agentImplement`, Fix conflicts `agentFix`, the Guide `agentGuide`, Draft reply `agentDraft`.
 - Text buttons get their icon from `labelIcons` in `webview/overview.ts`, keyed by the label's first words. Add a label there when you add a button.
 - Name icons after what they mean (`hidden`, `reaction`), not after their shape.
 
