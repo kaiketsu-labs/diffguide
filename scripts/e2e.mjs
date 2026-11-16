@@ -2,12 +2,13 @@
 // Usage: npm run e2e [-- --vsix <file>] [--code <binary>] [--out <dir>] [--keep]
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse } from 'jsonc-parser';
 import { chromium } from 'playwright-core';
+import { createRequire } from 'node:module';
 
 const args = process.argv.slice(2);
 const option = (name) => { const at = args.indexOf(name); return at < 0 ? undefined : args.splice(at, 2)[1]; };
@@ -20,12 +21,23 @@ const code = option('--code') ?? (process.platform === 'darwin' ? '/Applications
 const cli = join(code, process.platform === 'darwin' ? '../../Resources/app/bin/code' : '../bin/code');
 if (!existsSync(vsix)) throw new Error(`${vsix} is missing. Run npm run package first.`);
 await mkdir(out, { recursive: true });
+const fixtures = resolve('.render/e2e-fixtures.cjs');
+if (args.includes('--prepare')) {
+  const { build } = await import('esbuild');
+  await build({ entryPoints: ['test/render/fixtures.ts'], outfile: fixtures, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error' });
+  process.exit(0);
+}
+const { scenes } = createRequire(import.meta.url)(fixtures);
 for (const file of await readdir(out)) if (file.startsWith('failure')) await rm(join(out, file), { force: true });
 
 const root = await mkdtemp(join(tmpdir(), 'diffguide-e2e-'));
 const userData = join(root, 'user-data');
 const extensions = join(root, 'extensions');
 const repo = join(root, 'repo');
+const claude = join(root, 'mock-claude');
+const terminalLaunch = join(root, 'terminal-launch.json');
+await writeFile(claude, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(terminalLaunch)}, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));\n`);
+await chmod(claude, 0o755);
 const git = (...command) => execFileSync('git', command, { cwd: repo, stdio: 'pipe' });
 await mkdir(join(repo, 'src'), { recursive: true });
 const before = Array.from({ length: 12 }, (_, index) => `export const value${index + 1} = ${index + 1};`);
@@ -45,7 +57,7 @@ await mkdir(join(userData, 'User'), { recursive: true });
 await writeFile(join(userData, 'User/settings.json'), JSON.stringify({
   'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'workbench.tips.enabled': false,
   'update.mode': 'none', 'extensions.autoUpdate': false, 'telemetry.telemetryLevel': 'off', 'window.restoreWindows': 'none',
-  'chat.disableAIFeatures': true, 'diffGuide.mockPullRequests': true, ...theme ? { 'workbench.colorTheme': theme } : {},
+  'chat.disableAIFeatures': true, 'diffGuide.mockPullRequests': true, 'diffGuide.claudePath': claude, ...theme ? { 'workbench.colorTheme': theme } : {},
 }));
 // Only themes that ship with VS Code are available in the throwaway profile; others fall back to the default.
 execFileSync(cli, ['--user-data-dir', userData, '--extensions-dir', extensions, '--install-extension', vsix, '--force'], { stdio: 'pipe' });
@@ -259,6 +271,107 @@ const scenarios = [
     },
   },
   {
+    name: 'pending mock PR checks',
+    async run(workbench, step) {
+      await palette(workbench, 'Focus on Pull Requests View');
+      await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
+      const page = await reviewPage(workbench, 'text=Sample pull request');
+      await page.click('#view-code');
+      for (const verdict of ['comment', 'requestChanges', 'approve']) {
+        await page.click('#finish-review');
+        await page.fill('#review', `Mock QA ${verdict} summary`);
+        await page.click(`[data-verdict="${verdict}"]`);
+        await page.click('#finish-review');
+        await page.locator('#error', { hasText: 'Sample pull requests cannot be reviewed.' }).waitFor({ timeout: 10_000 });
+        if (await page.inputValue('#review') !== `Mock QA ${verdict} summary`) throw new Error('Failed review lost its summary');
+        await page.waitForSelector('#finish-review:not([disabled])', { timeout: 5_000 });
+        await page.press('#review', 'Escape');
+      }
+      step('All three verdicts reached the mock host, showed its rejection, preserved the summary and released the submit button');
+
+      // Host refreshes cannot replace a controlled page state while its UI is under test.
+      await page.evaluate(() => window.addEventListener('message', (event) => {
+        if (event.data?.state && !event.data.qa && window.__qaState) window.postMessage({ state: window.__qaState, qa: true }, '*');
+      }, true));
+      const sendScene = async (name) => {
+        const messages = scenes[name].messages.map((message) => name === 'claude' || !message.state ? message
+          : { ...message, state: { ...message.state, threads: message.state.threads.map(({ newAnswer, ...thread }) => thread) } });
+        await page.evaluate((messages) => { for (const message of messages) { if (message.state) window.__qaState = message.state; window.postMessage({ ...message, qa: true }, '*'); } }, messages);
+      };
+      await sendScene('finishReview');
+      await page.click('#finish-review');
+      await page.locator('#pending-note', { hasText: '2 pending' }).waitFor();
+      await page.click('#review-foot button:has-text("Discard pending")');
+      await page.click('#review-foot button:has-text("Cancel")');
+      await page.locator('#pending-note', { hasText: '2 pending' }).waitFor();
+      await page.click('#review-foot button:has-text("Discard pending")');
+      await page.click('#review-foot button.primary');
+      await page.waitForSelector('#finish-review:not([disabled])');
+      if (await page.textContent('#error')) throw new Error('Discard without a host pending review reported an error');
+      await page.press('#review', 'Escape');
+      step('With simulated pending comments, Discard supported Cancel and confirmation returned idle; the mock host has no pending review to discard');
+
+      const suggestions = structuredClone(scenes.finishReview.state);
+      suggestions.github[0].messages[0].suggestion = true;
+      suggestions.threads = [];
+      await page.evaluate((state) => { window.__qaState = state; window.postMessage({ state, qa: true }, '*'); }, suggestions);
+      await page.click('.suggest-row button:has-text("Add to batch")');
+      await page.click('#commit-batch');
+      await page.locator('#error', { hasText: 'You do not have permission to edit this pull request.' }).waitFor();
+      await page.waitForSelector('#finish-review:not([disabled])');
+      step('A simulated picked suggestion reached the host and the read-only mock PR rejected the commit');
+
+      await sendScene('code-guide');
+      await page.click('#order-guide');
+      await page.waitForSelector('.folded-body[hidden="until-found"]', { state: 'attached' });
+      const lineCount = await page.locator('#files tr:is(.context,.add,.del)').count();
+      if (lineCount !== 78) throw new Error(`Guide retained ${lineCount} lines instead of 78`);
+      const target = await page.locator('.folded-body[hidden="until-found"]').first().evaluate((body) => {
+        const cell = body.querySelector('td.code');
+        return cell.textContent.trim();
+      });
+      await page.click('#title');
+      await workbench.keyboard.press('Control+f');
+      await workbench.keyboard.type(target);
+      await workbench.keyboard.press('Enter');
+      try {
+        await until('find-in-page to unfold its match', () => page.$$eval('.folded-body:not([hidden])', (bodies, text) => bodies.some((body) => body.textContent.includes(text)), target), 10_000);
+        step('A simulated guide retained all 78 lines and native find-in-page opened an unchanged folded run');
+      } catch (error) {
+        failures.push({ name: 'folded native find', step: 'Guide retained all 78 lines', error });
+        await workbench.screenshot({ path: join(out, 'pr-guide-find-failure.png') });
+        step('FAILED: native find-in-page did not open the folded match');
+      }
+      await workbench.keyboard.press('Escape');
+      await workbench.screenshot({ path: join(out, 'pr-guide-find.png') });
+
+      await page.click('#order-files');
+      await sendScene('claude');
+      await page.locator('[data-answer="11111111-1111-1111-1111-111111111111"]').scrollIntoViewIfNeeded();
+      await page.waitForSelector('#claude-chip .chip-new:has-text("1 new")');
+      await page.click('#claude-chip');
+      await page.waitForSelector('#claude-menu .answer-row');
+      const working = scenes.claude.steps.find((entry) => entry.send?.state?.claude.running).send;
+      await page.evaluate((message) => { window.__qaState = message.state; window.postMessage({ ...message, qa: true }, '*'); }, working);
+      await page.waitForSelector('#claude-chip.working');
+      await page.waitForSelector('#claude-menu #stop-claude:visible');
+      const reviewing = scenes.claude.steps.find((entry) => entry.send?.state?.review?.running).send;
+      await page.evaluate((message) => { window.__qaState = message.state; window.postMessage({ ...message, qa: true }, '*'); }, reviewing);
+      await page.waitForSelector('#claude-review .review-live');
+      await page.click('#claude-chip');
+      await page.locator('[data-answer="33333333-3333-3333-3333-333333333333"]').scrollIntoViewIfNeeded();
+      await until('the visible answer to clear the new count', async () => (await page.textContent('#claude-chip .chip-new')) === '', 5_000);
+      await workbench.screenshot({ path: join(out, 'pr-answers-seen.png') });
+      step('Simulated work and code review appeared in the chip menu, and scrolling to the unseen answer cleared its count');
+      await page.locator('#page-menu-button').scrollIntoViewIfNeeded();
+      await page.click('#page-menu-button');
+      await page.click('#terminal');
+      const launch = await until('the simulated Claude terminal launch', async () => JSON.parse(await readFile(terminalLaunch, 'utf8')), 15_000);
+      if (!launch.args.includes('--session-id') || !launch.cwd.includes('201')) throw new Error('The terminal did not launch a PR conversation in its worktree');
+      step('Open in terminal launched a simulated Claude executable with a session in the PR worktree');
+    },
+  },
+  {
     name: 'reload',
     async run(workbench, step) {
       await palette(workbench, 'DiffGuide: Review local changes');
@@ -311,6 +424,8 @@ const agent = { done: false };
 try {
   browser = await until('VS Code to accept a debugger', () => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 60_000);
   workbench = await until('the workbench window', async () => browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes('workbench')), 30_000);
+  workbench.setDefaultTimeout(10_000);
+  workbench.on('pageerror', (error) => console.error('Page script: ' + error.message));
   await workbench.waitForSelector('.monaco-workbench', { timeout: 30_000 });
   console.log('VS Code started with the installed VSIX');
 } catch (error) {
@@ -326,6 +441,7 @@ for (const scenario of workbench === undefined ? [] : scenarios) {
     passed += 1;
   } catch (error) {
     failures.push({ name: scenario.name, step: last, error });
+    console.error(`${scenario.name}: ${error.message}`);
     await workbench.screenshot({ path: join(out, `failure-${scenario.name.replaceAll(' ', '-')}.png`) }).catch(() => undefined);
   }
   await workbench.keyboard.press('Escape').catch(() => undefined);

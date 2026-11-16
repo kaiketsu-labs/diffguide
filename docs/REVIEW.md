@@ -1,8 +1,10 @@
 # Review findings and verification
 
+Mock PR checks, 16 November 2026: [page layout QA](QA-PAGE-LAYOUT-2026-11-16.md) records review failure handling, discard interaction, suggestion permission enforcement and Guide line retention. Native Find failed to open matching folded lines in headless VS Code. The new E2E check records this failure; authenticated GitHub and Claude checks remain pending.
+
 Option D layout verification, 15 November 2026: phases 5 to 7 move PR actions and unpushed commits into header menus, simplify Overview, and open local review directly on code. Render scenes check placement and picker behavior. Headless VS Code exercises these controls with mock PRs and controlled host states; its agent replies are simulated.
 
-Authenticated checks remain pending: opening a folded run with find-in-page; Guide order on a real PR with a guide built by Claude; committing picked suggestions; Claude's chip during a real run and code review; clearing new-answer counts while scrolling; submitting each Finish review verdict and Discard pending against GitHub. The header's PR terminal action also needs a live Claude handoff check. The horizontal More icon and the terms More, unpushed, Details and Read in guide order await the user's review.
+Authenticated checks remain pending: Guide order on a real PR with a guide built by Claude; committing picked suggestions; Claude's chip during a real run and code review; clearing real new-answer counts while scrolling; submitting each Finish review verdict and Discard pending against GitHub. The header's PR terminal action also needs a live Claude handoff check. The horizontal More icon and the terms More, unpushed, Details and Read in guide order await the user's review.
 
 Reviewed on 20–21 October 2026. **Fixed** means a source change has been made. **Verified** requires recorded execution evidence; a static review or a staged demo does not establish it.
 
