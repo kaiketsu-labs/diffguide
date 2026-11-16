@@ -493,6 +493,8 @@ export interface ExtensionMessage {
   /** GitHub's rendering of a form's text, for its Preview tab. */
   readonly markdown?: { readonly form: string; readonly html: string };
   readonly reveal?: string | undefined;
+  /** Open the page's find bar; VS Code's ⌘/Ctrl+F keybinding sends it, since VS Code receives every key the page gets. */
+  readonly find?: true;
   /** A guide step's key: show the guided layout at that step. */
   readonly revealStep?: string | undefined;
   /** A guide group's key: show the guided layout at that section. */

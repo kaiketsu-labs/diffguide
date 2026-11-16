@@ -22,7 +22,7 @@ import { pullRequestPages } from './pullRequestPage.js';
 import { PullRequestSessions } from './pullRequestSessions.js';
 import { registerPullRequestView } from './pullRequestView.js';
 import { cleanUpPullRequestWorktrees, worktreesOf } from './pullRequestWorktrees.js';
-import { restoreReviewPages } from './reviewPanel.js';
+import { findInActivePage, restoreReviewPages } from './reviewPanel.js';
 import { prepareConnection, registerClaudeLauncher } from './setup.js';
 import { registerEditorHighlighter } from './textMate.js';
 
@@ -126,6 +126,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     activeLocalSessions = localSessions;
     context.subscriptions.push(localSessions, ...registerLocalReviewView(context.workspaceState, checkouts, localSessions, mainRoot, showOverview));
     void localSessions.restore(async (folder) => stat(folder).then((info) => info.isDirectory(), () => false));
+    context.subscriptions.push(vscode.commands.registerCommand('diffGuide.findInPage', findInActivePage));
     context.subscriptions.push(restoreReviewPages(async (key) => {
       if (key === mainPageKey) return main?.review.open();
       if (key.startsWith(mainPageKey + ':')) {

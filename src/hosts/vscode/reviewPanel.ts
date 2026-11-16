@@ -484,7 +484,7 @@ const restored = new Map<string, vscode.WebviewPanel>();
 const openingPages = new Map<string, { readonly panel: vscode.WebviewPanel; readonly closing: vscode.Disposable; closed: boolean }>();
 
 const createReviewPanel = (title: string, extensionUri: vscode.Uri): vscode.WebviewPanel => vscode.window.createWebviewPanel(reviewPageType, title, vscode.ViewColumn.Active,
-  { localResourceRoots: [], ...pageOptions(extensionUri), retainContextWhenHidden: true, enableFindWidget: true });
+  { localResourceRoots: [], ...pageOptions(extensionUri), retainContextWhenHidden: true });
 
 function showState(panel: vscode.WebviewPanel, state: OverviewState, extensionUri: vscode.Uri): void {
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
@@ -512,6 +512,11 @@ export function closeOpeningPage(key: string): void {
   openingPages.delete(key);
   opening?.closing.dispose();
   opening?.panel.dispose();
+}
+
+/** Open the find bar of the review page in the active tab. */
+export function findInActivePage(): void {
+  for (const { panel } of panels.values()) if (panel.active) void panel.webview.postMessage({ find: true } satisfies ExtensionMessage).then(undefined, () => undefined);
 }
 
 /**

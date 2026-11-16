@@ -246,6 +246,11 @@
         "icon": "$(diff-multiple)"
       },
       {
+        "command": "diffGuide.findInPage",
+        "title": "Find in review page",
+        "category": "DiffGuide"
+      },
+      {
         "command": "diffGuide.pinPullRequest",
         "title": "Bookmark",
         "category": "DiffGuide",
@@ -358,6 +363,14 @@
         "view": "diffGuide.pullRequests",
         "contents": "Sign in to your GitHub Enterprise host to see your pull requests.\n[Sign in to GitHub Enterprise](command:diffGuide.signInToGitHub)",
         "when": "diffGuide.gitHubSignIn == github-enterprise"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "diffGuide.findInPage",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "activeWebviewPanelId == 'diffGuide.pullRequestOverview' && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !inputFocus"
       }
     ],
     "menus": {
@@ -481,6 +494,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "diffGuide.findInPage",
+          "when": "false"
+        },
         {
           "command": "diffGuide.pinPullRequest",
           "when": "false"
