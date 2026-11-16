@@ -145,6 +145,12 @@ export const working: OverviewState = {
   ] } },
 };
 
+/** Claude answering the thread in `path` with `count` steps so far. */
+function threadWorking(count: number, path = 'src/auth/user.ts'): OverviewState {
+  const steps = [{ verb: 'Read', target: 'src/auth/user.ts', done: true }, { verb: 'Search', target: 'parseUser', done: true }, { verb: 'Read', target: 'src/core/parse.ts', done: false }].slice(0, count);
+  return { ...claudeIdle, claude: { text: 'Claude · Answering', running: true, retry: false }, threads: claudeIdle.threads.map((thread) => thread.path === path && !thread.resolved ? { ...thread, working: 'Answering', progress: { startedAt: now - 5_000, steps } } : thread) };
+}
+
 /** Claude idle with a code review to start, then working on a thread, then running the review. */
 // The extension's own status texts, which start with "Claude".
 const claudeIdle: OverviewState = { ...pullRequest, claude: { text: 'Claude idle', running: false, retry: false }, review: { running: false, picked: ['correctness'] } };
@@ -369,6 +375,21 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '#claude-menu .answer-row', absent: '#claude-menu:visible' },
     { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#title', absent: '#claude-menu:visible' },
     { scroll: 900, expect: '#claude-chip:visible', below: ['#code-bar', '#files-bar'] },
+  ], { saved: { view: 'code', order: 'files' } }),
+  // Claude working on a thread off screen, below or above, moves nothing on screen.
+  claudeScrolled: scene(claudeIdle, [
+    { scrollTo: '.file[data-path="src/api/client.ts"]', wait: 400 },
+    { send: { state: threadWorking(1) }, stay: '.file[data-path="src/api/client.ts"]' },
+    { send: { state: threadWorking(3) }, stay: '.file[data-path="src/api/client.ts"]' },
+    { send: { state: threadWorking(2) }, stay: '.file[data-path="src/api/client.ts"]' },
+    { send: { state: claudeIdle }, stay: '.file[data-path="src/api/client.ts"]' },
+  ], { saved: { view: 'code', order: 'files' } }),
+  claudeAbove: scene(claudeIdle, [
+    { scrollTo: '.file[data-path="src/auth/user.ts"]', wait: 400 },
+    { send: { state: threadWorking(1, 'src/api/client.ts') }, stay: '.file[data-path="src/auth/user.ts"]' },
+    { send: { state: threadWorking(3, 'src/api/client.ts') }, stay: '.file[data-path="src/auth/user.ts"]' },
+    { send: { state: threadWorking(2, 'src/api/client.ts') }, stay: '.file[data-path="src/auth/user.ts"]' },
+    { send: { state: claudeIdle }, stay: '.file[data-path="src/auth/user.ts"]' },
   ], { saved: { view: 'code', order: 'files' } }),
   // The answer toast and the activity box above the tabs are gone; Overview shows Claude in the chip.
   overviewChip: scene(working, [{ absent: '#answers' }, { absent: '.claude-box' }, { expect: '#claude-chip.working:visible' }], { saved: { view: 'overview' } }),

@@ -170,6 +170,33 @@ function restoreFrames(container: HTMLElement, parked: readonly HTMLIFrameElemen
   frameParking.replaceChildren();
 }
 
+/** Diffs by path and their count among diffs of that path, since the guide can show a file twice. */
+function diffsByKey(container: HTMLElement): Map<string, HTMLElement> {
+  const diffs = new Map<string, HTMLElement>();
+  for (const diff of container.querySelectorAll<HTMLElement>('.file[data-path]>.diff')) {
+    const path = (diff.parentElement as HTMLElement).dataset.path ?? '';
+    let count = 0;
+    while (diffs.has(path + '\0' + count)) count++;
+    diffs.set(path + '\0' + count, diff);
+  }
+  return diffs;
+}
+
+function diffSizes(container: HTMLElement): Map<string, { readonly diff: HTMLElement; readonly height: number }> {
+  return new Map([...diffsByKey(container)].map(([key, diff]) => [key, { diff, height: diff.getBoundingClientRect().height }]));
+}
+
+/**
+ * Give each new diff the height its predecessor had. Off screen, `content-visibility` sizes a new diff from its line count, which leaves out its threads,
+ * so the page would shrink and the browser would move the reader when it grows back.
+ */
+function keepDiffSizes(container: HTMLElement, sizes: ReadonlyMap<string, { readonly diff: HTMLElement; readonly height: number }>): void {
+  for (const [key, diff] of diffsByKey(container)) {
+    const old = sizes.get(key);
+    if (old && old.diff !== diff && old.height > 0) diff.style.containIntrinsicSize = 'auto ' + old.height + 'px';
+  }
+}
+
 /**
  * Redraw the file list, or `container`, without losing the scroll position, a preview's own scroll position, the draft being typed or a loaded HTML preview.
  * `redrawn` names the boxes `draw` replaces; frames elsewhere stay where they are.
@@ -180,7 +207,9 @@ export function keepView(draw: () => void, container = $('files'), redrawn: read
   const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
   const frames = parkFrames(redrawn);
   const scrolls = new Map([...container.querySelectorAll<HTMLElement>('[data-scroll-key]')].map((node) => [node.dataset.scrollKey, node.scrollTop]));
+  const sizes = diffSizes(container);
   draw();
+  keepDiffSizes(container, sizes);
   restoreFrames(container, frames);
   for (const node of container.querySelectorAll<HTMLElement>('[data-scroll-key]')) node.scrollTop = scrolls.get(node.dataset.scrollKey) ?? 0;
   // The draft may sit in a diff that is not drawn yet.
