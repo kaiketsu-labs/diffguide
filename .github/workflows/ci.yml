@@ -71,7 +71,9 @@ jobs:
           mkdir -p .vscode-test
           curl -fsSL "https://update.code.visualstudio.com/${version}/linux-x64/stable" | tar -xz -C .vscode-test --strip-components=1
       - name: Drive the local review flow
-        run: xvfb-run -a node scripts/e2e.mjs --code .vscode-test/code
+        run: |
+          node scripts/e2e.mjs --prepare
+          xvfb-run -a node scripts/e2e.mjs --code .vscode-test/code
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v7

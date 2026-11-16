@@ -4,10 +4,11 @@ import type { FileDiff } from '../../../core/unifiedDiff.js';
 import { icons } from '../../icons.js';
 import { toolButton } from '../conversation/comment.js';
 import { $, button, chevronMark, el, icon, setTip } from '../dom.js';
+import { guideIntro } from '../guide/model.js';
 import { railItem, railNode, renderGuide } from '../guide/render.js';
 import { rangeLabel, renderRangeControls } from '../range.js';
-import { showGuideTab } from '../render.js';
-import { collapsed, prefs, previewing, received, save, ui } from '../state.js';
+import { showCodeTab } from '../render.js';
+import { collapsed, guided, prefs, previewing, received, save, ui } from '../state.js';
 import { fileComposerBox, openFileComposer } from '../threads/composer.js';
 import { allThreads, inFiles, standalone } from '../threads/model.js';
 import { threadBox } from '../threads/threadBox.js';
@@ -71,11 +72,11 @@ function drawDiffsOnScreen(): void {
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 export function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(prefs.layout === name));
-  for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).setAttribute('aria-selected', String(prefs.view === name));
+  for (const name of ['overview', 'code'] as const) $('view-' + name).setAttribute('aria-selected', String(prefs.view === name));
   $('panel-overview').hidden = prefs.view !== 'overview';
   $('panel-files').hidden = prefs.view === 'overview';
   $('files-bar').classList.toggle('on-overview', prefs.view === 'overview');
-  showGuideTab();
+  showCodeTab();
   renderRangeControls();
   setTip($('fold-all'), allFolded() ? 'Expand all files' : 'Collapse all files');
   $('fold-all').innerHTML = allFolded() ? icons.expandAll : icons.collapseAll;
@@ -85,7 +86,7 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
     ui.focusThread = undefined;
     requestAnimationFrame(() => { drawPendingDiffs(); document.getElementById('thread-' + id)?.querySelector('summary')?.focus({ preventScroll: true }); });
   }
-  if (prefs.view === 'guide') { keepView(() => renderGuide(only)); return; }
+  if (guided() && received.current?.analysis.result) { keepView(() => renderGuide(only)); return; }
   const opened = filteredFiles(openedFiles());
   const changes = received.files.filter((file) => file.change !== 'unchanged');
   const shownChanges = filteredFiles(changes);
@@ -98,7 +99,6 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
     list.push(thread);
   }
   const tree = fileTree(shownChanges);
-  $('files').parentElement?.classList.remove('no-nav');
   renderFileNav(shownChanges, opened, threadsByFile);
   const visible = !prefs.folders ? shownFiles : shownFiles.filter((file) => !folderOf(file.path).some((folder) => collapsed.get('folder:' + folder) === true));
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.file[data-path]')].map((node) => [node.dataset.path, node]));
@@ -118,7 +118,7 @@ export function renderFiles(only?: readonly (string | undefined)[] | 'state'): v
         if (file) boxes.get(path)?.replaceWith(draw(file));
       }
     } else {
-      container.replaceChildren();
+      container.replaceChildren(...guided() ? [guideIntro()] : []);
       fileKeys.clear();
       undrawn.clear();
       if (!shownFiles.length) container.append(el('p', 'muted', changes.length || openedFiles().length ? 'No files match the filter.' : received.current?.localMode ? 'No uncommitted changes. Pick a file in the Local view to review it.' : received.diffRange.kind === 'all' ? 'No changes against the base branch.' : 'No changes in ' + rangeLabel(received.diffRange) + '.'));
@@ -170,6 +170,33 @@ function restoreFrames(container: HTMLElement, parked: readonly HTMLIFrameElemen
   frameParking.replaceChildren();
 }
 
+/** Diffs by path and their count among diffs of that path, since the guide can show a file twice. */
+function diffsByKey(container: HTMLElement): Map<string, HTMLElement> {
+  const diffs = new Map<string, HTMLElement>();
+  for (const diff of container.querySelectorAll<HTMLElement>('.file[data-path]>.diff')) {
+    const path = (diff.parentElement as HTMLElement).dataset.path ?? '';
+    let count = 0;
+    while (diffs.has(path + '\0' + count)) count++;
+    diffs.set(path + '\0' + count, diff);
+  }
+  return diffs;
+}
+
+function diffSizes(container: HTMLElement): Map<string, { readonly diff: HTMLElement; readonly height: number }> {
+  return new Map([...diffsByKey(container)].map(([key, diff]) => [key, { diff, height: diff.getBoundingClientRect().height }]));
+}
+
+/**
+ * Give each new diff the height its predecessor had. Off screen, `content-visibility` sizes a new diff from its line count, which leaves out its threads,
+ * so the page would shrink and the browser would move the reader when it grows back.
+ */
+function keepDiffSizes(container: HTMLElement, sizes: ReadonlyMap<string, { readonly diff: HTMLElement; readonly height: number }>): void {
+  for (const [key, diff] of diffsByKey(container)) {
+    const old = sizes.get(key);
+    if (old && old.diff !== diff && old.height > 0) diff.style.containIntrinsicSize = 'auto ' + old.height + 'px';
+  }
+}
+
 /**
  * Redraw the file list, or `container`, without losing the scroll position, a preview's own scroll position, the draft being typed or a loaded HTML preview.
  * `redrawn` names the boxes `draw` replaces; frames elsewhere stay where they are.
@@ -180,7 +207,9 @@ export function keepView(draw: () => void, container = $('files'), redrawn: read
   const focus = active instanceof HTMLTextAreaElement && active.dataset.draft ? { key: active.dataset.draft, start: active.selectionStart, end: active.selectionEnd } : undefined;
   const frames = parkFrames(redrawn);
   const scrolls = new Map([...container.querySelectorAll<HTMLElement>('[data-scroll-key]')].map((node) => [node.dataset.scrollKey, node.scrollTop]));
+  const sizes = diffSizes(container);
   draw();
+  keepDiffSizes(container, sizes);
   restoreFrames(container, frames);
   for (const node of container.querySelectorAll<HTMLElement>('[data-scroll-key]')) node.scrollTop = scrolls.get(node.dataset.scrollKey) ?? 0;
   // The draft may sit in a diff that is not drawn yet.

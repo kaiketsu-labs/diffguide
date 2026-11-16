@@ -3,11 +3,11 @@ import { reviewers } from '../../core/contracts.js';
 import type { ReviewEvent } from '../../core/forge.js';
 import { blockBrowserShortcuts } from '../browserShortcuts.js';
 import type { ExtensionMessage } from '../protocol.js';
-import { removeWorktreeQuestion } from '../removeWorktree.js';
+import { closeClaudeMenu, toggleClaudeMenu } from './claude/panel.js';
 import { attachMentions } from './conversation/mentions.js';
 import { renderConversation } from './conversation/timeline.js';
 import { $, closestTo, relativeTime } from './dom.js';
-import { allFolded, applyFilters, filtersOn, openFilterMenu, openViewMenu, showListToggle } from './files/filters.js';
+import { allFolded, applyFilters, closeSearch, filtersOn, openFilterMenu, openSearch, openViewMenu, showListToggle } from './files/filters.js';
 import { markCurrentNavFile, markEndingFiles, openFolders, showNavThreadsHeight, showNavWidth } from './files/nav.js';
 import { frameMessage } from './files/preview.js';
 import { frameParking, renderFiles } from './files/render.js';
@@ -15,15 +15,17 @@ import { paintDrag, pick } from './files/selection.js';
 import { guideState } from './guide/model.js';
 import { openConnectMenu, openContextMenu } from './header/connect.js';
 import { clickMerge, closeMergeForm, openMethodMenu, openUpdateMenu } from './header/merge.js';
-import { editBody, editTitle, renderLinked } from './header/pullRequest.js';
+import { openPageMenu, openUnpushedMenu } from './header/actions.js';
+import { editBody, editTitle } from './header/pullRequest.js';
 import { askInMenu, closePicker, closeToolbarMenu, openPicker, stopAsking } from './menus.js';
 import { onExtensionMessage } from './messages.js';
 import { closePeek, columnAt, lookupTarget, peeks, probeAt, renderPeek, showLink, showPeekWidth } from './peek.js';
-import { openRangeMenu, showUnpushed } from './range.js';
-import { finishReview, onShortcut, render, setView } from './render.js';
+import { openRangeMenu } from './range.js';
+import { onShortcut, render, setView } from './render.js';
+import { closeReviewForm, pickVerdict, toggleReviewForm } from './review/finish.js';
 import { openReviewMenu } from './review/review.js';
-import { collapsed, initial, prefs, received, save, ui } from './state.js';
-import { changePullRequest, clearNotice, elapsed, reviewButtons, setBusy } from './status.js';
+import { collapsed, guided, initial, prefs, received, save, ui } from './state.js';
+import { changePullRequest, clearNotice, elapsed } from './status.js';
 import { sendThemeColors } from './theme.js';
 import { hideThreadHover, threadHover } from './threads/list.js';
 import { batch } from './threads/suggestions.js';
@@ -55,8 +57,10 @@ document.addEventListener('mouseover', (event) => {
 }, { passive: true });
 document.addEventListener('scroll', hideThreadHover, { capture: true, passive: true });
 
-$('show-unpushed').addEventListener('click', showUnpushed);
-for (const [id, action] of [['pr', 'pr'], ['push', 'push'], ['terminal', 'terminal'], ['retry', 'retry']] as const) $(id).addEventListener('click', () => post({ action }));
+if (initial.state.localMode) $('refresh').before($('claude-anchor'));
+$('page-menu-button').addEventListener('click', openPageMenu);
+$('unpushed-chip').addEventListener('click', openUnpushedMenu);
+$('retry').addEventListener('click', () => post({ action: 'retry' }));
 const refresh = $<HTMLButtonElement>('refresh');
 refresh.addEventListener('click', () => {
   refresh.disabled = true;
@@ -66,8 +70,6 @@ refresh.addEventListener('click', () => {
 $('stop-claude').addEventListener('click', stopClaude);
 $('connect').addEventListener('click', openConnectMenu);
 $('context').addEventListener('click', openContextMenu);
-$('remove-worktree').addEventListener('click', () => askInMenu('remove-worktree', removeWorktreeQuestion(received.current?.number, received.current?.unpushed?.length ?? 0),
-  'Remove worktree', () => post({ action: 'remove-worktree' })));
 // Re-rendered working chips join the page clock instead of restarting their animation.
 document.addEventListener('animationstart', (event) => {
   if (event.animationName !== 'orb' || !(event.target instanceof Element)) return;
@@ -136,14 +138,20 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { prefs.layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { prefs.layout = 'split'; save(); renderFiles(); });
-for (const name of ['overview', 'files', 'guide'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
-$('finish-review').addEventListener('click', finishReview);
+for (const name of ['overview', 'code'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
+for (const name of ['files', 'guide'] as const) $('order-' + name).addEventListener('click', () => { setView('code', name); });
+$('finish-review').addEventListener('click', toggleReviewForm);
+for (const choice of $('verdicts').querySelectorAll<HTMLButtonElement>('[data-verdict]')) choice.addEventListener('click', () => { pickVerdict(choice.dataset.verdict as ReviewEvent); });
+$('pending-list').addEventListener('click', closeReviewForm);
 $('range').addEventListener('click', openRangeMenu);
 $<HTMLInputElement>('file-filter').value = prefs.fileFilter;
 $('file-filter').addEventListener('input', () => { prefs.fileFilter = $<HTMLInputElement>('file-filter').value; applyFilters(); });
 $('file-filter').addEventListener('keydown', (event) => { if (event.key === 'Escape') { $<HTMLInputElement>('file-filter').value = ''; prefs.fileFilter = ''; applyFilters(); $('file-filter').blur(); } });
 $('filter-clear').addEventListener('click', () => { $<HTMLInputElement>('file-filter').value = ''; prefs.fileFilter = ''; applyFilters(); $('file-filter').focus(); });
 $('filter-clear').hidden = prefs.fileFilter === '';
+$('search-toggle').addEventListener('click', openSearch);
+$('filter-box').addEventListener('focusout', (event) => { if (!$('filter-box').contains(event.relatedTarget instanceof Node ? event.relatedTarget : null)) closeSearch(); });
+closeSearch();
 $('filter-menu').addEventListener('click', openFilterMenu);
 $('nav-toggle').addEventListener('click', () => { prefs.listHidden = !prefs.listHidden; save(); showListToggle(); });
 showNavWidth();
@@ -198,6 +206,8 @@ showListToggle();
 $('fold-conversation').addEventListener('click', () => { prefs.conversationFolded = !prefs.conversationFolded; save(); if (received.current) renderConversation(received.current, true); });
 $('filter-menu').setAttribute('aria-pressed', String(filtersOn()));
 document.addEventListener('pointerdown', (event) => {
+  if (event.target instanceof Node && !$('claude-anchor').contains(event.target)) closeClaudeMenu();
+  if (event.target instanceof Node && !$('bar-review').contains(event.target)) closeReviewForm();
   if (ui.toolbarMenu && event.target instanceof Node && !ui.toolbarMenu.node.contains(event.target) && !$(ui.toolbarMenu.anchor).contains(event.target)) closeToolbarMenu();
   if (ui.emojiFor !== undefined && event.target instanceof Element && !event.target.closest('.reactions')) {
     ui.emojiFor = undefined;
@@ -207,8 +217,6 @@ document.addEventListener('pointerdown', (event) => {
 });
 window.addEventListener('keydown', onShortcut);
 $('commit-batch').addEventListener('click', () => { if (batch.size) changePullRequest({ action: 'commit-suggestions', picked: [...batch.values()] }); });
-$('discard-review').addEventListener('click', () => askInMenu('discard-review', 'Discard your pending review? Its comments are deleted. Nobody saw them yet.', 'Discard review',
-  () => changePullRequest({ action: 'discard-review' })));
 $('approve-runs').addEventListener('click', () => {
   const count = received.current?.conversation?.awaitingApproval.length ?? 0;
   askInMenu('approve-runs', 'Run ' + (count === 1 ? 'the workflow' : count + ' workflows') + ' from this fork? It runs code the fork\'s author wrote. Review changes to workflow files first.',
@@ -222,8 +230,8 @@ $('dequeue').addEventListener('click', () => changePullRequest({ action: 'dequeu
 $('merge-cancel').addEventListener('click', closeMergeForm);
 attachMentions($<HTMLTextAreaElement>('review'), $('review-box'));
 $('view-menu').addEventListener('click', openViewMenu);
-$('analyze').addEventListener('click', () => { $('error').textContent = ''; post({ action: received.current?.analysis.running ? 'analysis-stop' : 'analyze' }); });
-$('review').addEventListener('click', () => {
+$('claude-chip').addEventListener('click', toggleClaudeMenu);
+$('agent-review').addEventListener('click', () => {
   $('error').textContent = '';
   if (received.current?.review?.running) post({ action: 'review-stop' });
   else post({ action: 'review', reviewers: ui.reviewPicks ?? reviewers });
@@ -231,7 +239,7 @@ $('review').addEventListener('click', () => {
 $('review-pick').addEventListener('click', openReviewMenu);
 $('fold-all').addEventListener('click', () => {
   const value = !allFolded();
-  if (prefs.view === 'guide') {
+  if (guided()) {
     for (const group of received.guide ?? []) {
       if (!value) collapsed.set(guideState('group', group.key), false);
       for (const step of group.steps) collapsed.set(guideState('step', step.key), value);
@@ -245,13 +253,6 @@ $('fold-all').addEventListener('click', () => {
   save();
   renderFiles();
 });
-for (const review of reviewButtons) {
-  review.addEventListener('click', () => {
-    $('error').textContent = '';
-    setBusy(true);
-    post({ action: 'review', event: review.dataset.event as ReviewEvent, body: $<HTMLTextAreaElement>('review').value });
-  });
-}
 $('conflict-send').addEventListener('click', () => {
   const answer = $<HTMLTextAreaElement>('conflict-answer');
   if (!answer.value.trim()) { answer.focus(); return; }
@@ -278,7 +279,6 @@ $('fix-conflicts').addEventListener('click', () => {
   post({ action: 'fix-conflicts' });
 });
 $('edit-title').addEventListener('click', editTitle);
-$('link-pr').addEventListener('click', () => { ui.linking = true; if (received.current) renderLinked(received.current); });
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels', 'milestone'] as const) $('pick-' + what).addEventListener('click', () => openPicker(what));
 document.addEventListener('pointerdown', (event) => {
@@ -287,6 +287,7 @@ document.addEventListener('pointerdown', (event) => {
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && ui.picker) closePicker(false);
   if (event.key === 'Escape' && ui.toolbarMenu) closeToolbarMenu();
+  else if (event.key === 'Escape') { closeClaudeMenu(); closeReviewForm(); }
   if (event.key === 'Escape' && ui.asking) stopAsking();
 });
 $('merge').addEventListener('click', () => {
@@ -303,9 +304,15 @@ window.addEventListener('scroll', () => {
   if (ui.navFrame || prefs.view === 'overview') return;
   ui.navFrame = requestAnimationFrame(() => { ui.navFrame = 0; markCurrentNavFile(false); markEndingFiles(); });
 }, { passive: true });
-new ResizeObserver(([entry]) => {
-  if (entry) document.body.style.setProperty('--bar-height', (entry.target as HTMLElement).offsetHeight + 'px');
-}).observe($('files-bar'));
+// Lists stick under the tab row; file heads also under the Code toolbar, when it shows.
+const bars = new ResizeObserver(() => {
+  const tabs = $('files-bar').offsetHeight;
+  const code = $('code-bar');
+  document.body.style.setProperty('--tabs-height', tabs + 'px');
+  document.body.style.setProperty('--bar-height', (code.offsetHeight ? tabs + Number.parseFloat(getComputedStyle(code).marginTop) + code.offsetHeight : tabs) + 'px');
+});
+bars.observe($('files-bar'));
+bars.observe($('code-bar'));
 post({ action: 'ready' });
 sendThemeColors();
 // VS Code rewrites the page's theme variables and body class when the theme changes.

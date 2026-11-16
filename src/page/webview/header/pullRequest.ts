@@ -131,8 +131,8 @@ export function verdict(reviewers: ChangeRequestDetails['reviewers']): readonly 
 export function renderLinked(state: OverviewState): void {
   const rows = state.linked ?? [];
   const card = $('linked');
-  card.hidden = state.localMode === true;
-  const stamp = JSON.stringify([state.linked ?? null, ui.linking]);
+  card.hidden = state.localMode === true || !rows.some((row) => row.pullRequest !== undefined);
+  const stamp = JSON.stringify([state.linked ?? null]);
   if (card.dataset.stamp === stamp) return;
   card.dataset.stamp = stamp;
   const sourceLabels = { mention: 'Mentioned', pin: 'Pinned in the diff', claude: 'Claude worked here', manual: 'Linked by you' } as const;
@@ -179,20 +179,7 @@ export function renderLinked(state: OverviewState): void {
     item.append(what, actions);
     return item;
   }));
-  document.querySelector('.link-form')?.remove();
-  $('link-pr').hidden = ui.linking;
-  if (!ui.linking) return;
-  const form = el('div', 'link-form');
-  const input = el('input');
-  input.type = 'text';
-  input.placeholder = 'https://github.com/owner/repo/pull/12 or owner/repo#12';
-  input.setAttribute('aria-label', 'PR to link');
-  const close = (): void => { ui.linking = false; if (received.current) renderLinked(received.current); };
-  const submit = (): void => { if (input.value.trim()) post({ action: 'link', link: input.value.trim() }); };
-  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); submit(); } else if (event.key === 'Escape') close(); });
-  form.append(input, button('Cancel', close, 'quiet'), button('Link', submit, 'primary'));
-  $('linked-rows').after(form);
-  input.focus();
+
 }
 
 /** Swap the title for a text field with Cancel and Save. */

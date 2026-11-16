@@ -25,7 +25,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 
 - `main.ts` is the entry (bundled to `dist/overview.js`) and holds all control wiring in page order. `messages.ts` handles extension messages. `render.ts` draws the page from state.
 - `state.ts` holds the shared state: `prefs` persists through `save()`, `received` mirrors what the extension sent, `ui` is transient. State one module uses stays in that module.
-- Feature folders: `header/` (PR state, merge, reviewers, connect menu), `conversation/`, `files/` (render, diff table, nav, filters, previews, marks, selection), `threads/`, `guide/`, `review/`. Shared helpers: `dom.ts`, `menus.ts`, `status.ts`, `transport.ts` (the only use of `acquireVsCodeApi`).
+- Feature folders: `header/` (PR state, merge, reviewers, connect menu), `claude/` (Claude's header chip and its menu), `conversation/`, `files/` (render, diff table, nav, filters, previews, marks, selection), `threads/`, `guide/`, `review/`. Shared helpers: `dom.ts`, `menus.ts`, `status.ts`, `transport.ts` (the only use of `acquireVsCodeApi`).
 - `dom.ts` and `transport.ts` import no page module, so they load first.
 
 ## Code

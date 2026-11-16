@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Find-in-page now opens matching folded lines in Guide order. The page's hidden-element rule no longer hides those lines from native Find.
+- The header's More menu labels Open on GitHub, Remove worktree, Open in terminal and Link a PR. Remove worktree still asks before removing it. The PR's Claude terminal moved here; connected conversations keep their controls in Claude's menu.
+- An unpushed chip beside the branch holds Show changes and Push. Only editors see Push. Viewed progress appears in the header alone.
+- Overview starts with the description and guide summary. Linked changes appears only with a linked PR, checks appear once inside Merge, and Details unfolds Assignees, Labels, Milestone and Development. Merge remains secondary while its form is open.
+- Local review opens the code directly, without tabs or Finish review. Claude's chip sits in the header.
+- The review page has two tabs, Overview and Code. Code holds the files, and a Files / Guide switch at the top of its list sets their order. Pages that were on Files or Guide open on Code in that order.
+- Guide order keeps every line of every file on the page: lines far from a step's changes fold, and find-in-page still finds and opens them.
+- Guide order before a guide exists shows Build guide above the files. Rebuild and Stop sit on the guide's summary card instead of the toolbar.
+- A file ticked Viewed now shows its guide steps viewed too.
+- The file filter sits beside the Files / Guide switch as a search icon. Clicking it, or pressing t, widens the field over the switch; it shrinks back when you leave it, with a dot while its text still filters the list. Guide order hides it, as it filters files, not steps.
+- Code has its own toolbar above the files, the same in both orders: show or hide the list at its left end, then the range, Unified or Split, Collapse all and View. It stays in reach while you scroll. Show changes, Push and Finish review stay beside the tabs in a window half a screen wide. Overview no longer leaves a gap where the list toggle was.
+- Commit picked suggestions is a secondary button in the Code toolbar.
+- Claude sits in one chip in the tab row, which stays in view while you scroll, with its current step, time and count of new answers. In a narrow window the chip shortens to the orb. Its menu holds the live steps, new answers, Review, Stop and Open in terminal. Claude's work no longer pushes the page down, and the floating list of new answers is gone.
+- Code no longer moves collapsed comments into the margin. Comments stay under their lines.
+- A running code review shows its stages in Claude's menu instead of above the files. Its findings still show above the files once it is done.
+- Finish your review sends the summary you typed with the review. Before, the summary was dropped.
+- Finish review opens your review in a form under the button, on any tab, instead of jumping to Overview. The form lists your pending comments and holds the summary, a Comment / Request changes / Approve switch, Discard pending and Cancel. The button then submits and names the verdict: Submit comment, Request changes or Submit approval. Each open starts at Comment, and a summary you typed stays when you close the form. On your own PR the form only comments.
+- A count on Finish review replaces the "N pending" chip beside it. Overview no longer shows a review box.
+- The list under the files is called Threads and names each thread by its title, open ones first, resolved ones after.
 - A PR page no longer shows an error when GitHub is out of reach, Git cannot sign in, another Git command holds the checkout, or you are in the middle of a merge or rebase. The checkout stays as it is, a short notice says why, and DiffGuide syncs on a later check.
 - When GitHub's new commits clash with your local edits or commits, Claude merges them in a scratch copy and the page applies the result once no conflict markers are left and your checkout did not change meanwhile. A notice offers Undo until you close it or the next sync. When Claude needs a decision, its question shows above the tabs with an answer box, and your checkout stays as it was.
 - A failed push on someone else's PR names the push in its error, instead of "git -c failed".

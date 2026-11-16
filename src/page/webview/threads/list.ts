@@ -1,41 +1,14 @@
-/** Thread lists, margin marks and the thread hover card. */
-import type { DiffSide } from '../../protocol.js';
+/** Thread lists and the thread hover card. */
 import { $, chevronMark, el, icon, placeholders, timeLabel, titled } from '../dom.js';
 import { filteredFiles, filtersOn } from '../files/filters.js';
-import { iconNode } from '../files/nav.js';
-import { renderFiles } from '../files/render.js';
 import { jump } from '../files/table.js';
 import { threadKind } from '../review/review.js';
-import { collapsed, prefs, received, save, ui } from '../state.js';
+import { collapsed, guided, prefs, received, save, ui } from '../state.js';
 import { post } from '../transport.js';
 import type { Thread, ThreadKind } from '../types.js';
 import { allThreads, inFiles, nestedIn, standalone } from './model.js';
-import { avatar, kindLabel, kindLabels, kindMarks, threadOpen } from './threadBox.js';
+import { avatar, kindLabel, kindLabels, kindMarks } from './threadBox.js';
 
-/** A collapsed thread as a dot in its line's number cell; clicking it opens the thread in the diff. */
-export function marginMark(row: HTMLTableRowElement, side: DiffSide, thread: Thread): void {
-  const cell = row.querySelectorAll<HTMLTableCellElement>('td.num')[side === 'new' ? 1 : 0];
-  if (cell === undefined) return;
-  let marks = cell.querySelector<HTMLElement>('.margin-marks');
-  if (marks === null) {
-    marks = el('span', 'margin-marks');
-    cell.classList.add('has-marks');
-    cell.prepend(marks);
-  }
-  const kind = threadKind(thread);
-  const mark = el('button', 'margin-mark ' + kind);
-  const title = (thread.source === 'local' ? thread.title : undefined) ?? thread.text;
-  hoverPreview(mark, thread);
-  mark.setAttribute('aria-label', 'Open comment: ' + title);
-  mark.addEventListener('mousedown', (event) => { event.stopPropagation(); });
-  mark.addEventListener('click', (event) => {
-    event.stopPropagation();
-    threadOpen.set(thread.id, true);
-    ui.focusThread = thread.id;
-    renderFiles([thread.path]);
-  });
-  marks.append(mark);
-}
 const threadKinds: readonly ThreadKind[] = ['github', 'local', 'review', 'analysis'];
 
 /** The Threads card: one foldable group per kind, one line per thread. Guide starts folded because its notes already sit in the diff. */
@@ -75,45 +48,39 @@ export function renderThreadList(): void {
   renderNavThreads();
 }
 
-/** The comments panel under the file list: open threads on files the filters leave, grouped by file in page order; a click jumps to the thread. */
+/** The Threads panel under the file list: threads on files the filters leave by title, open ones first, each in page order; a click jumps to the thread. */
 export function renderNavThreads(): void {
   const pageFiles = received.files ?? [];
   const order = new Map(pageFiles.map((file, index) => [file.path, index]));
   const shown = new Set(filteredFiles(pageFiles).map((file) => file.path));
-  const threads = allThreads().filter((thread) => !thread.resolved && standalone(thread) && (prefs.view !== 'files' || inFiles(thread)) && (shown.has(thread.path) || (!order.has(thread.path) && !filtersOn())));
-  const byFile = new Map<string, Thread[]>();
-  for (const thread of threads) byFile.set(thread.path, [...byFile.get(thread.path) ?? [], thread]);
-  const paths = [...byFile.keys()].sort((left, right) => (order.get(left) ?? Infinity) - (order.get(right) ?? Infinity) || left.localeCompare(right));
+  const threads = allThreads().filter((thread) => standalone(thread) && (prefs.view !== 'code' || guided() || inFiles(thread)) && (shown.has(thread.path) || (!order.has(thread.path) && !filtersOn())))
+    .sort((left, right) => Number(left.resolved) - Number(right.resolved) || (order.get(left.path) ?? Infinity) - (order.get(right.path) ?? Infinity)
+      || left.path.localeCompare(right.path) || left.startLine - right.startLine);
   const panel = $('nav-threads');
   panel.hidden = threads.length === 0;
   $('nav-split').hidden = panel.hidden;
   const head = el('div', 'nav-head');
-  head.append('Comments', el('span', 'muted', String(threads.length)));
+  head.append('Threads', el('span', 'muted', String(threads.length)));
   const list = el('ul', 'nav-list');
-  const wholeFile = (thread: Thread): boolean => thread.source === 'local' && thread.scope === 'file';
-  for (const path of paths) {
-    const fileRow = el('li', 'nav-thread-file');
-    fileRow.title = path;
-    const themeIcon = received.fileIcons?.byPath[path];
-    fileRow.append(themeIcon ? iconNode(themeIcon) : el('span', 'file-icon'), el('span', 'nav-name', path.split('/').at(-1) ?? path));
-    list.append(fileRow);
-    const members = (byFile.get(path) ?? []).sort((left, right) => (wholeFile(left) ? 0 : left.startLine) - (wholeFile(right) ? 0 : right.startLine));
-    for (const thread of members) {
-      const kind = threadKind(thread);
-      const row = el('button', 'nav-file nav-thread ' + kind);
-      row.style.setProperty('--depth', '1');
-      hoverPreview(row, thread);
-      const mark = titled(el('span', 'nav-kind'), kindLabels[kind]);
-      mark.append(icon(kindMarks[kind]));
-      const lines = wholeFile(thread) ? 'File' : 'L' + thread.startLine + (thread.endLine > thread.startLine ? '–' + thread.endLine : '');
-      row.append(mark, el('span', 'nav-lines', lines), el('span', 'nav-name', thread.text.split('\n')[0] ?? ''));
-      row.addEventListener('click', () => { jump(thread); });
-      const item = el('li');
-      item.append(row);
-      list.append(item);
-    }
+  for (const thread of threads) {
+    const kind = threadKind(thread);
+    const row = el('button', 'nav-file nav-thread ' + kind + (thread.resolved ? ' resolved' : ''));
+    hoverPreview(row, thread);
+    const mark = titled(el('span', 'nav-kind'), kindLabels[kind]);
+    mark.append(icon(kindMarks[kind]));
+    row.append(mark, el('span', 'nav-name', threadTitle(thread)), ...thread.resolved ? [el('span', 'muted', 'resolved')] : []);
+    row.title = thread.location;
+    row.addEventListener('click', () => { jump(thread); });
+    const item = el('li');
+    item.append(row);
+    list.append(item);
   }
   panel.replaceChildren(head, list);
+}
+
+/** A thread's name in lists: its title, or the first line of its first message. */
+export function threadTitle(thread: Thread): string {
+  return (thread.source === 'local' ? thread.title : undefined) ?? thread.text.split('\n')[0] ?? '';
 }
 
 /** Plain text with `backtick` spans shown as code. */

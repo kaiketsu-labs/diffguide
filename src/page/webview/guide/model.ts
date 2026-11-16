@@ -1,5 +1,5 @@
 /** Claude's guide: steps, slices and their read state. */
-import { type Analysis, type GuideGroup, type GuideStep, stepViewed as isStepViewed } from '../../../core/prAnalysis.js';
+import { type Analysis, type GuideGroup, type GuideStep, type StepSpan, stepViewed as isStepViewed } from '../../../core/prAnalysis.js';
 import type { DiffHunk, FileDiff } from '../../../core/unifiedDiff.js';
 import { icons } from '../../icons.js';
 import type { DiffSide } from '../../protocol.js';
@@ -17,21 +17,8 @@ export function guideState(kind: 'step' | 'group', key: string): string {
   return kind + ':' + (received.current?.analysis.result?.createdAt ?? '') + ':' + key;
 }
 
-/** A step's change blocks with up to three unchanged lines around each, without reaching into other changes. */
-export function sliceOf(step: GuideStep): FileDiff | undefined {
-  const file = received.files?.find((item) => item.path === step.path);
-  if (!file) return undefined;
-  const spans: { hunk: number; from: number; to: number }[] = [];
-  for (const block of step.blocks) {
-    const lines = file.hunks[block.hunk]?.lines ?? [];
-    let from = block.first;
-    let to = block.last;
-    while (from > 0 && block.first - from < 3 && lines[from - 1]?.kind === 'context') from -= 1;
-    while (to < lines.length - 1 && to - block.last < 3 && lines[to + 1]?.kind === 'context') to += 1;
-    const previous = spans.at(-1);
-    if (previous && previous.hunk === block.hunk && from <= previous.to + 1) previous.to = Math.max(previous.to, to);
-    else spans.push({ hunk: block.hunk, from, to });
-  }
+/** The lines `spans` give a step, as a diff of their own. */
+export function spanDiff(file: FileDiff, spans: readonly StepSpan[]): FileDiff {
   return { ...file, hunks: spans.flatMap(({ hunk, from, to }) => { const source = file.hunks[hunk]; return source ? [subHunk(source, from, to)] : []; }) };
 }
 
@@ -51,9 +38,9 @@ function subHunk(source: DiffHunk, from: number, to: number): DiffHunk {
   return { header: '@@ -' + (oldCount ? oldBefore + 1 : oldBefore) + ',' + oldCount + ' +' + (newCount ? newBefore + 1 : newBefore) + ',' + newCount + ' @@', lines };
 }
 
-function hasLine(slice: FileDiff, side: DiffSide, line: number): boolean {
+function hasLine(part: FileDiff, side: DiffSide, line: number): boolean {
   const key = side === 'old' ? 'oldLine' : 'newLine';
-  return slice.hunks.some((hunk) => hunk.lines.some((item) => item[key] === line));
+  return part.hunks.some((hunk) => hunk.lines.some((item) => item[key] === line));
 }
 
 export function stepViewed(step: GuideStep): boolean {
@@ -68,8 +55,8 @@ export function groupCollapsed(group: GuideGroup): boolean {
   return collapsed.get(guideState('group', group.key)) ?? group.severity === 'trivial';
 }
 
-/** Which step shows each thread and the draft: a note's own step, otherwise the first step whose lines include it. */
-export function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<string, FileDiff>): { threads: Map<string, Thread[]>; notes: Map<string, Thread>; draft?: string } {
+/** Which step shows each thread and the draft: a note's own step, otherwise the step whose lines, `parts` by step key, include it. */
+export function guideOwners(groups: readonly GuideGroup[], parts: ReadonlyMap<string, FileDiff>): { threads: Map<string, Thread[]>; notes: Map<string, Thread>; draft?: string } {
   const threads = new Map<string, Thread[]>();
   const notes = new Map<string, Thread>();
   const all = allThreads().filter((thread) => standalone(thread) && thread.scope !== 'pullRequest');
@@ -80,12 +67,12 @@ export function guideOwners(groups: readonly GuideGroup[], slices: ReadonlyMap<s
   }
   const noted = new Set([...notes.values()].map((thread) => thread.id));
   const owner = (path: string, side: DiffSide, line: number): string | undefined => steps.find((step) => {
-    const slice = slices.get(step.key);
-    return step.path === path && slice !== undefined && hasLine(slice, side, line);
+    const part = parts.get(step.key);
+    return step.path === path && part !== undefined && hasLine(part, side, line);
   })?.key;
   for (const thread of all) {
     if (noted.has(thread.id) || thread.outdated) continue;
-    const key = thread.scope === 'file' ? steps.find((step) => step.path === thread.path && slices.has(step.key))?.key : owner(thread.path, thread.side, thread.endLine);
+    const key = thread.scope === 'file' ? steps.find((step) => step.path === thread.path && parts.has(step.key))?.key : owner(thread.path, thread.side, thread.endLine);
     if (key !== undefined) threads.set(key, [...threads.get(key) ?? [], thread]);
   }
   const draft = prefs.composer ? owner(prefs.composer.path, prefs.composer.side, prefs.composer.end) : undefined;
@@ -116,10 +103,19 @@ export function guideIntro(): HTMLElement {
   return card;
 }
 
+/** The guide's overview, with Rebuild, or Stop while Claude rebuilds it. */
 export function guideSummary(result: Analysis, groups: readonly GuideGroup[]): HTMLElement {
+  const analysis = received.current?.analysis;
   const card = el('section', 'card guide-intro');
-  card.append(el('h3', '', 'Guide'));
-  if (received.current?.analysis.stale) card.append(staleGuideRow(result, groups));
+  const head = el('div', 'section-head');
+  head.append(el('h3', '', 'Guide'));
+  if (analysis?.running) {
+    const stop = button('Stop', () => post({ action: 'analysis-stop' }), 'quiet small');
+    head.append(el('span', 'chip agent working', 'Guide · ' + (analysis.step ?? 'Working')), stop);
+  } else if (!analysis?.stale) head.append(button('Rebuild', () => { $('error').textContent = ''; post({ action: 'analyze' }); }, 'quiet small'));
+  card.append(head);
+  if (analysis?.stale) card.append(staleGuideRow(result, groups));
+  if (analysis?.error) card.append(el('p', 'bad', 'Guide failed: ' + analysis.error));
   if (result.overview) card.append(el('p', 'text', result.overview));
   card.append(el('p', 'muted', 'Every change is in exactly one step. Viewed on every step marks the whole PR viewed.'));
   return card;

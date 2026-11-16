@@ -1,3 +1,4 @@
+import { changeBlocks } from '../../src/core/prAnalysis.js';
 import type { DiffLine, FileDiff } from '../../src/core/unifiedDiff.js';
 import { openingOverviewState } from '../../src/page/overviewState.js';
 import type { ExtensionMessage, OverviewState } from '../../src/page/protocol.js';
@@ -7,7 +8,7 @@ import { githubCodeHtml } from '../../src/page/preview/githubCode.js';
 export interface Scene {
   readonly state: OverviewState;
   readonly messages: readonly ExtensionMessage[];
-  /** What `acquireVsCodeApi().getState()` returns, such as `{ view: 'guide' }`. */
+  /** What `acquireVsCodeApi().getState()` returns, such as `{ view: 'code', order: 'guide' }`. */
   readonly saved?: Record<string, unknown>;
   readonly width?: number;
   readonly height?: number;
@@ -25,11 +26,24 @@ export interface Step {
   readonly wait?: number;
   readonly shot?: string;
   readonly full?: boolean;
-  /** A selector that must match; with `text`, its text must contain that. */
+  /** A selector that must match; with `text`, its text must contain that; with `count`, it must match that many. */
   readonly expect?: string;
+  readonly count?: number;
   readonly text?: string;
   /** A selector that must not match. */
   readonly absent?: string;
+  /** A selector whose top must not move through this step's send, click and scroll. */
+  readonly stay?: string;
+  /** Two selectors: the first must start at or below the bottom of the second, so it does not draw over it. */
+  readonly below?: readonly [string, string];
+  /** Two selectors: the first must start at or right of the end of the second, so they do not overlap on a row. */
+  readonly after?: readonly [string, string];
+  /** A selector and the most pixels tall it may be, such as a row that must not wrap. */
+  readonly tallest?: readonly [string, number];
+  /** Two selectors whose vertical centers must line up, as on one row. */
+  readonly level?: readonly [string, string];
+  /** Two selectors: the first one's contents must lie within the second's box horizontally; the same selector twice catches text spilling out of its box. */
+  readonly inside?: readonly [string, string];
 }
 
 const now = Date.now();
@@ -59,6 +73,9 @@ const manyFiles: FileDiff[] = Array.from({ length: 300 }, (_, index) => ({
 }));
 
 const files = [file('src/auth/user.ts'), file('src/auth/token.ts'), file('src/api/client.ts'), file('README.md')];
+
+/** The signature Claude's guide uses to find a file's one change block. */
+const signatureOf = (path: string): string => changeBlocks(files).find((block) => block.path === path)?.signature ?? '';
 
 const thread = (id: string, path: string, line: number, title: string, minutes: number, resolved = false): OverviewState['threads'][number] => ({
   id, location: `${path}:${line}`, text: 'Is this null check needed here?', status: resolved ? 'Resolved' : 'Answered',
@@ -108,7 +125,10 @@ export const pullRequest: OverviewState = {
     result: {
       head: 'a'.repeat(40), createdAt: ago(60), overview: 'Adds null handling to user parsing and a retry to the API client. Risk sits in the token refresh path.',
       files: [{ path: 'src/auth/user.ts', note: 'Holds the behavior change.' }],
-      groups: [{ severity: 'critical', title: 'Token refresh', steps: [{ blocks: [{ path: 'src/auth/token.ts', signature: 'deadbeef' }], title: 'Refresh before expiry', note: 'Refreshes the token one minute early.' }] }],
+      groups: [{ severity: 'significant', title: 'Parsing and retries', steps: [
+        { blocks: [{ path: 'src/auth/user.ts', signature: signatureOf('src/auth/user.ts') }], title: 'user.ts null check', note: 'Returns null for empty input instead of throwing.' },
+        { blocks: [{ path: 'src/api/client.ts', signature: signatureOf('src/api/client.ts') }], title: 'client.ts retry', note: 'Retries a request once on timeout.' },
+      ] }],
     },
   },
   unpushed: [{ oid: 'f'.repeat(40), subject: 'Use the configured limit', author: 'claude', createdAt: ago(10), files: 1, additions: 2, deletions: 1 }],
@@ -124,6 +144,21 @@ export const working: OverviewState = {
     { verb: 'Edit', target: 'src/api/client.ts', done: false },
   ] } },
 };
+
+/** Claude answering the thread in `path` with `count` steps so far. */
+function threadWorking(count: number, path = 'src/auth/user.ts'): OverviewState {
+  const steps = [{ verb: 'Read', target: 'src/auth/user.ts', done: true }, { verb: 'Search', target: 'parseUser', done: true }, { verb: 'Read', target: 'src/core/parse.ts', done: false }].slice(0, count);
+  return { ...claudeIdle, claude: { text: 'Claude · Answering', running: true, retry: false }, threads: claudeIdle.threads.map((thread) => thread.path === path && !thread.resolved ? { ...thread, working: 'Answering', progress: { startedAt: now - 5_000, steps } } : thread) };
+}
+
+/** Claude idle with a code review to start, then working on a thread, then running the review. */
+// The extension's own status texts, which start with "Claude".
+const claudeIdle: OverviewState = { ...pullRequest, claude: { text: 'Claude idle', running: false, retry: false }, review: { running: false, picked: ['correctness'] } };
+const claudeWorking: OverviewState = { ...working, claude: { ...working.claude, text: 'Claude · Reading src/api/client.ts' }, review: { running: false, picked: ['correctness'] } };
+const claudeReviewing: OverviewState = { ...pullRequest, review: { running: true, picked: ['correctness'], live: {
+  reviewers: ['correctness'], stage: 'candidates', startedAt: now - 40_000, orchestrator: [{ verb: 'Read', target: 'src/auth/user.ts', done: true }],
+  lanes: [{ reviewer: 'correctness', phase: 'candidates', startedAt: now - 30_000, steps: [{ verb: 'Grep', target: 'parseUser', done: false }] }],
+} } };
 
 /** The local review page: uncommitted changes, no GitHub. */
 export const local: OverviewState = {
@@ -183,6 +218,7 @@ const { details: _details, github: _github, ...withoutDetails } = withoutConvers
 const { reviewed: _reviewed, ...withoutReviewed } = pullRequest;
 const listPending: OverviewState = { ...withoutReviewed, reviewedPending: true };
 const { linked: _linked, ...withoutLinked } = pullRequest;
+const withoutGuide: OverviewState = { ...pullRequest, analysis: { running: false, stale: false } };
 const opening = openingOverviewState({
   number: pullRequest.number ?? 1, title: pullRequest.heading ?? '', url: pullRequest.url, author: pullRequest.author, draft: false,
   headBranch: pullRequest.headBranch, baseBranch: pullRequest.baseBranch, ...pullRequest.changes === undefined ? {} : { changes: pullRequest.changes },
@@ -194,12 +230,181 @@ const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) =
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
-  overview: scene(pullRequest, [{ shot: 'overview.png', full: true }], { saved: { view: 'overview' } }),
-  files: scene(pullRequest, [{ scrollTo: '#files', shot: 'files.png' }, { scroll: 0, click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' }], { saved: { view: 'files' } }),
-  guide: scene(pullRequest, [{ shot: 'guide.png', full: true }], { saved: { view: 'guide' } }),
+  'header-actions': scene(pullRequest, [
+    { expect: '.head #reviewed', text: '1/4 viewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
+    { absent: '#files-bar #push' }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
+    { click: '#page-menu-button', expect: '#page-menu #pr', text: 'Open on GitHub' },
+    { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { shot: 'header-menu.png' },
+    { click: '#remove-worktree', expect: '.ask-menu .ask-text', text: '1 commit GitHub does not have', shot: 'header-remove.png' },
+    { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' },
+    { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus', shot: 'header-link.png' },
+    { click: '#title' }, { click: '#unpushed-chip', expect: '#unpushed-menu #show-unpushed', text: 'Show changes' },
+    { expect: '#unpushed-menu #push', text: 'Push', shot: 'header-unpushed.png' },
+    { click: '#show-unpushed', expect: '#view-code[aria-selected=true]' },
+  ], { saved: { view: 'code' } }),
+  'header-readonly': scene({ ...pullRequest, details: { ...pullRequest.details!, canEdit: false } }, [
+    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+  ], { saved: { view: 'code', order: 'guide' } }),
+  'header-permission-change': scene(pullRequest, [
+    { click: '#unpushed-chip', expect: '#push' },
+    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, canEdit: false } } }, absent: '#push' },
+    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+  ], { saved: { view: 'code' } }),
+  'header-connection-change': scene(pullRequest, [
+    { click: '#page-menu-button', expect: '#terminal' },
+    { send: { state: { ...pullRequest, claude: { ...pullRequest.claude, link: { delivering: true, terminal: true } } } }, absent: '#terminal' },
+    { absent: '#remove-worktree' }, { click: '#page-menu-button', absent: '#terminal' }, { absent: '#remove-worktree' },
+  ], { saved: { view: 'code' } }),
+  'header-placement': scene(pullRequest, [
+    { expect: '.head:not(#files-bar) #page-menu-button:visible' }, { absent: '#files-bar #page-menu-button' },
+    { expect: '.head:not(#files-bar) #reviewed', text: '1/4 viewed' }, { expect: '.byline #unpushed-chip:visible' },
+    { absent: '#files-bar #unpushed-chip' },
+  ], { saved: { view: 'code' } }),
+  'header-terminal': scene(pullRequest, [
+    { click: '#page-menu-button', expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' },
+  ], { saved: { view: 'code' } }),
+  'header-link-form': scene(pullRequest, [
+    { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus' },
+  ], { saved: { view: 'code' } }),
+  'header-progress': scene(pullRequest, [
+    { absent: '#file-nav > .nav-head:has-text("viewed")' },
+    { click: '#order-guide', absent: '#file-nav > .nav-head:has-text("viewed")' },
+  ], { saved: { view: 'code' } }),
+  'overview-order': scene(pullRequest, [
+    { expect: '#panel-overview .main-col > section:first-child #body' }, { below: ['#overview-guide', '#body'] },
+    { expect: '#overview-guide:visible', text: 'Risk sits in the token refresh path.' },
+  ], { saved: { view: 'overview' } }),
+  'overview-linked': scene(pullRequest, [
+    { absent: '#linked:visible' },
+    { send: { state: { ...pullRequest, linked: [{ key: 'acme/api#7', repository: 'acme/api', sources: ['manual'], unpushed: 0, local: false,
+      pullRequest: { number: 7, title: 'Handle empty responses', url: 'https://github.com/acme/api/pull/7', state: 'open', draft: false, headBranch: 'fix/empty', headOid: 'b'.repeat(40), canPush: false } }] } },
+      expect: '#linked:visible #linked-rows', text: '#7 Handle empty responses', shot: 'overview-linked.png' },
+    { send: { state: pullRequest }, absent: '#linked:visible' },
+  ], { saved: { view: 'overview' } }),
+  'overview-checks': scene(pullRequest, [
+    { expect: '#merge-box #checks li', count: 2 }, { absent: '#merge-status :has-text("failing check")' },
+    { absent: '#merge-status :has-text("All checks passed")' }, { expect: '#checks li:has-text("Pre-commit")', count: 1 },
+  ], { saved: { view: 'overview' } }),
+  'overview-details': scene(pullRequest, [
+    { absent: '#pick-assignees:visible' }, { absent: '#pick-labels:visible' }, { absent: '#pick-milestone:visible' },
+    { click: '#details-box > summary', expect: '#details-box #pick-assignees:visible' },
+    { expect: '#details-box #pick-labels:visible' }, { expect: '#details-box #pick-milestone:visible' }, { expect: '#details-box #development:visible' },
+  ], { saved: { view: 'overview' } }),
+  'overview-pick-assignees': scene(pullRequest, [
+    { click: '#details-box > summary' }, { click: '#pick-assignees', expect: '#details-box .picker input[placeholder="Filter people"]' },
+  ], { saved: { view: 'overview' } }),
+  'overview-pick-labels': scene(pullRequest, [
+    { click: '#details-box > summary' }, { click: '#pick-labels', expect: '#details-box .picker input[placeholder="Filter labels"]' },
+  ], { saved: { view: 'overview' } }),
+  'overview-pick-milestone': scene(pullRequest, [
+    { click: '#details-box > summary' }, { click: '#pick-milestone', expect: '#details-box .picker input[placeholder="Filter milestones"]' },
+  ], { saved: { view: 'overview' } }),
+  'overview-secondary-merge': scene(pullRequest, [
+    { click: '#merge', expect: '#merge-form:visible', absent: '#merge.primary' },
+  ], { saved: { view: 'overview' } }),
+  'overview-layout': scene(pullRequest, [
+    { expect: '#panel-overview .main-col > section:first-child #body' },
+    { below: ['#overview-guide', '#body'] }, { expect: '#overview-guide', text: 'Risk sits in the token refresh path.' },
+    { absent: '#linked:visible' }, { expect: '#merge-box #checks li', count: 2 },
+    { absent: '#merge-status :has-text("failing check")' }, { absent: '#merge-status :has-text("All checks passed")' },
+    { absent: '#pick-assignees:visible' }, { expect: '#details-summary', text: 'octo · bug · No milestone' }, { shot: 'overview-layout.png', full: true },
+    { click: '#details-box > summary', expect: '#details-box #pick-assignees:visible' },
+    { click: '#pick-assignees', expect: '#details-box .picker input[placeholder="Filter people"]' },
+    { click: '#pick-assignees' }, { click: '#pick-labels', expect: '#details-box .picker input[placeholder="Filter labels"]' },
+    { click: '#pick-labels' }, { click: '#pick-milestone', expect: '#details-box .picker input[placeholder="Filter milestones"]', shot: 'overview-details.png' },
+    { click: '#pick-milestone' }, { click: '#merge', absent: '#merge.primary', expect: '#merge-form:visible' },
+    { click: '#merge-cancel' }, { click: '#overview-guide button:has-text("Read in guide order")', expect: '#order-guide[aria-pressed=true]' },
+  ], { saved: { view: 'overview' } }),
+  overview: scene(pullRequest, [{ absent: '#nav-toggle:visible' }, { absent: '#code-bar:visible' }, { expect: '#finish-review:visible', shot: 'overview.png', full: true }], { saved: { view: 'overview' } }),
+  // A page saved before the Code tab remembers 'files' or 'guide' as its view; both open Code in that order.
+  'code-files': scene(pullRequest, [
+    { expect: '#view-code[aria-selected=true]' }, { expect: '#order-files[aria-pressed=true]' }, { expect: '#nav-threads .nav-head', text: 'Threads' },
+    { expect: '#nav-threads .nav-thread .nav-name', text: 'Null check in parseUser' },
+    // Every line of the three unviewed files; README.md is Viewed and folded in both orders.
+    { expect: '#files tr:is(.context,.add,.del)', count: 78 },
+    { scrollTo: '#files', shot: 'code-files.png' },
+    { scroll: 0, click: '#page-menu-button' }, { click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' },
+  ], { saved: { view: 'files' } }),
+  'code-guide': scene(pullRequest, [
+    { expect: '#view-code[aria-selected=true]' }, { expect: '#order-guide[aria-pressed=true]' }, { absent: '#view-guide' }, { absent: '#search-toggle:visible' },
+    { expect: '#files tr:is(.context,.add,.del)', count: 78 }, { expect: '.folded-lines .folded-body[hidden=until-found] tr.context' },
+    { expect: '.nav-step[data-nav-step="u:README.md"].done' }, { expect: '#file-nav .nav-step .nav-number', text: '1' },
+    { expect: '.guide-intro .section-head button', text: 'Rebuild' }, { absent: '#analyze' },
+    { shot: 'code-guide.png' },
+    { expect: '.folded-body[hidden]', count: 6 },
+    { click: '.folded-lines .fold-lines', expect: '.folded-body[hidden]', count: 5 },
+  ], { saved: { view: 'guide' } }),
+  search: scene(pullRequest, [
+    { expect: '#search-toggle.filtered' }, { absent: '#filter-box:visible' }, { expect: '#order-files:visible' },
+    { click: '#search-toggle', expect: '#nav-order.searching #file-filter:focus' }, { absent: '#order-files:visible', shot: 'search-open.png' },
+    { click: '#title', absent: '#nav-order.searching' }, { expect: '#search-toggle.filtered:visible', shot: 'search-closed.png' },
+  ], { saved: { view: 'code', order: 'files', filter: 'user' } }),
+  toolbar: scene(pullRequest, [
+    { expect: '#code-bar #nav-toggle:visible' }, { expect: '#code-bar #range:visible' }, { expect: '#code-bar #view-menu:visible' }, { absent: '#column-toggle' },
+    { absent: '#files-bar #range' }, { absent: '#files-bar #view-menu' }, { absent: '.margin-mark' }, { expect: '#files tr.inline .thread' },
+    { click: '#view-menu', absent: '.toolbar-menu .picker-row:has-text("margin")' },
+    { click: '#view-menu', scroll: 900, expect: '#code-bar:visible', shot: 'code-scrolled.png' },
+    // At the end of the page the sticky list stays under the tab row.
+    { scroll: 100_000, below: ['#nav-order', '#files-bar'] },
+    { scroll: 0, click: '#nav-toggle', expect: '#files-layout.list-hidden' }, { absent: '#nav-col:visible' }, { expect: '#nav-toggle:visible', shot: 'list-hidden.png' },
+  ], { saved: { view: 'code', order: 'files' } }),
+  'toolbar-guide': scene(pullRequest, [
+    { expect: '#code-bar #nav-toggle:visible' }, { expect: '#code-bar #range:visible' }, { absent: '#code-bar #analyze' },
+  ], { saved: { view: 'code', order: 'guide' } }),
+  'order-switch': scene(pullRequest, [
+    { click: '#order-guide', expect: '.step-wrap[data-key="g0.0"] .file-head', text: 'user.ts null check' },
+    { expect: '#files tr:is(.context,.add,.del)', count: 78 },
+    { click: '#order-files', absent: '.step-wrap' }, { expect: '#files tr:is(.context,.add,.del)', count: 78 },
+  ], { saved: { view: 'code', order: 'files' } }),
+  'guide-unbuilt': scene(withoutGuide, [
+    { expect: '#order-guide[aria-pressed=true]' }, { expect: '#files .guide-intro button', text: 'Build guide' }, { expect: '#files .file', count: 4, shot: 'guide-unbuilt.png' },
+  ], { saved: { view: 'code', order: 'guide' } }),
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
-  narrow: scene(pullRequest, [{ shot: 'narrow.png' }], { saved: { view: 'files' }, width: 420, height: 800 }),
-  local: scene(local, [{ shot: 'local.png' }]),
+  // Claude sits in one chip in the tab row, which stays in view while you scroll; its menu holds the live steps, Review, Stop, Open in terminal and new answers.
+  claude: scene(claudeIdle, [
+    { expect: '#files-bar #claude-chip .chip-text', text: 'Idle' }, { absent: '#claude-chip .chip-text:has-text("Claude")' }, { absent: '#claude:has-text("Claude")' }, { level: ['#claude-chip', '#finish-review'] }, { absent: '#claude-menu:visible' }, { absent: '#column-toggle' }, { absent: '#claude-col' },
+    { expect: '#files tr.inline #thread-11111111-1111-1111-1111-111111111111' }, { absent: '.margin-mark' },
+    // The answer on screen counts as seen; the one in client.ts, below, stays new.
+    { expect: '#claude-chip .chip-new', text: '1 new' },
+    { click: '#claude-chip', expect: '#claude-menu:visible #claude-body #claude-answers .answer-row', text: 'Retry on timeout' }, { expect: '#claude-menu #agent-review:visible', text: 'Review' },
+    // Claude starting, working, reviewing and stopping moves neither the code nor the tab row.
+    { send: { state: claudeWorking }, stay: '.file[data-path="src/auth/user.ts"] tr.add', expect: '#claude-chip.working', text: 'Reading src/api/client.ts' }, { absent: '#claude-chip .chip-text:has-text("Claude")' },
+    { expect: '#claude-menu .step-log' }, { expect: '#claude-menu #stop-claude:visible', shot: 'claude-working.png' },
+    { send: { state: claudeReviewing }, stay: '.file[data-path="src/auth/user.ts"] tr.add', expect: '#claude-review .review-live' }, { absent: '#review-card:visible' },
+    { send: { state: claudeIdle }, stay: '#files-bar', absent: '#stop-claude:visible' },
+    { click: '#claude-menu .answer-row', absent: '#claude-menu:visible' },
+    { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#title', absent: '#claude-menu:visible' },
+    { scroll: 900, expect: '#claude-chip:visible', below: ['#code-bar', '#files-bar'] },
+  ], { saved: { view: 'code', order: 'files' } }),
+  // Claude working on a thread off screen, below or above, moves nothing on screen.
+  claudeScrolled: scene(claudeIdle, [
+    { scrollTo: '.file[data-path="src/api/client.ts"]', wait: 400 },
+    { send: { state: threadWorking(1) }, stay: '.file[data-path="src/api/client.ts"]' },
+    { send: { state: threadWorking(3) }, stay: '.file[data-path="src/api/client.ts"]' },
+    { send: { state: threadWorking(2) }, stay: '.file[data-path="src/api/client.ts"]' },
+    { send: { state: claudeIdle }, stay: '.file[data-path="src/api/client.ts"]' },
+  ], { saved: { view: 'code', order: 'files' } }),
+  claudeAbove: scene(claudeIdle, [
+    { scrollTo: '.file[data-path="src/auth/user.ts"]', wait: 400 },
+    { send: { state: threadWorking(1, 'src/api/client.ts') }, stay: '.file[data-path="src/auth/user.ts"]' },
+    { send: { state: threadWorking(3, 'src/api/client.ts') }, stay: '.file[data-path="src/auth/user.ts"]' },
+    { send: { state: threadWorking(2, 'src/api/client.ts') }, stay: '.file[data-path="src/auth/user.ts"]' },
+    { send: { state: claudeIdle }, stay: '.file[data-path="src/auth/user.ts"]' },
+  ], { saved: { view: 'code', order: 'files' } }),
+  // The answer toast and the activity box above the tabs are gone; Overview shows Claude in the chip.
+  overviewChip: scene(working, [{ absent: '#answers' }, { absent: '.claude-box' }, { expect: '#claude-chip.working:visible' }], { saved: { view: 'overview' } }),
+  // Half of a 1440 px window, as with two pages side by side.
+  narrow: scene(pullRequest, [{ level: ['#view-code', '#finish-review'], shot: 'narrow.png' },
+    // A long step shortens the chip instead of breaking the row.
+    { send: { state: working }, stay: '#code-bar', level: ['#view-code', '#claude-chip'] }, { level: ['#view-code', '#finish-review'] },
+    { tallest: ['#finish-review', 26] }, { tallest: ['#claude-chip', 26] }, { after: ['#claude-chip', '#view-code'], shot: 'narrow-working.png' }], { saved: { view: 'files' }, width: 700, height: 900 }),
+  local: scene(local, [
+    { absent: '.tabs:visible' }, { absent: '#files-bar:visible' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' },
+    { expect: '#panel-files:visible .file', count: 4 }, { expect: '.head #claude-chip:visible' }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },
+    { shot: 'local.png' }, { click: '#claude-chip', expect: '#claude-menu:visible' },
+  ]),
+  'local-saved-overview': scene(local, [{ expect: '#panel-files:visible .file', count: 4 }, { absent: '#panel-overview:visible' }, { absent: '.tabs:visible' }], { saved: { view: 'overview' }, width: 700 }),
+  'local-header-chip': scene(local, [{ expect: '.head:not(#files-bar) #claude-chip:visible' }]),
   // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
   syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [
     { expect: '#notice', text: syncUndoText, shot: 'sync-undo.png' },
@@ -222,8 +427,8 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // The page shows before GitHub sends the details and threads; pulsing bars hold their places and review and merge wait.
   detailsLoading: scene(withoutDetails, [
     { expect: '#body .skeleton' }, { expect: '#reviewers .skeleton' }, { expect: '#merge-status .skeleton' }, { expect: '#threads .skeleton' },
-    { expect: '#merge[disabled]' }, { expect: '#review[disabled]' }, { expect: '[data-event="comment"][disabled]', shot: 'details-loading.png' },
-    { send: { state: pullRequest }, absent: '.skeleton' }, { absent: '#review[disabled]' },
+    { expect: '#merge[disabled]' }, { expect: 'textarea#review[disabled]' }, { absent: '#finish-review:visible', shot: 'details-loading.png' },
+    { send: { state: pullRequest }, absent: '.skeleton' }, { absent: 'textarea#review[disabled]' },
   ], { saved: { view: 'overview' } }),
   // The page shows before GitHub sends its file list; the viewed count pulses and the files wait for GitHub's Viewed marks.
   listLoading: { state: listPending, messages: [{ state: listPending }, filesMessage],
@@ -248,10 +453,10 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // A PR without a worktree shows from its summary while the worktree is made, before the page loads in the same tab.
   opening: { state: opening, messages: [], saved: { view: 'overview' }, steps: [{ expect: '#reviewed .skeleton', shot: 'opening.png' }] },
   openingFiles: { state: opening, messages: [], saved: { view: 'files' }, steps: [{ expect: '#files', text: 'Loading changes…', shot: 'opening-files.png' }] },
-  // The page shows before GitHub sends the linked changes; pulsing bars hold the card's place.
+  // Linked changes waits for an actual PR.
   linkedLoading: scene(withoutLinked, [
-    { expect: '#linked:not([hidden]) .skeleton', shot: 'linked-loading.png' },
-    { send: { state: { ...withoutLinked, linked: [] } }, absent: '#linked .skeleton' }, { expect: '#linked-rows', text: 'No PRs in other repositories go with this one.' },
+    { absent: '#linked:visible', shot: 'linked-loading.png' },
+    { send: { state: { ...withoutLinked, linked: [] } }, absent: '#linked .skeleton' }, { absent: '#linked:visible' },
   ], { saved: { view: 'overview' } }),
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },
@@ -259,17 +464,22 @@ export const scenes: Readonly<Record<string, Scene>> = {
   hover: scene(pullRequest, [
     { scrollTo: '#files', hover: '.nav-thread', wait: 600, shot: 'hover-nav.png' },
     { hover: '#files', wait: 100, shot: 'hover-gone.png' },
-    { hover: '.margin-mark', wait: 600, shot: 'hover-mark.png' },
-  ], { saved: { view: 'files', marginThreads: true } }),
+  ], { saved: { view: 'files' } }),
   hoverCard: scene(pullRequest, [{ hover: '.card-thread', wait: 600, shot: 'hover-card.png' }], { saved: { view: 'overview' } }),
-  // A thread opened from its margin mark still folds when resolved.
+  // An open thread folds when resolved.
   resolveFold: scene(pullRequest, [
-    { click: '.margin-mark[aria-label="Open comment: Null check in parseUser"]', expect: '#thread-11111111-1111-1111-1111-111111111111[open]' },
+    { expect: '#thread-11111111-1111-1111-1111-111111111111[open]' },
     { click: '#thread-11111111-1111-1111-1111-111111111111 button:has-text("Resolve")' },
     { send: { state: { ...pullRequest, threads: pullRequest.threads.map((each) => each.id.startsWith('1111') ? { ...each, resolved: true, status: 'Resolved' } : each) } },
       absent: '#thread-11111111-1111-1111-1111-111111111111[open]', shot: 'resolve-fold.png' },
-  ], { saved: { view: 'files', marginThreads: true } }),
+  ], { saved: { view: 'files' } }),
   get pending() { return reviewingScenes['pending']!; },
+  get finishReview() { return reviewingScenes['finishReview']!; },
+  // Authors can only comment.
+  finishAuthor: scene(pullRequest, [
+    { click: '#finish-review', expect: '#author-note:visible', absent: '#verdicts:visible' },
+    { expect: '#submit-review', text: 'Submit comment', shot: 'finish-author.png' },
+  ], { saved: { view: 'code' } }),
   get since() { return reviewingScenes['since']!; },
   get submitted() { return reviewingScenes['submitted']!; },
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
@@ -346,7 +556,24 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   // The details' count lags at 5; the page counts the 2 pending comments its list shows.
   pending: { state: pendingLag, messages: [{ state: pendingLag }, filesMessage], saved: { view: 'overview' }, steps: [
-    { expect: '#pending-note', text: '2 pending comments' }, { expect: '#bar-pending', text: '2 pending', shot: 'pending.png', full: true },
+    { expect: '#finish-count:visible', text: '2', absent: '#review-box:visible' },
+    { click: '#finish-review', expect: '#pending-note', text: '2 pending, only you see them' },
+    { expect: '#pending-list li', count: 2, absent: '.rail #review-box', shot: 'pending.png', full: true },
+  ] },
+  // Finish review toggles its form in place on Code; the form's own submit names the verdict.
+  finishReview: { state: reviewing, messages: [{ state: reviewing }, filesMessage], saved: { view: 'code' }, steps: [
+    { expect: '#finish-label', text: 'Finish review', absent: '#review-box:visible' },
+    { click: '#finish-review', stay: '.file[data-path="src/auth/user.ts"]', expect: '#review-box:visible', absent: '#panel-overview:visible' },
+    { expect: '[data-verdict="comment"][aria-pressed="true"]' }, { expect: '#submit-review', text: 'Submit comment' }, { expect: '#finish-label', text: 'Finish review' }, { expect: '#finish-count', text: '2' },
+    { click: '[data-verdict="approve"]', expect: '#submit-review', text: 'Submit approval', shot: 'finish-review.png' },
+    { click: '[data-verdict="requestChanges"]', expect: '#submit-review', text: 'Request changes' },
+    { click: '#review-foot button:has-text("Discard pending")', expect: '#review-foot', text: 'Discard 2 pending comments? Nobody saw them yet.', level: ['#review-foot .muted', '#review-foot button.primary'], inside: ['#review-foot .muted', '#review-foot .muted'] }, { inside: ['#review-foot button.primary', '#review-box'], shot: 'finish-discard.png' },
+    { click: '#review-foot button:has-text("Cancel")', expect: '#review-foot button', text: 'Discard pending' },
+    { click: '#submit-review', expect: '#submit-review[disabled]' },
+    { send: { done: 'review' }, absent: '#review-box:visible' }, { expect: '#finish-label', text: 'Finish review' },
+    { click: '#finish-review', expect: '[data-verdict="comment"][aria-pressed="true"]' },
+    { click: '#finish-review', absent: '#review-box:visible' }, { click: '#finish-review', expect: '#review-box:visible' },
+    { click: '#view-code', absent: '#review-box:visible' },
   ] },
   stale: { state: reviewing, messages: [{ state: reviewing }, filesMessage, { stale: true }], saved: { view: 'files' }, steps: [
     { expect: '#notice', text: 'The base branch moved on GitHub' },

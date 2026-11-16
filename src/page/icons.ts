@@ -18,6 +18,7 @@ const bookmark = 'M4 1.5h8a.5.5 0 0 1 .5.5v12.5L8 11.25 3.5 14.5V2a.5.5 0 0 1 .5
  * ones into `resources/diffguide-icons-<hash>.woff` for menus, the sidebar and the status bar. See `docs/ICONS.md`.
  */
 export const icons = {
+  more: line(`<circle ${solid} cx="4" cy="8" r="1"/><circle ${solid} cx="8" cy="8" r="1"/><circle ${solid} cx="12" cy="8" r="1"/>`),
   orb: pixels('M6 2h4v1h-4zM4 3h8v1h-8zM3 4h10v1h-10zM3 5h10v1h-10zM2 6h3v1h-3zM7 6h2v1h-2zM11 6h3v1h-3zM2 7h3v1h-3zM7 7h2v1h-2zM11 7h3v1h-3zM2 8h12v1h-12zM2 9h12v1h-12zM3 10h10v1h-10zM3 11h10v1h-10zM4 12h8v1h-8zM6 13h4v1h-4z'),
   orbAsleep: pixels('M6 2h4v1h-4zM4 3h8v1h-8zM3 4h10v1h-10zM3 5h10v1h-10zM2 6h12v1h-12zM2 7h3v1h-3zM7 7h2v1h-2zM11 7h3v1h-3zM2 8h12v1h-12zM2 9h12v1h-12zM3 10h10v1h-10zM3 11h10v1h-10zM4 12h8v1h-8zM6 13h4v1h-4z'),
   orbAway: pixels('M6 2h4v1h-4zM4 3h2v1h-2zM10 3h2v1h-2zM3 4h1v2h-1zM12 4h1v2h-1zM2 6h1v4h-1zM5 6h2v2h-2zM9 6h2v2h-2zM13 6h1v4h-1zM3 10h1v2h-1zM12 10h1v2h-1zM4 12h2v1h-2zM10 12h2v1h-2zM6 13h4v1h-4z'),
@@ -32,7 +33,7 @@ export const icons = {
 
   unified: line('<path d="M1.5 4h3M3 2.5v3M1.5 12h3M7 4h7.5M7 8h7.5M7 12h7.5"/>'),
   split: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11M3.75 8h2M10.25 8h2M11.25 7v2"/>'),
-  fileList: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11M3.5 5.5h1M3.5 8h1M3.5 10.5h1"/>'),
+  fileList: line('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6.5 2.5v11M3.25 5.5h1.5M3.25 8h1.5M3.25 10.5h1.5"/>'),
   collapseAll: line('<path d="M5 2.5h7A1.5 1.5 0 0 1 13.5 4v7"/><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M4.75 9.25h4"/>'),
   expandAll: line('<path d="M5 2.5h7A1.5 1.5 0 0 1 13.5 4v7"/><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M4.75 9.25h4M6.75 7.25v4"/>'),
   overview: line('<path d="M2 7.5L8 2.25l6 5.25M3.5 6.25v7.25h9V6.25M6.5 13.5v-3.5h3v3.5"/>'),
@@ -44,8 +45,8 @@ export const icons = {
   search: line('<circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5l4 4"/>'),
   whitespace: line('<path d="M2.5 9v3.5h11V9"/>'),
   tree: line('<path d="M2.5 3.5h11M4.5 3.5V12M4.5 8h3M4.5 12h3M9.5 8h4M9.5 12h4"/>'),
-  margin: line(`<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M5.5 2.5v11M8 6h4.5M8 8.5h3M8 11h4"/><circle ${solid} cx="3.5" cy="6" r="1"/><circle ${solid} cx="3.5" cy="9.5" r="1"/>`),
   chevronDown: line('<path d="M4 6l4 4 4-4"/>'),
+  caret: line(`<path ${solid} d="M4.6 6.5h6.8a.4.4 0 0 1 .3.7L8.3 10.6a.4.4 0 0 1-.6 0L4.3 7.2a.4.4 0 0 1 .3-.7z"/>`),
   fold: line(ring + '<path d="M5 8h6"/>'),
   unfold: line(ring + '<path d="M5 8h6M8 5v6"/>'),
 

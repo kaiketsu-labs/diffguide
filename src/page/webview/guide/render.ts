@@ -1,12 +1,13 @@
 /** Draws the Guide tab and its navigation. */
-import { buildGuide, groupReadMarks, type GuideGroup, type GuideStep, type Severity } from '../../../core/prAnalysis.js';
+import { buildGuide, groupReadMarks, type GuideGroup, type GuideStep, type Severity, type StepSpan, stepSpans } from '../../../core/prAnalysis.js';
 import { fullyRead } from '../../../core/readLines.js';
 import type { FileDiff } from '../../../core/unifiedDiff.js';
+import type { DiffSide } from '../../protocol.js';
 import { icons } from '../../icons.js';
 import { toolButton } from '../conversation/comment.js';
-import { $, chevronMark, el, icon } from '../dom.js';
+import { $, button, chevronMark, el, icon } from '../dom.js';
 import { markViewed, selectedReadIds, unmarkRead } from '../files/marks.js';
-import { changeLetters, localMark, markCurrentNavFile } from '../files/nav.js';
+import { changeLetters, iconNode, localMark, markCurrentNavFile } from '../files/nav.js';
 import { mediaNode, previewKind, previewNode, previewOnly } from '../files/preview.js';
 import { headTools, previewSwitch, renderFiles, wholeFileBlock } from '../files/render.js';
 import { table } from '../files/table.js';
@@ -14,8 +15,9 @@ import { revealGroup, revealStep } from '../render.js';
 import { collapsed, prefs, previewing, received, save, ui } from '../state.js';
 import { threadBox } from '../threads/threadBox.js';
 import { post } from '../transport.js';
-import type { Thread } from '../types.js';
-import { groupCollapsed, guideIntro, guideOwners, guideState, guideSummary, sliceOf, stepCollapsed, stepViewed } from './model.js';
+import { openFileComposer } from '../threads/composer.js';
+import type { Composer, Thread } from '../types.js';
+import { groupCollapsed, guideOwners, guideState, guideSummary, spanDiff, stepCollapsed, stepViewed } from './model.js';
 
 const severityLabels: Record<Severity | 'unclassified', string> = { critical: 'Critical', significant: 'Significant', routine: 'Routine', trivial: 'Trivial', unclassified: 'Unclassified' };
 const stepKeys = new Map<string, string>();
@@ -103,26 +105,24 @@ function updateGuideProgress(groups: readonly GuideGroup[]): void {
 export function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const container = $('files');
   const result = received.current?.analysis.result;
-  if (!received.files || !result) {
-    $('files').parentElement?.classList.add('no-nav');
-    container.replaceChildren(guideIntro());
-    return;
-  }
+  if (!received.files || !result) return;
   const shownFiles = received.files;
   received.guide ??= buildGuide(result, shownFiles);
   const groups = received.guide;
-  const slices = new Map(groups.flatMap((group) => group.steps).flatMap((step) => {
-    const slice = sliceOf(step);
-    return slice ? [[step.key, slice] as const] : [];
+  const steps = groups.flatMap((group) => group.steps);
+  const spans = stepSpans(groups, shownFiles);
+  const parts = new Map(steps.flatMap((step) => {
+    const file = shownFiles.find((item) => item.path === step.path);
+    return file ? [[step.key, spanDiff(file, spans.get(step.key) ?? [])] as const] : [];
   }));
-  const owners = guideOwners(groups, slices);
+  const owners = guideOwners(groups, parts);
   const visible = groups.filter((group) => !groupCollapsed(group)).flatMap((group) => group.steps);
   const keyOf = (step: GuideStep): string => JSON.stringify([stepViewed(step), stepCollapsed(step), received.readRanges.filter((marked) => marked.path === step.path), received.current?.local?.[step.path] ?? null,
     owners.threads.get(step.key) ?? [], owners.notes.get(step.key) ?? null, owners.draft === step.key ? [ui.author, received.current?.details?.pendingComments] : null]);
-  const numbers = new Map(groups.flatMap((group) => group.steps.map((step, index) => [step.key, index + 1] as const)));
+  const numbers = stepNumbers(groups);
   const draw = (step: GuideStep): HTMLElement => {
     stepKeys.set(step.key, keyOf(step));
-    return stepBox(step, numbers.get(step.key) ?? 0, slices.get(step.key), owners.threads.get(step.key) ?? [], owners.notes.get(step.key), owners.draft === step.key);
+    return stepBox(step, numbers.get(step.key) ?? 0, spans.get(step.key) ?? [], owners.threads.get(step.key) ?? [], owners.notes.get(step.key), owners.draft === step.key);
   };
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.step-wrap')].map((node) => [node.dataset.key, node]));
   const targets = only === 'state' ? visible.filter((step) => stepKeys.get(step.key) !== keyOf(step))
@@ -143,15 +143,20 @@ export function renderGuide(only?: readonly (string | undefined)[] | 'state'): v
   renderGuideNav(groups);
 }
 
+/** Steps numbered through the whole guide, so a number names one step. */
+function stepNumbers(groups: readonly GuideGroup[]): Map<string, number> {
+  return new Map(groups.flatMap((group) => group.steps).map((step, index) => [step.key, index + 1]));
+}
+
 /** The guide's sections and numbered steps beside the steps, each with its Viewed state; a click scrolls to it. */
 function renderGuideNav(groups: readonly GuideGroup[]): void {
-  $('files').parentElement?.classList.remove('no-nav');
   const nav = $('file-nav');
   nav.classList.toggle('folded', ui.navFolded);
   const steps = groups.flatMap((group) => group.steps);
+  const numbers = stepNumbers(groups);
   const head = el('button', 'nav-head');
   head.setAttribute('aria-expanded', String(!ui.navFolded));
-  head.append(chevronMark(ui.navFolded), steps.length + (steps.length === 1 ? ' step' : ' steps'), el('span', 'muted', steps.filter(stepViewed).length + ' viewed'));
+  head.append(chevronMark(ui.navFolded), steps.length + (steps.length === 1 ? ' step' : ' steps'));
   head.addEventListener('click', () => { ui.navFolded = !ui.navFolded; renderGuideNav(groups); });
   const list = el('ul', 'nav-list');
   for (const group of groups) {
@@ -167,30 +172,30 @@ function renderGuideNav(groups: readonly GuideGroup[]): void {
     item.append(row);
     list.append(item);
     if (isCollapsed) continue;
-    group.steps.forEach((step, index) => {
+    for (const step of group.steps) {
       const done = stepViewed(step);
       const stepRow = el('button', 'nav-file nav-step' + (done ? ' done' : ''));
       stepRow.dataset.navStep = step.key;
       stepRow.title = step.path + (step.note === undefined ? '' : '\n\n' + step.note);
       const mark = el('span', 'nav-done');
       if (done) mark.append(icon(icons.check));
-      stepRow.append(el('span', 'nav-number', String(index + 1)), el('span', 'nav-name', step.title ?? step.path.split('/').at(-1) ?? step.path), mark);
+      stepRow.append(el('span', 'nav-number', String(numbers.get(step.key) ?? '')), el('span', 'nav-name', step.title ?? step.path.split('/').at(-1) ?? step.path), mark);
       stepRow.addEventListener('click', () => revealStep(step.key));
       const stepItem = el('li');
       stepItem.append(stepRow);
       list.append(stepItem);
-    });
+    }
   }
   nav.replaceChildren(head, list);
   markCurrentNavFile();
 }
 
-function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, threads: readonly Thread[], note: Thread | undefined, hasDraft: boolean): HTMLElement {
+function stepBox(step: GuideStep, number: number, spans: readonly StepSpan[], threads: readonly Thread[], note: Thread | undefined, hasDraft: boolean): HTMLElement {
   const wrap = el('div', 'step-wrap');
   wrap.dataset.key = step.key;
   if (step.transition) wrap.append(el('div', 'transition', '↓ ' + step.transition));
   const file = received.files?.find((item) => item.path === step.path);
-  if (!file || !slice) return wrap;
+  if (!file) return wrap;
   const isCollapsed = stepCollapsed(step);
   const box = el('div', 'file step' + (isCollapsed ? ' collapsed' : ''));
   box.dataset.path = step.path;
@@ -198,6 +203,7 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   const chevron = chevronMark(isCollapsed);
   const name = el('span', 'name');
   name.append(el('span', 'step-title', number + '.' + (step.title ? ' ' + step.title : '')), el('span', 'step-path', file.oldPath ? file.oldPath + ' → ' + file.path : file.path));
+  name.title = file.path;
   const toggle = (): void => { collapsed.set(guideState('step', step.key), !isCollapsed); save(); renderFiles([step.path]); };
   chevron.addEventListener('click', toggle);
   name.addEventListener('click', toggle);
@@ -232,7 +238,11 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   label.append(check, 'Viewed');
   const kind = previewKind(file);
   const showPreview = kind !== undefined && (previewing.has(file.path) || previewOnly(file));
-  head.append(chevron, name, badge, ...localMark(step.path), stats, previewSwitch(file, showPreview), headTools(toolButton(icons.openExternal, 'Open in editor', () => post({ action: 'editor', path: step.path }))), label);
+  const themeIcon = received.fileIcons?.byPath[file.path];
+  const commentFile = toolButton(icons.comment, 'Comment on the whole file', () => openFileComposer(file.path));
+  commentFile.hidden = !received.atHead || file.change === 'deleted';
+  head.append(chevron, ...themeIcon ? [iconNode(themeIcon)] : [], name, badge, ...localMark(step.path), stats, previewSwitch(file, showPreview),
+    headTools(commentFile, toolButton(icons.openExternal, 'Open in editor', () => post({ action: 'editor', path: step.path }))), label);
   box.append(head);
   const diff = el('div', 'diff');
   if (step.fileNote) {
@@ -248,9 +258,50 @@ function stepBox(step: GuideStep, number: number, slice: FileDiff | undefined, t
   if (showPreview && kind === 'media') diff.append(mediaNode(file));
   else if (file.binary) diff.append(el('div', 'note muted', 'Binary file not shown.'));
   else if (showPreview) diff.append(previewNode(file, threads, placed));
-  else if (!slice.hunks.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
-  else diff.append(table(slice, threads, placed, hasDraft ? prefs.composer : null, 'step:' + step.key));
+  else if (!spans.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
+  else if (!isCollapsed) diff.append(...stepTables(step, file, spans, threads, placed, hasDraft ? prefs.composer : null));
   box.append(diff);
   wrap.append(box);
+  return wrap;
+}
+
+/** Folded runs of lines opened by hand or by find-in-page, by step and first line; they stay open across redraws. */
+const unfolded = new Set<string>();
+
+/** A step's lines: runs near its changes as tables, the rest folded but in the page, unless a thread or the draft sits on them. */
+function stepTables(step: GuideStep, file: FileDiff, spans: readonly StepSpan[], threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined): HTMLElement[] {
+  const nodes: HTMLElement[] = [];
+  let run: StepSpan[] = [];
+  const lines = (spanList: readonly StepSpan[], key: string): HTMLElement => table(spanDiff(file, spanList), threads, placed, draft, 'step:' + key, false);
+  const flush = (): void => {
+    if (run.length) nodes.push(lines(run, step.key + ':' + nodes.length));
+    run = [];
+  };
+  for (const span of spans) {
+    const key = step.key + ':' + span.hunk + ':' + span.from;
+    if (!span.folded || unfolded.has(key) || holdsComment(file, span, threads, draft)) { run.push(span); continue; }
+    flush();
+    nodes.push(foldedLines(key, lines([span], key), span.to - span.from + 1));
+  }
+  flush();
+  return nodes;
+}
+
+function holdsComment(file: FileDiff, span: StepSpan, threads: readonly Thread[], draft: Composer | null | undefined): boolean {
+  const lines = file.hunks[span.hunk]?.lines.slice(span.from, span.to + 1) ?? [];
+  const at = (side: DiffSide, line: number): boolean => lines.some((item) => (side === 'new' ? item.newLine : item.oldLine) === line);
+  return threads.some((thread) => !thread.outdated && thread.scope !== 'file' && at(thread.side, thread.endLine)) || (draft !== null && draft !== undefined && draft.path === file.path && at(draft.side, draft.end));
+}
+
+/** Unchanged lines far from the step's changes: folded with hidden=until-found, so find-in-page still finds and opens them. */
+function foldedLines(key: string, lines: HTMLElement, count: number): HTMLElement {
+  const wrap = el('div', 'folded-lines');
+  const body = el('div', 'folded-body');
+  body.setAttribute('hidden', 'until-found');
+  body.append(lines);
+  const show = button(count + (count === 1 ? ' unchanged line' : ' unchanged lines'), () => { unfolded.add(key); body.removeAttribute('hidden'); show.remove(); }, 'fold-lines');
+  show.prepend(icon(icons.unfold));
+  body.addEventListener('beforematch', () => { unfolded.add(key); show.remove(); });
+  wrap.append(show, body);
   return wrap;
 }

@@ -7,7 +7,7 @@ import { $, button, el, icon, timeLabel } from './dom.js';
 import { copyRef } from './header/pullRequest.js';
 import { closeToolbarMenu, openToolbarMenu } from './menus.js';
 import { setView } from './render.js';
-import { prefs, received } from './state.js';
+import { guided, prefs, received } from './state.js';
 import { post } from './transport.js';
 
 /** The commit a Shift-click range starts from in the Commits tab. */
@@ -46,14 +46,14 @@ export function showUnpushed(): void {
 export function showCommits(from: string, to: string): void {
   if (from === to) rangeAnchor = from;
   requestFiles({ kind: 'commits', from, to }, prefs.whitespace);
-  setView('files');
+  setView('code', 'files');
   $('files-bar').scrollIntoView({ block: 'start' });
 }
 
 export function requestFiles(next: DiffRange, hideWhitespace: boolean): void {
   prefs.wantedRange = undefined;
   $('error').textContent = '';
-  if ((next.kind !== 'all' || hideWhitespace) && prefs.view === 'guide') setView('files');
+  if ((next.kind !== 'all' || hideWhitespace) && guided()) setView('code', 'files');
   post({ action: 'files', range: next, whitespace: hideWhitespace });
 }
 

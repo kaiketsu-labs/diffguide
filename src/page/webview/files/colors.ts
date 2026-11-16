@@ -1,7 +1,7 @@
 /** Syntax colors that come after the files: swapped into the drawn code cells instead of redrawing the file boxes. */
 import type { DiffLine, FileDiff } from '../../../core/unifiedDiff.js';
 import { $ } from '../dom.js';
-import { prefs, received } from '../state.js';
+import { guided, prefs, received } from '../state.js';
 import { renderFiles } from './render.js';
 import { cellLines } from './selection.js';
 
@@ -22,7 +22,7 @@ export function applyColors(files: readonly FileDiff[]): void {
   const previous = new Map(received.files.map((file) => [file.path, file]));
   received.files = received.files.map((file) => byPath.get(file.path) ?? file);
   received.guide = undefined;
-  if (prefs.view !== 'files') { renderFiles([...byPath.keys()]); return; }
+  if (prefs.view !== 'code' || guided()) { renderFiles([...byPath.keys()]); return; }
   for (const file of files) {
     const before = previous.get(file.path);
     if (before) queue.push({ file, shown: new Set(before.hunks.flatMap((hunk) => hunk.lines)) });

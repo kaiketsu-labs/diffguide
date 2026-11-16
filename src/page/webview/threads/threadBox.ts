@@ -131,10 +131,7 @@ export function threadBox(thread: Thread): HTMLElement {
   box.id = 'thread-' + thread.id;
   box.open = threadOpen.get(thread.id) ?? !thread.resolved;
   box.addEventListener('toggle', () => {
-    // With comments in the margin a diff thread starts as a mark, so its open state is always kept.
-    const inMargin = prefs.marginThreads && box.parentElement?.closest('details.thread') === null && box.closest('tr.inline') !== null;
-    if (!inMargin && box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open);
-    if (inMargin && !box.open) renderFiles([thread.path]);
+    if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open);
   });
   const status = github ? thread.status.split(' · ').filter((part) => part !== 'Open' && part !== 'Pending')
     : thread.status.split(' · ').filter((part) => !fromClaude || part !== 'Answered');

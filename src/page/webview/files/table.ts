@@ -6,9 +6,8 @@ import type { DiffSide } from '../../protocol.js';
 import { renderConversation } from '../conversation/timeline.js';
 import { button, chevronMark, el, stateIcon } from '../dom.js';
 import { setView } from '../render.js';
-import { collapsed, prefs, received, save, ui } from '../state.js';
+import { collapsed, guided, prefs, received, save, ui } from '../state.js';
 import { composerBox } from '../threads/composer.js';
-import { marginMark } from '../threads/list.js';
 import { inFiles } from '../threads/model.js';
 import { threadBox, threadOpen } from '../threads/threadBox.js';
 import { post } from '../transport.js';
@@ -51,7 +50,7 @@ export function jump(thread: Thread): void {
     post({ action: thread.source === 'github' ? 'github' : 'thread', id: thread.id });
     return;
   }
-  if (!inFiles(thread)) { if (prefs.view !== 'guide') setView('guide'); } else if (prefs.view === 'overview' || (prefs.view === 'guide' && !document.getElementById('thread-' + thread.id))) setView('files');
+  if (!inFiles(thread)) { if (!guided()) setView('code', 'guide'); } else if (prefs.view === 'overview' || (guided() && !document.getElementById('thread-' + thread.id))) setView('code', 'files');
   if (collapsed.get(thread.path) || folderOf(thread.path).some((folder) => collapsed.get('folder:' + folder))) {
     collapsed.set(thread.path, false);
     openFolders(thread.path);
@@ -131,7 +130,8 @@ function expand(file: FileDiff, key: string, index: number, top: number, bottom:
 }
 
 /** `expandKey` names where shown context lines are kept; a guide step passes its own so its slice does not share the file's. */
-export function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined = prefs.composer?.path === file.path ? prefs.composer : undefined, expandKey = file.path): HTMLTableElement {
+/** A diff table; without `gaps` it draws only the lines, with no hunk headers or rows that show hidden lines. */
+export function table(file: FileDiff, threads: readonly Thread[], placed: Set<string>, draft: Composer | null | undefined = prefs.composer?.path === file.path ? prefs.composer : undefined, expandKey = file.path, gaps = true): HTMLTableElement {
   const node = el('table');
   const columns = el('colgroup');
   // An unchanged file has the same lines on both sides, so it shows them once with one line number.
@@ -154,8 +154,7 @@ export function table(file: FileDiff, threads: readonly Thread[], placed: Set<st
       for (const thread of threads) {
         if (placed.has(thread.id) || thread.outdated || thread.side !== side || thread.endLine !== line || !linesFit(side)) continue;
         placed.add(thread.id);
-        if (prefs.marginThreads && !hidden && threadOpen.get(thread.id) !== true) marginMark(row, side, thread);
-        else node.append(inline(threadBox(thread), widths.length));
+        node.append(inline(threadBox(thread), widths.length));
       }
       if (side === 'new' && !hidden) {
         for (const note of notes) {
@@ -190,7 +189,7 @@ export function table(file: FileDiff, threads: readonly Thread[], placed: Set<st
     if (split) pairRow(line, line);
     else lineRow(line);
   };
-  const gaps = gapsOf(file);
+  const gapList = gapsOf(file);
   const read = readLines(file, received.readRanges);
   const readRow = (lines: readonly DiffLine[], key: string, open: boolean): HTMLTableRowElement => {
     const row = el('tr', 'read-run');
@@ -255,10 +254,10 @@ export function table(file: FileDiff, threads: readonly Thread[], placed: Set<st
   };
   const isRead = (row: Row): boolean => row.every((line) => !line || read.has(line));
   file.hunks.forEach((hunk, index) => {
-    const gap = gaps[index];
+    const gap = gapList[index];
     // An unchanged file is one hunk of every line, so it has no header or gaps to show.
-    if (file.change !== 'unchanged' && gap) gapRows(gap, index, hunk.header);
-    else if (file.change !== 'unchanged') {
+    if (gaps && file.change !== 'unchanged' && gap) gapRows(gap, index, hunk.header);
+    else if (gaps && file.change !== 'unchanged') {
       const header = el('tr', 'hunk');
       const cell = el('td', '', hunk.header);
       cell.colSpan = widths.length;
@@ -280,7 +279,7 @@ export function table(file: FileDiff, threads: readonly Thread[], placed: Set<st
       at = end;
     }
   });
-  const last = gaps[file.hunks.length];
-  if (last && file.change !== 'added' && file.change !== 'deleted' && file.change !== 'unchanged') gapRows(last, file.hunks.length);
+  const last = gapList[file.hunks.length];
+  if (gaps && last && file.change !== 'added' && file.change !== 'deleted' && file.change !== 'unchanged') gapRows(last, file.hunks.length);
   return node;
 }

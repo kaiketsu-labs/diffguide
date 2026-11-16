@@ -88,6 +88,8 @@ for (const name of names) {
   await page.waitForTimeout(300);
   const shots = [];
   for (const step of scene.steps) {
+    const top = (selector) => page.evaluate((s) => document.querySelector(s)?.getBoundingClientRect().top, selector);
+    const before = step.stay ? await top(step.stay) : undefined;
     if (step.send) await page.evaluate((m) => window.postMessage(m, '*'), step.send);
     if (step.click) await page.click(step.click);
     if (step.scroll !== undefined) await page.evaluate((y) => window.scrollTo(0, y), step.scroll);
@@ -98,7 +100,39 @@ for (const name of names) {
       const found = await page.$(step.expect);
       const text = found ? await found.textContent() : null;
       if (!found) errors.push(`expected ${step.expect}`);
+      else if (step.count !== undefined && (await page.$$(step.expect)).length !== step.count) errors.push(`expected ${step.count} of ${step.expect}, got ${(await page.$$(step.expect)).length}`);
       else if (step.text !== undefined && !text?.includes(step.text)) errors.push(`expected ${step.expect} to contain "${step.text}", got "${text?.trim()}"`);
+    }
+    if (step.stay) {
+      const after = await top(step.stay);
+      if (before === undefined || after !== before) errors.push(`expected ${step.stay} to stay at ${before}, got ${after}`);
+    }
+    if (step.below) {
+      const [lower, upper] = await page.evaluate(([a, b]) => [document.querySelector(a)?.getBoundingClientRect().top, document.querySelector(b)?.getBoundingClientRect().bottom], step.below);
+      if (lower === undefined || upper === undefined || lower < upper) errors.push(`expected ${step.below[0]} (top ${lower}) below ${step.below[1]} (bottom ${upper})`);
+    }
+    if (step.after) {
+      const [left, right] = await page.evaluate(([a, b]) => [document.querySelector(a)?.getBoundingClientRect().left, document.querySelector(b)?.getBoundingClientRect().right], step.after);
+      if (left === undefined || right === undefined || left < right) errors.push(`expected ${step.after[0]} (left ${left}) after ${step.after[1]} (right ${right})`);
+    }
+    if (step.inside) {
+      // Measures a's contents, not its box, so text that spills out of a shrunken box counts.
+      const [inner, outer] = await page.evaluate(([a, b]) => {
+        const node = document.querySelector(a);
+        const range = document.createRange();
+        if (node) range.selectNodeContents(node);
+        const box = (r) => r && { left: r.left, right: r.right };
+        return [node ? box(range.getBoundingClientRect()) : undefined, box(document.querySelector(b)?.getBoundingClientRect())];
+      }, step.inside);
+      if (!inner || !outer || inner.left < outer.left - 1 || inner.right > outer.right + 1) errors.push(`expected ${step.inside[0]} (${inner?.left}-${inner?.right}) inside ${step.inside[1]} (${outer?.left}-${outer?.right})`);
+    }
+    if (step.tallest) {
+      const height = await page.evaluate((s) => document.querySelector(s)?.getBoundingClientRect().height, step.tallest[0]);
+      if (height === undefined || height > step.tallest[1]) errors.push(`expected ${step.tallest[0]} at most ${step.tallest[1]} px tall, got ${height}`);
+    }
+    if (step.level) {
+      const [a, b] = await page.evaluate((selectors) => selectors.map((s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && r.top + r.height / 2; }), step.level);
+      if (a === undefined || b === undefined || Math.abs(a - b) > 4) errors.push(`expected ${step.level[0]} (middle ${a}) level with ${step.level[1]} (middle ${b})`);
     }
     if (step.absent && await page.$(step.absent)) errors.push(`expected no ${step.absent}`);
     if (step.shot) { await page.screenshot({ path: join(out, step.shot), fullPage: step.full === true }); shots.push(join(out, step.shot)); }

@@ -4,8 +4,10 @@ import type { ChangeRequestDetails, CommentKind } from '../../core/forge.js';
 import type { DiffSide, GitHubThreadView, OverviewState } from '../protocol.js';
 import type { OrbMotion } from './orb.js';
 
-/** What the file list shows: every file, the PR's commits, or Claude's guide in reading order. */
-export type View = 'overview' | 'files' | 'guide';
+/** The page's tab: the PR's record, or its code. */
+export type View = 'overview' | 'code';
+/** The order the Code tab shows files in: the file tree, or Claude's guide in reading order. */
+export type Order = 'files' | 'guide';
 export type Intent = 'ask' | 'implement';
 export interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
 /** A new comment on a whole file, written above its diff. */
