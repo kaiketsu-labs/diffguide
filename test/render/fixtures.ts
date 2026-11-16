@@ -457,7 +457,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // Authors can only comment.
   finishAuthor: scene(pullRequest, [
     { click: '#finish-review', expect: '#author-note:visible', absent: '#verdicts:visible' },
-    { expect: '#finish-label', text: 'Submit comment', shot: 'finish-author.png' },
+    { expect: '#submit-review', text: 'Submit comment', shot: 'finish-author.png' },
   ], { saved: { view: 'code' } }),
   get since() { return reviewingScenes['since']!; },
   get submitted() { return reviewingScenes['submitted']!; },
@@ -539,18 +539,19 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { click: '#finish-review', expect: '#pending-note', text: '2 pending, only you see them' },
     { expect: '#pending-list li', count: 2, absent: '.rail #review-box', shot: 'pending.png', full: true },
   ] },
-  // Finish review opens its form in place on Code and becomes the form's confirm, naming the verdict.
+  // Finish review toggles its form in place on Code; the form's own submit names the verdict.
   finishReview: { state: reviewing, messages: [{ state: reviewing }, filesMessage], saved: { view: 'code' }, steps: [
     { expect: '#finish-label', text: 'Finish review', absent: '#review-box:visible' },
     { click: '#finish-review', stay: '.file[data-path="src/auth/user.ts"]', expect: '#review-box:visible', absent: '#panel-overview:visible' },
-    { expect: '[data-verdict="comment"][aria-pressed="true"]' }, { expect: '#finish-label', text: 'Submit comment', absent: '#finish-count:visible' },
-    { click: '[data-verdict="approve"]', expect: '#finish-label', text: 'Submit approval', shot: 'finish-review.png' },
-    { click: '[data-verdict="requestChanges"]', expect: '#finish-label', text: 'Request changes' },
+    { expect: '[data-verdict="comment"][aria-pressed="true"]' }, { expect: '#submit-review', text: 'Submit comment' }, { expect: '#finish-label', text: 'Finish review' }, { expect: '#finish-count', text: '2' },
+    { click: '[data-verdict="approve"]', expect: '#submit-review', text: 'Submit approval', shot: 'finish-review.png' },
+    { click: '[data-verdict="requestChanges"]', expect: '#submit-review', text: 'Request changes' },
     { click: '#review-foot button:has-text("Discard pending")', expect: '#review-foot', text: 'Discard 2 pending comments? Nobody saw them yet.', level: ['#review-foot .muted', '#review-foot button.primary'], inside: ['#review-foot .muted', '#review-foot .muted'] }, { inside: ['#review-foot button.primary', '#review-box'], shot: 'finish-discard.png' },
     { click: '#review-foot button:has-text("Cancel")', expect: '#review-foot button', text: 'Discard pending' },
-    { click: '#finish-review', expect: '#finish-review[disabled]' },
+    { click: '#submit-review', expect: '#submit-review[disabled]' },
     { send: { done: 'review' }, absent: '#review-box:visible' }, { expect: '#finish-label', text: 'Finish review' },
     { click: '#finish-review', expect: '[data-verdict="comment"][aria-pressed="true"]' },
+    { click: '#finish-review', absent: '#review-box:visible' }, { click: '#finish-review', expect: '#review-box:visible' },
     { click: '#view-code', absent: '#review-box:visible' },
   ] },
   stale: { state: reviewing, messages: [{ state: reviewing }, filesMessage, { stale: true }], saved: { view: 'files' }, steps: [

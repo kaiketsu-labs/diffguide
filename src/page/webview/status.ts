@@ -74,8 +74,8 @@ export function status(key: ReviewerState | CheckState, name: string, url?: stri
 export function setBusy(value: boolean): void {
   ui.busy = value;
   const loading = detailsLoading(received.current);
-  // Finish review only submits while its form is open.
-  $<HTMLButtonElement>('finish-review').disabled = $('finish-review').getAttribute('aria-expanded') === 'true' && (value || loading);
+  const submit = document.querySelector<HTMLButtonElement>('#submit-review');
+  if (submit) submit.disabled = value || loading;
   const merge = received.current?.conversation?.merge;
   const mergeLoading = merge === undefined && received.current?.conversationError === undefined;
   $<HTMLButtonElement>('merge').disabled = value || loading || mergeLoading || received.current?.details?.mergeable === 'no' || (merge?.state === 'blocked' && !merge.canBypass && !merge.mergeQueue);

@@ -1,7 +1,7 @@
-/** The Finish review form: a menu under Finish review, which becomes its confirm and names the verdict, as Merge does. */
+/** The Finish review form: a dropdown under Finish review with its own submit button that names the verdict. */
 import type { ReviewEvent } from '../../../core/forge.js';
 import { icons } from '../../icons.js';
-import { $, button, el, icon } from '../dom.js';
+import { $, button, detailsLoading, el, icon } from '../dom.js';
 import { received, ui } from '../state.js';
 import { changePullRequest, setBusy } from '../status.js';
 import { post } from '../transport.js';
@@ -21,12 +21,12 @@ export function pendingCount(): number | undefined {
     : (received.current.github ?? []).reduce((sum, thread) => sum + thread.messages.filter((message) => message.pending).length, 0);
 }
 
-/** Open the form, or submit it when it is open. */
-export function clickFinishReview(): void {
-  if (!isOpen()) {
-    openReviewForm();
-    return;
-  }
+export function toggleReviewForm(): void {
+  if (isOpen()) closeReviewForm();
+  else openReviewForm();
+}
+
+function submitReview(): void {
   $('error').textContent = '';
   setBusy(true);
   post({ action: 'review', event: ui.author ? 'comment' : verdict, body: $<HTMLTextAreaElement>('review').value });
@@ -38,7 +38,6 @@ function openReviewForm(): void {
   $('review-box').hidden = false;
   $('finish-review').setAttribute('aria-expanded', 'true');
   showReviewForm();
-  setBusy(ui.busy);
   $<HTMLTextAreaElement>('review').focus();
 }
 
@@ -49,7 +48,6 @@ export function closeReviewForm(): void {
   $('review-box').hidden = true;
   $('finish-review').setAttribute('aria-expanded', 'false');
   showReviewForm();
-  setBusy(ui.busy);
 }
 
 export function pickVerdict(next: ReviewEvent): void {
@@ -59,11 +57,9 @@ export function pickVerdict(next: ReviewEvent): void {
 
 /** The button's label and count, and the form's contents, from the verdict and the pending review. */
 export function showReviewForm(): void {
-  const open = isOpen();
   const count = pendingCount();
   const picked = ui.author ? 'comment' : verdict;
-  $('finish-label').replaceChildren(icon(open && picked === 'requestChanges' ? icons.requestChanges : icons.check), open ? confirmLabels[picked] : 'Finish review');
-  $('finish-count').hidden = open || !count;
+  $('finish-count').hidden = !count;
   $('finish-count').textContent = String(count ?? '');
   $('pending-note').hidden = !count;
   $('pending-note').textContent = count + ' pending, only you see them';
@@ -82,6 +78,10 @@ export function showReviewForm(): void {
     const discard = button('Discard pending', () => { discarding = true; showReviewForm(); }, 'quiet');
     discard.dataset.prAction = '';
     discard.disabled = ui.busy;
-    foot.replaceChildren(...count === undefined ? [] : [discard], el('span', 'gap'), button('Cancel', closeReviewForm, 'quiet'));
+    const submit = button('', submitReview, 'primary');
+    submit.id = 'submit-review';
+    submit.replaceChildren(icon(picked === 'requestChanges' ? icons.requestChanges : icons.check), confirmLabels[picked]);
+    submit.disabled = ui.busy || detailsLoading(received.current);
+    foot.replaceChildren(...count === undefined ? [] : [discard], el('span', 'gap'), button('Cancel', closeReviewForm, 'quiet'), submit);
   }
 }

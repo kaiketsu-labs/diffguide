@@ -46,6 +46,7 @@ export const icons = {
   whitespace: line('<path d="M2.5 9v3.5h11V9"/>'),
   tree: line('<path d="M2.5 3.5h11M4.5 3.5V12M4.5 8h3M4.5 12h3M9.5 8h4M9.5 12h4"/>'),
   chevronDown: line('<path d="M4 6l4 4 4-4"/>'),
+  caret: line(`<path ${solid} d="M4.6 6.5h6.8a.4.4 0 0 1 .3.7L8.3 10.6a.4.4 0 0 1-.6 0L4.3 7.2a.4.4 0 0 1 .3-.7z"/>`),
   fold: line(ring + '<path d="M5 8h6"/>'),
   unfold: line(ring + '<path d="M5 8h6M8 5v6"/>'),
 

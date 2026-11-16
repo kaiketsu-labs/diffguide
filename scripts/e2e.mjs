@@ -263,7 +263,7 @@ const scenarios = [
       // Finish review opens its form under the button and stays on Code.
       await page.click('#finish-review');
       await page.waitForSelector('#review-box:visible', { timeout: 5_000 });
-      await page.locator('#finish-label', { hasText: 'Submit comment' }).waitFor({ timeout: 5_000 });
+      await page.locator('#submit-review', { hasText: 'Submit comment' }).waitFor({ timeout: 5_000 });
       if (!await page.isVisible('#panel-files') || await page.isVisible('#panel-overview')) throw new Error('Finish review left the Code tab');
       await page.press('#review', 'Escape');
       await page.waitForSelector('#review-box', { state: 'hidden', timeout: 5_000 });
@@ -281,10 +281,10 @@ const scenarios = [
         await page.click('#finish-review');
         await page.fill('#review', `Mock QA ${verdict} summary`);
         await page.click(`[data-verdict="${verdict}"]`);
-        await page.click('#finish-review');
+        await page.click('#submit-review');
         await page.locator('#error', { hasText: 'Sample pull requests cannot be reviewed.' }).waitFor({ timeout: 10_000 });
         if (await page.inputValue('#review') !== `Mock QA ${verdict} summary`) throw new Error('Failed review lost its summary');
-        await page.waitForSelector('#finish-review:not([disabled])', { timeout: 5_000 });
+        await page.waitForSelector('#submit-review:not([disabled])', { timeout: 5_000 });
         await page.press('#review', 'Escape');
       }
       step('All three verdicts reached the mock host, showed its rejection, preserved the summary and released the submit button');

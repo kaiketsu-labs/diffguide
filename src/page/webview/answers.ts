@@ -55,7 +55,7 @@ export function renderAnswers(): void {
   const fresh = freshAnswers();
   const count = fresh.length;
   const chipCount = $('claude-chip').querySelector('.chip-new');
-  if (chipCount) chipCount.textContent = count ? '· ' + count + ' new' : '';
+  if (chipCount) chipCount.textContent = count ? count + ' new' : '';
   const list = $('claude-answers');
   list.hidden = count === 0;
   list.replaceChildren(...count ? [el('div', 'answers-head', 'New answers')] : [], ...fresh.slice(0, 5).map((thread) => {
