@@ -18,7 +18,7 @@ export function overviewHtml(state: OverviewState, script: string, pdfScript?: s
 ${webviewStyles}
 ${codePreviewStyles()}
 body{margin:0;padding:var(--space-24) var(--space-24) 48px}
-[hidden],body.local .pr-only{display:none!important}
+[hidden]:not([hidden="until-found"]),body.local .pr-only{display:none!important}
 h1{font-size:18px;line-height:26px;font-weight:600;margin:0;overflow-wrap:anywhere}
 h2{font-size:14px;font-weight:600;margin:0}
 h3{margin:0 0 var(--space-8);font-size:12px;line-height:18px;font-weight:600;color:var(--ink)}

@@ -36,7 +36,7 @@ const extensions = join(root, 'extensions');
 const repo = join(root, 'repo');
 const claude = join(root, 'mock-claude');
 const terminalLaunch = join(root, 'terminal-launch.json');
-await writeFile(claude, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(terminalLaunch)}, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));\n`);
+await writeFile(claude, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(terminalLaunch)}, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));\nsetInterval(() => {}, 1000);\n`);
 await chmod(claude, 0o755);
 const git = (...command) => execFileSync('git', command, { cwd: repo, stdio: 'pipe' });
 await mkdir(join(repo, 'src'), { recursive: true });
@@ -445,6 +445,7 @@ for (const scenario of workbench === undefined ? [] : scenarios) {
     await workbench.screenshot({ path: join(out, `failure-${scenario.name.replaceAll(' ', '-')}.png`) }).catch(() => undefined);
   }
   await workbench.keyboard.press('Escape').catch(() => undefined);
+  await workbench.click('.part.sidebar .composite.title').catch(() => undefined);
   await palette(workbench, 'View: Close All Editors').catch(() => undefined);
 }
 agent.done = true;

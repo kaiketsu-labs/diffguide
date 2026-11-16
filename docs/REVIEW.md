@@ -1,6 +1,6 @@
 # Review findings and verification
 
-Mock PR checks, 16 November 2026: [page layout QA](QA-PAGE-LAYOUT-2026-11-16.md) records review failure handling, discard interaction, suggestion permission enforcement and Guide line retention. Native Find failed to open matching folded lines in headless VS Code. The new E2E check records this failure; authenticated GitHub and Claude checks remain pending.
+Mock PR checks, 16 November 2026: [page layout QA](QA-PAGE-LAYOUT-2026-11-16.md) records review failure handling, discard interaction, suggestion permission enforcement and Guide line retention. Native Find initially failed because the global hidden-element rule also hid until-found content. Excluding that value fixes the regression; all four E2E scenarios pass. Authenticated GitHub and Claude checks remain pending.
 
 Option D layout verification, 15 November 2026: phases 5 to 7 move PR actions and unpushed commits into header menus, simplify Overview, and open local review directly on code. Render scenes check placement and picker behavior. Headless VS Code exercises these controls with mock PRs and controlled host states; its agent replies are simulated.
 
