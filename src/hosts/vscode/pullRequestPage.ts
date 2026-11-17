@@ -16,7 +16,7 @@ import { latestAnswers, type SeenAnswers } from './claudeAnswers.js';
 import { claudeFinished } from './claudeStatus.js';
 import { DefinitionPeeks } from './definitions.js';
 import { readFileIcons } from './fileIcons.js';
-import { listRepositoryFiles, localClaudeStatus, toDisposable, wholeFile } from './localReview.js';
+import { listRepositoryFiles, connectedClaudeStatus, toDisposable, wholeFile } from './localReview.js';
 import type { LocalSession } from './localSessions.js';
 import { openPullRequestFile, readBaseContent } from './pullRequestDiff.js';
 import { checkoutDataPath } from './pullRequestSessions.js';
@@ -102,7 +102,7 @@ export function pullRequestPages(
     const page = pullRequestPageController({ provider, repository, pullRequest, role, folder, opened, fileReviews, revealed, onCheckout: onCheckout !== undefined, host });
     const read = onCheckout === undefined ? page.read : async (): ReturnType<typeof page.read> => ({
       ...await page.read(),
-      claude: { ...localClaudeStatus(onCheckout.bridge, onCheckout.store.pendingEvents.length), link: { delivering: onCheckout.bridge.state.deliveryReady === true, terminal: onCheckout.launcher.hasTerminal } },
+      claude: await connectedClaudeStatus(onCheckout.bridge, onCheckout.store.pendingEvents.length, onCheckout.launcher.hasTerminal),
     });
     const changed: vscode.Event<unknown> = (listener) => vscode.Disposable.from(
       pullRequestSessions.onDidChangeState((changedSession) => {

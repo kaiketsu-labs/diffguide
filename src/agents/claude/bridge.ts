@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { BridgeState, CodeAnchor, ConnectionDescriptor, Disposable, LinkedRepositoryHandler, ReviewBridge, ReviewEvent, ReviewMessage, ReviewStore, ReviewThread } from '../../core/contracts.js';
 import { maximumConversationMessages, maximumConversationTextLength, maximumIdentifierLength, maximumPathLength, maximumReviewTextLength } from '../../core/limits.js';
-import { readSessionBinding } from '../../core/sessionBinding.js';
+import { isSessionId, readSessionBinding } from '../../core/sessionBinding.js';
 import { parseAgentUpdate, ReviewStoreError } from '../../core/store.js';
 
 const maximumBodyBytes = 256 * 1024;
@@ -152,7 +152,7 @@ class DiffGuideBridge implements ReviewBridge {
       respond(response, 403, { error: 'Browser-origin requests are not supported.' });
       return;
     }
-    this.#touch(request.headers['x-diffguide-client']);
+    this.#touch(request.headers['x-diffguide-client'], request.headers['x-diffguide-session']);
     const declaredLength = request.headers['content-length'];
     if (declaredLength !== undefined && Number(declaredLength) > maximumBodyBytes) {
       request.resume();
@@ -241,11 +241,12 @@ class DiffGuideBridge implements ReviewBridge {
   }
 
   /** Track a feedback receiver separately from MCP tool activity and explicit event ACKs. */
-  #touch(role: string | readonly string[] | undefined): void {
+  #touch(role: string | readonly string[] | undefined, session: string | readonly string[] | undefined): void {
     clearTimeout(this.#connectionTimer);
     const receiver = role === 'watcher' || role === 'channel';
+    const sessionId = receiver && isSessionId(session) ? session : this.#state.sessionId;
     this.#state = Object.freeze({
-      connected: true, deliveryReady: receiver || this.#state.deliveryReady === true, lastSeenAt: Date.now(),
+      connected: true, deliveryReady: receiver || this.#state.deliveryReady === true, lastSeenAt: Date.now(), ...sessionId === undefined ? {} : { sessionId },
     });
     this.#connectionTimer = setTimeout(() => {
       this.#connectionTimer = undefined;

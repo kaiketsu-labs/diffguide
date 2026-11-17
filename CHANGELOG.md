@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- New conversation and Resume from the review page start Claude in a terminal that stays in the background. Show terminal brings it up.
+- A thread Claude works on has a Show terminal button beside Stop while its conversation runs in a terminal.
+- Claude's menu shows how full a connected conversation's context is, on the local page and on your own checkout's PR page. Start fresh or compact it in its terminal.
 - Comments and suggestions posted to GitHub with unpushed local commits no longer fail with "The commitOID is not part of the pull request". They go on GitHub's latest commit; a file the unpushed commits changed asks you to push first.
 - Menus near the window's right edge, such as Open in terminal inside Claude's menu, open leftward instead of scrolling the page sideways.
 - Claude's chip stays beside Finish review when its step is long. Before, a gap opened between them.

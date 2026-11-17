@@ -221,8 +221,8 @@ export function createClaudeLauncher(
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Connecting running Claude' }, prepareRunning);
     context.subscriptions.push(showLiveConnection(bridge));
   };
-  /** Start Claude in the review terminal, replacing the conversation that runs there. */
-  const launch = async (resume: boolean | string): Promise<void> => {
+  /** Start Claude in the review terminal, replacing the conversation that runs there; `reveal` shows the terminal, which the review page leaves to Show terminal. */
+  const launch = async (resume: boolean | string, reveal = true): Promise<void> => {
     const replaceTerminal = liveTerminal();
     requireNoConflict(replaceTerminal);
     const command = await prepareClaudeCommand(context, bridge, storagePath, resume);
@@ -233,7 +233,7 @@ export function createClaudeLauncher(
       replaceTerminal.dispose();
     }
     terminal = vscode.window.createTerminal({ name: terminalName, cwd: bridge.descriptor.workspaceRoot });
-    terminal.show();
+    if (reveal) terminal.show();
     terminal.sendText(command);
     changed.fire();
   };
@@ -287,8 +287,8 @@ export function createClaudeLauncher(
         current.show();
         return undefined;
       }
-      case 'new': await launch(false); return undefined;
-      case 'resume': await launch(choice.session ?? true); return undefined;
+      case 'new': await launch(false, false); return undefined;
+      case 'resume': await launch(choice.session ?? true, false); return undefined;
       case 'running': await prepareRunning(); return undefined;
       case 'copy': await copy(false); return copiedNotice;
     }

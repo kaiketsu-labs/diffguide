@@ -58,7 +58,9 @@ export function fileKey(path: string, threads: readonly Thread[]): string {
   return JSON.stringify([received.viewed.has(path), collapsed.get(path) === true, received.readRanges.filter((marked) => marked.path === path), threads, received.current?.local?.[path] ?? null,
     prefs.composer?.path === path ? [ui.author, received.current?.details?.pendingComments] : null,
     // Draft reply disables itself while Claude runs, so an open form redraws when the run ends.
-    threads.some((thread) => replies.has(thread.id) || publishing.has(thread.id)) ? received.current?.claude.running === true : null]);
+    threads.some((thread) => replies.has(thread.id) || publishing.has(thread.id)) ? received.current?.claude.running === true : null,
+    // A working thread offers Show terminal only while the conversation's terminal is open.
+    threads.some((thread) => thread.source === 'local' && thread.working !== undefined) ? received.current?.claude.link?.terminal === true : null]);
 }
 
 /** Ids of the read ranges covering every selected diff line, or undefined when some selected line is unread. */

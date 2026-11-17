@@ -1,6 +1,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import * as vscode from 'vscode';
+import { readConversationContext } from '../../agents/claude/claudeSessions.js';
 import { CodeReview, readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
 import type { AgentCodeReview } from '../../core/agent.js';
 import { anchorFromText, fileAnchor } from '../../core/anchors.js';
@@ -73,6 +74,13 @@ export function localClaudeStatus(bridge: Pick<ReviewBridge, 'state'>, waiting: 
   const { connected, deliveryReady } = bridge.state;
   const text = !connected ? 'Claude not connected' : deliveryReady === true ? 'Claude connected' : 'Delivery paused';
   return { text: waiting > 0 ? `${text} · ${waiting} waiting` : text, running: false, retry: false };
+}
+
+/** Claude's status on a page whose comments go to a conversation you connect, with that conversation's context size once its receiver has reached the bridge. */
+export async function connectedClaudeStatus(bridge: ReviewBridge, waiting: number, terminal: boolean): Promise<OverviewState['claude']> {
+  const { sessionId, deliveryReady } = bridge.state;
+  const context = sessionId === undefined ? undefined : await readConversationContext(bridge.descriptor.workspaceRoot, sessionId).catch(() => undefined);
+  return { ...localClaudeStatus(bridge, waiting), ...context === undefined ? {} : { context }, link: { delivering: deliveryReady === true, terminal } };
 }
 
 /**
@@ -270,8 +278,7 @@ export class LocalReview implements vscode.Disposable {
       viewed: [...viewed],
       read,
       reviewed: { done: viewed.size, total: paths.length },
-      claude: { ...localClaudeStatus(this.bridge, this.store.pendingEvents.length),
-        link: { delivering: this.bridge.state.deliveryReady === true, terminal: this.launcher.hasTerminal } },
+      claude: await connectedClaudeStatus(this.bridge, this.store.pendingEvents.length, this.launcher.hasTerminal),
       analysis: { running: false, stale: false },
       review: await reviewView(this.#codeReview, readPicks(this.context.globalState, this.root)),
       threads: this.store.threads.map((thread) => {

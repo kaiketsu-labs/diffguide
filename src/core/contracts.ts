@@ -153,6 +153,8 @@ export interface BridgeState {
   /** A feedback receiver was recently active; this never acknowledges a comment. */
   readonly deliveryReady?: boolean;
   readonly lastSeenAt?: number;
+  /** The Claude conversation whose feedback receiver last reached the bridge. */
+  readonly sessionId?: string;
 }
 
 /** Loopback server lifecycle without a dependency on the VS Code module. */

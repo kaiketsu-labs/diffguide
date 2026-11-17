@@ -11,7 +11,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import type * as vscode from 'vscode';
 import { createReviewBridge } from '../src/agents/claude/bridge.js';
-import { listClaudeConversations } from '../src/agents/claude/claudeSessions.js';
+import { listClaudeConversations, readConversationContext } from '../src/agents/claude/claudeSessions.js';
 import { readBatch } from '../src/core/connection.js';
 import { writePrivateJson } from '../src/core/privateFiles.js';
 import { readSessionBinding } from '../src/core/sessionBinding.js';
@@ -237,4 +237,19 @@ test('the saved picker reads bounded metadata for this exact project and disting
     JSON.stringify({ type: 'ai-title', aiTitle: 'Short generated title' }),
   ].join('\n'));
   assert.equal((await listClaudeConversations(f.root, config))[0]?.title, 'Short generated title');
+});
+
+test('reads a connected conversation\'s context size from its latest main turn, and none right after a compaction', async t => {
+  const f = await fixture(t);
+  const config = join(f.root, 'claude-config');
+  const project = join(config, 'projects', f.root.replace(/[^a-zA-Z0-9]/gu, '-'));
+  await mkdir(project, { recursive: true });
+  const turn = (input: number, extra: Record<string, unknown> = {}) => JSON.stringify({ type: 'assistant', ...extra, message: { usage: { input_tokens: input, cache_read_input_tokens: 1000, cache_creation_input_tokens: 0, output_tokens: 50 } } });
+  await writeFile(join(project, `${firstSession}.jsonl`), [
+    turn(10), 'x'.repeat(300_000), turn(20), turn(500, { isSidechain: true }), JSON.stringify({ type: 'user', message: { content: 'next' } }), '',
+  ].join('\n'));
+  assert.deepEqual(await readConversationContext(f.root, firstSession, config), { tokens: 1020 });
+  assert.equal(await readConversationContext(f.root, otherSession, config), undefined);
+  await writeFile(join(project, `${firstSession}.jsonl`), [turn(20), JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { preTokens: 1020 } })].join('\n'));
+  assert.equal(await readConversationContext(f.root, firstSession, config), undefined);
 });
