@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { commitAndPush, commitFiles, syncKeepingLocalCommits } from '../../core/conflicts.js';
 import { readGitBase } from '../../core/git/git.js';
 import { git } from '../../core/git/worktrees.js';
+import { commentCommit } from '../../core/pullRequestComments.js';
 import { applySuggestion, parseSuggestions, suggestionLines, suggestionMarkdown } from '../../core/suggestions.js';
 import type { OverviewActions } from '../protocol.js';
 import type { PageParts } from './context.js';
@@ -10,7 +11,7 @@ import type { PageParts } from './context.js';
 export type SuggestionActions = Pick<OverviewActions, 'applySuggestion' | 'discardSuggestion' | 'publishSuggestion'>;
 
 /** The page's actions on code suggestions in Local threads: apply them to the worktree, undo that, or post them on GitHub. */
-export function suggestionActions({ page, remote, diff, edits, findThread, pushTarget }: PageParts): SuggestionActions {
+export function suggestionActions({ page, remote, edits, findThread, pushTarget }: PageParts): SuggestionActions {
   const { provider, pullRequest, folder, role, opened } = page;
   const { applied, undo } = edits;
   return {
@@ -56,7 +57,8 @@ export function suggestionActions({ page, remote, diff, edits, findThread, pushT
       const suggestion = parseSuggestions(messages[message]?.text ?? '')[option];
       if (suggestion === undefined || anchor.scope !== undefined) throw new Error('This suggestion no longer exists.');
       if (anchor.side !== 'working') throw new Error('GitHub takes suggestions only on the PR\'s version of a file.');
-      const head = await diff.readHead();
+      const conversation = await remote.conversation();
+      const head = await commentCommit(folder, anchor.path, conversation instanceof Error ? undefined : conversation.merge.headOid);
       const lines = suggestionLines(await readGitBase(folder, anchor.path, head), anchor);
       await provider.publishComment(pullRequest.number, { path: anchor.path, body: suggestionMarkdown(suggestion), commitId: head, side: 'RIGHT', lines }, true);
       void remote.loadThreads();

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Comments and suggestions posted to GitHub with unpushed local commits no longer fail with "The commitOID is not part of the pull request". They go on GitHub's latest commit; a file the unpushed commits changed asks you to push first.
 - Menus near the window's right edge, such as Open in terminal inside Claude's menu, open leftward instead of scrolling the page sideways.
 - Claude's chip stays beside Finish review when its step is long. Before, a gap opened between them.
 - Typing in Find keeps the page still when the match is already visible.

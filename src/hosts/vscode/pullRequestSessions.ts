@@ -357,7 +357,8 @@ export class PullRequestSessions implements ReviewSessionSource, vscode.Disposab
     const place = async (anchor: CodeAnchor): Promise<CommentPlacement> => {
       const base = await readPullRequestBase(worktree, metadata.pullRequest.baseBranch);
       if (base === undefined) throw new Error(`Could not find where #${number} branched off ${metadata.pullRequest.baseBranch}.`);
-      return placeComment(worktree, base, anchor);
+      const { merge } = await (await this.connect()).conversation(number).catch(() => ({ merge: undefined }));
+      return placeComment(worktree, base, anchor, merge?.headOid);
     };
     const commentOnDiff = async (threadId: string, placement: CommentPlacement, body: string, pending: boolean): Promise<void> => {
       const url = await (await this.connect()).publishComment(number, { ...placement, body }, pending);
