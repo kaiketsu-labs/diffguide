@@ -43,6 +43,8 @@ export interface Step {
   readonly below?: readonly [string, string];
   /** Two selectors: the first must start at or right of the end of the second, so they do not overlap on a row. */
   readonly after?: readonly [string, string];
+  /** Two selectors and a gap in pixels: the first must start right of the second's end, at most that far from it. */
+  readonly next?: readonly [string, string, number];
   /** A selector and the most pixels tall it may be, such as a row that must not wrap. */
   readonly tallest?: readonly [string, number];
   /** A selector, pseudo-element, CSS property and expected computed value. */
@@ -413,6 +415,8 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#order-guide[aria-pressed=true]' }, { expect: '#files .guide-intro button', text: 'Build guide' }, { expect: '#files .file', count: 4, shot: 'guide-unbuilt.png' },
   ], { saved: { view: 'code', order: 'guide' } }),
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
+  // A long step shortens the chip, which stays beside Finish review.
+  'working-long-step': scene({ ...working, claude: { ...working.claude, text: 'Running sed -n 225,236p src/service/classification/classifier.py' } }, [{ next: ['#bar-review', '#claude-chip', 12], shot: 'working-long-step.png' }], { saved: { view: 'files' }, width: 1200 }),
   // Claude sits in one chip in the tab row, which stays in view while you scroll; its menu holds the live steps, Review, Stop, Open in terminal and new answers.
   claude: scene(claudeIdle, [
     { expect: '#files-bar #claude-chip .chip-text', text: 'Idle' }, { absent: '#claude-chip .chip-text:has-text("Claude")' }, { absent: '#claude:has-text("Claude")' }, { level: ['#claude-chip', '#finish-review'] }, { absent: '#claude-menu:visible' }, { absent: '#column-toggle' }, { absent: '#claude-col' },
@@ -462,6 +466,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { shot: 'local.png' }, { click: '#claude-chip', expect: '#claude-menu:visible' },
   ]),
   'local-saved-overview': scene(local, [{ expect: '#panel-files:visible .file', count: 4 }, { absent: '#panel-overview:visible' }, { absent: '.tabs:visible' }], { saved: { view: 'overview' }, width: 700 }),
+  // The connect menu inside Claude's menu opens leftward when it would run past the window's right edge.
+  'local-connect-menu': scene({ ...local, claude: { ...local.claude, link: { delivering: true, terminal: true } } }, [
+    { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#connect', expect: '.connect-menu:visible' },
+    { inside: ['.connect-menu', 'body'], shot: 'local-connect-menu.png' },
+  ], { width: 800 }),
   'local-header-chip': scene(local, [{ expect: '.head:not(#files-bar) #claude-chip:visible' }]),
   // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
   syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [
@@ -499,6 +508,12 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { scrollTo: '#files', absent: '#files td.code span', shot: 'colors-later.png' },
     { send: { colors: files.slice(0, 2) }, expect: '.file[data-path="src/auth/token.ts"] td.code .hljs-keyword' }, { absent: '.file[data-path="src/api/client.ts"] td.code span' },
     { send: { colors: files.slice(2) }, expect: '.file[data-path="src/api/client.ts"] td.code .hljs-keyword', shot: 'colors-arrived.png' },
+  ] },
+  // Split view swaps the colors into both sides.
+  colorsLaterSplit: { state: pullRequest, messages: [{ state: pullRequest }, { ...filesMessage, files: uncolored }], saved: { view: 'files', layout: 'split' }, steps: [
+    { scrollTo: '#files', absent: '#files td.code span' },
+    { send: { colors: files }, expect: '.file[data-path="src/auth/user.ts"] td.code.del .hljs-keyword' },
+    { expect: '.file[data-path="src/auth/user.ts"] td.code.add .hljs-keyword', shot: 'colors-split.png' },
   ] },
   // A large PR shows its first screen at once and draws the other diffs over the next frames; a folded file draws none.
   drawnOverFrames: { state: pullRequest, messages: [{ state: pullRequest }], saved: { view: 'files' }, steps: [

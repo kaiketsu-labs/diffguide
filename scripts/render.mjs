@@ -117,6 +117,10 @@ for (const name of names) {
       const [left, right] = await page.evaluate(([a, b]) => [document.querySelector(a)?.getBoundingClientRect().left, document.querySelector(b)?.getBoundingClientRect().right], step.after);
       if (left === undefined || right === undefined || left < right) errors.push(`expected ${step.after[0]} (left ${left}) after ${step.after[1]} (right ${right})`);
     }
+    if (step.next) {
+      const [left, right] = await page.evaluate(([a, b]) => [document.querySelector(a)?.getBoundingClientRect().left, document.querySelector(b)?.getBoundingClientRect().right], step.next);
+      if (left === undefined || right === undefined || left < right || left - right > step.next[2]) errors.push(`expected ${step.next[0]} (left ${left}) within ${step.next[2]} px after ${step.next[1]} (right ${right})`);
+    }
     if (step.inside) {
       // Measures a's contents, not its box, so text that spills out of a shrunken box counts.
       const [inner, outer] = await page.evaluate(([a, b]) => {

@@ -2,7 +2,7 @@
 import { icons } from '../../icons.js';
 import type { OverviewState } from '../../protocol.js';
 import { $, button, el, icon, relativeTime } from '../dom.js';
-import { askInMenu, closeToolbarMenu, openToolbarMenu } from '../menus.js';
+import { askInMenu, closeToolbarMenu, keepInWindow, openToolbarMenu } from '../menus.js';
 import { received, ui } from '../state.js';
 import { showNotice } from '../status.js';
 import { post } from '../transport.js';
@@ -140,4 +140,5 @@ export function renderConnectMenu(): void {
     list.replaceChildren(el('p', 'ask-text', 'In the Claude terminal, run:'), command('/reload-plugins --force', 'reload'), command('/diffguide:connect', 'connect'),
       el('div', 'muted picker-note', 'Waiting for connection…'));
   }
+  if (ui.toolbarMenu) keepInWindow(ui.toolbarMenu.node);
 }
