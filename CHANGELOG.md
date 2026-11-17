@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Menus near the window's right edge, such as Open in terminal inside Claude's menu, open leftward instead of scrolling the page sideways.
+- Claude's chip stays beside Finish review when its step is long. Before, a gap opened between them.
 - Typing in Find keeps the page still when the match is already visible.
 - Opening or refocusing Find with Cmd/Ctrl+F preserves the page's scroll position.
 - Search matches have visible underlines, with a thicker underline on the current match. The find bar fits the toolbar height without shifting its controls.

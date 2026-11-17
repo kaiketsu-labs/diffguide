@@ -183,7 +183,14 @@ export function openToolbarMenu(anchor: string, rows: HTMLElement[], className =
   $(anchor).after(node);
   $(anchor).setAttribute('aria-expanded', 'true');
   ui.toolbarMenu = { anchor, node };
+  keepInWindow(node);
   (node.querySelector<HTMLElement>('input:checked, [aria-checked=true]') ?? node.querySelector<HTMLElement>('input, button'))?.focus();
+}
+
+/** Open a left-aligned menu leftward when it would run past the window's right edge, which would scroll the page sideways. */
+export function keepInWindow(node: HTMLElement): void {
+  node.classList.remove('flip');
+  if (node.getBoundingClientRect().right > document.documentElement.clientWidth) node.classList.add('flip');
 }
 
 export function closeToolbarMenu(): void {
