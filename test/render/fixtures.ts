@@ -482,6 +482,22 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '#claude-chip', expect: '#claude-menu #context:visible', text: '48k tokens' },
     { click: '#context', expect: '.context-menu', text: 'tokens after the last run', shot: 'local-context.png' }, { absent: '.context-menu .connect-row' },
   ], { width: 1000 }),
+  // Hovering a code block in an answer shows Copy at its top right; it copies the code only.
+  'code-copy': scene({ ...local, threads: local.threads.map((each) => ({ ...each, messages: [...each.messages, { author: 'claude' as const, createdAt: ago(1),
+    html: '<p>Guard it:</p><pre><code><span class="hljs-keyword">if</span> (!input) <span class="hljs-keyword">return</span> undefined;\nreturn parse(input);</code></pre>' }] })) }, [
+    { scroll: 200 }, { hover: '.msg-text pre', expect: '.code-copy:visible' }, { inside: ['.code-copy', '.msg-text pre'], shot: 'code-copy.png' },
+    { click: '.code-copy', expect: '.code-copy.copied' }, { expect: 'body[data-copied="if (!input) return undefined;\\a return parse(input);"]' },
+    { hover: '.file-head', absent: '.code-copy:visible' },
+  ], { width: 1000 }),
+  // Claude's file references link to files on the page: hover previews the lines, a click jumps there; other files stay plain code.
+  'code-refs': scene({ ...local, threads: local.threads.map((each) => ({ ...each, messages: [...each.messages, { author: 'claude' as const, createdAt: ago(1),
+    html: '<p>See <code class="code-ref" data-ref="src/api/client.ts:6">src/api/client.ts:6</code>, <code class="code-ref" data-ref="token.ts:5-6">token.ts:5-6</code> and <code class="code-ref" data-ref="src/other.ts:3">src/other.ts:3</code>.</p>' }] })) }, [
+    { scroll: 200 }, { expect: '.msg-text code.code-ref.linked', count: 2 }, { absent: '.msg-text code.code-ref.linked[data-ref="src/other.ts:3"]' },
+    { hover: '.msg-text code[data-ref="token.ts:5-6"]', expect: '.ref-preview:popover-open', text: 'src/auth/token.ts:5-6' },
+    { expect: '.ref-preview tr.picked', count: 2 }, { tallest: ['.ref-preview td.ref-num', 20], shot: 'code-refs.png' },
+    { click: '.msg-text code[data-ref="src/api/client.ts:6"]', absent: '.ref-preview:popover-open' },
+    { expect: '.file[data-path="src/api/client.ts"] tr.ref-flash td.code[data-line="6"]', shot: 'code-refs-jump.png' },
+  ], { width: 1000 }),
   'local-header-chip': scene(local, [{ expect: '.head:not(#files-bar) #claude-chip:visible' }]),
   // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
   syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [
@@ -573,6 +589,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   get submitted() { return reviewingScenes['submitted']!; },
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
+  get 'review-clear'() { return reviewingScenes['review-clear']!; },
 };
 
 const pendingMessage = (id: string, body: string): GitHubMessage => ({
@@ -642,6 +659,14 @@ const githubMarkup: OverviewState = {
 };
 
 export const reviewingScenes: Readonly<Record<string, Scene>> = {
+  // Clear asks under its button, then the card goes once the extension sends the cleared state.
+  'review-clear': { state: reviewing, messages: [{ state: reviewing }, filesMessage], saved: { view: 'files' }, width: 1100, steps: [
+    { scrollTo: '#review-card', expect: '#review-card summary #review-clear' },
+    { click: '#review-clear', expect: '.ask-menu .ask-text', text: 'Findings nobody answered are archived', shot: 'review-clear.png' },
+    { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' }, { expect: '#review-card details[open]' },
+    { click: '#review-clear', expect: '.ask-menu' }, { click: '.ask-menu button:has-text("Clear")', absent: '.ask-menu' }, { expect: '#review-card details[open]' },
+    { send: { state: { ...reviewing, review: { running: false, picked: ['correctness'] } } }, absent: '#review-card:visible' },
+  ] },
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   // The details' count lags at 5; the page counts the 2 pending comments its list shows.
   pending: { state: pendingLag, messages: [{ state: pendingLag }, filesMessage], saved: { view: 'overview' }, steps: [

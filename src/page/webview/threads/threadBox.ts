@@ -8,6 +8,7 @@ import { commentBody, commentTools } from '../conversation/comment.js';
 import { githubField } from '../conversation/mentions.js';
 import { $, agentButton, button, chevronMark, el, icon, iconButton, keepInView, personAvatar, setTip, timeLabel, titled } from '../dom.js';
 import { renderFiles } from '../files/render.js';
+import { linkCodeRefs } from '../files/refs.js';
 import { range } from '../files/selection.js';
 import { previewTabs } from '../messages.js';
 import { orbCanvas, stepMotion } from '../orb.js';
@@ -88,6 +89,7 @@ function message(entry: Message, thread?: Thread): HTMLElement {
   }
   const body = el('div', 'msg-text');
   body.innerHTML = entry.html;
+  linkCodeRefs(body);
   main.append(body);
   return item;
 }

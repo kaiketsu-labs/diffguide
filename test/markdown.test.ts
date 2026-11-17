@@ -5,7 +5,7 @@ import { fenceFilePaths, markdownBlocks, markdownHtml } from '../src/page/previe
 test('renders the Markdown Claude writes: paragraphs, lists, inline code, emphasis, links and fenced code', () => {
   const html = markdownHtml('`5` is **hardcoded**, see _notes_.\nSecond line.\n\n- `a.json` has 3\n- b\n\n1. one\n2. two\n\n> quoted\n\n## Fix\n\n```typescript\nconst total = 2;\n```');
   assert.equal(html, '<p><code>5</code> is <strong>hardcoded</strong>, see <em>notes</em>.<br>Second line.</p>'
-    + '<ul><li><code>a.json</code> has 3</li><li>b</li></ul><ol><li>one</li><li>two</li></ol>'
+    + '<ul><li><code class="code-ref" data-ref="a.json">a.json</code> has 3</li><li>b</li></ul><ol><li>one</li><li>two</li></ol>'
     + '<blockquote><p>quoted</p></blockquote><p class="md-heading"><strong>Fix</strong></p>'
     + '<pre><code><span class="hljs-keyword">const</span> total = <span class="hljs-number">2</span>;</code></pre>');
 });
@@ -77,4 +77,12 @@ test('folds a details section with Markdown inside and escapes anything looser',
     '<p>Claim.</p><details class="md-details"><summary>Evidence: <code>tested</code></summary><ul><li>ran it</li></ul></details>');
   assert.equal(markdownHtml('<details>\n<summary>x</summary>\nno end').includes('<details'), false);
   assert.equal(markdownHtml('<details open>\n<summary>x</summary>\n</details>').includes('<details'), false);
+});
+
+test('marks inline code naming a file and lines as a reference for the page to link, and leaves other code plain', () => {
+  const ref = (code: string): string => `<code class="code-ref" data-ref="${code}">${code}</code>`;
+  assert.equal(markdownHtml('See `src/a.ts:12`, `src/a.ts:3-9`, `./lib/b.py` and `docs/Makefile`.'),
+    `<p>See ${ref('src/a.ts:12')}, ${ref('src/a.ts:3-9')}, ${ref('./lib/b.py')} and ${ref('docs/Makefile')}.</p>`);
+  assert.equal(markdownHtml('`parse`, `a b.ts`, `x.ts" onclick="y` and `src/a.ts:12:4`'),
+    '<p><code>parse</code>, <code>a b.ts</code>, <code>x.ts&quot; onclick=&quot;y</code> and <code>src/a.ts:12:4</code></p>');
 });

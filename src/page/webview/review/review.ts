@@ -6,7 +6,7 @@ import { icons } from '../../icons.js';
 import { $, agentButton, button, el, icon, setTip, stateIcon, timeLabel, titled } from '../dom.js';
 import { jump } from '../files/table.js';
 import { tokenCount } from '../header/connect.js';
-import { menuRow, openToolbarMenu } from '../menus.js';
+import { askInMenu, menuRow, openToolbarMenu } from '../menus.js';
 import { collapsed, received, save, ui } from '../state.js';
 import { elapsed, stepLog } from '../status.js';
 import { allThreads, localThreads } from '../threads/model.js';
@@ -76,7 +76,7 @@ function renderReviewCard(): void {
   box.append(strip('summary', 'review', 'Claude\'s code review of these changes.', [], `${result.candidates} candidates · ${result.dropped.length} dropped`,
     count === 0 ? 'No findings' : count + (count === 1 ? ' finding' : ' findings')));
   const usage = result.usage === undefined ? undefined : usageChip(result.usage);
-  box.querySelector('summary')?.append(...timeLabel(result.createdAt), ...usage ? [usage.chip] : []);
+  box.querySelector('summary')?.append(...timeLabel(result.createdAt), ...usage ? [usage.chip] : [], clearButton());
   if (usage) box.append(usage.popover);
   const openFindings = localThreads().filter((thread) => thread.source === 'local' && thread.origin === 'review' && !thread.resolved && thread.archived !== true);
   if (openFindings.length > 0) {
@@ -133,6 +133,21 @@ function renderReviewCard(): void {
     box.append(dropped);
   }
   card.replaceChildren(box);
+}
+
+/** Clear in the review card's head, which asks first under the button. */
+function clearButton(): HTMLElement {
+  const anchor = el('span', 'menu-anchor review-clear');
+  const clear = el('button', 'icon-button');
+  clear.id = 'review-clear';
+  clear.append(icon(icons.close));
+  setTip(clear, 'Clear review');
+  clear.addEventListener('click', (event) => {
+    event.stopPropagation();
+    askInMenu('review-clear', 'Clear this review? Findings nobody answered are archived; Show archived brings them back.', 'Clear', () => post({ action: 'review-clear' }));
+  });
+  anchor.append(clear);
+  return anchor;
 }
 
 const usageDuration = (ms: number): string => {

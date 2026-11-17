@@ -71,7 +71,7 @@ DiffGuide is a VS Code extension for reviewing code with Claude on one review pa
 - Preserve immutable event IDs and original code context across edits and restarts.
 - A transport connection is not a delivery acknowledgment.
 - Do not silently attach uncertain comments or read marks to another line of code.
-- Reply Markdown stays untrusted. Model-provided paths or command arguments cannot select navigation targets.
+- Reply Markdown stays untrusted. Model-provided paths or command arguments cannot select navigation targets, except `path:line` references the page itself matches against the files it shows; those only scroll the page.
 - Keep connection credentials outside the repository and preserve existing Claude configuration.
 
 ## Commands

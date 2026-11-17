@@ -73,3 +73,7 @@ test('tells Claude a PR-level comment has no code anchor', () => {
   assert.match(prompt, /"scope": "Pull request: the comment is about the PR as a whole, from its conversation, and has no code anchor\./u);
   assert.doesNotMatch(prompt, /"path"/u);
 });
+
+test('asks Claude to cite code as path and line in backticks, which the review page links', () => {
+  assert.match(reviewInstructions, /Cite code as `path:line` in backticks/u);
+});

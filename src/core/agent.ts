@@ -165,6 +165,8 @@ export interface AgentCodeReview extends Disposable {
   result(): Promise<CodeReviewResult | undefined>;
   start(input: CodeReviewInput): void;
   stop(): void;
+  /** Forget the last finished review. */
+  clear(): Promise<void>;
 }
 
 /** The agent's guide through a change: its blocks in reading order, with notes. */

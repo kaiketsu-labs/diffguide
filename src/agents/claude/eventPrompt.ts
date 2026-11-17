@@ -1,10 +1,10 @@
 import type { ReviewEvent, ReviewThread } from '../../core/contracts.js';
 
 /** Shared Markdown contract for answers rendered in native review comments. */
-export const reviewReplyInstructions = 'Write the reply text as Markdown. Put code declarations, implementations and examples in fenced code blocks with a language identifier, such as javascript, typescript, python, or diff. This includes import statements, doc comments, incomplete function headers and functions that happen to fit on one line. Put the opening fence, each logical code line, and the closing fence on separate lines; preserve indentation and actual newlines. Use inline backticks only for identifiers and short code expressions within prose. Keep explanatory prose outside code fences. Do not double-escape newlines or Markdown.';
+export const reviewReplyInstructions = 'Write the reply text as Markdown. Put code declarations, implementations and examples in fenced code blocks with a language identifier, such as javascript, typescript, python, or diff. This includes import statements, doc comments, incomplete function headers and functions that happen to fit on one line. Put the opening fence, each logical code line, and the closing fence on separate lines; preserve indentation and actual newlines. Use inline backticks only for identifiers, short code expressions and code references within prose. Cite code you refer to by its repository-relative path and line in backticks, such as `src/app.ts:42` or `src/app.ts:42-48`; the review page links them to the code. Keep explanatory prose outside code fences. Do not double-escape newlines or Markdown.';
 
 /** Keep wake-up events concise while the reply tool exposes the full formatting contract. */
-const reviewReplyReminder = 'Fence all code, including imports and one-line functions, with a language tag. Preserve indentation and real newlines.';
+const reviewReplyReminder = 'Fence all code, including imports and one-line functions, with a language tag. Preserve indentation and real newlines. Cite code as `path:line` in backticks.';
 
 /** Instructions applied to every authenticated human review event. */
 export const reviewInstructions = `You receive authenticated code-review feedback from the human in VS Code.

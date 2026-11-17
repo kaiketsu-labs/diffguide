@@ -47,7 +47,11 @@ body.local .layout{grid-template-columns:minmax(0,1fr)}body.local #files-bar{dis
 .bar span{display:block;height:100%;border-radius:inherit;background:var(--brand)}
 .ref{min-height:20px;height:20px;gap:var(--space-4);padding:0 var(--space-6);border:0;color:var(--github);background:var(--github-soft);font:12px/18px var(--font-code)}
 .ref:hover{filter:none}.ref svg{width:12px;height:12px;opacity:.55}.ref:hover svg,.ref:focus-visible svg{opacity:1}
-.ref .done,.ref.copied .copy{display:none}.ref.copied .done{display:block;opacity:1}
+.ref .done,.ref.copied .copy{display:none}
+.msg-text code.code-ref.linked{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}.msg-text code.code-ref.linked:hover{text-decoration-style:solid}
+.ref-preview{position:fixed;inset:auto;margin:0;width:max-content;max-width:min(560px,calc(100vw - 16px));padding:var(--space-6) 0;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-raised);color:var(--ink);box-shadow:var(--shadow-overlay);font-size:12px;pointer-events:none}.ref-preview-head{padding:0 var(--space-8) var(--space-4);font-family:var(--font-code);color:var(--ink-muted)}.ref-preview>.muted{padding:0 var(--space-8)}.ref-preview table{width:auto;table-layout:auto;border-collapse:collapse;font-family:var(--font-code)}.ref-preview td{padding:0 var(--space-8);white-space:pre;line-height:18px}.ref-preview td.ref-num{color:var(--ink-muted);text-align:right;user-select:none}.ref-preview tr.ref-add td{background:var(--diff-add)}.ref-preview tr.picked td.ref-num{color:var(--ink);box-shadow:inset 2px 0 0 var(--agent)}
+tr.ref-flash td{animation:ref-flash 1.2s ease-out}@keyframes ref-flash{from{background:var(--agent-soft)}}
+.code-copy{position:absolute;z-index:5;width:24px;height:24px;min-height:24px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-raised)}.code-copy svg{width:14px;height:14px}.code-copy .done,.code-copy.copied svg:not(.done){display:none}.code-copy.copied .done{display:block}.ref.copied .done{display:block;opacity:1}
 ul{list-style:none;margin:0;padding:0}li{padding:var(--space-6) 0;font-size:12px}li+li{border-top:1px solid var(--line)}
 .where{font-family:var(--font-code);font-size:12px}.text{overflow-wrap:anywhere}
 .ok{color:var(--success)}.bad{color:var(--danger)}.wait{color:var(--warning)}

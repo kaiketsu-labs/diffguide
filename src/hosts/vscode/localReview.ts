@@ -11,6 +11,7 @@ import { resolveExecutable } from '../../core/executables.js';
 import type { ChangeRequestSummary } from '../../core/forge.js';
 import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { git } from '../../core/git/worktrees.js';
+import { clearReview } from '../../core/review.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
 import { applySuggestion, parseSuggestions } from '../../core/suggestions.js';
 import { type ColorFiles, colorInBatches, type FileDiff, highlightSource, knownColors, readPullRequestDiffPlainFirst, type Uncolored, wholeFileCode, wholeFileDiff } from '../../core/unifiedDiff.js';
@@ -427,6 +428,7 @@ export class LocalReview implements vscode.Disposable {
         });
       },
       stopReview: () => { this.#codeReview.stop(); },
+      clearReview: () => clearReview(this.store, this.#codeReview),
       pickReviewers: async (picks) => { await savePicks(this.context.globalState, this.root, picks); this.#marksChanged.fire(); },
       publish: unsupported, postToGitHub: unsupported, commentOnGitHub: unsupported, commentOnGitHubFile: unsupported, replyOnGitHub: unsupported, askAboutGitHub: unsupported, askAboutComment: unsupported, resolveOnGitHub: unsupported,
       deleteOnGitHub: unsupported, push: unsupported, readCommit: unsupported, submitReview: unsupported, merge: unsupported, addComment: unsupported,
