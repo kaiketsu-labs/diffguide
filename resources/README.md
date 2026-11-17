@@ -1,12 +1,14 @@
 # DiffGuide identity
 
-The mark is the DiffGuide orb over a pair of diff lines: a + line and a − line. The orb uses larger pixels than the lines. The orb is the companion character; its look is recorded in [docs/design/orb-character.html](../docs/design/orb-character.html).
+The mark is the Diff pair, DiffGuide's companion: two stacked rounded bars, an added line (jade) over a removed line (grey), a little out of step, with two pill eyes on the top bar. Its look and motions are recorded in [docs/design/diff-pair-character.html](../docs/design/diff-pair-character.html).
 
-- `icon.svg`: editable vector source, 256 × 256. The paper tile fills the whole canvas. The orb is drawn in 12 px cells and the lines are 9 px thick, so every edge lands on a whole pixel. A two-step pixel halo frames the orb's top and sides, with three loose particles outside it.
-- `icon.png`: 256 × 256 RGBA PNG used by the extension manifest and Marketplace listing.
-- `review.svg`: 24 × 24 one-color sidebar icon: a solid pixel orb with eye holes over 1 px + and − lines. The orb uses 1.5 px cells, so it fills the full height and stays sharp on 2x screens; on 1x screens its edges soften.
-- `diffguide-icons-<hash>.woff`: icon font for menus, the sidebar and the status bar, built from `src/icons.ts` by `npm run icons`. See [docs/ICONS.md](../docs/ICONS.md).
+- `icon.svg`: editable vector source, 256 × 256. A warm light tile with corners of radius 58 and a hairline edge. The pair sits on it inset by the page's framing (translate .1, .08, scale .8 of the unit square). Each bar has a darker edge under it; only the grey bar casts a soft bar-shaped shadow.
+- `icon.png`: 256 × 256 RGBA PNG used by the extension manifest and Marketplace listing, rendered from `icon.svg`.
+- `review.svg`: 24 × 24 one-color sidebar icon: the pair in `#C5C5C5`, its eyes masked out so the background shows through.
+- `diffguide-icons-<hash>.woff`: icon font for menus, the sidebar and the status bar, built from `src/page/icons.ts` by `npm run icons`. See [docs/ICONS.md](../docs/ICONS.md).
 
-Palette: paper tile `#FFFFFF` to `#E3E9EF`, slate `#2F7EA6` with tints for the orb's inner light, `#1B4A62` for the rim facing away from the top-left light, white for the highlight, slate at 24% and 9% opacity for the halo, `#7EAFC8` for the particles, grey `#9AA7B3` for the removed line.
+Proportions on the unit square: bars x .18, width .64; top bar y .20, height .34, radius .12; bottom bar y .59, height .24, radius .10; bars offset ±.035; edge .045; eyes .075 × .13, .2 apart, centered on the top bar.
 
-Export `icon.svg` at 256 × 256 with transparency to regenerate `icon.png`. Both are drawn from code, with no stock imagery or generated bitmaps. VS Code scales `review.svg` to 16 px in some places, where its pixel edges soften.
+Palette, light: tile `#FFFDF9` to `#ECE7DF`; top bar `#1E8463` with a `#2A9D78` highlight at its top and `#125540` edge; white eyes; bottom bar `#A6ACA9` with `#767C79` edge; shadow `#0A1E2D` at 24%. The review page's dark themes use top `#3DB88C`, highlight `#4FC79A`, edge `#237A5C`, eyes `#0B2A20`, bottom `#6B7270`, edge `#4A504E`. One-color icons take the agent color, `#1e8463` light and `#3db88c` dark.
+
+To regenerate `icon.png`, render `icon.svg` at 256 × 256 with a transparent background, for example in headless Chromium through `playwright-core`. Both are drawn from code, with no stock imagery or generated bitmaps.

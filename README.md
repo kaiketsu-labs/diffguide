@@ -47,7 +47,7 @@ PR pages have Overview and Code tabs. The header's More menu holds PR actions; t
   </tr>
   <tr>
     <td><img src="docs/media/icons/sidebar.png" width="36" alt=""></td>
-    <td><b>Pull Requests sidebar.</b> Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The orb marks rows where the agent is working.</td>
+    <td><b>Pull Requests sidebar.</b> Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The Diff pair, DiffGuide's companion, marks rows where the agent is working.</td>
   </tr>
   <tr>
     <td><img src="docs/media/icons/linked.png" width="36" alt=""></td>

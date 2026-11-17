@@ -41,9 +41,9 @@ const themeTokens: Readonly<Record<string, ThemeToken>> = {
 };
 
 const brandTokens: Readonly<Record<string, BrandToken>> = {
-  // The coding agent, whichever one runs: its actions, replies and the orb that stands for it.
-  agent: { dark: '#7fc0de', light: '#2f7ea6' },
-  'agent-soft': { dark: '#7fc0de2e', light: '#2f7ea61f' },
+  // The coding agent, whichever one runs: its actions, replies and the Diff pair that stands for it.
+  agent: { dark: '#3db88c', light: '#1e8463' },
+  'agent-soft': { dark: '#3db88c2e', light: '#1e84631f' },
   'on-agent': { dark: '#0b1f2a', light: '#ffffff' },
   github: { dark: '#7fa8f0', light: '#2f5fc4' },
   'github-soft': { dark: '#7fa8f024', light: '#2f5fc41a' },
@@ -63,7 +63,7 @@ const aliases: Readonly<Record<string, string>> = {
   'on-brand': 'surface',
   action: 'brand',
   'on-action': 'on-brand',
-  // The orb's shading tones derive from its color.
+  // The one-color Diff pair on the working chip and the tint behind Claude's avatar.
   orb: 'agent',
   'orb-soft': 'agent-soft',
 };

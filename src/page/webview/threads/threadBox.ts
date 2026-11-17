@@ -30,11 +30,11 @@ const threadUnfolded = new Set<string>();
 const foldThreadsAbove = 4;
 const unfoldedMessages = 3;
 
-/** The orb for a thread that waits for Claude: it dozes off while nothing will pick the comment up, and nods once Claude does. */
+/** The pair for a thread that waits for Claude: it falls asleep while nothing will pick the comment up, and jolts awake once Claude does. */
 const waitMotion = (id: string): StepPick => ({ verb }) => {
   const since = workingSince.get(id)?.since;
-  if (verb === 'Picked up') return ['nod', since];
-  if (verb === 'Waiting for Claude' && !(received.current?.claude.link?.delivering ?? received.current?.claude.running)) return ['doze', since];
+  if (verb === 'Picked up') return ['pickedUp', since];
+  if (verb === 'Waiting for Claude' && !(received.current?.claude.link?.delivering ?? received.current?.claude.running)) return ['waiting', since];
   return [stepMotion(verb)];
 };
 

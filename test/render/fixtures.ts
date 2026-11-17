@@ -1,3 +1,4 @@
+import type { AgentStep } from '../../src/core/agent.js';
 import { changeBlocks } from '../../src/core/prAnalysis.js';
 import type { DiffLine, FileDiff } from '../../src/core/unifiedDiff.js';
 import { openingOverviewState } from '../../src/page/overviewState.js';
@@ -215,6 +216,23 @@ export const readme: OverviewState = {
         { author: 'human', html: '<p>Does a timeout use up an attempt?</p>', createdAt: ago(4), intent: 'ask' },
         { author: 'claude', html: '<p>Yes. The <code>catch</code> swallows a <code>TimeoutError</code>, so the loop counts it as a failed attempt. <code>npm test -- retry</code> passes, 12 tests.</p>', createdAt: ago(3) },
       ] },
+  ],
+};
+
+/** Claude's Diff pair on a reading, an editing and a thinking step, beside a comment that waits with nothing to pick it up. */
+const companionThread = (id: string, line: number, title: string, working: string, steps?: AgentStep[]): OverviewState['threads'][number] => ({
+  id, location: `src/retry.ts:${line}`, text: title, status: working, path: 'src/retry.ts', side: 'new', startLine: line, endLine: line, resolved: false, title, working,
+  ...steps === undefined ? {} : { progress: { startedAt: now - 12_000, steps } },
+  messages: [{ author: 'human', html: `<p>${title}</p>`, createdAt: ago(1), intent: 'implement' }],
+});
+// A PR page, not the local one: render.mjs only sets the theme's body class on a body without a class.
+const companion: OverviewState = {
+  ...pullRequest, claude: { text: 'Claude idle', running: false, retry: false },
+  threads: [
+    companionThread('a1111111-1111-1111-1111-111111111111', 9, 'Read the timeout from settings.', 'Working', [{ verb: 'Read', target: 'src/settings.ts', done: false }]),
+    companionThread('a2222222-2222-2222-2222-222222222222', 12, 'Wrap the call in withTimeout.', 'Editing', [{ verb: 'Read', target: 'src/retry.ts', done: true }, { verb: 'Edit', target: 'src/retry.ts', done: false }]),
+    companionThread('a3333333-3333-3333-3333-333333333333', 14, 'Rethrow anything but a timeout.', 'Working', [{ verb: 'Bash', target: 'npm test -- retry', done: false }]),
+    companionThread('a4444444-4444-4444-4444-444444444444', 16, 'Keep the fixed delay.', 'Waiting for Claude'),
   ],
 };
 
@@ -501,6 +519,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
   readme: { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files', composer: { path: 'src/retry.ts', side: 'new', start: 16, end: 16, text: 'Keep the fixed delay for now, the backend rate limits retries.' } },
     width: 1100, height: 900, steps: [{ scrollTo: '#files', shot: 'readme.png' }] },
+  companion: { state: companion, messages: [{ state: companion }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
+    saved: { view: 'files' }, width: 1100, height: 1100, steps: [
+      { expect: 'canvas.orb.step[data-motion="reading"]' }, { expect: 'canvas.orb.step[data-motion="editing"]' }, { expect: 'canvas.orb.step[data-motion="thinking"]' },
+      { expect: 'canvas.orb.step[data-motion="waiting"]' }, { scrollTo: '#files', wait: 600, shot: 'companion.png' },
+    ] },
   hover: scene(pullRequest, [
     { scrollTo: '#files', hover: '.nav-thread', wait: 600, shot: 'hover-nav.png' },
     { hover: '#files', wait: 100, shot: 'hover-gone.png' },

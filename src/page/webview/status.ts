@@ -14,9 +14,9 @@ export const elapsed = (since: number, until = Date.now()): string => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
-/** A run's orb motion per step: it wakes as the run starts, then follows the step's verb. */
+/** A run's orb motion per step: Starting until the first step, then the step's verb. */
 export const runMotion = (progress: AgentProgress): StepPick => (step) =>
-  progress.steps.length === 0 ? ['wake', performance.now() - (Date.now() - progress.startedAt)] : [stepMotion(step.verb)];
+  progress.steps.length === 0 ? ['starting', performance.now() - (Date.now() - progress.startedAt)] : [stepMotion(step.verb)];
 
 /** When each thread's current waiting or pickup state began, so its orb plays the change once; threads already in that state when the page opened skip it. */
 export const workingSince = new Map<string, { readonly working: string; readonly since: number }>();

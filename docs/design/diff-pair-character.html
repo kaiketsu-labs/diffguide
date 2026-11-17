@@ -1,0 +1,567 @@
+<title>DiffGuide companion directions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: variant picker, then one large preview with states, then every real-size use of the picked variant. */
+:root {
+  --bg: #F3F5F7; --surface: #FFFFFF; --ink: #1B2430; --ink-muted: #5B6775; --line: #D9DEE4; --accent: #2F7EA6;
+  --font-ui: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161B; --surface: #1A2027; --ink: #E3E8EE; --ink-muted: #95A1AE; --line: #2C343E; --accent: #7FC0DE; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #12161B; --surface: #1A2027; --ink: #E3E8EE; --ink-muted: #95A1AE; --line: #2C343E; --accent: #7FC0DE; color-scheme: dark }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-block: 32px 96px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 32px; }
+section, .col { display: grid; gap: 12px; min-width: 0; align-content: start; }
+h1 { font-size: 26px; line-height: 1.2; font-weight: 600; margin: 0; text-wrap: balance; }
+h3 { font-size: 12px; font-weight: 500; margin: 0; color: var(--ink-muted); letter-spacing: .07em; text-transform: uppercase; }
+p { margin: 0; max-width: 72ch; }
+.muted { color: var(--ink-muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 20px; }
+.variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.variant { font: inherit; color: var(--ink); display: grid; justify-items: center; gap: 4px; padding: 12px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+.variant[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.variant b { font-weight: 500; font-size: 13px; }
+.variant span { font-size: 12px; color: var(--ink-muted); text-align: center; }
+h2 { font-size: 20px; line-height: 1.3; font-weight: 600; margin: 0; text-wrap: balance; }
+.q { display: grid; gap: 10px; }
+.q h3 { font-size: 14px; letter-spacing: 0; text-transform: none; color: var(--ink); font-weight: 600; }
+.q p { color: var(--ink-muted); font-size: 13px; }
+.rec { font-size: 11px; font-family: var(--font-code); color: var(--accent); }
+.rows { display: grid; gap: 4px; width: 100%; font-size: 12px; text-align: left; }
+.rows div { display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; }
+.pill { font-family: var(--font-code); font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink-muted); white-space: nowrap; }
+.ratio { font-family: var(--font-code); font-size: 11px; color: var(--ink-muted); display: grid; gap: 1px; width: 100%; }
+.ratio .low { color: #B4572E; }
+.pill.new { color: var(--accent); border-color: var(--accent); }
+.answer { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding-top: 4px; border-top: 1px solid var(--line); }
+.answer code { font-family: var(--font-code); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.mcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; }
+.mcard .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.mcard .tag { font-family: var(--font-code); font-size: 11px; color: var(--ink-muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+.mcard b { font-weight: 600; } .mcard p { font-size: 13px; }
+.mrows { display: grid; gap: 4px; }
+.steprow { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 4px; font: 12px -apple-system, "Segoe UI", sans-serif; }
+.steprow.d { background: #1F1F1F; color: #CCCCCC; } .steprow.l { background: #FFFFFF; color: #3B3B3B; border: 1px solid var(--line); }
+.mag { display: flex; gap: 8px; flex-wrap: wrap; }
+.mag canvas { border-radius: 6px; max-width: 100%; } .av { border-radius: 3px; }
+.mag canvas.dark, .av.dark { background: #1F1F1F; } .mag canvas.light, .av.light { background: #FFFFFF; outline: 1px solid var(--line); }
+.variant:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.strip { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.cap { display: grid; gap: 4px; justify-items: center; font-size: 11px; color: var(--ink-muted); font-family: var(--font-code); text-align: center; }
+.stage canvas, .states canvas { background: var(--bg); border-radius: 14px; }
+button { font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.bar { width: 48px; display: grid; border-radius: 6px; overflow: hidden; }
+.bar .it { width: 48px; height: 48px; display: grid; place-items: center; position: relative; }
+.bar .it.act::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; }
+.bar.d { background: #181818; } .bar.d .act::before { background: #E7E7E7; }
+.bar.l { background: #F8F8F8; border: 1px solid var(--line); } .bar.l .act::before { background: #1F1F1F; }
+.bar.h { background: #000; outline: 1px solid #6FC3DF; } .bar.h .act { outline: 1px dashed #6FC3DF; outline-offset: -4px; } .bar.h .act::before { background: #FFF; }
+.px canvas { image-rendering: pixelated; border-radius: 4px; }
+.tabs { display: grid; gap: 6px; }
+.tab { display: flex; gap: 6px; align-items: center; height: 35px; padding: 0 12px; font: 13px -apple-system, "Segoe UI", sans-serif; border-radius: 4px; }
+.tab.d { background: #1F1F1F; color: #CCCCCC; } .tab.l { background: #FFFFFF; color: #3B3B3B; border: 1px solid var(--line); }
+.market { display: flex; gap: 12px; flex-wrap: wrap; }
+.mk { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 8px; min-width: 0; flex: 1 1 260px; }
+.mk.d { background: #1F1F1F; color: #CCCCCC; } .mk.l { background: #FFFFFF; color: #3B3B3B; border: 1px solid var(--line); }
+.mk .t { font-weight: 600; font-size: 14px; } .mk .s { font-size: 12px; opacity: .75; }
+@media (max-width: 760px) { .row { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="wrap">
+  <section>
+    <h1>DiffGuide companion directions</h1>
+    <p class="muted">Round 3. Back to the flat 2D Diff pair from round 1, with the mouth gone: the bottom bar is a plain removed line. Pick a proportion; every mock below follows it.</p>
+    <div class="strip"><span class="muted">Motion</span><button id="motion" aria-pressed="true">Playing</button></div>
+  </section>
+
+  <section class="card" id="decide">
+    <h2>Three decisions before I write the files</h2>
+    <div class="q"><h3>1. Shadow under the grey bar</h3><div class="variants" id="qShadow"></div></div>
+    <div class="q"><h3>2. App icon tile</h3><div class="variants" id="qTile"></div></div>
+    <div class="q"><h3>3. How far the Diff pair replaces the old orb</h3>
+      <p>The orb is in four places today: the app icon, the sidebar icon, the small built-in icons (orb, asleep, away and the agent action badges), and the animated orb on the review page with 9 motions (rest, think, search, write, lead, sleep, doze, wake, nod).</p>
+      <div class="variants" id="qScope"></div></div>
+    <div class="q"><h3>4. Colors</h3>
+      <p>Jade variations. The added bar's color is also the agent color: the working icon in the sidebar and on review tabs. Numbers are contrast ratios; icons and shapes need 3:1 to stay readable.</p>
+      <div class="variants" id="qPalette"></div></div>
+    <div class="q"><h3>5. Light tile background</h3>
+      <p>The old tile was tinted blue to match the slate orb. With jade it should change.</p>
+      <div class="variants" id="qBg"></div></div>
+    <div class="q"><h3>6. Dark theme colors</h3>
+      <p>In dark themes the character sits on VS Code's near-black editor. Each option shows a step at 4×, the 16 px avatar, and the review tab icon. Bar contrast needs 3:1 against the editor to stay visible.</p>
+      <div class="variants" id="qDark"></div></div>
+    <div class="answer"><code id="answer"></code><button id="copy">Copy answers</button></div>
+  </section>
+
+  <section>
+    <h3>Proportions, click to pick</h3>
+    <div class="variants" id="variants"></div>
+  </section>
+
+  <section>
+    <h3>Done eyes, click to pick</h3>
+    <div class="variants" id="doneEyes"></div>
+  </section>
+
+  <article class="card">
+    <div class="row">
+      <div class="col">
+        <h3>Preview and states</h3>
+        <div class="strip">
+          <div class="stage" id="stage"></div>
+          <div class="strip states" id="states"></div>
+        </div>
+        <h3>App icon</h3>
+        <div class="strip" id="tiles"></div>
+        <h3>Marketplace listing</h3>
+        <div class="market" id="market"></div>
+      </div>
+      <div class="col">
+        <h3>Activity bar, 24 px glyph</h3>
+        <div class="strip" id="bars"></div>
+        <h3>Review tab, 16 px, agent color</h3>
+        <div class="tabs" id="tabs"></div>
+        <h3>16 px on a 1x screen, magnified 4×</h3>
+        <div class="strip px" id="px"></div>
+        <h3>Round 1, for comparison</h3>
+        <div class="strip" id="before"></div>
+      </div>
+    </div>
+  </article>
+
+  <section id="motions">
+    <h2>Motions on the review page</h2>
+    <p class="muted">A new set built from what only this character can do: two bars that slide, stack and line up, and a removed line that turns into an added one. Each card names the old motion it replaces. Shown at the size the review page draws them (30 × 20 px next to a step) in VS Code dark and light, then 4× magnified.</p>
+    <div class="mgrid" id="mgrid"></div>
+  </section>
+</div>
+
+<script>
+(() => {
+const C = { slate: '#2F7EA6', slateHi: '#3D93BD', deep: '#1B4A62', grey: '#9AA7B3', greyDeep: '#6E7D8B', white: '#FFFFFF', agentLight: '#2f7ea6', agentDark: '#7fc0de' };
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+let playing = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const STILL = { idle: .5, working: .35, done: .9 };
+
+const VARIANTS = [
+  { id: 'r1', name: 'Round 1', note: 'Same shapes as before, minus the mouth.', top: [.2, .34], bot: [.59, .24], r: [.12, .1], eye: [.075, .13, .2], ex: .045 },
+  { id: 'big', name: 'Big head', note: 'Taller added bar, bigger eyes, slimmer removed bar.', top: [.17, .4], bot: [.62, .18], r: [.13, .09], eye: [.085, .15, .22], ex: .045 },
+  { id: 'pills', name: 'Pills', note: 'Fully round ends.', top: [.2, .34], bot: [.59, .24], r: ['pill', 'pill'], eye: [.075, .13, .2], ex: .045 },
+  { id: 'flat', name: 'Flat', note: 'No extrusion or shadow. Cleanest at small sizes.', top: [.2, .34], bot: [.6, .22], r: [.12, .1], eye: [.075, .13, .2], ex: 0 }
+];
+let pick = 'r1', shadowMode = 'drop', doneEyes = 'same';
+const DONE_EYES = [
+  ['arc', 'Arcs', 'Current: thin ∩ lines.'],
+  ['crescent', 'Crescents', 'Filled smile eyes, thick on top, tapered ends.'],
+  ['squint', 'Content', 'Short flat pills, eyes relaxed shut.'],
+  ['up', 'Look up', 'Open eyes, shorter and raised, looking at you.'],
+  ['same', 'Unchanged', 'Eyes stay open; the lined-up bars and the hop say done.']
+];
+
+function rr(g, x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); }
+function face(state, t) {
+  let bob = 0, lx = 0, kind = 'open';
+  if (state === 'idle') { bob = Math.sin(t * 2) * .012; if (t % 3.4 < .14) kind = 'closed'; }
+  if (state === 'working') { lx = Math.sin(t * 4) * .03; bob = Math.sin(t * 9) * .005; }
+  if (state === 'done') { kind = 'happy'; const p = t % 1.8; bob = p < .4 ? -Math.sin(p / .4 * Math.PI) * .04 : 0; }
+  return { bob, lx, kind };
+}
+function eyes(g, cx, cy, gap, w, h, f, col) {
+  g.fillStyle = col; g.strokeStyle = col;
+  for (const sx of [-1, 1]) {
+    const x = cx + sx * gap / 2 + f.lx;
+    if (f.kind === 'open') { rr(g, x - w / 2, cy - h / 2, w, h, w / 2); g.fill(); }
+    else if (f.kind === 'closed') { rr(g, x - w / 2, cy - w * .3, w, w * .6, w * .3); g.fill(); }
+    else if (doneEyes === 'arc') { g.lineWidth = w * .75; g.lineCap = 'round'; g.beginPath(); g.arc(x, cy + h * .15, w * .7, Math.PI + .35, Math.PI * 2 - .35); g.stroke(); }
+    else if (doneEyes === 'crescent') { g.beginPath(); g.ellipse(x, cy + h * .28, w * .9, h * .66, 0, Math.PI, Math.PI * 2); g.closePath(); g.ellipse(x, cy + h * .28, w * .9, h * .2, 0, Math.PI, Math.PI * 2); g.closePath(); g.fill('evenodd'); }
+    else if (doneEyes === 'squint') { rr(g, x - w * .75, cy - w * .28, w * 1.5, w * .56, w * .28); g.fill(); }
+    else if (doneEyes === 'up') { rr(g, x - w / 2, cy - h * .5 - h * .12, w, h * .72, w / 2); g.fill(); }
+    else { rr(g, x - w / 2, cy - h / 2, w, h, w / 2); g.fill(); }
+  }
+}
+function drawPair(g, v, state, t, mouth) {
+  const f = face(state, t), b = f.bob;
+  const off = state === 'working' ? Math.sin(t * 3) * .05 : state === 'done' ? 0 : .035;
+  const [ty, th] = v.top, [by, bh] = v.bot;
+  const rt = v.r[0] === 'pill' ? th / 2 : v.r[0], rb = v.r[1] === 'pill' ? bh / 2 : v.r[1];
+  if (v.ex) {
+    g.save();
+    // Front view: the floor is a line, so the shadow takes the bar's own shape. shadowBlur is in canvas pixels, not transform units.
+    if (shadowMode === 'drop') { const W = g.canvas.width; g.shadowColor = 'rgba(10,30,45,.24)'; g.shadowBlur = W * .035; g.shadowOffsetY = W * .02; }
+    g.fillStyle = C.greyDeep; rr(g, .18 + off, by + b + v.ex, .64, bh, rb); g.fill();
+    g.restore();
+  }
+  g.fillStyle = C.grey; rr(g, .18 + off, by + b, .64, bh, rb); g.fill();
+  if (v.ex) { g.fillStyle = C.deep; rr(g, .18 - off, ty + b + v.ex, .64, th, rt); g.fill(); }
+  const tg = g.createLinearGradient(0, ty, 0, ty + th); tg.addColorStop(0, v.ex ? C.slateHi : C.slate); tg.addColorStop(1, C.slate);
+  g.fillStyle = tg; rr(g, .18 - off, ty + b, .64, th, rt); g.fill();
+  const [ew, eh, gap] = v.eye;
+  eyes(g, .5 - off, ty + th / 2 + b, gap, ew, eh, f, C.white);
+  if (mouth) { g.fillStyle = C.white; rr(g, .42 + off, by + bh / 2 - .022 + b, .16, .045, .022); g.fill(); }
+}
+const TILES = { light: ['#FFFFFF', '#E6E8E7'], dark: ['#21465C', '#0E2230'] };
+
+const views = [];
+function view(size, o) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = Math.round(size * DPR); cv.style.width = cv.style.height = size + 'px';
+  const v = { cv, state: 'idle', ...o }; views.push(v); paint(v, STILL[v.state]); return v;
+}
+function paint(v, t) {
+  const g = v.cv.getContext('2d'), W = v.cv.width;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, W); g.setTransform(W, 0, 0, W, 0, 0);
+  if (v.tile) { const [a, b] = TILES[v.tile], tg = g.createLinearGradient(.15, 0, .85, 1); tg.addColorStop(0, a); tg.addColorStop(1, b); g.fillStyle = tg; rr(g, 0, 0, 1, 1, .22); g.fill(); g.translate(.1, .08); g.scale(.8, .8); }
+  const vr = v.variant ? VARIANTS.find(x => x.id === v.variant) : VARIANTS.find(x => x.id === pick);
+  drawPair(g, vr, v.state, t, v.mouth);
+}
+
+/* Hand-tuned one-color glyphs. Integer edges so they stay sharp at 1x. */
+const GLYPH = {
+  r1: { g24: '<rect x="2" y="3" width="18" height="10" rx="3"/><rect x="4" y="15" width="18" height="6" rx="2.5"/>', c24: '<rect x="7" y="6" width="2" height="4" rx="1"/><rect x="13" y="6" width="2" height="4" rx="1"/>',
+        g16: '<rect x="1" y="2" width="12" height="7" rx="2"/><rect x="3" y="10" width="12" height="4" rx="1.5"/>', c16: '<rect x="4" y="4" width="2" height="3" rx="1"/><rect x="8" y="4" width="2" height="3" rx="1"/>' },
+  big: { g24: '<rect x="2" y="2" width="18" height="12" rx="3.5"/><rect x="4" y="16" width="18" height="5" rx="2.5"/>', c24: '<rect x="6.5" y="5.5" width="2.5" height="5" rx="1.25"/><rect x="13" y="5.5" width="2.5" height="5" rx="1.25"/>',
+         g16: '<rect x="1" y="1" width="12" height="9" rx="2.5"/><rect x="3" y="11" width="12" height="3" rx="1.5"/>', c16: '<rect x="4" y="3" width="2" height="4" rx="1"/><rect x="8" y="3" width="2" height="4" rx="1"/>' },
+  pills: { g24: '<rect x="2" y="3" width="18" height="10" rx="5"/><rect x="4" y="15" width="18" height="6" rx="3"/>', c24: '<rect x="7" y="6" width="2" height="4" rx="1"/><rect x="13" y="6" width="2" height="4" rx="1"/>',
+           g16: '<rect x="1" y="2" width="12" height="7" rx="3.5"/><rect x="3" y="10" width="12" height="4" rx="2"/>', c16: '<rect x="4" y="4" width="2" height="3" rx="1"/><rect x="8" y="4" width="2" height="3" rx="1"/>' }
+};
+GLYPH.flat = GLYPH.r1;
+let uid = 0;
+function svg(shapes, cuts, vb, size, color) {
+  const id = 'm' + (uid++);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${vb} ${vb}" aria-hidden="true"><mask id="${id}"><rect width="${vb}" height="${vb}" fill="#fff"/><g fill="#000">${cuts}</g></mask><g fill="${color}" mask="url(#${id})">${shapes}</g></svg>`;
+}
+const g24 = (c, size = 24) => { const G = GLYPH[pick]; return svg(G.g24, G.c24, 24, size, c); };
+const g16 = c => { const G = GLYPH[pick]; return svg(G.g16, G.c16, 16, 16, c); };
+function pxCanvas(markup, bg, outline) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 16; cv.style.width = cv.style.height = '64px'; cv.style.background = bg; if (outline) cv.style.outline = '1px solid var(--line)';
+  const img = new Image(); img.onload = () => cv.getContext('2d').drawImage(img, 0, 0, 16, 16); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
+  return cv;
+}
+
+const $ = id => document.getElementById(id);
+function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+function cap(node, label) { const w = el('div', 'cap'); w.append(node, document.createTextNode(label)); return w; }
+const STANDINS = [
+  c => `<rect x="5" y="3.5" width="10.5" height="14" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M9 20.5h10.5V7.5" fill="none" stroke="${c}" stroke-width="1.5"/>`,
+  c => `<circle cx="10" cy="10" r="5.5" fill="none" stroke="${c}" stroke-width="1.6"/><path d="M14 14l6 6" stroke="${c}" stroke-width="1.7" stroke-linecap="round"/>`,
+  c => `<g fill="none" stroke="${c}" stroke-width="1.5"><circle cx="7" cy="5" r="2"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="8" r="2"/><path d="M7 7v10M17 10c0 4-6 4-10 6"/></g>`,
+  c => `<g fill="none" stroke="${c}" stroke-width="1.5"><rect x="4" y="11" width="6" height="6"/><rect x="10" y="11" width="6" height="6"/><rect x="4" y="5" width="6" height="6"/><rect x="13" y="3" width="6" height="6" transform="rotate(45 16 6)"/></g>`
+];
+
+function build() {
+  views.length = 0;
+  for (const id of ['stage', 'states', 'tiles', 'market', 'bars', 'tabs', 'px', 'before']) $(id).replaceChildren();
+  $('stage').append(view(200, { animate: true }).cv);
+  for (const s of ['idle', 'working', 'done']) $('states').append(cap(view(72, { animate: true, state: s }).cv, s));
+  for (const tile of ['light', 'dark']) { const r = el('div', 'strip'); for (const s of [128, 64, 32]) r.append(cap(view(s, { tile }).cv, `${s} px`)); $('tiles').append(r); }
+  for (const th of ['l', 'd']) { const m = el('div', 'mk ' + th); m.append(view(56, { tile: th === 'd' ? 'dark' : 'light' }).cv, el('div', null, '<div class="t">DiffGuide</div><div class="s">Review local changes and GitHub pull requests with Claude Code on one review page.</div>')); $('market').append(m); }
+  for (const [t, lab, ico, act] of [['d', 'dark', '#868686', '#E7E7E7'], ['l', 'light', '#616161', '#1F1F1F'], ['h', 'high contrast', '#FFFFFF', '#FFFFFF']]) {
+    const b = el('div', 'bar ' + t);
+    for (const s of STANDINS) b.append(el('div', 'it', `<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">${s(ico)}</svg>`));
+    b.append(el('div', 'it act', g24(act))); $('bars').append(cap(b, lab));
+  }
+  for (const [t, c] of [['d', C.agentDark], ['l', C.agentLight]]) { const tab = el('div', 'tab ' + t, g16(c)); tab.append(document.createTextNode('Review #75')); $('tabs').append(tab); }
+  $('px').append(cap(pxCanvas(g24('#CCCCCC', 16), '#1F1F1F'), '24 px glyph shrunk'), cap(pxCanvas(g16('#CCCCCC'), '#1F1F1F'), 'tuned 16, dark'), cap(pxCanvas(g16('#1F1F1F'), '#FFFFFF', true), 'tuned 16, light'));
+  $('before').append(cap(view(64, { tile: 'light', variant: 'r1', mouth: true }).cv, 'with mouth'), cap(view(64, { tile: 'light' }).cv, 'now'));
+}
+
+for (const v of VARIANTS) {
+  const b = el('button', 'variant'); b.setAttribute('aria-pressed', String(v.id === pick));
+  const cv = document.createElement('canvas'); cv.width = cv.height = 88 * DPR; cv.style.width = cv.style.height = '88px';
+  const g = cv.getContext('2d'); g.setTransform(cv.width, 0, 0, cv.width, 0, 0); drawPair(g, v, 'idle', .5, false);
+  b.append(cv, el('b', null, v.name), el('span', null, v.note));
+  b.onclick = () => { pick = v.id; [...$('variants').children].forEach(x => x.setAttribute('aria-pressed', String(x === b))); build(); };
+  $('variants').append(b);
+}
+function doneOptions() {
+  $('doneEyes').replaceChildren();
+  for (const [id, name, note] of DONE_EYES) {
+    const b = el('button', 'variant'); b.setAttribute('aria-pressed', String(id === doneEyes));
+    const cv = document.createElement('canvas'); cv.width = cv.height = 96 * DPR; cv.style.width = cv.style.height = '96px';
+    const g = cv.getContext('2d'); g.setTransform(cv.width, 0, 0, cv.width, 0, 0);
+    const keep = doneEyes; doneEyes = id; drawPair(g, VARIANTS.find(x => x.id === pick), 'done', STILL.done, false); doneEyes = keep;
+    b.append(cv, el('b', null, name), el('span', null, note));
+    b.onclick = () => { doneEyes = id; doneOptions(); build(); };
+    $('doneEyes').append(b);
+  }
+}
+doneOptions();
+for (const b of $('variants').children) b.addEventListener('click', doneOptions);
+build();
+
+const answers = { shadow: shadowMode, tile: 'light', scope: 'everywhere', palette: 'jade', bg: 'neutral', dark: 'lifted' };
+function still(size, tile, sm) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = size * DPR; cv.style.width = cv.style.height = size + 'px';
+  const g = cv.getContext('2d'); g.setTransform(cv.width, 0, 0, cv.width, 0, 0);
+  const [a, b] = TILES[tile], tg = g.createLinearGradient(.15, 0, .85, 1); tg.addColorStop(0, a); tg.addColorStop(1, b); g.fillStyle = tg; rr(g, 0, 0, 1, 1, .22); g.fill(); g.translate(.1, .08); g.scale(.8, .8);
+  const keep = shadowMode; shadowMode = sm; drawPair(g, VARIANTS.find(x => x.id === pick), 'idle', .5, false); shadowMode = keep;
+  return cv;
+}
+const SCOPE_ROWS = ['App icon', 'Sidebar icon', 'Built-in icons', 'Review page animation'];
+const SCOPES = [
+  ['icons-first', 'Icons first', 'App and sidebar icons now; the rest in a second step once you have seen it in VS Code.', ['now', 'now', 'later', 'later'], true],
+  ['everywhere', 'Everywhere at once', 'One change. Bigger, and the 9 motions need new designs.', ['now', 'now', 'now', 'now'], false],
+  ['icons-only', 'Icons only', 'The orb stays as the agent indicator inside the app.', ['now', 'now', 'orb stays', 'orb stays'], false]
+];
+function option(box, key, value, visual, title, note, recommended) {
+  const b = el('button', 'variant'); b.setAttribute('aria-pressed', String(answers[key] === value));
+  b.append(visual, el('b', null, title));
+  if (recommended) b.append(el('span', 'rec', 'Recommended'));
+  b.append(el('span', null, note));
+  b.onclick = () => { answers[key] = value; if (key === 'shadow') { shadowMode = value; build(); } renderDecisions(); };
+  box.append(b);
+}
+function renderDecisions() {
+  for (const id of ['qShadow', 'qTile', 'qScope']) $(id).replaceChildren();
+  option($('qShadow'), 'shadow', 'drop', still(96, answers.tile, 'drop'), 'Soft shadow', 'Bar-shaped, lifts the pair off the tile.', true);
+  option($('qShadow'), 'shadow', 'none', still(96, answers.tile, 'none'), 'No shadow', 'The dark edge under each bar carries the depth alone.', false);
+  option($('qTile'), 'tile', 'light', still(96, 'light', answers.shadow), 'Light tile', 'White to pale grey. The blue bar\'s dark edge stays visible.', true);
+  option($('qTile'), 'tile', 'dark', still(96, 'dark', answers.shadow), 'Dark tile', 'Stands out on dark pages; I would lighten the blue bar\'s dark edge so it doesn\'t vanish.', false);
+  for (const [id, title, note, cells, recommended] of SCOPES) {
+    const rows = el('div', 'rows');
+    SCOPE_ROWS.forEach((r, i) => { const d = el('div'); d.append(el('span', null, r), el('span', 'pill' + (cells[i] === 'now' ? ' new' : ''), cells[i] === 'now' ? 'Diff pair' : cells[i])); rows.append(d); });
+    option($('qScope'), 'scope', id, rows, title, note, recommended);
+  }
+  const name = (list, v) => v == null ? 'not picked' : (list.find(x => x[0] === v) || [v, v])[1];
+  $('answer').textContent = `Shadow: ${answers.shadow === 'drop' ? 'soft' : 'none'} · Tile: ${answers.tile} · Scope: ${name(SCOPES, answers.scope)} · Proportion: ${VARIANTS.find(x => x.id === pick).name} · Done eyes: unchanged · Colors: ${PALETTES.find(x => x.id === answers.palette).name} · Tile background: ${answers.bg} · Dark theme: ${answers.dark}`;
+}
+const PALETTES = [
+  { id: 'jade', name: 'Jade', note: 'The one you liked, with a neutral grey bar.', slate: '#1E8463', slateHi: '#2A9D78', deep: '#125540', agentLight: '#1e8463', agentDark: '#62cfa6', grey: '#A6ACA9', greyDeep: '#767C79' },
+  { id: 'deepjade', name: 'Deep jade', note: 'Darker and calmer; more contrast for the eyes.', slate: '#176E52', slateHi: '#22876A', deep: '#0D4734', grey: '#A6ACA9', greyDeep: '#767C79', agentLight: '#176e52', agentDark: '#5cc49d' },
+  { id: 'lightjade', name: 'Light jade', note: 'Fresher, toward mint. Friendliest, lowest contrast.', slate: '#23936E', slateHi: '#30AE85', deep: '#156048', grey: '#A6ACA9', greyDeep: '#767C79', agentLight: '#1e8463', agentDark: '#74dcb4' },
+  { id: 'mint', name: 'Jade and mint', note: 'Pale mint removed bar. One color family, softest.', slate: '#1E8463', slateHi: '#2A9D78', deep: '#125540', agentLight: '#1e8463', agentDark: '#62cfa6', grey: '#A8D4C2', greyDeep: '#73A794' },
+  { id: 'jsand', name: 'Jade and sand', note: 'Warm sand removed bar. Old and new lines look clearly different.', slate: '#1E8463', slateHi: '#2A9D78', deep: '#125540', agentLight: '#1e8463', agentDark: '#62cfa6', grey: '#CDBFA8', greyDeep: '#A0927B' },
+  { id: 'jslate', name: 'Jade and blue-grey', note: 'Cool blue-grey removed bar; a trace of today\'s slate.', slate: '#1E8463', slateHi: '#2A9D78', deep: '#125540', agentLight: '#1e8463', agentDark: '#62cfa6', grey: '#A3B1C0', greyDeep: '#728294' }
+];
+const lum = hex => { const n = parseInt(hex.slice(1), 16); const c = [n >> 16 & 255, n >> 8 & 255, n & 255].map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+function renderPalettes() {
+  $('qPalette').replaceChildren();
+  const keep = { ...C };
+  for (const p of PALETTES) {
+    Object.assign(C, p);
+    const vis = el('div', 'cap'); vis.append(still(96, answers.tile, answers.shadow));
+    const r = el('div', 'ratio');
+    for (const [label, a, b] of [['eyes on bar', '#FFFFFF', p.slate], ['icon, light editor', p.agentLight, '#FFFFFF'], ['icon, dark editor', p.agentDark, '#1F1F1F']]) {
+      const v = ratio(a, b); r.append(el('span', v < 3 ? 'low' : null, `${label} ${v.toFixed(1)}:1`));
+    }
+    const b = el('button', 'variant'); b.setAttribute('aria-pressed', String(answers.palette === p.id));
+    b.append(vis, el('b', null, p.name), el('span', null, p.note), r);
+    b.onclick = () => { answers.palette = p.id; Object.assign(C, p); build(); renderDecisions(); renderPalettes(); };
+    $('qPalette').append(b);
+  }
+  Object.assign(C, keep);
+}
+Object.assign(C, PALETTES[0]); build(); renderDecisions();
+renderPalettes();
+const BGS = [
+  ['neutral', 'Neutral', 'Paper white to a plain light grey. The bars carry all the color.', ['#FFFFFF', '#E6E8E7'], true],
+  ['jade', 'Jade tint', 'A faint jade wash; ties the tile to the character.', ['#FFFFFF', '#DDEDE5'], false],
+  ['warm', 'Warm', 'Off-white to a warm stone; softer next to the green.', ['#FFFDF9', '#ECE7DF'], false],
+  ['blue', 'Old blue', 'What you see now, kept from the slate design.', ['#FFFFFF', '#E1E9EF'], false]
+];
+function renderBg() {
+  $('qBg').replaceChildren();
+  const keep = TILES.light;
+  for (const [id, name, note, stops, recommended] of BGS) {
+    TILES.light = stops; const vis = still(96, 'light', answers.shadow); TILES.light = keep;
+    const b = el('button', 'variant'); b.setAttribute('aria-pressed', String(answers.bg === id));
+    b.append(vis, el('b', null, name)); if (recommended) b.append(el('span', 'rec', 'Recommended')); b.append(el('span', null, note));
+    b.onclick = () => { answers.bg = id; TILES.light = stops; build(); renderDecisions(); renderPalettes(); renderBg(); };
+    $('qBg').append(b);
+  }
+}
+renderBg();
+$('copy').onclick = () => {
+  const text = $('answer').textContent;
+  const sel = () => { const r = document.createRange(); r.selectNodeContents($('answer')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; }, sel); } catch { sel(); }
+};
+for (const b of $('variants').children) b.addEventListener('click', renderDecisions);
+renderDecisions();
+
+const mb = $('motion');
+const setMb = () => { mb.setAttribute('aria-pressed', String(playing)); mb.textContent = playing ? 'Playing' : 'Paused'; };
+mb.onclick = () => { playing = !playing; setMb(); if (playing) requestAnimationFrame(loop); }; setMb();
+const t0 = performance.now();
+function loop(now) { if (!playing) return; const t = (now - t0) / 1000; for (const v of views) if (v.animate) paint(v, t); requestAnimationFrame(loop); }
+if (playing) requestAnimationFrame(loop);
+/* ---------- Motions: the Diff pair at the review page's real step size (30 × 20 px) ---------- */
+const MT = {
+  light: { top: '#1E8463', topHi: '#2A9D78', edge: '#125540', eye: '#FFFFFF', bot: '#A6ACA9', botEdge: '#767C79', add: '#7FCBAA', sweep: 'rgba(255,255,255,.75)', spark: '#1E8463', ground: 'rgba(10,30,25,.22)' },
+  dark: { top: '#62CFA6', topHi: '#7FDCB8', edge: '#2F7D61', eye: '#0B1F2A', bot: '#6B7270', botEdge: '#4A504E', add: '#3F9677', sweep: 'rgba(255,255,255,.4)', spark: '#62CFA6', ground: 'rgba(0,0,0,.35)' }
+};
+const MW = 30, MH = 20, MX = 15, BASE = 18, TAU = Math.PI * 2;
+const frac = v => v - Math.floor(v), lerp = (a, b, k) => a + (b - a) * k, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const ease = k => k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+const blink = (t, every = 3400) => t % every < 120;
+const P = (o = {}) => ({ xt: MX - 1, xb: MX + 1, y: 0, topDy: 0, eyes: 'open', look: [0, 0], alpha: 1, fill: 0, fillA: 1, sweep: null, dots: [], text: [], ...o });
+
+function dp(g, f, T) {
+  const BW = 13, TH = 6, BH = 4, GAP = 1, EX = 1;
+  const by = BASE - EX - BH + f.y, ty = by - GAP - TH + f.topDy;
+  const bx = f.xb - BW / 2, tx = f.xt - BW / 2;
+  for (const d of f.dots) { g.globalAlpha = clamp(d.a, 0, 1) * f.alpha; g.fillStyle = T.spark; g.beginPath(); g.arc(d.x, d.y, d.r ?? .6, 0, TAU); g.fill(); }
+  for (const s of f.text) { g.globalAlpha = clamp(s.a, 0, 1) * f.alpha; g.fillStyle = T.spark; g.font = `700 ${s.size}px ui-monospace, Menlo, monospace`; g.fillText(s.ch, s.x, s.y); }
+  g.globalAlpha = f.alpha * clamp(1 + f.y / 6, .3, 1);
+  if (!f.noShadow) { g.fillStyle = T.ground; rr(g, bx + 1, BASE + .2, BW - 2, 1.2, .6); g.fill(); }
+  g.globalAlpha = f.alpha;
+  g.fillStyle = T.botEdge; rr(g, bx, by + EX, BW, BH, 1.6); g.fill();
+  g.fillStyle = T.bot; rr(g, bx, by, BW, BH, 1.6); g.fill();
+  if (f.fill > 0 || f.sweep != null) {
+    g.save(); rr(g, bx, by, BW, BH, 1.6); g.clip();
+    if (f.fill > 0) { g.globalAlpha = f.alpha * f.fillA; g.fillStyle = T.add; g.fillRect(bx, by, BW * f.fill, BH); }
+    if (f.sweep != null) { g.globalAlpha = f.alpha; g.fillStyle = T.sweep; rr(g, bx + f.sweep * BW - 1.5, by + .6, 3, BH - 1.2, .8); g.fill(); }
+    g.restore(); g.globalAlpha = f.alpha;
+  }
+  g.fillStyle = T.edge; rr(g, tx, ty + EX, BW, TH, 2); g.fill();
+  const tg = g.createLinearGradient(0, ty, 0, ty + TH); tg.addColorStop(0, T.topHi); tg.addColorStop(1, T.top);
+  g.fillStyle = tg; rr(g, tx, ty, BW, TH, 2); g.fill();
+  const [lx, ly] = f.look, ecx = f.xt + lx * .9, ecy = ty + TH / 2 + ly * .6;
+  g.fillStyle = T.eye;
+  for (const s of [-1, 1]) {
+    const x = ecx + s * 2.3;
+    if (f.eyes === 'closed') rr(g, x - .9, ecy - .1, 1.8, .9, .45);
+    else { const h = f.eyes === 'wide' ? 3.4 : 2.6; rr(g, x - .8, ecy - h / 2, 1.6, h, .8); }
+    g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+/** Inchworm walk: the bottom bar steps first, then the top bar catches up and hops a little. */
+function walk(from, to, k) {
+  const steps = Math.max(1, Math.round(Math.abs(to - from) / 2.4)), s = clamp(k, 0, .9999) * steps, i = Math.floor(s), f = s - i, d = (to - from) / steps, base = from + i * d;
+  const kb = ease(clamp(f * 2, 0, 1)), kt = ease(clamp(f * 2 - 1, 0, 1));
+  return { xb: base + 1 + d * kb, xt: base - 1 + d * kt, topDy: -Math.sin(clamp(f * 2 - 1, 0, 1) * Math.PI) * .9 };
+}
+function sleepPose(t) {
+  const b = Math.sin(TAU * t / 3600), q = (t % 3600) / 3600;
+  return P({ xt: MX, xb: MX, topDy: .75 + b * .25, eyes: 'closed', text: [{ ch: 'z', x: MX + 6 + q * 3, y: 8.5 - q * 3, size: 5, a: q < .2 ? q / .2 : 1 - (q - .2) / .8 }] });
+}
+const MOTIONS = {
+  rest: () => P(),
+  aligned: () => P({ xt: MX, xb: MX }),
+  thinking: t => { const o = 1 + Math.sin(TAU * t / 2600) * 1.6; return P({ xt: MX - o, xb: MX + o, look: [clamp(o / 2, -1, 1), .8], eyes: blink(t) ? 'closed' : 'open' }); },
+  reading: t => {
+    const p = (t % 1500) / 1500, k = clamp(p / .75, 0, 1), reading = p < .75;
+    return P({ sweep: reading ? k : null, look: [reading ? (k - .5) * 2 : -.6, 1], topDy: p > .78 && p < .9 ? .6 : 0 });
+  },
+  editing: t => {
+    const p = (t % 2600) / 2600;
+    if (p < .55) { const k = ease(p / .55); return P({ fill: k, look: [k * 2 - 1, 1], topDy: Math.sin(t / 45) * .25 }); }
+    if (p < .8) return P({ fill: 1, y: p < .68 ? -Math.sin((p - .55) / .13 * Math.PI) * 1.4 : 0 });
+    return P({ fill: 1, fillA: 1 - (p - .8) / .2 });
+  },
+  guiding: t => {
+    const p = (t % 5200) / 5200, xl = 8, xr = 22;
+    let o, look = [1, 0], eyes = 'open', alpha = Math.min(1, p / .05);
+    if (p < .4) o = walk(xl, MX, p / .4);
+    else if (p < .55) { o = { xb: MX + 1, xt: MX - 1, topDy: 0 }; look = [-1, 0]; eyes = p > .47 && p < .49 ? 'closed' : 'open'; }
+    else if (p < .9) o = walk(MX, xr, (p - .55) / .35);
+    else { o = { xb: xr + 1, xt: xr - 1, topDy: 0 }; alpha = 1 - (p - .9) / .1; }
+    const dots = []; for (let c = 2; c < o.xb - 7.5; c += 2.4) dots.push({ x: c, y: MH - 1.1, a: .45, r: .45 });
+    return P({ ...o, look, eyes, alpha, dots });
+  },
+  starting: t => {
+    if (t < 500) return P({ xt: MX, xb: MX, topDy: 1, eyes: 'closed' });
+    if (t < 850) { const k = (t - 500) / 350; const dots = k > .3 ? [-3, 0, 3].map(dx => ({ x: MX + dx, y: 4.5 - k * 2, a: 1 - k, r: .55 })) : []; return P({ xt: MX, xb: MX, topDy: 1 - k - Math.sin(k * Math.PI) * 3.2, eyes: 'wide', dots }); }
+    if (t < 1300) { const k = ease((t - 850) / 450); return P({ xt: MX - k, xb: MX + k }); }
+    return P();
+  },
+  waiting: t => {
+    const p = t / 3200;
+    if (p < .5) return P({ look: [p < .25 ? -1 : 1, 0], eyes: p > .2 && p < .22 ? 'closed' : 'open' });
+    const k = ease((p - .5) / .5);
+    return P({ xt: MX - 1 + k, xb: MX + 1 - k, topDy: .75 * k, eyes: k > .65 || (k > .3 && k < .4) ? 'closed' : 'open' });
+  },
+  sleeping: sleepPose,
+  pickedUp: t => {
+    if (t < 150) return P({ xt: MX, xb: MX, topDy: .75, eyes: 'closed' });
+    if (t < 400) return P({ xt: MX, xb: MX, topDy: .75 - (t - 150) / 250 * 2.2, eyes: 'wide' });
+    if (t < 1000) { const q = (t - 400) / 600; return P({ xt: MX - ease(q), xb: MX + ease(q), topDy: -1.45 + 1.45 * ease(clamp(q * 2, 0, 1)) + Math.sin(clamp((q - .4) / .6, 0, 1) * Math.PI) * 1.1, look: [0, q > .4 ? 1 : 0] }); }
+    return P();
+  },
+  done: t => { const k = ease(clamp(t / 400, 0, 1)), o = 1 - k; return P({ xt: MX - o, xb: MX + o, y: t > 400 && t < 800 ? -Math.sin((t - 400) / 400 * Math.PI) * 2.5 : 0 }); }
+};
+const MCARDS = [
+  ['rest', 'Rest', 'was Rest', 'Claude\'s avatar and every still frame: the bars a pixel out of step, like a diff.', 'Claude'],
+  ['thinking', 'Thinking', 'was Think', 'One calm motion instead of three that rotate. The bars slide past each other, comparing old and new, while the eyes watch.', 'Thinking'],
+  ['reading', 'Reading', 'was Search', 'Read, Search, Find and Web steps. A highlight runs along the bottom bar the way eyes run along a line; the eyes follow it, then dip to the next line.', 'Read src/core/forge.ts'],
+  ['editing', 'Editing', 'was Write', 'Edit, Write and Update steps. The grey removed line fills with green from left to right: the old line becomes the new one. A small hop when it lands.', 'Edit src/page/html.ts'],
+  ['guiding', 'Guiding', 'was Lead', 'The Guide. It walks like an inchworm: the bottom bar steps, the top bar follows. Halfway it looks back at you.', 'Guide'],
+  ['starting', 'Starting', 'was Wake', 'A run begins. Stacked flat with eyes shut, the top bar pops up wide-eyed, then the bars settle out of step and it starts thinking. 1.3 s.', 'Starting', 1300, 'thinking'],
+  ['waiting', 'Waiting', 'was Doze and Sleep', 'A comment waits and nothing will pick it up. Looks left and right, then the bars line up, the top settles onto the bottom, eyes shut, breathing. One small z.', 'Waiting for Claude', 3200, 'sleeping'],
+  ['pickedUp', 'Picked up', 'was Nod', 'Claude takes the comment. From sleep the top bar jolts up, nods once, and the bars slide back out of step. 1 s.', 'Picked up', 1000, 'thinking'],
+  ['done', 'Done', 'new', 'A step or run finishes: the bars slide into line and hop once, the done state you picked.', 'Done', 1300, 'aligned']
+];
+const mviews = [];
+function mcanvas(w, h, scale) { const cv = document.createElement('canvas'); const d = scale * DPR; cv.width = w * d; cv.height = h * d; cv.style.width = w * scale + 'px'; cv.style.height = h * scale + 'px'; cv._d = d; return cv; }
+function mpaint(v, now) {
+  const [id, , , , , ms, then] = v.card;
+  let name = id, t = now;
+  if (ms) { const cyc = ms + (then === 'sleeping' ? 4500 : 1800); t = now % cyc; if (t >= ms) { name = then; t -= ms; } }
+  if (id === 'pickedUp' && !playing) { name = 'rest'; }
+  const f = MOTIONS[name](playing ? t : 1200);
+  const g = v.cv.getContext('2d'), d = v.cv._d; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, v.cv.width, v.cv.height);
+  // The avatar frames the pair on its own: scaled to leave a pixel of air, centered on the body, no ground shadow.
+  if (v.avatar) { const s = .82; f.noShadow = true; g.setTransform(s * d, 0, 0, s * d, (8 - s * MX) * d, (8 - s * 12) * d); }
+  else g.setTransform(d, 0, 0, d, 0, 0);
+  dp(g, f, v.T || MT[v.theme]);
+}
+for (const card of MCARDS) {
+  const [id, name, was, when, label] = card;
+  const box = el('div', 'mcard');
+  const head = el('div', 'head'); head.append(el('b', null, name), el('span', 'tag', was)); box.append(head, el('p', 'muted', when));
+  const rows = el('div', 'mrows');
+  for (const th of ['dark', 'light']) { const row = el('div', 'steprow ' + th[0]); const cv = mcanvas(MW, MH, 1); mviews.push({ cv, theme: th, card }); row.append(cv, document.createTextNode(label)); rows.append(row); }
+  const mag = el('div', 'mag');
+  for (const th of ['dark', 'light']) { const cv = mcanvas(MW, MH, 4); cv.className = th; mviews.push({ cv, theme: th, card }); mag.append(cv); }
+  box.append(rows, mag);
+  if (id === 'rest') {
+    const av = el('div', 'strip'); av.append(el('span', 'muted', 'Avatar, 16 px:'));
+    for (const th of ['dark', 'light']) { const cv = mcanvas(16, 16, 1); cv.className = 'av ' + th; mviews.push({ cv, theme: th, card, avatar: true }); av.append(cv); }
+    for (const th of ['dark', 'light']) { const cv = mcanvas(16, 16, 4); cv.className = 'av ' + th; mviews.push({ cv, theme: th, card, avatar: true }); av.append(cv); }
+    box.append(av);
+  }
+  $('mgrid').append(box);
+}
+const m0 = performance.now(); let mlast = 0;
+function mloop(now) { requestAnimationFrame(mloop); if (now - mlast < 1000 / 30) return; mlast = now; for (const v of mviews) mpaint(v, now - m0); }
+for (const v of mviews) mpaint(v, 1200);
+requestAnimationFrame(mloop);
+
+const DARKS = [
+  ['same', 'Same jade', 'Exactly the light-theme jade and white eyes. One color everywhere.', { top: '#1E8463', topHi: '#2A9D78', edge: '#125540', eye: '#FFFFFF', bot: '#6B7270', botEdge: '#4A504E', add: '#2E7A5E' }, false],
+  ['lifted', 'Lifted jade', 'A step lighter so it doesn\'t sink into the dark editor; still white eyes.', { top: '#2A9A75', topHi: '#36AE86', edge: '#19684F', eye: '#FFFFFF', bot: '#6B7270', botEdge: '#4A504E', add: '#3A8F70' }, true],
+  ['mid', 'Mid jade', 'Brighter still; eyes turn dark because white no longer reads on it.', { top: '#3DB88C', topHi: '#4FC79A', edge: '#237A5C', eye: '#0B2A20', bot: '#6B7270', botEdge: '#4A504E', add: '#3F9677' }, false],
+  ['light', 'Light jade', 'What the page showed so far, my default. Pastel, dark eyes.', { top: '#62CFA6', topHi: '#7FDCB8', edge: '#2F7D61', eye: '#0B1F2A', bot: '#6B7270', botEdge: '#4A504E', add: '#3F9677' }, false]
+];
+function applyDark() { const o = DARKS.find(x => x[0] === answers.dark)[3]; Object.assign(MT.dark, o, { spark: o.top }); C.agentDark = o.top; const pj = PALETTES.find(x => x.id === 'jade'); if (pj) pj.agentDark = o.top; }
+function renderDark() {
+  $('qDark').replaceChildren();
+  for (const [id, name, note, o, recommended] of DARKS) {
+    const T = { ...MT.dark, ...o, spark: o.top };
+    const vis = el('div', 'col'); vis.style.justifyItems = 'center';
+    const step = mcanvas(MW, MH, 3); step.className = 'dark'; step.style.background = '#1F1F1F'; step.style.borderRadius = '6px';
+    let g = step.getContext('2d'); g.setTransform(step._d, 0, 0, step._d, 0, 0); dp(g, MOTIONS.rest(), T);
+    const av = mcanvas(16, 16, 1); av.style.background = '#1F1F1F';
+    g = av.getContext('2d'); const s = .82, f = MOTIONS.rest(); f.noShadow = true; g.setTransform(s * av._d, 0, 0, s * av._d, (8 - s * MX) * av._d, (8 - s * 12) * av._d); dp(g, f, T);
+    const tab = el('div', 'tab d', svg(GLYPH.r1.g16, GLYPH.r1.c16, 16, 16, o.top)); tab.append(document.createTextNode('Review #75')); tab.style.width = '100%';
+    const row = el('div', 'strip'); row.append(av, el('span', 'muted', 'avatar'));
+    vis.append(step, row, tab);
+    const r = el('div', 'ratio');
+    for (const [label, a, b] of [['bar on editor', o.top, '#1F1F1F'], ['eyes on bar', o.eye, o.top], ['grey bar on editor', o.bot, '#1F1F1F']]) { const v = ratio(a, b); r.append(el('span', v < 3 ? 'low' : null, `${label} ${v.toFixed(1)}:1`)); }
+    const b = el('button', 'variant'); b.setAttribute('aria-pressed', String(answers.dark === id));
+    b.append(vis, el('b', null, name)); if (recommended) b.append(el('span', 'rec', 'Recommended')); b.append(el('span', null, note), r);
+    b.onclick = () => { answers.dark = id; applyDark(); build(); renderDecisions(); renderDark(); };
+    $('qDark').append(b);
+  }
+}
+applyDark(); build(); renderDecisions(); renderDark();
+})();
+</script>
