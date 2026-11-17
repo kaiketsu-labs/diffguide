@@ -184,10 +184,15 @@ function fencedCode(lines: readonly string[], start: number): { readonly html: s
   return { html: `<pre><code>${codePreviewHtml(body.join('\n'), fenceFiles[language.toLowerCase()] ?? 'x.txt')}</code></pre>`, next: index + 1 };
 }
 
+/** Inline code that may name a file and lines, such as `src/a.ts:12-14`; the page links it only to a file it shows. */
+const codeRef = /^(?:\.\/)?[\w@+-][\w@.+-]*(?:\/[\w@.+-]+)*(?::\d+(?:-\d+)?)?$/u;
+const looksLikeFile = (code: string): boolean => codeRef.test(code) && /[/.]/u.test(code.replace(/:[\d-]+$/u, ''));
+
 /** Inline code, bold, italics and https links; everything else stays escaped text. Emphasis may span inline code, as on GitHub. */
 function inline(text: string): string {
   const spans: string[] = [];
-  const marked = text.replaceAll('\u0000', '').replaceAll(/(`+)(?!`)(.+?)(?<!`)\1(?!`)/gu, (_match, _ticks: string, code: string) => `\u0000${spans.push(`<code>${escapeCode(code)}</code>`) - 1}\u0000`);
+  const codeSpan = (code: string): string => looksLikeFile(code) ? `<code class="code-ref" data-ref="${escapeCode(code)}">${escapeCode(code)}</code>` : `<code>${escapeCode(code)}</code>`;
+  const marked = text.replaceAll('\u0000', '').replaceAll(/(`+)(?!`)(.+?)(?<!`)\1(?!`)/gu, (_match, _ticks: string, code: string) => `\u0000${spans.push(codeSpan(code)) - 1}\u0000`);
   return escapeCode(marked)
     .replaceAll(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/gu, '<a href="$2">$1</a>')
     .replaceAll(/\*\*(?!\s)(.+?)\*\*/gu, '<strong>$1</strong>')

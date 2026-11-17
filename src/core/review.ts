@@ -1,5 +1,5 @@
-import type { AgentStep } from './agent.js';
-import { type FindingEvidence, type FindingSeverity, type Reviewer, reviewers } from './contracts.js';
+import type { AgentCodeReview, AgentStep } from './agent.js';
+import { type FindingEvidence, type FindingSeverity, type Reviewer, reviewers, type ReviewStore } from './contracts.js';
 import { lineText } from './prAnalysis.js';
 import correctness from './prompts/correctness.md';
 import design from './prompts/design.md';
@@ -415,4 +415,15 @@ export interface ReviewView {
   readonly error?: string;
   readonly result?: CodeReviewResult;
   readonly picked: readonly Reviewer[];
+}
+
+/**
+ * Clear the last code review: its summary goes, and findings nobody answered or resolved are archived.
+ * They are archived, not deleted, since dropping the newest events would let event numbers repeat.
+ */
+export async function clearReview(store: ReviewStore, review: AgentCodeReview): Promise<void> {
+  if (review.activity.running) throw new Error('The review is still running. Stop it first.');
+  const untouched = store.threads.filter((thread) => thread.origin === 'review' && !thread.resolved && thread.archived !== true && thread.messages.length === 1);
+  for (const thread of untouched) await store.archive(thread.id, true);
+  await review.clear();
 }

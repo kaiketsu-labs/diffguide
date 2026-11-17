@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The code review card has a Clear button. After you confirm, the card goes and findings nobody answered or resolved are archived; Show archived brings them back.
+- Code blocks in answers, comments and the description show a Copy button on hover.
+- Claude cites code as `path:line` in backticks. On the review page such a reference to a file the page shows is a link: hovering previews the lines, clicking jumps to them.
 - New conversation and Resume from the review page start Claude in a terminal that stays in the background. Show terminal brings it up.
 - A thread Claude works on has a Show terminal button beside Stop while its conversation runs in a terminal.
 - Claude's menu shows how full a connected conversation's context is, on the local page and on your own checkout's PR page. Start fresh or compact it in its terminal.

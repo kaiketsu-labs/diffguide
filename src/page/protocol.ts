@@ -402,6 +402,8 @@ export interface OverviewActions {
   /** Run a code review with these reviewers, and remember them for the next run. */
   review(reviewers: readonly Reviewer[]): Promise<void>;
   stopReview(): void;
+  /** Clear the last code review and archive the findings nobody answered. */
+  clearReview(): Promise<void>;
   /** Remember the reviewers for the next run without starting one. */
   pickReviewers(reviewers: readonly Reviewer[]): Promise<void>;
 }
@@ -414,7 +416,7 @@ type PageRange = { readonly path: string; readonly side: DiffSide; readonly star
 
 /** What the page sends. The extension still validates each message, since the page renders untrusted HTML. */
 export type PageMessage =
-  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'review-stop' | 'review-recheck' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
+  | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'review-stop' | 'review-recheck' | 'review-clear' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
   | { readonly action: 'draft-reply' | 'github-draft-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
   | { readonly action: 'review' | 'review-pick'; readonly reviewers: readonly Reviewer[] }

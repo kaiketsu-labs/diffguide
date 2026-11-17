@@ -350,6 +350,7 @@ export async function showPullRequestOverview(
           const picks = allReviewers.filter((name) => reviewersPicked.includes(name));
           if (action === 'review') await actions.review(picks); else await actions.pickReviewers(picks);
         } else if (action === 'review-stop') actions.stopReview();
+        else if (action === 'review-clear') await actions.clearReview();
         else if (action === 'review-recheck') {
           const open = state.threads.filter((thread) => thread.origin === 'review' && !thread.resolved && thread.archived !== true);
           for (const thread of open) await actions.reply(thread.id, recheckRequest, 'ask');

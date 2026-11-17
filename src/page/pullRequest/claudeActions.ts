@@ -6,12 +6,13 @@ import { withScratchWorktree } from '../../core/git/scratch.js';
 import { git } from '../../core/git/worktrees.js';
 import { maximumReplyLength } from '../../core/limits.js';
 import { draftReplyTask, githubReplyTask } from '../../core/pullRequestComments.js';
+import { clearReview } from '../../core/review.js';
 import { type FileDiff, readPullRequestDiffPlainFirst } from '../../core/unifiedDiff.js';
 import type { OverviewActions } from '../protocol.js';
 import type { PageParts } from './context.js';
 
 export type ClaudeActions = Pick<OverviewActions, 'retry' | 'stopClaude' | 'newConversation' | 'compactConversation' | 'draftReply' | 'draftGitHubReply'
-  | 'fixConflicts' | 'dismissConflictQuestion' | 'analyze' | 'stopAnalysis' | 'review' | 'stopReview' | 'pickReviewers'>;
+  | 'fixConflicts' | 'dismissConflictQuestion' | 'analyze' | 'stopAnalysis' | 'review' | 'stopReview' | 'clearReview' | 'pickReviewers'>;
 
 /** The page's actions that run Claude: its conversation, drafted replies, conflict fixes, the guide and the code review. */
 export function claudeActions({ page, remote, diff, edits, findThread, notOnCheckout, pushTarget }: PageParts): ClaudeActions {
@@ -87,6 +88,7 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
       });
     },
     stopReview: () => { opened.review.stop(); },
+    clearReview: () => clearReview(opened.session.store, opened.review),
     pickReviewers: async (picks) => { await host.savePicks(picks); remote.changed(); },
   };
 }

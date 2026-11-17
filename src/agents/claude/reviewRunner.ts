@@ -221,6 +221,13 @@ export class CodeReview implements AgentCodeReview {
     if (this.#child !== undefined) stopProcess(this.#child);
   }
 
+  async clear(): Promise<void> {
+    if (this.#activity.running) throw new Error('The review is still running. Stop it first.');
+    await rm(reviewFile(this.options.dataPath), { force: true });
+    this.#result = Promise.resolve(undefined);
+    this.#set({ running: false });
+  }
+
   dispose(): void {
     this.#disposed = true;
     this.stop();

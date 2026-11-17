@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { ReviewTracker } from '../src/agents/claude/reviewRunner.js';
 import type { CodeAnchor, Finding } from '../src/core/contracts.js';
-import { findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/core/review.js';
+import { clearReview, findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/core/review.js';
 import { createReviewStore } from '../src/core/store.js';
 import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 
@@ -252,4 +252,20 @@ test('a finding message puts the fix after the claim and folds the evidence', ()
   assert.ok(finding);
   assert.equal(findingText(finding), 'It breaks.\n\n#### Suggested fix\n\nUse `<=`.\n\n<details>\n<summary>Evidence: tested</summary>\n\nran it\n\n</details>');
   assert.equal(findingText({ ...finding, fix: '', evidenceDetail: '' }), 'It breaks.');
+});
+
+test('clearing a review forgets its result and archives only the findings nobody answered or resolved', async (t) => {
+  const store = await openStore(t);
+  const [replied, resolved, untouched] = await store.replaceReviewFindings([note(1), note(2), note(3)]);
+  assert.ok(replied !== undefined && resolved !== undefined && untouched !== undefined);
+  await store.submit(anchor(1), 'Why?', 'ask', replied);
+  await store.resolve(resolved, true);
+  let cleared = 0;
+  const review = { activity: { running: false }, clear: async () => { cleared += 1; } } as unknown as Parameters<typeof clearReview>[1];
+  await clearReview(store, review);
+  assert.equal(cleared, 1);
+  assert.deepEqual(store.threads.map((thread) => [thread.id, thread.archived === true]), [[replied, false], [resolved, false], [untouched, true]]);
+  const running = { activity: { running: true }, clear: async () => { cleared += 1; } } as unknown as Parameters<typeof clearReview>[1];
+  await assert.rejects(clearReview(store, running), /still running/u);
+  assert.equal(cleared, 1);
 });

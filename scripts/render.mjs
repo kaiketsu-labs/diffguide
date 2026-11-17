@@ -82,7 +82,7 @@ for (const name of names) {
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await page.setContent(html);
-  await page.addScriptTag({ content: `window.__posted=[];window.acquireVsCodeApi=()=>({postMessage:(m)=>window.__posted.push(m),getState:()=>(${JSON.stringify(scene.saved ?? {})}),setState:()=>{}});` });
+  await page.addScriptTag({ content: `window.__posted=[];window.acquireVsCodeApi=()=>({postMessage:(m)=>window.__posted.push(m),getState:()=>(${JSON.stringify(scene.saved ?? {})}),setState:()=>{}});Object.defineProperty(navigator,'clipboard',{value:{writeText:async(t)=>{document.body.dataset.copied=t;}}});` });
   await page.addScriptTag({ content: script });
   for (const message of scene.messages) await page.evaluate((m) => window.postMessage(m, '*'), message);
   await page.waitForTimeout(300);

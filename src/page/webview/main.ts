@@ -6,10 +6,12 @@ import type { ExtensionMessage } from '../protocol.js';
 import { closeClaudeMenu, toggleClaudeMenu } from './claude/panel.js';
 import { attachMentions } from './conversation/mentions.js';
 import { renderConversation } from './conversation/timeline.js';
+import { setupCodeCopy } from './codeCopy.js';
 import { $, closestTo, relativeTime } from './dom.js';
 import { allFolded, applyFilters, closeSearch, filtersOn, openFilterMenu, openSearch, openViewMenu, showListToggle } from './files/filters.js';
 import { markCurrentNavFile, markEndingFiles, openFolders, showNavThreadsHeight, showNavWidth } from './files/nav.js';
 import { frameMessage } from './files/preview.js';
+import { setupCodeRefs } from './files/refs.js';
 import { setupFind } from './find.js';
 import { frameParking, renderFiles } from './files/render.js';
 import { paintDrag, pick } from './files/selection.js';
@@ -84,6 +86,8 @@ document.addEventListener('pointerdown', (event) => { if (!(event.target instanc
 window.addEventListener('keydown', (event) => { if (event.key === 'Escape') clearNotice(); });
 blockBrowserShortcuts();
 setupFind();
+setupCodeCopy();
+setupCodeRefs();
 document.addEventListener('mousemove', (event) => {
   ui.pointer = event;
   if (event.metaKey || event.ctrlKey) probeAt(event);
