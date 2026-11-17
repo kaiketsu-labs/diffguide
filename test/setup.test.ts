@@ -461,3 +461,19 @@ test('preparing a refreshed bridge also updates the descriptor used by an instal
   assert.deepEqual(JSON.parse(await readFile(live, 'utf8')), updated.descriptor);
   assert.equal((await stat(live)).mode & 0o777, 0o600);
 });
+
+test('a conversation the review page starts runs in a terminal that stays in the background until Show terminal', async (t) => {
+  const { root, context } = await fixture(t);
+  workspace.configurationValues.set('diffGuide.claudePath', process.execPath);
+  workspace.configurationValues.set('diffGuide.nodePath', process.execPath);
+  const launcher = registerClaudeLauncher(context, bridge(root, false), root);
+  registrations.push(launcher);
+
+  await launcher.local.connect({ how: 'new' });
+
+  const terminal = window.terminals[0];
+  assert.equal(terminal?.sendTextCalls.length, 1);
+  assert.equal(terminal?.showCalls, 0);
+  await launcher.local.connect({ how: 'show' });
+  assert.equal(terminal?.showCalls, 1);
+});

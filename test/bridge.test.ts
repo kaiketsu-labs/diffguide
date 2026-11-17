@@ -346,3 +346,14 @@ test('delivers a PR-level comment with its scope and no code, and refuses one th
   const named = { ...payload, events: payload.events.map((event) => ({ ...event, anchor: { ...event.anchor, path: 'src/a.ts' } })) };
   assert.throws(() => readBatch(named, root), /invalid source context/u);
 });
+
+test('remembers the conversation whose feedback receiver reached the bridge, not a tool call\'s', async (t) => {
+  const { bridge, headers } = await fixture(t);
+  const session = '33333333-3333-4333-8333-333333333333';
+  await (await fetch(`${bridge.descriptor.url}/pending`, { headers: { ...headers, 'X-DiffGuide-Client': 'tools', 'X-DiffGuide-Session': '44444444-4444-4444-8444-444444444444' } })).json();
+  assert.equal(bridge.state.sessionId, undefined);
+  await (await fetch(`${bridge.descriptor.url}/pending`, { headers: { ...headers, 'X-DiffGuide-Client': 'watcher', 'X-DiffGuide-Session': session } })).json();
+  assert.equal(bridge.state.sessionId, session);
+  await (await fetch(`${bridge.descriptor.url}/pending`, { headers: { ...headers, 'X-DiffGuide-Client': 'tools' } })).json();
+  assert.equal(bridge.state.sessionId, session);
+});

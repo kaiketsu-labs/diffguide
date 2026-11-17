@@ -17,7 +17,7 @@ const largeContext = 0.5;
 
 /** How full the PR's Claude conversation is, as a meter that opens the menu to start fresh or compact. */
 export function renderContextButton(claude: OverviewState['claude']): void {
-  const context = claude.link === undefined ? claude.context : undefined;
+  const { context } = claude;
   const button = $('context');
   button.parentElement?.toggleAttribute('hidden', context === undefined);
   if (context === undefined) { if (ui.toolbarMenu?.anchor === 'context') closeToolbarMenu(); return; }
@@ -35,9 +35,12 @@ export function renderContextButton(claude: OverviewState['claude']): void {
 export function openContextMenu(): void {
   const context = received.current?.claude.context;
   if (!context) return;
+  const note = el('div', 'muted picker-note', tokenCount(context.tokens) + (context.window ? ' of ' + tokenCount(context.window) : '') + ' tokens after the last run');
+  // A connected conversation is the user's own: they start fresh or compact it in its terminal.
+  if (received.current?.claude.link !== undefined) { openToolbarMenu('context', [note], 'context-menu'); return; }
   const running = received.current?.claude.running === true;
   const rows = [
-    el('div', 'muted picker-note', tokenCount(context.tokens) + (context.window ? ' of ' + tokenCount(context.window) : '') + ' tokens after the last run'),
+    note,
     connectRow(icons.reopen, 'New conversation', 'Claude forgets this PR\'s earlier runs. Each comment still sends its thread', () => {
       askInMenu('context', 'Start a new conversation on the next comment? Claude forgets what it learned in earlier runs.', 'Start new', () => post({ action: 'new-conversation' }));
     }),

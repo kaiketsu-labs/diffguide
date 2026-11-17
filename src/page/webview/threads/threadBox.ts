@@ -202,6 +202,7 @@ export function threadBox(thread: Thread): HTMLElement {
     const progress = thread.source === 'local' ? thread.progress : undefined;
     const controls = el('span', 'step-actions');
     const takeBack = thread.source === 'local' && thread.linkedTo === undefined && thread.scope !== 'pullRequest' && thread.messages.at(-1)?.author === 'human';
+    if (received.current?.claude.link?.terminal) controls.append(terminalButton());
     // Local mode has no run of its own to stop, so its Stop only takes the comment back.
     if (takeBack) controls.append(withdrawButton(thread));
     else if (!received.current?.localMode) controls.append(stopButton());
@@ -293,6 +294,14 @@ export function stopClaude(): void {
 }
 
 /** Stop beside a thread's live log, for the run that is answering it. */
+/** Shows the terminal of the conversation working on the thread. */
+function terminalButton(): HTMLButtonElement {
+  const show = button('', () => post({ action: 'terminal' }), 'icon-button show-terminal');
+  show.append(icon(icons.terminal));
+  setTip(show, 'Show terminal');
+  return show;
+}
+
 function stopButton(): HTMLButtonElement {
   const stop = button('', stopClaude, 'icon-button stop-claude');
   stop.append(icon(icons.stop));

@@ -471,6 +471,17 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#connect', expect: '.connect-menu:visible' },
     { inside: ['.connect-menu', 'body'], shot: 'local-connect-menu.png' },
   ], { width: 800 }),
+  // A thread Claude works on offers its terminal when the conversation runs in one.
+  'thread-terminal': { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
+    saved: { view: 'files' }, width: 1100, height: 900, steps: [
+      { scrollTo: '.claude-live', expect: '.claude-live .show-terminal' }, { level: ['.claude-live .show-terminal', '.claude-live .step:last-child .time'], shot: 'thread-terminal.png' },
+      { send: { state: { ...readme, claude: { ...readme.claude, link: { delivering: true, terminal: false } } } }, absent: '.claude-live .show-terminal' },
+    ] },
+  // A connected conversation shows its context size; starting fresh or compacting stays in its terminal.
+  'local-context': scene({ ...local, claude: { ...local.claude, context: { tokens: 48_200 }, link: { delivering: true, terminal: true } } }, [
+    { click: '#claude-chip', expect: '#claude-menu #context:visible', text: '48k tokens' },
+    { click: '#context', expect: '.context-menu', text: 'tokens after the last run', shot: 'local-context.png' }, { absent: '.context-menu .connect-row' },
+  ], { width: 1000 }),
   'local-header-chip': scene(local, [{ expect: '.head:not(#files-bar) #claude-chip:visible' }]),
   // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
   syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [

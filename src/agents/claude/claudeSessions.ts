@@ -1,10 +1,11 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { AgentConversation } from '../../core/agent.js';
+import type { AgentContext, AgentConversation } from '../../core/agent.js';
 import { record } from '../../core/connection.js';
 import { readPrivateJson } from '../../core/privateFiles.js';
 import { isSessionId } from '../../core/sessionBinding.js';
+import { contextTokens, type StreamMessage } from './claudeRunner.js';
 
 /** Keep conversation labels bounded and free of terminal or layout control characters. */
 function label(value: unknown, maximum = 100): string {
@@ -94,4 +95,45 @@ export async function listClaudeConversations(
     } catch { return undefined; }
   }));
   return found.filter(session => session !== undefined);
+}
+
+/** Enough of a transcript's end to hold its latest assistant turn. */
+const contextTailBytes = 262_144;
+
+/** How full a conversation of this project is after its latest turn, read from the end of its transcript; undefined when unknown or just compacted. */
+export async function readConversationContext(
+  workspaceRoot: string, sessionId: string, configRoot = process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
+): Promise<AgentContext | undefined> {
+  if (!isSessionId(sessionId)) return undefined;
+  const roots = new Set([await realpath(workspaceRoot).catch(() => resolve(workspaceRoot)), resolve(workspaceRoot)]);
+  for (const projectRoot of roots) {
+    const path = join(resolve(configRoot), 'projects', projectRoot.replace(/[^a-zA-Z0-9]/gu, '-'), sessionId + '.jsonl');
+    const tail = await readTail(path).catch(() => undefined);
+    if (tail === undefined) continue;
+    for (const line of tail.split('\n').reverse()) {
+      let data: Record<string, unknown> | undefined;
+      try { data = record(JSON.parse(line) as unknown); } catch { continue; }
+      if (data === undefined || data['isSidechain'] === true) continue;
+      // The transcript keeps only the size before a compaction, so the size after it is unknown until the next turn.
+      if (data['type'] === 'system' && data['subtype'] === 'compact_boundary') return undefined;
+      const tokens = contextTokens(data as StreamMessage);
+      if (tokens !== undefined) return { tokens };
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+async function readTail(path: string): Promise<string> {
+  const file = await open(path, 'r');
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) return '';
+    const size = Math.min(info.size, contextTailBytes);
+    const tail = Buffer.alloc(size);
+    await file.read(tail, 0, size, info.size - size);
+    const text = tail.toString('utf8');
+    // A cut at the start leaves a partial first line.
+    return info.size > size ? text.slice(text.indexOf('\n') + 1) : text;
+  } finally { await file.close(); }
 }
