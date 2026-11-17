@@ -16,10 +16,14 @@ export function githubActions({ page, remote, diff, pushTarget }: PageParts): Gi
   const { provider, pullRequest, folder, role, host } = page;
   const { number } = pullRequest;
   const { written } = remote;
+  const pushedHead = async (): Promise<string | undefined> => {
+    const conversation = await remote.conversation();
+    return conversation instanceof Error ? undefined : conversation.merge.headOid;
+  };
   return {
     commentOnGitHub: async ({ text, ...lines }, pending) => {
       const { anchor, base } = await diff.anchor(lines);
-      const placement = await placeComment(folder, base, anchor);
+      const placement = await placeComment(folder, base, anchor, await pushedHead());
       if (placement.lines === undefined) throw new Error('GitHub only takes comments on lines its diff shows. Pick lines inside a changed section.');
       await provider.publishComment(number, { ...placement, body: text }, pending);
       await Promise.all([remote.loadThreads(), remote.loadDetails()]);
@@ -28,7 +32,7 @@ export function githubActions({ page, remote, diff, pushTarget }: PageParts): Gi
       diff.requireInDiff(path);
       const base = await diff.readBase();
       const anchor = fileAnchor(await readFile(join(folder, path), 'utf8'), { path, side: 'working', baseRevision: base });
-      await provider.publishComment(number, { ...await placeComment(folder, base, anchor), body: text }, pending);
+      await provider.publishComment(number, { ...await placeComment(folder, base, anchor, await pushedHead()), body: text }, pending);
       await Promise.all([remote.loadThreads(), remote.loadDetails()]);
     },
     replyOnGitHub: async (id, text) => {

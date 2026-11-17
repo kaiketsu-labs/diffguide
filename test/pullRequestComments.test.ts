@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { diffRanges, draftReplyTask, githubFeedbackRequest, githubReplyTask, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/core/pullRequestComments.js';
+import { diffRanges, draftReplyTask, placeComment, githubFeedbackRequest, githubReplyTask, readClaudeCommits, readGitHubLinks, writeClaudeCommits, writeGitHubLinks } from '../src/core/pullRequestComments.js';
 import type { PullRequestSession } from '../src/hosts/vscode/pullRequestSessions.js';
 import { overviewHtml } from '../src/page/html.js';
 import { buildOverviewState } from '../src/page/overviewState.js';
@@ -200,4 +201,28 @@ test('has Claude draft the human\'s next GitHub reply from the thread, its code 
   assert.match(task.prompt, /Can we find a better name for this\?/u);
   const bare = githubReplyTask({ location: 'the file src/retry.ts', comments: [] }).prompt;
   assert.doesNotMatch(bare, /BEGIN NOTES|"code"|\(@/u);
+});
+
+test('puts a comment on GitHub\'s head commit when local commits GitHub lacks leave the file as is, and refuses when they change it', async (t) => {
+  const repo = await mkdtemp(join(tmpdir(), 'diffguide-place-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const git = (...args: string[]): string => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  await writeFile(join(repo, 'a.ts'), 'one\n');
+  await writeFile(join(repo, 'b.ts'), 'one\n');
+  git('add', '.');
+  git('commit', '--quiet', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  await writeFile(join(repo, 'a.ts'), 'one\ntwo\n');
+  git('commit', '--quiet', '-am', 'pushed');
+  const pushed = git('rev-parse', 'HEAD');
+  await writeFile(join(repo, 'b.ts'), 'one\nlocal\n');
+  git('commit', '--quiet', '-am', 'not pushed');
+  const anchor = (path: string) => ({ path, startLine: 2, endLine: 2, selectedText: 'two', contextBefore: '', contextAfter: '', documentHash: 'x', side: 'working' as const, baseRevision: base });
+
+  const placed = await placeComment(repo, base, anchor('a.ts'), pushed);
+  assert.equal(placed.commitId, pushed);
+  assert.deepEqual(placed.lines, { start: 2, end: 2 });
+  await assert.rejects(placeComment(repo, base, anchor('b.ts'), pushed), /commits GitHub does not have yet/u);
+  assert.equal((await placeComment(repo, base, anchor('a.ts'))).commitId, git('rev-parse', 'HEAD'));
 });

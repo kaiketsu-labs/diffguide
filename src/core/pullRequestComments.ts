@@ -21,21 +21,33 @@ export function publishableText(thread: ReviewThread): string {
 /** Where a thread lands on the code host, minus the text. */
 export type CommentPlacement = Omit<ChangeRequestComment, 'body'>;
 
-/** Place a thread on the PR diff: on its lines when the diff shows them, else on the whole file, as a whole-file thread always goes. */
-export async function placeComment(worktree: string, base: string, anchor: CodeAnchor): Promise<CommentPlacement> {
+/**
+ * Place a thread on the PR diff: on its lines when the diff shows them, else on the whole file, as a whole-file thread always goes.
+ * `pushedHead` is the PR's latest commit on GitHub; local commits GitHub does not have yet cannot carry a comment.
+ */
+export async function placeComment(worktree: string, base: string, anchor: CodeAnchor, pushedHead?: string): Promise<CommentPlacement> {
   if (anchor.scope === 'pullRequest') throw new Error('This thread is about the whole PR, so it goes on GitHub as a conversation comment.');
   const side = anchor.side === 'original' ? 'LEFT' : 'RIGHT';
-  if (anchor.scope === 'file') return { path: anchor.path, commitId: (await git(worktree, ['rev-parse', 'HEAD'])).trim(), side };
+  const commitId = await commentCommit(worktree, anchor.path, pushedHead);
+  if (anchor.scope === 'file') return { path: anchor.path, commitId, side };
   if (side === 'RIGHT' && (await git(worktree, ['status', '--porcelain', '--', anchor.path])).trim() !== '') {
     throw new Error(`${anchor.path} has uncommitted changes, so its lines may not match GitHub. Commit and push them first.`);
   }
-  const commitId = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
   const diff = await git(worktree, ['diff', '--unified=3', '--no-color', base, commitId, '--', anchor.path]);
   const shown = diffRanges(diff, side).some((range) => range.start <= anchor.startLine && anchor.endLine <= range.end);
   return {
     path: anchor.path, commitId, side,
     ...(shown ? { lines: { start: anchor.startLine, end: anchor.endLine } } : {}),
   };
+}
+
+/** The commit a comment on `path` goes on: GitHub's head when unpushed commits leave the file as it is there, else the checkout's HEAD. */
+export async function commentCommit(worktree: string, path: string, pushedHead: string | undefined): Promise<string> {
+  const head = (await git(worktree, ['rev-parse', 'HEAD'])).trim();
+  if (pushedHead === undefined || pushedHead === '' || pushedHead === head) return head;
+  const same = await git(worktree, ['diff', '--quiet', pushedHead, head, '--', path]).then(() => true, () => false);
+  if (!same) throw new Error(`${path} changed in commits GitHub does not have yet, so its lines may not match GitHub. Push them first.`);
+  return pushedHead;
 }
 
 /** Line ranges of one side that a unified diff shows, hunk by hunk. */
