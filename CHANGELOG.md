@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The README uses the current Diff pair icon and jade color and describes the current local and pull request review flows.
 - The code review card has a Clear button. After you confirm, the card goes and findings nobody answered or resolved are archived; Show archived brings them back.
 - Code blocks in answers, comments and the description show a Copy button on hover.
 - Claude cites code as `path:line` in backticks. On the review page such a reference to a file the page shows is a link: hovering previews the lines, clicking jumps to them.

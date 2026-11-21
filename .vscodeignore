@@ -10,5 +10,6 @@
 !resources/icon.png
 !resources/review.svg
 !resources/diffguide-icons-*.woff
-!docs/media/diffguide-flow.png
 !docs/media/banner.png
+!docs/media/icons/*.png
+!docs/media/how-it-works.png

@@ -1,95 +1,84 @@
 # DiffGuide
 
 <p align="center">
-  <img src="docs/media/banner.png" alt="DiffGuide: Your guide through code changes." width="100%">
+  <img src="docs/media/banner.png" alt="DiffGuide: Your guide through code changes. The Diff pair sits beside an illustration of a pull request in guide order." width="100%">
 </p>
 
 <p align="center">
-  <img alt="VS Code 1.100+" src="https://img.shields.io/badge/VS%20Code-1.100%2B-2F7EA6">
-  <img alt="Agent: Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-2F7EA6">
-  <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-9AA7B3">
+  <img alt="VS Code 1.100+" src="https://img.shields.io/badge/VS%20Code-1.100%2B-1E8463">
+  <img alt="Agent: Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-1E8463">
+  <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-767C79">
 </p>
 
-DiffGuide is a review page in VS Code for your local changes and your GitHub pull requests. Comment on a line, and your coding agent answers in the same thread or changes the code. You decide what to accept and when the review is done.
+Review local changes and GitHub pull requests with Claude Code in VS Code. Select lines on the review page, then choose **Ask** to discuss the code or **Implement** to request a change. DiffGuide sends your comment to Claude automatically. The answer comes back in the same thread, and you decide when to resolve it.
 
-PR pages have Overview and Code tabs. The header's More menu holds PR actions; the branch's unpushed chip holds Show changes and Push. Local review opens the code directly. [Page controls](docs/USAGE.md#the-whole-github-pr).
+[Install](https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide) · [Usage guide](docs/USAGE.md) · [Setup and troubleshooting](docs/INSTALL.md) · [Report an issue](https://github.com/kaiketsu-labs/diffguide/issues)
 
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide">Install</a> ·
-  <a href="https://github.com/kaiketsu-labs/diffguide/blob/main/docs/USAGE.md">Guide</a> ·
-  <a href="https://github.com/kaiketsu-labs/diffguide/blob/main/docs/INSTALL.md">Setup and troubleshooting</a> ·
-  <a href="https://github.com/kaiketsu-labs/diffguide/issues">Issues</a>
-</p>
+## Get started
+
+Install DiffGuide from the VS Code Marketplace, or run the following command.
+
+```bash
+code --install-extension kaiketsu-labs.diffguide
+```
+
+[GitHub releases](https://github.com/kaiketsu-labs/diffguide/releases) also provide a VSIX.
+
+1. Open a trusted Git repository in VS Code.
+2. In DiffGuide's **Local** view, choose **Review local changes** on a checkout.
+3. Choose **Connect Claude** to start, resume, or connect a running Claude conversation.
+4. Select lines, write a comment, and send it with **Ask** or **Implement**.
+
+Requires VS Code 1.100+, Node.js 20+, Git, and authenticated Claude Code with `asyncRewake` support. PR sync requires Git 2.40+. See [platform support and connection requirements](docs/INSTALL.md).
 
 ## Three ways to review
 
 <table>
   <tr>
     <td><img src="docs/media/icons/comment.png" width="36" alt=""></td>
-    <td><b>Comment at the line.</b> Click a line and choose <b>Ask</b> to discuss it, <b>Implement</b> to change it, or <b>Reply</b> to draft your GitHub answer. The agent reads the codebase, runs the tests and edits the code for exactly those lines, while you write the next comment.</td>
+    <td><b>Comment on the code.</b> Choose <b>Ask</b> to discuss selected lines or <b>Implement</b> to request a change. Claude replies in the same thread.</td>
   </tr>
   <tr>
     <td><img src="docs/media/icons/guide.png" width="36" alt=""></td>
-    <td><b>Guide.</b> <b>Build guide</b> has the agent order a PR's changes into steps by severity and explain each one. Tick <b>Viewed</b> on every step and you have covered the whole PR.</td>
+    <td><b>Build guide.</b> Claude groups PR changes by severity and explains each step. Mark steps <b>Viewed</b> as you go.</td>
   </tr>
   <tr>
     <td><img src="docs/media/icons/review.png" width="36" alt=""></td>
-    <td><b>Code review.</b> <b>Review</b> sends correctness, design, security, performance and test agents over the change. Each proves its findings in its own worktree, with a failing test, a trace or a citation, before they open as threads.</td>
+    <td><b>Review</b> in Claude's menu checks local changes or a PR for bugs, design issues, security issues, performance issues, and gaps in tests. Findings with evidence open as review threads.</td>
   </tr>
 </table>
 
-## Around the review
+## Around the pull request
 
 <table>
   <tr>
     <td><img src="docs/media/icons/pr.png" width="36" alt=""></td>
-    <td><b>The whole GitHub PR.</b> Conversation, commits since your last review, checks and the merge box on one page.</td>
+    <td><b>Review on one page.</b> Overview shows the conversation, checks, and merge controls. Code shows the diff in Files or Guide order. Use <b>Finish review</b> to submit pending GitHub comments and your verdict. Local threads can be previewed and published separately.</td>
   </tr>
   <tr>
     <td><img src="docs/media/icons/sidebar.png" width="36" alt=""></td>
-    <td><b>Pull Requests sidebar.</b> Your PRs and review requests per repository, colored by unpushed commits and uncommitted edits. The Diff pair, DiffGuide's companion, marks rows where the agent is working.</td>
+    <td><b>Pull Requests sidebar.</b> Open your PRs and review requests by repository. The Diff pair marks rows where Claude is working.</td>
   </tr>
   <tr>
     <td><img src="docs/media/icons/linked.png" width="36" alt=""></td>
-    <td><b>Linked changes.</b> A PR that needs changes in other repositories lists them, with the branch the agent made and <b>Push and open draft PR</b>.</td>
+    <td><b>Linked changes.</b> See related PRs and branches Claude created in other repositories. Push a branch or open a draft PR from the page.</td>
   </tr>
 </table>
 
 ## How it works
 
 <p align="center">
-  <img src="docs/media/how-it-works.png" alt="The DiffGuide review page: the agent works on an Implement comment and shows each step in the thread, an Ask on lines 12 to 14 is answered, and you write the next comment meanwhile." width="100%">
+  <img src="docs/media/how-it-works.png" alt="Three examples on the DiffGuide review page: Claude works on an Implement comment, answers an Ask in its thread, and you write the next comment while Claude works." width="100%">
 </p>
 
-A small local helper waits for your comment and wakes the agent conversation you connected. The agent does not poll for comments. It answers through review tools that put the reply back in the thread. Threads stay in VS Code's workspace storage. [Architecture →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/HOW-IT-WORKS.md)
-
-## Install
-
-Install **DiffGuide** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide), or run:
-
-```bash
-code --install-extension kaiketsu-labs.diffguide
-```
-
-Each [GitHub release](https://github.com/kaiketsu-labs/diffguide/releases) also carries a `.vsix`.
-
-Then open a trusted local Git repository, click **Review local changes** in the DiffGuide **Local** view, and **Connect Claude** on the review page. Start a new conversation, resume a saved one, or connect the one already running in your terminal.
-
-Requires VS Code 1.100+, Node.js 20+, Git 2.40+ and an agent. Claude Code is the supported agent today. macOS is verified; Linux is unverified; automatic connection does not work on Windows yet. [Setup and troubleshooting →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/INSTALL.md)
-
-Coming from Pair Review? [Move your settings →](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/INSTALL.md#moving-from-pair-review)
+A small local helper waits for a submitted comment and wakes the Claude conversation you connected. Claude reports progress and replies in the same thread. You can keep reviewing or send another comment while Claude works. DiffGuide saves the threads in VS Code's workspace storage. [How the connection works](docs/HOW-IT-WORKS.md)
 
 ## Development
 
 ```bash
-git clone https://github.com/kaiketsu-labs/diffguide.git
-cd diffguide
 npm ci --ignore-scripts
 npm run typecheck
 npm test
-make install    # package and install into VS Code
 ```
 
-[Contributing](https://github.com/kaiketsu-labs/diffguide/blob/main/CONTRIBUTING.md) · [Publishing](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/PUBLISHING.md) · [Review tracker](https://github.com/kaiketsu-labs/diffguide/blob/main/docs/REVIEW.md)
-
-Built on [VS Code webviews](https://code.visualstudio.com/api/extension-guides/webview), [Claude hooks](https://code.claude.com/docs/en/hooks) and [MCP](https://code.claude.com/docs/en/mcp). Not affiliated with Anthropic or Microsoft.
+[Contributing](CONTRIBUTING.md) · [Publishing](docs/PUBLISHING.md)
