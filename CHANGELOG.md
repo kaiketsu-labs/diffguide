@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-21)
+
+
+### Notes
+
 - The README uses the current Diff pair icon and jade color and describes the current local and pull request review flows.
 - The code review card has a Clear button. After you confirm, the card goes and findings nobody answered or resolved are archived; Show archived brings them back.
 - Code blocks in answers, comments and the description show a Copy button on hover.
@@ -64,9 +69,6 @@
 - When the base branch moves while Claude works, a notice says the files are out of date and offers Refresh. It stays until the files reload.
 - **Finish your review** counts the pending comments it lists.
 - In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.
-
-## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-21)
-
 
 ### Features
 
