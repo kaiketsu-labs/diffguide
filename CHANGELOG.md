@@ -65,6 +65,61 @@
 - **Finish your review** counts the pending comments it lists.
 - In comments and Claude's answers, ```x``` on one line is inline code, no longer an open code block that swallows the rest of the message.
 
+## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-21)
+
+
+### Features
+
+* **branding:** replace the pixel orb with the Diff pair companion ([#76](https://github.com/kaiketsu-labs/diffguide/issues/76)) ([b2ff246](https://github.com/kaiketsu-labs/diffguide/commit/b2ff246cc81cd3a6730764cd6d2903ecacba95f0))
+* **claude:** background terminal, Show terminal on working threads, connected conversation's context ([0987d0e](https://github.com/kaiketsu-labs/diffguide/commit/0987d0e6c9194bf98113f19570f8ab2fdc659d0a))
+* **page:** add find without moving visible matches ([#77](https://github.com/kaiketsu-labs/diffguide/issues/77)) ([90998e8](https://github.com/kaiketsu-labs/diffguide/commit/90998e89b01651b70a29bec7643c43f51ba3b7af))
+* **page:** clear a code review, copy code blocks, link Claude's path:line references ([ece22b4](https://github.com/kaiketsu-labs/diffguide/commit/ece22b42e3b325411cf19e913c0c29d35e1abca3))
+* **page:** say when the shown files are out of date ([e267ccf](https://github.com/kaiketsu-labs/diffguide/commit/e267ccf80a31e7758d060f2d918239cc3c63162e))
+* **page:** show refresh progress and result ([29eae9b](https://github.com/kaiketsu-labs/diffguide/commit/29eae9b522a875b394f320fa9aba6a69959dfa1f))
+* **page:** two-tab review page with Claude chip and Finish review form ([#75](https://github.com/kaiketsu-labs/diffguide/issues/75)) ([9d645d4](https://github.com/kaiketsu-labs/diffguide/commit/9d645d4b6a66a0a0fac4a2943deabf22b009654a))
+* **sync:** keep checkouts in sync without losing local work ([#74](https://github.com/kaiketsu-labs/diffguide/issues/74)) ([dd38fea](https://github.com/kaiketsu-labs/diffguide/commit/dd38feae179de05d89371d0776134e83178c66d1))
+* **vscode:** reopen review pages after a window reload ([3afd1de](https://github.com/kaiketsu-labs/diffguide/commit/3afd1dec3e0703e9e8d773e3e26186de7d22b9f1))
+
+
+### Bug Fixes
+
+* **github:** post comments on GitHub's head commit when local commits are unpushed ([9261646](https://github.com/kaiketsu-labs/diffguide/commit/9261646f37f65937e4bf81358a62562aa1d98b8a))
+* **markdown:** read ```x``` on one line as inline code ([27704ec](https://github.com/kaiketsu-labs/diffguide/commit/27704ec3e4a1d754a2eb8642342da02fcf0afbe5))
+* **page:** count the pending comments the review list shows ([d30d0aa](https://github.com/kaiketsu-labs/diffguide/commit/d30d0aa0a46f5899ff1cc2a64187e26b8bafd857))
+* **page:** fold a thread when it is resolved ([456b86e](https://github.com/kaiketsu-labs/diffguide/commit/456b86ec7d246bd949089775924514fe2cc10a57))
+* **page:** highlight github code with the page's highlighter ([e8c8684](https://github.com/kaiketsu-labs/diffguide/commit/e8c868460278bf2da926fab7b62980d20ac436cc))
+* **page:** keep menus in the window and Claude's chip beside Finish review ([c2e684c](https://github.com/kaiketsu-labs/diffguide/commit/c2e684c8722ebee5185b57ad448e9e59c7a89dc4))
+* **page:** redraw when the state changes during the page's first read ([4cca3a5](https://github.com/kaiketsu-labs/diffguide/commit/4cca3a58aa2449860a55ea9a16b1b1a6cf564927))
+* **page:** style github suggested changes and code colors ([f3e7f0b](https://github.com/kaiketsu-labs/diffguide/commit/f3e7f0b07664eae0e008a544aa76514e8e65d0e6))
+* **pr:** follow the base branch github reports ([a3a5d01](https://github.com/kaiketsu-labs/diffguide/commit/a3a5d01f1c2b7f119329c702d109436b494224df))
+* **vscode:** reopen PR pages after a reload ([f40e5c5](https://github.com/kaiketsu-labs/diffguide/commit/f40e5c5f65137620c4df5267f88992aeff040202))
+
+
+### Performance
+
+* **local:** show the local page's files before their syntax colors ([63ae4eb](https://github.com/kaiketsu-labs/diffguide/commit/63ae4ebac9108f68d52210380c2a4ed5bd69dd38))
+* **page:** color diffs on worker threads ([e1addf7](https://github.com/kaiketsu-labs/diffguide/commit/e1addf7625ea2565add349dd122ab9badd003f60))
+* **page:** draw a large PR's diffs over several frames ([cd46e01](https://github.com/kaiketsu-labs/diffguide/commit/cd46e01d9b130de59dd2faa18a837d7b2e84a8d1))
+* **page:** read linked changes alongside the other GitHub reads ([3689ba7](https://github.com/kaiketsu-labs/diffguide/commit/3689ba71c6f3f1c54ec89b9f46b60ed6ffa8a441))
+* **page:** read the files while the page state loads ([1dedc7c](https://github.com/kaiketsu-labs/diffguide/commit/1dedc7cbfa6c10acc5635ed6610f0e894e9ca946))
+* **page:** send syntax colors in batches and swap them into drawn lines ([d81da24](https://github.com/kaiketsu-labs/diffguide/commit/d81da240ee952d1dd7d8b440d0750f17690a1ab6))
+* **page:** show a PR's files before their syntax colors ([0075dfa](https://github.com/kaiketsu-labs/diffguide/commit/0075dfa8ca4dca186fd7f5f696cc6691c1fd54d1))
+* **page:** show a PR's tab before its worktree is made ([b16ecec](https://github.com/kaiketsu-labs/diffguide/commit/b16ececbec1163ca5cc53ca69cd43d984e70d962))
+* **page:** show commit previews and start Claude's reads before syntax colors ([357063b](https://github.com/kaiketsu-labs/diffguide/commit/357063b17c68a4a1359cf3d29b519970ca1be25e))
+* **page:** show the PR page before GitHub sends details and threads ([2c96a5e](https://github.com/kaiketsu-labs/diffguide/commit/2c96a5e4039ff37b22932eef6b93e4cd82285073))
+* **page:** show the PR page before GitHub sends its file list ([bd236d6](https://github.com/kaiketsu-labs/diffguide/commit/bd236d6aac93d9d99a82f681c039b89bb16b1a35))
+* **page:** show the PR page before GitHub sends its linked changes ([faf3601](https://github.com/kaiketsu-labs/diffguide/commit/faf36019d8e949f83506aba4eeaf0ba06329b3e9))
+* **page:** show the PR page before GitHub sends the conversation ([e089d61](https://github.com/kaiketsu-labs/diffguide/commit/e089d61da4fcf1c642ca3c4063e062acf6bc1487))
+* **page:** skip layout and paint for diffs off screen ([ad1b3f6](https://github.com/kaiketsu-labs/diffguide/commit/ad1b3f6de7dd777369657ed02350430820db9125))
+* **sidebar:** show PR rows before GitHub and Git answer for them ([8dcc135](https://github.com/kaiketsu-labs/diffguide/commit/8dcc135b83c7bb37394702a7aeaca5e31f38d06c))
+
+
+### Documentation
+
+* **agents:** add a bench skill and the page's loading rules ([b811dc0](https://github.com/kaiketsu-labs/diffguide/commit/b811dc079c003aadfc7e254c8fb0070f776a5505))
+* **agents:** ship each fix and feature with a failing-first test ([f25ee0a](https://github.com/kaiketsu-labs/diffguide/commit/f25ee0a3166720673f61f5bbdaa2f62fef3e4dc6))
+* **readme:** refresh branding and prune outdated docs ([1d6b162](https://github.com/kaiketsu-labs/diffguide/commit/1d6b162a1963f40afe1d9e9926869223e359bc99))
+
 ## [0.9.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.8.0...v0.9.0) (2026-11-12)
 
 
