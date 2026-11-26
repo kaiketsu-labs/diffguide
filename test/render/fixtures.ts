@@ -590,6 +590,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
   get 'review-clear'() { return reviewingScenes['review-clear']!; },
+  get previewRefresh() { return reviewingScenes['previewRefresh']!; },
 };
 
 const pendingMessage = (id: string, body: string): GitHubMessage => ({
@@ -700,4 +701,10 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { expect: '#conversation .js-suggested-changes-blob .blob-code-addition', text: 'objects the caller passes', absent: '#conversation .js-suggested-changes-blob .blob-num:visible', scrollTo: '#conversation', shot: 'github-markup.png' },
   ] },
   since: { state: reviewing, messages: [{ state: reviewing }, { ...filesMessage, selection: { range: { kind: 'since' }, whitespace: false } }], steps: [{ shot: 'since.png' }], saved: { view: 'files' } },
+  // A previewed file that changes on disk reads its preview again.
+  previewRefresh: { state: pullRequest, messages: [{ state: pullRequest }, filesMessage], saved: { view: 'files', previewing: ['README.md'] }, steps: [
+    { send: { preview: { path: 'README.md', kind: 'markdown', blocks: [{ startLine: 1, endLine: 1, html: '<p>Old text</p>' }] } }, expect: '#files', text: 'Old text' },
+    { send: { ...filesMessage, files: files.map((each) => each.path === 'README.md' ? { ...each, additions: 7 } : each) }, expect: '#files', text: 'Loading preview' },
+    { send: { preview: { path: 'README.md', kind: 'markdown', blocks: [{ startLine: 1, endLine: 1, html: '<p>New text</p>' }] } }, expect: '#files', text: 'New text', shot: 'preview-refresh.png' },
+  ] },
 };

@@ -7,7 +7,7 @@ import { commentAsks, renderConversation } from './conversation/timeline.js';
 import { $, el } from './dom.js';
 import { applyColors, dropColors } from './files/colors.js';
 import { openFolders } from './files/nav.js';
-import { medias, previews } from './files/preview.js';
+import { forgetPreviews, medias, previews } from './files/preview.js';
 import { isLarge, renderFiles } from './files/render.js';
 import { openFind } from './find.js';
 import { contextLines, jump } from './files/table.js';
@@ -63,6 +63,10 @@ export function onExtensionMessage(data: ExtensionMessage): void {
     dropColors();
     setStale(false);
     const changed = changedFiles(data.files, shownAs);
+    const before = new Map(received.files?.map((file) => [file.path, JSON.stringify(file)]));
+    const edited = data.files.filter((file) => before.has(file.path) && before.get(file.path) !== JSON.stringify(file)).map((file) => file.path);
+    for (const path of edited) { loading.delete('preview:' + path); loading.delete('media:' + path); }
+    forgetPreviews(edited);
     received.files = data.files;
     for (const file of received.files) if (!collapsed.has(file.path) && (file.generated || isLarge(file))) collapsed.set(file.path, true);
     if (changed === undefined) { received.guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
