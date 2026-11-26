@@ -474,6 +474,7 @@ test('a conversation the review page starts runs in a terminal that stays in the
   const terminal = window.terminals[0];
   assert.equal(terminal?.sendTextCalls.length, 1);
   assert.equal(terminal?.showCalls, 0);
+  assert.deepEqual(terminal?.creationOptions.env, { CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' });
   await launcher.local.connect({ how: 'show' });
   assert.equal(terminal?.showCalls, 1);
 });

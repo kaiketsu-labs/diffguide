@@ -232,7 +232,8 @@ export function createClaudeLauncher(
       inactiveTerminals.add(replaceTerminal);
       replaceTerminal.dispose();
     }
-    terminal = vscode.window.createTerminal({ name: terminalName, cwd: bridge.descriptor.workspaceRoot });
+    // Claude Code's VS Code link opens its diffs in the editor, which brings the terminal panel to the front on every edit.
+    terminal = vscode.window.createTerminal({ name: terminalName, cwd: bridge.descriptor.workspaceRoot, env: { CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' } });
     if (reveal) terminal.show();
     terminal.sendText(command);
     changed.fire();
