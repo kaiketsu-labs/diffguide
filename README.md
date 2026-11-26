@@ -10,9 +10,13 @@
   <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-767C79">
 </p>
 
-Review local changes and GitHub pull requests with Claude Code in VS Code. Select lines on the review page, then choose **Ask** to discuss the code or **Implement** to request a change. DiffGuide sends your comment to Claude automatically. The answer comes back in the same thread, and you decide when to resolve it.
+<p align="center">
+  Review local changes and GitHub pull requests with Claude Code in VS Code. Select lines on the review page, then choose <b>Ask</b> to discuss the code or <b>Implement</b> to request a change. DiffGuide sends your comment to Claude automatically. The answer comes back in the same thread, and you decide when to resolve it.
+</p>
 
-[Install](https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide) · [Usage guide](docs/USAGE.md) · [Setup and troubleshooting](docs/INSTALL.md) · [Report an issue](https://github.com/kaiketsu-labs/diffguide/issues)
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=kaiketsu-labs.diffguide">Install</a> · <a href="docs/USAGE.md">Usage guide</a> · <a href="docs/INSTALL.md">Setup and troubleshooting</a> · <a href="https://github.com/kaiketsu-labs/diffguide/issues">Report an issue</a>
+</p>
 
 ## Get started
 
