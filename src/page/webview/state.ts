@@ -169,6 +169,8 @@ export interface Ui {
   peekAt: number;
   drag: { path: string; side: DiffSide; from: number; to: number } | undefined;
   busy: boolean;
+  /** Set from a Push click until the extension answers. */
+  pushing: boolean;
   author: boolean;
   /** The description is open for editing, so redraws leave it alone. */
   editingBody: boolean;
@@ -201,6 +203,7 @@ export const ui: Ui = {
   peekAt: -1,
   drag: undefined,
   busy: false,
+  pushing: false,
   author: true,
   editingBody: false,
   picker: undefined,

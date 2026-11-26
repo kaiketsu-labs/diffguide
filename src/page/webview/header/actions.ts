@@ -1,7 +1,7 @@
 /** Header menus for the PR and its unpushed commits. */
 import { icons } from '../../icons.js';
 import { removeWorktreeQuestion } from '../../removeWorktree.js';
-import { button, el } from '../dom.js';
+import { $, button, el, icon } from '../dom.js';
 import { askInMenu, closeToolbarMenu, menuRow, openToolbarMenu } from '../menus.js';
 import { showUnpushed } from '../range.js';
 import { received, ui } from '../state.js';
@@ -44,10 +44,31 @@ function openLinkForm(): void {
   input.focus();
 }
 
-/** Show changes and Push belong to the branch; only editors can push. */
 export function openUnpushedMenu(): void {
-  const rows = [action('show-unpushed', 'Show changes', icons.show, showUnpushed)];
-  if (received.current?.details?.canEdit) rows.push(action('push', 'Push', icons.push, () => post({ action: 'push' })));
-  openToolbarMenu('unpushed-chip', rows);
+  openToolbarMenu('unpushed-chip', [action('show-unpushed', 'Show changes', icons.show, showUnpushed)]);
   if (ui.toolbarMenu) ui.toolbarMenu.node.id = 'unpushed-menu';
+}
+
+/** Push beside Claude's chip while the branch has unpushed commits; only editors can push. */
+export function renderPush(): void {
+  const unpushed = received.current?.unpushed?.length ?? 0;
+  const push = $<HTMLButtonElement>('push');
+  push.hidden = !ui.pushing && (unpushed === 0 || received.current?.details?.canEdit !== true);
+  push.disabled = ui.pushing;
+  push.classList.toggle('busy', ui.pushing);
+  push.replaceChildren(icon(ui.pushing ? icons.sync : icons.push), ui.pushing ? 'Pushing…' : 'Push ' + unpushed);
+}
+
+export function pushCommits(): void {
+  ui.pushing = true;
+  renderPush();
+  post({ action: 'push' });
+}
+
+/** The push finished or failed; on success the button stays hidden until the next state recounts the commits. */
+export function pushEnded(pushed: boolean): void {
+  if (!ui.pushing) return;
+  ui.pushing = false;
+  renderPush();
+  if (pushed) $('push').hidden = true;
 }

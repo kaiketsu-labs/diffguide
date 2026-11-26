@@ -12,6 +12,7 @@ import { isLarge, renderFiles } from './files/render.js';
 import { openFind } from './find.js';
 import { contextLines, jump } from './files/table.js';
 import { renderConnectMenu } from './header/connect.js';
+import { pushEnded } from './header/actions.js';
 import { closeMergeForm } from './header/merge.js';
 import { closeTitleForm, renderLinked } from './header/pullRequest.js';
 import { renderBaseMenu, renderReviewers } from './header/reviewers.js';
@@ -120,6 +121,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.notice) showNotice(data.notice);
   if (data.error) {
     loading.clear();
+    pushEnded(false);
     $('error').textContent = data.error;
     if (data.form && sending.delete(data.form)) { renderFiles(); if (received.current) renderConversation(received.current, true); }
   }
@@ -141,6 +143,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   }
   if (data.done === 'review') { $<HTMLTextAreaElement>('review').value = ''; closeReviewForm(); }
   if (data.done === 'merge') closeMergeForm();
+  if (data.done === 'push') pushEnded(true);
   if (data.done === 'title') closeTitleForm();
   if (data.done === 'dismiss') { ui.dismissing = undefined; if (received.current) renderReviewers(received.current, true); }
   if (data.done === 'suggestions') { batch.clear(); renderBatch(); }
