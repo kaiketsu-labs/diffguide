@@ -76,7 +76,7 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
   #count(checkout: LocalCheckout): Promise<number> {
     let count = this.#counts.get(checkout.root);
     if (count === undefined) {
-      count = countChangedFiles(checkout.root).catch(() => 0);
+      count = checkout.plain ? Promise.resolve(0) : countChangedFiles(checkout.root).catch(() => 0);
       this.#counts.set(checkout.root, count);
     }
     return count;
@@ -108,7 +108,7 @@ export class LocalFilesView implements vscode.TreeDataProvider<Node>, vscode.Dis
     const item = new vscode.TreeItem(checkoutLabel(checkout), vscode.TreeItemCollapsibleState.None);
     item.id = `checkout:${checkout.root}`;
     const working = busy !== undefined || threads.some((thread) => !thread.resolved && (thread.status === 'received' || thread.status === 'working'));
-    item.iconPath = working ? workingIcon : new vscode.ThemeIcon(checkoutIcons[checkout.kind]);
+    item.iconPath = working ? workingIcon : new vscode.ThemeIcon(checkout.plain ? 'folder' : checkoutIcons[checkout.kind]);
     item.description = [checkoutNotes[checkout.kind], changed > 0 ? `${changed} changed` : '', open === 0 ? '' : open === 1 ? '1 comment' : `${open} comments`, busy].filter(Boolean).join(' · ');
     item.tooltip = checkout.root;
     item.contextValue = 'diffGuide.checkout';

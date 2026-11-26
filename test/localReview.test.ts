@@ -11,7 +11,7 @@ import type { AgentChoice } from '../src/core/agent.js';
 import { anchorFromText } from '../src/core/anchors.js';
 import type { ReviewBridge, ReviewStore } from '../src/core/contracts.js';
 import { getHeadRevision } from '../src/core/git/git.js';
-import { checkoutLabel, groupByRepository, listLocalCheckouts, type LocalCheckout, matchesFilter, parseWorktreeList } from '../src/core/git/localCheckouts.js';
+import { checkoutLabel, groupByRepository, listLocalCheckouts, type LocalCheckout, matchesFilter, parseWorktreeList, plainFolder } from '../src/core/git/localCheckouts.js';
 import { useEditorHighlighter } from '../src/core/codePreview.js';
 import { createReviewStore } from '../src/core/store.js';
 import { wholeFileDiff } from '../src/core/unifiedDiff.js';
@@ -20,7 +20,7 @@ import { localClaudeStatus, LocalReview } from '../src/hosts/vscode/localReview.
 import { LocalSessions } from '../src/hosts/vscode/localSessions.js';
 import { isPageOpen, showPullRequestOverview } from '../src/hosts/vscode/reviewPanel.js';
 import type { ClaudeLauncher } from '../src/hosts/vscode/setup.js';
-import type { ExtensionMessage, OverviewActions } from '../src/page/protocol.js';
+import type { ExtensionMessage, OverviewActions, OverviewState } from '../src/page/protocol.js';
 import { extensionContext, FakeMemento, resetFakeWindow, Uri, window, workspace } from './fakes/vscode.js';
 
 const executeFile = promisify(execFile);
@@ -362,4 +362,33 @@ test('groups checkouts by repository and filters them by repository, branch or P
   assert.deepEqual(checkouts.filter((checkout) => matchesFilter(checkout, 'ANCH')).map((checkout) => checkout.root), ['/a-fix']);
   assert.deepEqual(checkouts.filter((checkout) => matchesFilter(checkout, '#19')).map((checkout) => checkout.root), ['/a/pr-19']);
   assert.equal(checkouts.filter((checkout) => matchesFilter(checkout, 'beta')).length, 1);
+});
+
+test('a folder outside Git shows its files whole, without a diff or Claude\'s code review', async () => {
+  const scratch = await realpath(await mkdtemp(path.join(tmpdir(), 'diffguide-plain-')));
+  cleanup.push(() => rm(scratch, { recursive: true, force: true }));
+  const root = path.join(scratch, 'notes');
+  await mkdir(path.join(root, 'node_modules', 'dep'), { recursive: true });
+  await writeFile(path.join(root, 'plan.md'), '# Plan\n');
+  await writeFile(path.join(root, 'node_modules', 'dep', 'index.js'), 'module.exports = 1;\n');
+  const store = await createReviewStore(path.join(scratch, 'storage', 'review.json'), root);
+  const context = { ...extensionContext(new FakeMemento()), extensionUri: Uri.file('/extension') } as unknown as vscode.ExtensionContext;
+  const review = new LocalReview(context, root, store, bridge, path.join(scratch, 'storage', 'local-review'), fakeLauncher());
+  cleanup.push(() => { review.dispose(); });
+
+  const { files, repositoryFiles } = await review.readFiles();
+  assert.deepEqual(files.map((file) => [file.path, file.change]), [['plan.md', 'unchanged']]);
+  assert.deepEqual(repositoryFiles, ['plan.md']);
+  await review.open();
+  await until(() => window.panels.length > 0);
+  const state = await until(() => (window.panels.at(-1)?.sent ?? []).some((message) => typeof message === 'object' && message !== null && 'state' in message))
+    .then(() => (window.panels.at(-1)?.sent ?? []).find((message): message is { state: OverviewState } => typeof message === 'object' && message !== null && 'state' in message)?.state);
+  assert.equal(state?.headBranch, '');
+  assert.equal(state?.review, undefined);
+});
+
+test('names a folder outside Git after the folder, with no branch', () => {
+  const folder = plainFolder('/work/notes');
+  assert.equal(checkoutLabel(folder), 'notes');
+  assert.equal(folder.plain, true);
 });
