@@ -595,6 +595,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
   get 'review-clear'() { return reviewingScenes['review-clear']!; },
+  get 'review-recheck'() { return reviewingScenes['review-recheck']!; },
   get previewRefresh() { return reviewingScenes['previewRefresh']!; },
 };
 
@@ -672,6 +673,12 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' }, { expect: '#review-card details[open]' },
     { click: '#review-clear', expect: '.ask-menu' }, { click: '.ask-menu button:has-text("Clear")', absent: '.ask-menu' }, { expect: '#review-card details[open]' },
     { send: { state: { ...reviewing, review: { running: false, picked: ['correctness'] } } }, absent: '#review-card:visible' },
+  ] },
+  // Re-check findings stays once every finding is resolved, to confirm they are fixed.
+  'review-recheck': { state: reviewing, messages: [{ state: reviewing }, filesMessage], saved: { view: 'files' }, width: 1100, steps: [
+    { scrollTo: '#review-card', expect: '.review-recheck', text: '1 open finding' },
+    { send: { state: { ...reviewing, threads: reviewing.threads.map((each) => each.origin === 'review' ? { ...each, resolved: true } : each) } }, expect: '.review-recheck', text: 'All findings resolved' },
+    { click: '.review-recheck button:has-text("Re-check findings")', shot: 'review-recheck.png' },
   ] },
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   // The details' count lags at 5; the page counts the 2 pending comments its list shows.

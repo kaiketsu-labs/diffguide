@@ -335,3 +335,36 @@ test('withdrawing a new thread\'s only comment removes the thread and keeps its 
   const reopened = await createReviewStore(file, root);
   assert.deepEqual(reopened.events, store.events);
 });
+
+test('a re-checked resolved thread resolves again only when Claude answers Fixed', async (t) => {
+  const { store, file, root } = await fixture(t);
+  const fixed = await store.submit(anchor(), 'Off by one.', 'ask');
+  const partly = await store.submit(anchor(), 'Missing null check.', 'ask');
+  for (const thread of [fixed, partly]) await store.resolve(thread.id, true);
+  const asked = await store.submit(fixed.anchor, 'Is it fixed?', 'ask', fixed.id, true);
+  const askedPartly = await store.submit(partly.anchor, 'Is it fixed?', 'ask', partly.id, true);
+  assert.equal(asked.resolved, false);
+  assert.equal(asked.recheck, true);
+  assert.equal(store.pendingEvents.length, 2);
+  assert.equal((await createReviewStore(file, root)).threads[0]?.recheck, true);
+  await store.updateFromAgent({ eventId: asked.latestEventId, status: 'answered', text: '**Fixed.** Line 4 now checks the bound.' });
+  await store.updateFromAgent({ eventId: askedPartly.latestEventId, status: 'answered', text: 'Partly fixed: the caller still passes null.' });
+  assert.equal(store.threads[0]?.resolved, true);
+  assert.equal(store.threads[0]?.recheck, undefined);
+  assert.equal(store.threads[1]?.resolved, false);
+  assert.equal(store.threads[1]?.recheck, undefined);
+});
+
+test('a re-check of an open thread leaves it open, and taking the question back restores the resolution', async (t) => {
+  const { store } = await fixture(t);
+  const open = await store.submit(anchor(), 'Off by one.', 'ask');
+  const asked = await store.submit(open.anchor, 'Is it fixed?', 'ask', open.id, true);
+  assert.equal(asked.recheck, undefined);
+  await store.updateFromAgent({ eventId: asked.latestEventId, status: 'answered', text: 'Fixed.' });
+  assert.equal(store.threads[0]?.resolved, false);
+  await store.resolve(open.id, true);
+  await store.submit(open.anchor, 'Is it fixed?', 'ask', open.id, true);
+  await store.withdraw(open.id);
+  assert.equal(store.threads[0]?.resolved, true);
+  assert.equal(store.threads[0]?.recheck, undefined);
+});

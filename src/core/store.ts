@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pullRequestAnchor } from './anchors.js';
 import { type AgentUpdate, type CodeAnchor, type Disposable, type Finding, type Reviewer, reviewers, type ReviewEvent, type ReviewIntent, type ReviewMessage, type ReviewSnapshot, type ReviewStatus, type ReviewStore, type ReviewThread, type WithdrawnComment } from './contracts.js';
 import { maximumIdentifierLength, maximumPathLength, maximumReplyLength, maximumReviewTextLength, maximumTitleLength } from './limits.js';
+import { saysFixed } from './review.js';
 
 const intents: readonly ReviewIntent[] = ['ask', 'implement', 'summarize'];
 const statuses: readonly ReviewStatus[] = ['queued', 'received', 'working', 'answered', 'ready'];
@@ -90,8 +91,8 @@ class FileReviewStore implements ReviewStore {
     return this.#snapshot.events.filter((event) => !event.acknowledged && currentEvents.has(event.id));
   }
 
-  /** Capture a human comment as a new immutable event and reopen its thread. */
-  submit(anchor: CodeAnchor, text: string, intent: ReviewIntent, threadId?: string): Promise<ReviewThread> {
+  /** Capture a human comment as a new immutable event and reopen its thread; `recheck` lets the answer restore a resolved thread's resolution. */
+  submit(anchor: CodeAnchor, text: string, intent: ReviewIntent, threadId?: string, recheck = false): Promise<ReviewThread> {
     const capturedAnchor = readAnchor(anchor);
     const capturedText = readBoundedText(text, 'Comment', maximumReviewTextLength, true);
     const capturedIntent = readIntent(intent);
@@ -132,6 +133,7 @@ class FileReviewStore implements ReviewStore {
         latestEventId: event.id,
         ...(existing?.origin === undefined ? {} : { origin: existing.origin }),
         ...(existing?.title === undefined ? {} : { title: existing.title }),
+        ...(recheck && (existing?.resolved === true || existing?.recheck === true) ? { recheck: true as const } : {}),
       };
       return [
         {
@@ -184,9 +186,10 @@ class FileReviewStore implements ReviewStore {
         ? captured.status
         : thread.status;
       const title = thread.title ?? captured.title;
-      const nextThread = messages === thread.messages && status === thread.status && title === thread.title
+      const changed = messages === thread.messages && status === thread.status && title === thread.title
         ? thread
         : { ...thread, messages, status, ...(title === undefined ? {} : { title }) };
+      const nextThread = thread.recheck === true && current && historicalReply ? settleRecheck(changed, captured.text ?? '') : changed;
       if (events === snapshot.events && nextThread === thread) {
         return [snapshot, thread];
       }
@@ -204,9 +207,10 @@ class FileReviewStore implements ReviewStore {
     const value = readBoolean(resolved, 'resolved');
     return this.#mutate((snapshot) => {
       const thread = requireThread(snapshot, id);
-      return thread.resolved === value
+      const { recheck: _recheck, ...settled } = thread;
+      return thread.resolved === value && thread.recheck === undefined
         ? [snapshot, undefined]
-        : [replaceThread(snapshot, { ...thread, resolved: value }), undefined];
+        : [replaceThread(snapshot, { ...settled, resolved: value }), undefined];
     });
   }
 
@@ -236,10 +240,11 @@ class FileReviewStore implements ReviewStore {
       const messages = thread.messages.slice(0, -1);
       const events = snapshot.events.map((candidate) => candidate.id === event.id ? { ...candidate, withdrawn: true as const } : candidate);
       const answered = previous !== undefined && (previous.acknowledged || messages.some((message) => message.author === 'claude' && message.eventId === previous.id));
+      const { recheck, ...rest } = thread;
       const threads = previous === undefined || messages.length === 0
         ? snapshot.threads.filter((candidate) => candidate.id !== id)
         : snapshot.threads.map((candidate) => candidate.id === id
-          ? { ...thread, messages, latestEventId: previous.id, intent: previous.intent, status: answered ? 'answered' as const : 'queued' as const }
+          ? { ...rest, ...recheck ? { resolved: true } : {}, messages, latestEventId: previous.id, intent: previous.intent, status: answered ? 'answered' as const : 'queued' as const }
           : candidate);
       return [{ ...snapshot, threads, events }, {
         text: last.text, intent: event.intent, anchor: thread.anchor, received: event.acknowledged, threadRemoved: threads.length < snapshot.threads.length,
@@ -446,7 +451,8 @@ function readFinding(value: unknown): Finding {
 /** Validate a stored review thread and its nested messages. */
 function readThread(value: unknown): ReviewThread {
   const record = readObject(value, 'thread');
-  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'finding', 'title', 'archived']);
+  checkKeys(record, ['id', 'anchor', 'messages', 'intent', 'status', 'resolved', 'outdated', 'latestEventId', 'origin', 'finding', 'title', 'archived', 'recheck']);
+  if (record['recheck'] !== undefined && record['recheck'] !== true) throw new ReviewStoreError('Invalid recheck flag.');
   if (record['archived'] !== undefined && record['archived'] !== true) throw new ReviewStoreError('Invalid archived flag.');
   const messages = readArray(record['messages'], 'messages').map(readMessage);
   const origin = record['origin'];
@@ -466,7 +472,14 @@ function readThread(value: unknown): ReviewThread {
     outdated: readBoolean(record['outdated'], 'outdated'), latestEventId: readId(record['latestEventId']),
     ...(record['title'] === undefined ? {} : { title: readTitle(record['title']) }),
     ...(record['archived'] === true ? { archived: true as const } : {}),
+    ...(record['recheck'] === true ? { recheck: true as const } : {}),
   };
+}
+
+/** A re-checked thread after Claude's answer: resolved again when the answer starts with Fixed, open otherwise. */
+function settleRecheck(thread: ReviewThread, answer: string): ReviewThread {
+  const { recheck: _recheck, ...settled } = thread;
+  return { ...settled, resolved: saysFixed(answer) };
 }
 
 /** Validate an event's immutable work payload and delivery marker. */

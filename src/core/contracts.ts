@@ -66,6 +66,8 @@ export interface ReviewThread {
   readonly title?: string;
   /** The human put the thread away; it keeps its events and can be unarchived. */
   readonly archived?: true;
+  /** The human had resolved this finding before Re-check findings reopened it; Claude's answer resolves it again when it says Fixed. */
+  readonly recheck?: true;
 }
 
 /** A single immutable work item sent to Claude at least once. */
@@ -131,7 +133,7 @@ export interface ReviewStore {
   readonly events: readonly ReviewEvent[];
   readonly workspaceRoot: string;
   readonly pendingEvents: readonly ReviewEvent[];
-  submit(anchor: CodeAnchor, text: string, intent: ReviewIntent, threadId?: string): Promise<ReviewThread>;
+  submit(anchor: CodeAnchor, text: string, intent: ReviewIntent, threadId?: string, recheck?: boolean): Promise<ReviewThread>;
   updateFromAgent(update: AgentUpdate): Promise<ReviewThread>;
   resolve(threadId: string, resolved: boolean): Promise<void>;
   /** Hide a thread from the review page, or show it again, without touching its events. */
