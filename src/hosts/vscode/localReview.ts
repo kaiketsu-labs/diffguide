@@ -11,7 +11,7 @@ import { resolveExecutable } from '../../core/executables.js';
 import type { ChangeRequestSummary } from '../../core/forge.js';
 import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { git } from '../../core/git/worktrees.js';
-import { clearReview } from '../../core/review.js';
+import { clearReview, recheckRequest } from '../../core/review.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
 import { applySuggestion, parseSuggestions } from '../../core/suggestions.js';
 import { type ColorFiles, colorInBatches, type FileDiff, highlightSource, knownColors, readPullRequestDiffPlainFirst, type Uncolored, wholeFileCode, wholeFileDiff } from '../../core/unifiedDiff.js';
@@ -350,6 +350,11 @@ export class LocalReview implements vscode.Disposable {
         if (thread.resolved) throw new Error('Reopen this thread before replying.');
         if (thread.archived) throw new Error('Unarchive this thread before replying.');
         await this.store.submit(thread.anchor, text || implementThreadRequest, intent, id);
+      },
+      recheck: async (id) => {
+        const thread = this.#findThread(id);
+        if (thread.origin !== 'review' || thread.archived) throw new Error('Only open or resolved code review findings can be re-checked.');
+        await this.store.submit(thread.anchor, recheckRequest, 'ask', thread.id, true);
       },
       resolve: (id, resolved) => this.store.resolve(this.#findThread(id).id, resolved),
       archive: (id, archived) => this.store.archive(this.#findThread(id).id, archived),

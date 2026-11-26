@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type Reviewer, reviewers as allReviewers } from '../../core/contracts.js';
 import { type ChangeRequestConversation, type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type ReactionContent, reactionContents, type ReviewEvent } from '../../core/forge.js';
-import { recheckRequest } from '../../core/review.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
 import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, type FilesView, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
@@ -356,9 +355,9 @@ export async function showPullRequestOverview(
         } else if (action === 'review-stop') actions.stopReview();
         else if (action === 'review-clear') await actions.clearReview();
         else if (action === 'review-recheck') {
-          const open = state.threads.filter((thread) => thread.origin === 'review' && !thread.resolved && thread.archived !== true);
-          for (const thread of open) await actions.reply(thread.id, recheckRequest, 'ask');
-          post({ notice: { text: open.length === 1 ? 'Asked Claude to re-check 1 finding.' : `Asked Claude to re-check ${open.length} findings.` } });
+          const findings = state.threads.filter((thread) => thread.origin === 'review' && thread.archived !== true);
+          for (const thread of findings) await actions.recheck(thread.id);
+          post({ notice: { text: findings.length === 1 ? 'Asked Claude to re-check 1 finding.' : `Asked Claude to re-check ${findings.length} findings.` } });
         }
         else if (action === 'remove-worktree') { await actions.removeWorktree(); panel.dispose(); }
         else if (action === 'refresh') {
