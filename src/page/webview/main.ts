@@ -18,7 +18,7 @@ import { paintDrag, pick } from './files/selection.js';
 import { guideState } from './guide/model.js';
 import { openConnectMenu, openContextMenu } from './header/connect.js';
 import { clickMerge, closeMergeForm, openMethodMenu, openUpdateMenu } from './header/merge.js';
-import { openPageMenu, openUnpushedMenu } from './header/actions.js';
+import { openPageMenu, openUnpushedMenu, pushCommits } from './header/actions.js';
 import { editBody, editTitle } from './header/pullRequest.js';
 import { askInMenu, closePicker, closeToolbarMenu, openPicker, stopAsking } from './menus.js';
 import { onExtensionMessage } from './messages.js';
@@ -63,6 +63,7 @@ document.addEventListener('scroll', hideThreadHover, { capture: true, passive: t
 if (initial.state.localMode) $('refresh').before($('claude-anchor'));
 $('page-menu-button').addEventListener('click', openPageMenu);
 $('unpushed-chip').addEventListener('click', openUnpushedMenu);
+$('push').addEventListener('click', pushCommits);
 $('retry').addEventListener('click', () => post({ action: 'retry' }));
 const refresh = $<HTMLButtonElement>('refresh');
 refresh.addEventListener('click', () => {

@@ -258,24 +258,29 @@ const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) =
 export const scenes: Readonly<Record<string, Scene>> = {
   'header-actions': scene(pullRequest, [
     { expect: '.head #reviewed', text: '1/4 viewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
-    { absent: '#files-bar #push' }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
+    { expect: '#files-bar #push:visible', text: 'Push 1' }, { next: ['#claude-anchor', '#push', 12] }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
     { click: '#page-menu-button', expect: '#page-menu #pr', text: 'Open on GitHub' },
     { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { shot: 'header-menu.png' },
     { click: '#remove-worktree', expect: '.ask-menu .ask-text', text: '1 commit GitHub does not have', shot: 'header-remove.png' },
     { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' },
     { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus', shot: 'header-link.png' },
     { click: '#title' }, { click: '#unpushed-chip', expect: '#unpushed-menu #show-unpushed', text: 'Show changes' },
-    { expect: '#unpushed-menu #push', text: 'Push', shot: 'header-unpushed.png' },
+    { absent: '#unpushed-menu #push', shot: 'header-unpushed.png' },
     { click: '#show-unpushed', expect: '#view-code[aria-selected=true]' },
   ], { saved: { view: 'code' } }),
   'header-readonly': scene({ ...pullRequest, details: { ...pullRequest.details!, canEdit: false } }, [
-    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+    { expect: '#unpushed-chip' }, { absent: '#push:visible' },
   ], { saved: { view: 'code', order: 'guide' } }),
   'header-permission-change': scene(pullRequest, [
-    { click: '#unpushed-chip', expect: '#push' },
-    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, canEdit: false } } }, absent: '#push' },
-    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+    { expect: '#push:visible' },
+    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, canEdit: false } } }, absent: '#push:visible' },
   ], { saved: { view: 'code' } }),
+  // Push shows it is working until the extension answers, then hides until the next state recounts.
+  'header-pushing': scene(pullRequest, [
+    { click: '#push', expect: '#push.busy', text: 'Pushing…' }, { expect: '#push[disabled]', shot: 'header-pushing.png' },
+    { send: { error: 'GitHub refused the push.' }, expect: '#push:visible', text: 'Push 1' }, { absent: '#push.busy' },
+    { click: '#push', expect: '#push.busy' }, { send: { done: 'push', notice: { text: 'Pushed to GitHub.' } }, absent: '#push:visible' }, { expect: '#notice', text: 'Pushed to GitHub.' },
+  ], { saved: { view: 'overview' } }),
   'header-connection-change': scene(pullRequest, [
     { click: '#page-menu-button', expect: '#terminal' },
     { send: { state: { ...pullRequest, claude: { ...pullRequest.claude, link: { delivering: true, terminal: true } } } }, absent: '#terminal' },

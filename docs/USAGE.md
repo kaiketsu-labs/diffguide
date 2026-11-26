@@ -127,7 +127,7 @@ The PR page has Overview and Code tabs. Overview starts with the description and
 
 The review page covers GitHub's PR tabs: conversation with comments, reviews, reactions, edits and events; commits with per-commit diffs and changes since your last review; a file tree, file filters and hidden whitespace; check annotations and re-runs; and a merge box with branch protection, update branch, auto-merge, merge queue and revert.
 
-The header's More menu holds Open on GitHub, Remove worktree, Open in terminal and Link a PR. Open in terminal stops the PR's background Claude run and continues its conversation in VS Code's terminal. A conversation you connected keeps its terminal and connection choices in Claude's menu. The unpushed chip beside the branch holds Show changes and, when you can edit the PR, Push. Viewed progress appears only in the header.
+The header's More menu holds Open on GitHub, Remove worktree, Open in terminal and Link a PR. Open in terminal stops the PR's background Claude run and continues its conversation in VS Code's terminal. A conversation you connected keeps its terminal and connection choices in Claude's menu. The unpushed chip beside the branch holds Show changes. When you can edit the PR, **Push** sits beside Claude's chip and shows Pushing… until GitHub has the commits. Viewed progress appears only in the header.
 
 ## Linked changes
 

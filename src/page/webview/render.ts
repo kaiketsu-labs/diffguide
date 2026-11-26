@@ -10,6 +10,7 @@ import { $, button, detailsLoading, el, icon, placeholders, stateIcon } from './
 import { openSearch, showListToggle } from './files/filters.js';
 import { drawPendingDiffs, renderFiles } from './files/render.js';
 import { guideState, guideSummary } from './guide/model.js';
+import { renderPush } from './header/actions.js';
 import { branchRef, copyRef, pullRequestChip, pullRequestFacts, renderLinked, renderState, verdict } from './header/pullRequest.js';
 import { baseButton, renderReviewers } from './header/reviewers.js';
 import { renderSync } from './header/sync.js';
@@ -172,6 +173,7 @@ export function render(state: OverviewState): void {
   $('unpushed-anchor').hidden = !unpushed;
   $('unpushed-chip').replaceChildren(unpushed + ' unpushed', icon(icons.chevronDown));
   if (!unpushed && ui.toolbarMenu?.anchor === 'unpushed-chip') closeToolbarMenu();
+  renderPush();
   renderThreadList();
   renderLinked(state);
   ui.author = !details || details.viewerIsAuthor;

@@ -326,7 +326,11 @@ export async function showPullRequestOverview(
         }
         else if (action === 'open-pr' && actions.openPullRequest !== undefined) await actions.openPullRequest();
         else if (action === 'terminal') await actions.openTerminal();
-        else if (action === 'push') await actions.push();
+        else if (action === 'push') {
+          await actions.push();
+          redraw();
+          post({ done: 'push', notice: { text: 'Pushed to GitHub.' } });
+        }
         else if (action === 'retry') actions.retry();
         else if (action === 'stop-claude') await actions.stopClaude();
         else if (action === 'new-conversation' && actions.newConversation !== undefined) {
