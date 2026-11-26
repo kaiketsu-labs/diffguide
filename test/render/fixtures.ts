@@ -465,6 +465,10 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { after: ['#find-box', '#view-code'] }, { after: ['#claude-anchor', '#find-box'] }, { after: ['#bar-review', '#claude-anchor'] }, { inside: ['#find-box', '#find-box'] }, { tallest: ['#files-bar', 60], shot: 'find-narrow.png' },
   ], { saved: { view: 'code' }, width: 600 }),
   'local-find': scene(local, [{ press: 'ControlOrMeta+F', stay: '#view-menu', expect: '#code-bar #find-box:visible #find-input:focus' }, { tallest: ['#find-box', 28], shot: 'local-find.png' }, { absent: '#files-bar #find-box' }]),
+  // A folder outside Git names no branch and offers no code review.
+  'local-plain': scene({ ...local, headBranch: '' }, [
+    { expect: '#byline', text: 'Files in this folder, outside Git' }, { absent: '#byline .branch-ref' }, { click: '#claude-chip', expect: '#claude-menu:visible' }, { absent: '#review-tools:visible', shot: 'local-plain.png' },
+  ]),
   local: scene(local, [
     { absent: '.tabs:visible' }, { absent: '#files-bar:visible' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' },
     { expect: '#panel-files:visible .file', count: 4 }, { expect: '.head #claude-chip:visible' }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },

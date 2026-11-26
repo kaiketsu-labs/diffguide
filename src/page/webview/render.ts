@@ -80,7 +80,8 @@ export function render(state: OverviewState): void {
   if ($('byline').dataset.stamp !== byline) {
     $('byline').dataset.stamp = byline;
     if (ui.toolbarMenu?.anchor === 'change-base') closeToolbarMenu();
-    if (state.localMode) $('byline').replaceChildren('Uncommitted changes on', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
+    if (state.localMode && !state.headBranch) $('byline').replaceChildren('Files in this folder, outside Git');
+    else if (state.localMode) $('byline').replaceChildren('Uncommitted changes on', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
     else $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
   }
   $('facts').replaceChildren(...pullRequestFacts(state));

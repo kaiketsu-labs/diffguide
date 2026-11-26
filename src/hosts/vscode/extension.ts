@@ -119,7 +119,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     activeBridge = bridge;
     const launchers = registerClaudeLauncher(context, bridge, storage.fsPath);
     const mainRoot = await realpath(root).catch(() => root);
-    const main = await repositoryRoot(root) === mainRoot
+    const top = await repositoryRoot(root);
+    const main = top === mainRoot || top === undefined
       ? { root: mainRoot, folder: storage.fsPath, store, bridge, launcher: launchers.local, review: new LocalReview(context, root, store, bridge, join(storage.fsPath, 'local-review'), launchers.local) } : undefined;
     const pullRequestsOfBranch = branchPullRequests(checkouts, showOverview);
     const localSessions = new LocalSessions(context, storage.fsPath, main, (session) => { session.review.usePullRequests(pullRequestsOfBranch(session)); });

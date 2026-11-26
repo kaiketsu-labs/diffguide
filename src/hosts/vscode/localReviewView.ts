@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { backgroundStatus } from '../../core/agent.js';
 import type { ReviewThread } from '../../core/contracts.js';
 import { isWorkspaceRelativePath } from '../../core/git/git.js';
-import { listLocalCheckouts, type LocalCheckout } from '../../core/git/localCheckouts.js';
+import { listLocalCheckouts, type LocalCheckout, plainFolder } from '../../core/git/localCheckouts.js';
 import { git } from '../../core/git/worktrees.js';
 import { type Checkouts, nestedRepositoryRoots } from './checkouts.js';
 import { LocalFilesView } from './localFilesView.js';
@@ -165,11 +165,15 @@ export function registerLocalReviewView(state: vscode.Memento, checkouts: Checko
     if (opened === undefined) return undefined;
     return backgroundStatus(opened.analysis.activity.running, opened.review.activity.running) ?? (opened.runner.activity.running ? 'Claude working' : undefined);
   };
-  const repositories = async (): Promise<readonly string[]> => {
+  /** Workspace folders that are a repository's top folder or hold repositories, and those outside Git that hold none. */
+  const checkoutsOfWorkspace = async (): Promise<readonly LocalCheckout[]> => {
     const folders = (vscode.workspace.workspaceFolders ?? []).filter((each) => each.uri.scheme === 'file').map((each) => each.uri.fsPath);
-    const tops = await Promise.all(folders.map(async (folder) => await repositoryRoot(folder) === await realpath(folder).catch(() => folder) ? [folder] : []));
-    const nested = await Promise.all(folders.map((folder) => nestedRepositoryRoots(folder)));
-    return [...tops.flat(), ...nested.flat()];
+    const scanned = await Promise.all(folders.map(async (folder) => {
+      const [top, root, nested] = await Promise.all([repositoryRoot(folder), realpath(folder).catch(() => folder), nestedRepositoryRoots(folder)]);
+      return { top: top === root ? [folder] : [], nested, plain: top === undefined && nested.length === 0 ? [root] : [] };
+    }));
+    const repositories = await listLocalCheckouts([...scanned.flatMap(({ top }) => top), ...scanned.flatMap(({ nested }) => nested)]);
+    return [...repositories, ...scanned.flatMap(({ plain }) => plain).map(plainFolder)];
   };
-  return registerLocalReview(state, localSessions, mainRoot, async () => listLocalCheckouts(await repositories()), openPullRequestCheckout, pullRequestThreads, pullRequestBusy, checkouts.onDidChangeState);
+  return registerLocalReview(state, localSessions, mainRoot, checkoutsOfWorkspace, openPullRequestCheckout, pullRequestThreads, pullRequestBusy, checkouts.onDidChangeState);
 }
