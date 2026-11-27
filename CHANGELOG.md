@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- HTML previews sit on a white page like a browser's, show images stored in the repository, and drop the help line above them. Comment cards beside the preview no longer overlap when one grows, such as when you show earlier messages.
+
 ## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-21)
 
 

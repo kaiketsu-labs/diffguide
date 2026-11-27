@@ -154,10 +154,13 @@ export function previewNode(file: FileDiff, threads: readonly Thread[], placed: 
     const margin = el('div', 'html-margin');
     margin.dataset.path = file.path;
     const anchors: Anchor[] = [];
+    // Cards grow in place (unfolded messages, streamed answers), so restack them whenever one changes size.
+    const restack = new ResizeObserver(() => { layoutMargin(frame, frameTops.get(file.path) ?? {}); });
     const attach = (card: HTMLElement, anchor: Anchor): void => {
       card.dataset.anchor = anchor.key;
       anchors.push(anchor);
       margin.append(card);
+      restack.observe(card);
       card.addEventListener('mouseenter', () => frame.contentWindow?.postMessage({ focus: anchor.key }, '*'));
       card.addEventListener('mouseleave', () => frame.contentWindow?.postMessage({ focus: null }, '*'));
     };
@@ -171,18 +174,19 @@ export function previewNode(file: FileDiff, threads: readonly Thread[], placed: 
     const split = el('div', 'html-split');
     split.dataset.scrollKey = file.path;
     split.append(frame, margin);
-    const note = el('div', 'row note muted preview-note');
-    note.append(el('span', '', scripted
-      ? 'Scripts are running. The page\'s buttons and links work, click anything else to comment. Comments on drawn content attach to its nearest source element.'
-      : 'Click an element to comment on its source lines, Shift-click to extend. ' + (data.scripted === undefined ? '' : 'Scripts in the file are off. ') + 'Linked stylesheets and relative images do not load.'));
     if (data.scripted !== undefined) {
+      const note = el('div', 'row note muted preview-note');
+      note.append(el('span', '', scripted
+        ? 'Scripts are running. The page\'s buttons and links work, click anything else to comment. Comments on drawn content attach to its nearest source element.'
+        : 'Scripts in the file are off.'));
       note.append(titled(button(scripted ? 'Stop scripts' : 'Run scripts', () => {
         if (scripted) scriptedFrames.delete(file.path);
         else scriptedFrames.add(file.path);
         renderFiles([file.path]);
       }, 'small'), scripted ? 'Show the file without its scripts' : 'Run the file\'s scripts in the sandboxed preview. They can load code from the internet.'));
+      wrap.append(note);
     }
-    wrap.append(note, split);
+    wrap.append(split);
     return wrap;
   }
   const wrap = el('div', 'preview md');

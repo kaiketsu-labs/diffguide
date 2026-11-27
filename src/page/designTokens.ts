@@ -54,6 +54,8 @@ const brandTokens: Readonly<Record<string, BrandToken>> = {
   merged: { dark: '#ab7df8', light: '#8250df' },
   'merged-soft': { dark: '#ab7df826', light: '#8250df1a' },
   'danger-soft': { dark: '#f0726a26', light: '#c4322a14' },
+  // A browser's default page background: previewed HTML files are written for it, whatever the editor theme.
+  'preview-canvas': { dark: '#ffffff', light: '#ffffff' },
   'shadow-overlay': { dark: '0 4px 16px rgba(0,0,0,.35)', light: '0 4px 16px rgba(0,0,0,.12)' },
 };
 
