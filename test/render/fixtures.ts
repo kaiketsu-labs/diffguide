@@ -637,6 +637,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#submit-review', text: 'Submit comment', shot: 'finish-author.png' },
   ], { saved: { view: 'code' } }),
   get since() { return reviewingScenes['since']!; },
+  get drafting() { return reviewingScenes['drafting']!; },
   get submitted() { return reviewingScenes['submitted']!; },
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
@@ -726,6 +727,13 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { send: { state: { ...reviewing, threads: reviewing.threads.map((each) => each.origin === 'review' ? { ...each, resolved: true } : each) } }, expect: '.review-recheck', text: 'All findings resolved' },
     { click: '.review-recheck button:has-text("Re-check findings")', shot: 'review-recheck.png' },
   ] },
+  // Draft reply shows Claude at work under the form, with Stop, until the draft or an error arrives.
+  drafting: scene(submitted, [
+    { click: '.file[data-path="src/auth/user.ts"] button:has-text("Draft reply")', expect: '.claude-live.drafting .step-call', text: 'Drafting' },
+    { expect: '.claude-live.drafting .stop-claude:enabled', shot: 'drafting.png' },
+    { click: '.claude-live.drafting .stop-claude', expect: '.claude-live.drafting .stop-claude:disabled' },
+    { send: { error: 'Drafting stopped.', form: 'draft:g1' }, absent: '.claude-live.drafting' },
+  ], { saved: { view: 'code', replies: { g1: 'say it is fixed' } } }),
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   // The details' count lags at 5; the page counts the 2 pending comments its list shows.
   pending: { state: pendingLag, messages: [{ state: pendingLag }, filesMessage], saved: { view: 'overview' }, steps: [

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- While Claude drafts a reply, the form shows its progress and how long it has run, with a Stop button.
 - Code review has a Docs agent that finds docs, help text and doc comments a change made wrong.
 - The reviewer menu has a Focus field: tell the review what to look at first.
 - A review agent's lane lists the candidates it handed back, so a lane no longer says No candidates while its candidates go on to verification. The lane no longer shows a bare "candidates" next to its name.

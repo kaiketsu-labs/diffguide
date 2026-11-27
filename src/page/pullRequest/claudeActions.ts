@@ -20,6 +20,7 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
   /** Run a drafting task in the PR's conversation and return Claude's comment. */
   const runDraft = async (task: AgentTask): Promise<string> => {
     const { error, reply } = await opened.runner.runTask(task);
+    if (error === 'Stopped.') throw new Error('Drafting stopped.');
     if (error !== undefined) throw new Error(`Claude could not draft the reply: ${error}`);
     if (reply === undefined) throw new Error('Claude did not write a draft. Try again.');
     return reply.slice(0, maximumReplyLength);
