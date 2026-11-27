@@ -13,6 +13,12 @@ import { type ClaudeRunnerOptions, contentBlocks, StepLog, type StreamMessage, u
 import { worktreeFolder } from './editGuard.js';
 import { runStructuredClaude, type StructuredRun } from './prAnalysisRunner.js';
 
+/** A tool result's text, given as a string or as text blocks. */
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  return Array.isArray(content) ? content.map((part: unknown) => typeof part === 'object' && part !== null && typeof (part as Record<string, unknown>)['text'] === 'string' ? (part as Record<string, unknown>)['text'] as string : '').join('\n') : '';
+}
+
 interface AgentCall {
   readonly reviewer: Reviewer;
   readonly phase: ReviewLane['phase'];
@@ -81,6 +87,8 @@ export class ReviewTracker {
         if (call === undefined || call.endedAt !== undefined) continue;
         call.endedAt = this.now();
         if (block.is_error === true) call.failed = true;
+        // Without a SubagentHandback call, the agent's report comes back as the tool result.
+        else call.items ??= handbackItems(resultText(block.content));
         changed = true;
       }
     }
@@ -256,7 +264,7 @@ export class CodeReview implements AgentCodeReview {
       this.#tracker = tracker;
       this.#set({ ...this.#activity, live: tracker.live });
       output = await runStructuredClaude({
-        ...this.options, prompt: reviewPrompt(files, input.about, worktrees), schema: reviewSchema, missing: 'Claude returned no review.',
+        ...this.options, prompt: reviewPrompt(files, input.about, worktrees, input.focus), schema: reviewSchema, missing: 'Claude returned no review.',
         args: [
           '--agents', agentsPath, '--settings', await this.#guardSettings(),
           '--allowedTools', 'Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'Agent', 'Task',

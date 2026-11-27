@@ -335,3 +335,15 @@ test('a change during the page\'s first read redraws the page once it is open', 
   assert.equal(states[0]?.reviewedPending, undefined);
   panel.dispose();
 });
+
+test('a review message passes its focus on, trimmed, and leaves it out when blank', async () => {
+  resetFakeWindow();
+  const calls: unknown[][] = [];
+  const actions = { review: async (...args: unknown[]) => { calls.push(args); } } as unknown as OverviewActions;
+  await showPullRequestOverview('review-focus-test', async () => base, new EventEmitter<void>().event, actions, vscode.Uri.file('/extension'));
+  const panel = window.panels.at(-1)!;
+  panel.receive({ action: 'review', reviewers: ['tests', 'correctness'], focus: '  the retry loop  ' }); await tick();
+  panel.receive({ action: 'review', reviewers: ['correctness'], focus: '   ' }); await tick();
+  assert.deepEqual(calls, [[['correctness', 'tests'], 'the retry loop'], [['correctness'], undefined]]);
+  panel.dispose();
+});

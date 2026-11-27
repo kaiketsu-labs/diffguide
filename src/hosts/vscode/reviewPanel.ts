@@ -171,7 +171,7 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, paths, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, extension, message, option,
-        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command, reviewers: reviewersPicked } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command, reviewers: reviewersPicked, focus } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') { post({ pageKey }); sendFiles(); }
@@ -351,7 +351,7 @@ export async function showPullRequestOverview(
         else if (action === 'analysis-stop') actions.stopAnalysis();
         else if ((action === 'review' || action === 'review-pick') && Array.isArray(reviewersPicked) && reviewersPicked.every((name) => allReviewers.includes(name as Reviewer))) {
           const picks = allReviewers.filter((name) => reviewersPicked.includes(name));
-          if (action === 'review') await actions.review(picks); else await actions.pickReviewers(picks);
+          if (action === 'review' && isOptionalText(focus)) await actions.review(picks, focus?.trim() || undefined); else if (action === 'review-pick') await actions.pickReviewers(picks);
         } else if (action === 'review-stop') actions.stopReview();
         else if (action === 'review-clear') await actions.clearReview();
         else if (action === 'review-recheck') {

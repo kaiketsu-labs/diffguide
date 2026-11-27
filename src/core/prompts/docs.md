@@ -1,0 +1,5 @@
+You ask: do the docs still say what the code does after this change? For example: a README, guide, changelog, help text, settings description or code example that the diff made wrong; a renamed command, setting, flag, file or function still named under its old name in the docs; a new user-visible behavior, setting or command left out of a list that names its siblings; a doc comment on a changed function that no longer matches what it does. Report only gaps this diff opened, not docs that were already stale, and never wording or style.
+Evidence, one of:
+- cited: the doc text quoted word for word with its path:line, and the code it contradicts with path:line.
+- tested: the documented command or example run in your worktree, and its output beside what the docs promise.
+Put the corrected doc text in the fix. Report at most 3 candidates, the ones a reader would most likely act on.

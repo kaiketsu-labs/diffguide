@@ -401,8 +401,8 @@ export interface OverviewActions {
   unlink(key: string): Promise<void>;
   analyze(): Promise<void>;
   stopAnalysis(): void;
-  /** Run a code review with these reviewers, and remember them for the next run. */
-  review(reviewers: readonly Reviewer[]): Promise<void>;
+  /** Run a code review with these reviewers, and remember them for the next run; `focus` is what the user wants it to look at most. */
+  review(reviewers: readonly Reviewer[], focus?: string): Promise<void>;
   stopReview(): void;
   /** Clear the last code review and archive the findings nobody answered. */
   clearReview(): Promise<void>;
@@ -421,7 +421,8 @@ export type PageMessage =
   | { readonly action: 'ready' | 'terminal' | 'push' | 'retry' | 'stop-claude' | 'refresh' | 'pr' | 'analyze' | 'analysis-stop' | 'review-stop' | 'review-recheck' | 'review-clear' | 'remove-worktree' | 'open-pr' | 'new-conversation' | 'compact' }
   | { readonly action: 'draft-reply' | 'github-draft-reply'; readonly form: string; readonly id: string; readonly text: string }
   | { readonly action: 'publish' | 'github' | 'thread'; readonly id: string }
-  | { readonly action: 'review' | 'review-pick'; readonly reviewers: readonly Reviewer[] }
+  | { readonly action: 'review'; readonly reviewers: readonly Reviewer[]; readonly focus?: string }
+  | { readonly action: 'review-pick'; readonly reviewers: readonly Reviewer[] }
   | { readonly action: 'context' | 'preview' | 'media' | 'editor' | 'open-file'; readonly path: string }
   | { readonly action: 'close-files'; readonly paths: readonly string[] }
   | { readonly action: 'theme-colors'; readonly colors: Readonly<Record<string, string>> }

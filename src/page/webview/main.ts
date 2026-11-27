@@ -241,7 +241,12 @@ $('claude-chip').addEventListener('click', toggleClaudeMenu);
 $('agent-review').addEventListener('click', () => {
   $('error').textContent = '';
   if (received.current?.review?.running) post({ action: 'review-stop' });
-  else post({ action: 'review', reviewers: ui.reviewPicks ?? reviewers });
+  else {
+    const focus = ui.reviewFocus.trim();
+    post({ action: 'review', reviewers: ui.reviewPicks ?? reviewers, ...focus ? { focus } : {} });
+    ui.reviewFocus = '';
+    closeToolbarMenu();
+  }
 });
 $('review-pick').addEventListener('click', openReviewMenu);
 $('fold-all').addEventListener('click', () => {

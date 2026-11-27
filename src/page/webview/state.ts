@@ -184,6 +184,8 @@ export interface Ui {
   navFolded: boolean;
   /** Reviewers picked for the next review; the page updates them before the extension confirms. */
   reviewPicks: readonly Reviewer[] | undefined;
+  /** What the next review should look at first; sent with it, then cleared. */
+  reviewFocus: string;
   threadHoverAnchor: HTMLElement | undefined;
   hovered: { id: string; cell: HTMLElement; start: number; end: number } | undefined;
   pointer: MouseEvent | undefined;
@@ -213,6 +215,7 @@ export const ui: Ui = {
   stoppingClaude: false,
   navFolded: true,
   reviewPicks: undefined,
+  reviewFocus: '',
   threadHoverAnchor: undefined,
   hovered: undefined,
   pointer: undefined,

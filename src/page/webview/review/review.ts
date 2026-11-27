@@ -294,7 +294,6 @@ function reviewLane(name: HTMLElement, status: string, busy: boolean, steps: rea
   // The running step below carries the orb; the empty icon keeps the lane names aligned.
   const mark = state === 'active' ? el('span', 'state-icon') : stateIcon(state === 'done' ? 'done' : state === 'failed' ? 'failed' : 'idle', state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'muted');
   head.append(mark, name);
-  if (lane !== undefined) head.append(el('span', 'lane-phase muted', lane.phase === 'verification' ? 'verification' : 'candidates'));
   head.append(el('span', 'gap'), el('span', 'lane-status muted', status));
   if (lane?.endedAt !== undefined) head.append(el('span', 'time', elapsed(lane.startedAt, lane.endedAt)));
   node.append(head);
@@ -335,5 +334,12 @@ export function openReviewMenu(): void {
     ui.reviewPicks = reviewers.filter((other) => other === name ? on : ui.reviewPicks?.includes(other) === true);
     post({ action: 'review-pick', reviewers: ui.reviewPicks });
   }));
-  openToolbarMenu('review-pick', [el('div', 'muted picker-note', 'Reviewers'), ...rows, el('div', 'muted picker-note', 'Remembered for this repository.')], 'review-menu');
+  const focus = el('textarea', 'review-focus');
+  focus.id = 'review-focus';
+  focus.rows = 2;
+  focus.placeholder = 'Anything to look at first? Optional';
+  focus.setAttribute('aria-label', 'Focus');
+  focus.value = ui.reviewFocus;
+  focus.addEventListener('input', () => { ui.reviewFocus = focus.value; });
+  openToolbarMenu('review-pick', [el('div', 'muted picker-note', 'Reviewers'), ...rows, el('div', 'muted picker-note', 'Remembered for this repository.'), el('div', 'muted picker-note', 'Focus'), focus], 'review-menu');
 }

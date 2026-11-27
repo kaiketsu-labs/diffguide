@@ -79,11 +79,11 @@ export function claudeActions({ page, remote, diff, edits, findThread, notOnChec
       });
     },
     stopAnalysis: () => { opened.analysis.stop(); },
-    review: async (picks) => {
+    review: async (picks, focus) => {
       await host.savePicks(picks);
       const files = await readChanges();
       opened.review.start({
-        files, reviewers: picks, about,
+        files, reviewers: picks, about, ...focus === undefined ? {} : { focus },
         anchor: async (range) => (await diff.anchor(range)).anchor,
       });
     },

@@ -68,7 +68,7 @@ A comment captures its code when you send it. Replies keep the thread's original
 
 ## Code review
 
-**Review** in Claude's chip menu has Claude review the changes with review agents, on a PR's page and on a local page. The arrow beside it picks the agents; DiffGuide remembers the choice per repository.
+**Review** in Claude's chip menu has Claude review the changes with review agents, on a PR's page and on a local page. The arrow beside it picks the agents; DiffGuide remembers the choice per repository. Under **Focus** in the same menu, tell the review what to look at first, such as "the retry loop"; the agents still report anything else they can prove.
 
 | Agent | Reports | Evidence it needs |
 |---|---|---|
@@ -77,8 +77,9 @@ A comment captures its code when you send it. Replies keep the thread's original
 | Security | Untrusted input reaching paths, commands, queries or HTML; mishandled secrets | A trace from input to harm |
 | Performance | Cost that grows with input on a path users wait on | A measurement or a complexity argument at a real size |
 | Tests | Changes no test would catch | The missing case and what would fail |
+| Docs | Docs, help text, examples or doc comments the change made wrong | The doc text quoted beside the code it contradicts, or the documented example run |
 
-Claude briefs the agents, skips one the change gives nothing to check, collects their candidates, keeps the 10 strongest at most and sends them back to be proven. Each agent proves its candidates in its own worktree under `.claude/worktrees/diffguide/review/`, a copy of the checkout with your uncommitted changes, where it may install dependencies, write tests and run them. DiffGuide removes these worktrees when the review ends. On someone else's PR this runs the PR's code on your machine.
+Claude briefs the agents, skips one the change gives nothing to check, collects their candidates, keeps the 10 strongest at most and sends them back to be proven. An agent with no candidates is not called again. Each agent proves its candidates in its own worktree under `.claude/worktrees/diffguide/review/`, a copy of the checkout with your uncommitted changes, where it may install dependencies, write tests and run them. DiffGuide removes these worktrees when the review ends. On someone else's PR this runs the PR's code on your machine.
 
 Proven findings open as **Review** threads with the agents that raised them, the severity and how they were proven: **Tested**, **Traced** or **Cited**. The summary card above the files lists them, which agents ran, and under **Dropped** every candidate that was not posted, with its reason. A new review replaces findings nobody replied to or resolved. **Clear** removes the review card and archives those findings. Use **Show archived** to see them again.
 
