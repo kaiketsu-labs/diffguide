@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileAnchor, pullRequestAnchor } from '../../core/anchors.js';
+import { fileAnchor, pullRequestAnchor, withColumns } from '../../core/anchors.js';
 import { githubFeedbackRequest } from '../../core/pullRequestComments.js';
 import { recheckRequest } from '../../core/review.js';
 import type { OverviewActions } from '../protocol.js';
@@ -17,9 +17,9 @@ export function threadActions({ page, remote, diff, findThread }: PageParts): Th
   const { folder, opened, host } = page;
   const { store } = opened.session;
   return {
-    comment: async ({ text, intent, ...lines }) => {
+    comment: async ({ text, intent, columns, ...lines }) => {
       const { anchor } = await diff.anchor(lines);
-      await store.submit(anchor, text, intent);
+      await store.submit(withColumns(anchor, columns), text, intent);
     },
     commentOnFile: async (path, text, intent) => {
       diff.requireInDiff(path);

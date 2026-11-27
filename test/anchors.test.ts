@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { anchorFromText, capturedCodeContext, fileAnchor, hashDocumentText, locateCodeAnchor } from '../src/core/anchors.js';
+import { anchorFromText, capturedCodeContext, fileAnchor, hashDocumentText, highlightedText, locateCodeAnchor, withColumns } from '../src/core/anchors.js';
 import type { CodeAnchor } from '../src/core/contracts.js';
 
 /** Capture a full-line review selection with neighboring code for restoration tests. */
@@ -89,4 +89,15 @@ test('a whole-file anchor names no lines and stays on the file\'s first line as 
   assert.deepEqual(captured, { path: 'src/example.ts', side: 'working', baseRevision: 'a'.repeat(40), scope: 'file', startLine: 1, endLine: 1,
     selectedText: '', contextBefore: '', contextAfter: '', documentHash: hashDocumentText('one\ntwo\n') });
   assert.deepEqual(locateCodeAnchor('zero\none\ntwo\nthree\n', captured), { startLine: 1, endLine: 1 });
+});
+
+test('highlighted columns mark text from the first selected line to the last, and are dropped when they do not fit', () => {
+  assert.equal(highlightedText({ selectedText: '  const value = 1;', columns: { start: 2, end: 7 } }), 'const');
+  assert.equal(highlightedText({ selectedText: 'a = f(\r\n  x,\r\n  y);', columns: { start: 4, end: 3 } }), 'f(\n  x,\n  y');
+  for (const columns of [{ start: 3, end: 3 }, { start: 0, end: 99 }, { start: -1, end: 2 }, { start: 1.5, end: 3 }, { start: 0, end: 1 }]) {
+    assert.equal(highlightedText({ selectedText: ' ab', columns }), undefined, JSON.stringify(columns));
+  }
+  const anchor = anchorFromText('one\ntwo\n', { path: 'a.ts', startLine: 2, endLine: 2, side: 'working', baseRevision: 'HEAD' });
+  assert.deepEqual(withColumns(anchor, { start: 0, end: 2 }).columns, { start: 0, end: 2 });
+  assert.equal(withColumns(anchor, { start: 0, end: 9 }).columns, undefined);
 });

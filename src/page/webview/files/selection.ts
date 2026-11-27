@@ -1,7 +1,7 @@
 /** Line selection in the diff: drag, pick and selected text. */
 import type { DiffLine } from '../../../core/unifiedDiff.js';
-import type { DiffSide } from '../../protocol.js';
-import { el } from '../dom.js';
+import type { DiffSide, TextColumns } from '../../protocol.js';
+import { el, setTip } from '../dom.js';
 import { prefs, received, save, ui } from '../state.js';
 import type { Composer } from '../types.js';
 import { linesFit } from './filters.js';
@@ -58,6 +58,8 @@ export function pick(path: string, side: DiffSide, line: number, extend: boolean
   if (extend && prefs.composer?.path === path && prefs.composer.side === side) {
     prefs.composer.start = Math.min(prefs.composer.start, line);
     prefs.composer.end = Math.max(prefs.composer.end, line);
+    // Lines picked in the gutter cover whole lines, so text marked earlier no longer says what the comment is about.
+    delete prefs.composer.columns;
   } else {
     prefs.composer = { path, side, start: line, end: line, text: prefs.composer?.text ?? '', target: prefs.composer?.target ?? 'claude' };
   }
@@ -87,8 +89,25 @@ export function selectedText(path: string, start: number, end: number): string |
   return lines.join('\n');
 }
 
-/** The lines a text selection in one diff covers, on one side, or undefined when it spans files, sides or lines that take no comment. */
-export function selectedLines(selection: Selection | null, split = prefs.layout === 'split'): { path: string; side: DiffSide; start: number; end: number } | undefined {
+/** The diff side and line a code cell shows, or undefined when that line takes no comment. */
+function cellPlace(cell: HTMLTableCellElement, split: boolean): { side: DiffSide; line: number } | undefined {
+  const line = cellLines.get(cell);
+  if (!line) return undefined;
+  const side: DiffSide = split ? (cell.cellIndex <= 1 ? 'old' : 'new') : line.kind === 'del' ? 'old' : 'new';
+  const number = side === 'old' ? line.oldLine : line.newLine;
+  return number === undefined || !linesFit(side) ? undefined : { side, line: number };
+}
+
+/** Characters of `cell`'s text before a point in it. */
+function offsetIn(cell: HTMLElement, node: Node, offset: number): number {
+  const before = document.createRange();
+  before.setStart(cell, 0);
+  before.setEnd(node, offset);
+  return before.toString().length;
+}
+
+/** The lines a text selection in one diff covers on one side, with the selected text's columns in the first and last line; undefined when it spans files, sides or lines that take no comment. */
+export function selectedLines(selection: Selection | null, split = prefs.layout === 'split'): { path: string; side: DiffSide; start: number; end: number; columns: TextColumns } | undefined {
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return undefined;
   const range = selection.getRangeAt(0);
   const cellOf = (node: Node): HTMLTableCellElement | null => (node instanceof Element ? node : node.parentElement)?.closest<HTMLTableCellElement>('td.code') ?? null;
@@ -101,25 +120,71 @@ export function selectedLines(selection: Selection | null, split = prefs.layout 
     const cell = row?.children[first.cellIndex];
     last = cell instanceof HTMLTableCellElement && cell.matches('td.code') ? cell : null;
   }
-  const place = (cell: HTMLTableCellElement | null): { path: string; side: DiffSide; line: number } | undefined => {
-    const line = cell ? cellLines.get(cell) : undefined;
-    const path = cell?.closest<HTMLElement>('[data-path]')?.dataset.path;
-    if (!cell || !line || path === undefined) return undefined;
-    const side: DiffSide = split ? (cell.cellIndex <= 1 ? 'old' : 'new') : line.kind === 'del' ? 'old' : 'new';
-    const number = side === 'old' ? line.oldLine : line.newLine;
-    return number === undefined || !linesFit(side) ? undefined : { path, side, line: number };
-  };
-  const from = place(first);
-  const to = place(last);
-  if (!from || !to || from.path !== to.path || from.side !== to.side) return undefined;
-  return { path: from.path, side: from.side, start: Math.min(from.line, to.line), end: Math.max(from.line, to.line) };
+  const path = first?.closest<HTMLElement>('[data-path]')?.dataset.path;
+  const from = first ? cellPlace(first, split) : undefined;
+  const to = last ? cellPlace(last, split) : undefined;
+  if (!first || !last || !from || !to || path === undefined || last.closest<HTMLElement>('[data-path]')?.dataset.path !== path || from.side !== to.side || to.line < from.line) return undefined;
+  // A selection that starts or ends outside the code text, such as in the line numbers, takes its line from the start or to the end.
+  const startColumn = first.contains(range.startContainer) ? offsetIn(first, range.startContainer, range.startOffset) : 0;
+  const endColumn = last.contains(range.endContainer) ? offsetIn(last, range.endContainer, range.endOffset) : (last.textContent ?? '').length;
+  return { path, side: from.side, start: from.line, end: to.line, columns: { start: startColumn, end: endColumn } };
+}
+
+/** Each diff table's marked comment text, so a redrawn table's ranges leave the highlight. */
+const markedSpans = new Map<HTMLTableElement, Range[]>();
+const spanHighlight = new Highlight();
+CSS.highlights.set('comment-span', spanHighlight);
+
+/** A range over characters `from` to `to` of a cell's text. */
+function cellRange(cell: HTMLElement, from: number, to: number): Range | undefined {
+  const range = document.createRange();
+  let seen = 0;
+  let started = false;
+  const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    const length = node.data.length;
+    if (!started && from <= seen + length) { range.setStart(node, from - seen); started = true; }
+    if (started && to <= seen + length) { range.setEnd(node, to - seen); return range.collapsed ? undefined : range; }
+    seen += length;
+  }
+  return undefined;
+}
+
+/** Mark the text each comment in `spans` highlights in a diff table; a span with `text` is marked only where the lines still hold that text. */
+export function markSpans(table: HTMLTableElement, spans: readonly { readonly side: DiffSide; readonly start: number; readonly end: number; readonly columns: TextColumns; readonly text?: string }[], split = prefs.layout === 'split'): void {
+  for (const [other, ranges] of markedSpans) {
+    if (other !== table && other.isConnected) continue;
+    for (const range of ranges) spanHighlight.delete(range);
+    markedSpans.delete(other);
+  }
+  if (spans.length === 0) return;
+  const ranges: Range[] = [];
+  const cells = [...table.querySelectorAll<HTMLTableCellElement>('td.code')].flatMap((cell) => {
+    const place = cellPlace(cell, split);
+    return place ? [{ cell, ...place }] : [];
+  });
+  for (const span of spans) {
+    const covered = cells.filter(({ side, line }) => side === span.side && line >= span.start && line <= span.end);
+    const pieces = covered.map(({ cell, line }) => {
+      const length = (cell.textContent ?? '').length;
+      return { cell, from: line === span.start ? span.columns.start : 0, to: line === span.end ? Math.min(span.columns.end, length) : length };
+    });
+    // Code that changed since the comment would mark other text, so the span then shows nowhere.
+    if (span.text !== undefined && pieces.map(({ cell, from, to }) => (cell.textContent ?? '').slice(from, to)).join('\n') !== span.text) continue;
+    for (const { cell, from, to } of pieces) {
+      const range = cellRange(cell, from, to);
+      if (range) ranges.push(range);
+    }
+  }
+  markedSpans.set(table, ranges);
+  for (const range of ranges) spanHighlight.add(range);
 }
 
 /** Comment beside a text selection in a diff, which opens the comment form on exactly the selected lines. */
 export function setupSelectionComment(): void {
-  const comment = el('button', 'small selection-comment');
+  const comment = el('button', 'selection-comment');
   comment.id = 'selection-comment';
-  comment.textContent = 'Comment';
+  setTip(comment, 'Comment on the selected text');
   comment.hidden = true;
   document.body.append(comment);
   let lines: ReturnType<typeof selectedLines>;
@@ -128,10 +193,12 @@ export function setupSelectionComment(): void {
   comment.addEventListener('mousedown', (event) => { event.preventDefault(); });
   comment.addEventListener('click', () => {
     if (!lines) return;
-    const { path, side, start, end } = lines;
+    const { path, side, start, end, columns } = lines;
     hide();
     window.getSelection()?.removeAllRanges();
-    pick(path, side, start, false).end = end;
+    const draft = pick(path, side, start, false);
+    draft.end = end;
+    draft.columns = columns;
     save();
     renderFiles([path]);
   });

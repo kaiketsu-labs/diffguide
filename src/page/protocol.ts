@@ -93,6 +93,9 @@ export interface OverviewState {
     readonly side: DiffSide;
     readonly startLine: number;
     readonly endLine: number;
+    /** The text the human highlighted within those lines, which the page marks in the code where the lines still hold `marked`. */
+    readonly columns?: TextColumns;
+    readonly marked?: string;
     /** `file` when the comment is about the whole file; the page shows it above the file's diff. `pullRequest` when it is about the PR, with an empty path; the page shows it under `linkedTo`, its conversation comment. */
     readonly scope?: 'file' | 'pullRequest';
     readonly resolved: boolean;
@@ -235,6 +238,18 @@ export interface PageComment {
   readonly endLine: number;
   readonly text: string;
   readonly intent: CommentIntent;
+  /** The text the human highlighted within those lines: from `start` in the first line to `end` in the last. */
+  readonly columns?: TextColumns;
+}
+
+export interface TextColumns { readonly start: number; readonly end: number }
+
+/** Highlighted columns from the page: two whole numbers, or undefined when none were sent; null when malformed. */
+export function parseColumns(value: unknown): TextColumns | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null) return null;
+  const { start, end } = value as Record<string, unknown>;
+  return Number.isSafeInteger(start) && Number.isSafeInteger(end) && (start as number) >= 0 && (end as number) >= 0 ? { start: start as number, end: end as number } : null;
 }
 
 /** A notice about a sync Claude worked on; `show` adds a button that scrolls to Claude's question. */
@@ -429,7 +444,7 @@ export type PageMessage =
   | { readonly action: 'theme-colors'; readonly colors: Readonly<Record<string, string>> }
   | { readonly action: 'linked-open' | 'linked-push' | 'linked-draft' | 'unlink'; readonly key: string }
   | { readonly action: 'link'; readonly link: string }
-  | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent })
+  | (PageRange & { readonly action: 'comment'; readonly form: string; readonly text: string; readonly intent: CommentIntent; readonly columns?: TextColumns })
   | { readonly action: 'file-comment'; readonly form: string; readonly path: string; readonly text: string; readonly intent: CommentIntent }
   | (PageRange & { readonly action: 'github-comment'; readonly form: string; readonly text: string; readonly pending: boolean })
   | { readonly action: 'github-file-comment'; readonly form: string; readonly path: string; readonly text: string; readonly pending: boolean }

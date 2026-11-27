@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pullRequestAnchor } from './anchors.js';
+import { highlightedText, pullRequestAnchor } from './anchors.js';
 import { type AgentUpdate, type CodeAnchor, type Disposable, type Finding, type Reviewer, reviewers, type ReviewEvent, type ReviewIntent, type ReviewMessage, type ReviewSnapshot, type ReviewStatus, type ReviewStore, type ReviewThread, type WithdrawnComment } from './contracts.js';
 import { maximumIdentifierLength, maximumPathLength, maximumReplyLength, maximumReviewTextLength, maximumTitleLength } from './limits.js';
 import { saysFixed } from './review.js';
@@ -529,7 +529,7 @@ function readModel(value: unknown): string {
 /** Copy and validate line coordinates and workspace-relative code context. */
 function readAnchor(value: unknown): CodeAnchor {
   const record = readObject(value, 'anchor');
-  checkKeys(record, ['path', 'startLine', 'endLine', 'selectedText', 'contextBefore', 'contextAfter', 'documentHash', 'side', 'baseRevision', 'scope']);
+  checkKeys(record, ['path', 'startLine', 'endLine', 'selectedText', 'contextBefore', 'contextAfter', 'documentHash', 'side', 'baseRevision', 'scope', 'columns']);
   if (record['scope'] !== undefined && record['scope'] !== 'file' && record['scope'] !== 'pullRequest') throw new ReviewStoreError('Invalid anchor scope.');
   if (record['scope'] === 'pullRequest') return readPullRequestAnchor(record);
   const filePath = readNonemptyText(record['path'], 'path').replaceAll('\\', '/');
@@ -542,15 +542,27 @@ function readAnchor(value: unknown): CodeAnchor {
   if (endLine < startLine || (record['side'] !== 'working' && record['side'] !== 'original')) {
     throw new ReviewStoreError('Invalid anchor range or side.');
   }
+  const selectedText = readText(record['selectedText'], 'selectedText');
+  const columns = record['columns'] === undefined ? undefined : readColumns(record['columns'], selectedText);
   return Object.freeze({
     path: path.posix.normalize(filePath), startLine, endLine,
-    selectedText: readText(record['selectedText'], 'selectedText'),
+    selectedText,
     contextBefore: readText(record['contextBefore'], 'contextBefore'),
     contextAfter: readText(record['contextAfter'], 'contextAfter'),
     documentHash: readNonemptyText(record['documentHash'], 'documentHash'), side: record['side'],
     baseRevision: readText(record['baseRevision'], 'baseRevision'),
     ...(record['scope'] === 'file' ? { scope: 'file' as const } : {}),
+    ...(columns === undefined || record['scope'] === 'file' ? {} : { columns }),
   });
+}
+
+/** Highlighted columns that mark text within the selected lines. */
+function readColumns(value: unknown, selectedText: string): { readonly start: number; readonly end: number } {
+  const record = readObject(value, 'columns');
+  checkKeys(record, ['start', 'end']);
+  const columns = { start: record['start'] as number, end: record['end'] as number };
+  if (highlightedText({ selectedText, columns }) === undefined) throw new ReviewStoreError('The highlighted columns do not mark text in the selected lines.');
+  return Object.freeze(columns);
 }
 
 /** A PR-level anchor carries no code: empty path, hash and context, line 1. */

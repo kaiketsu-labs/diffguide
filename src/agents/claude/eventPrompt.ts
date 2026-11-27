@@ -1,3 +1,4 @@
+import { highlightedText } from '../../core/anchors.js';
 import type { ReviewEvent, ReviewThread } from '../../core/contracts.js';
 
 /** Shared Markdown contract for answers rendered in native review comments. */
@@ -23,6 +24,7 @@ An event must be explicitly acknowledged through the tool; receiving a channel n
 
 /** Render captured code and conversation as a clearly bounded review payload. */
 function reviewData(event: ReviewEvent, thread?: ReviewThread): string {
+  const highlighted = highlightedText(event.anchor);
   const payload = {
     event_id: event.id,
     thread_id: event.threadId,
@@ -42,6 +44,7 @@ function reviewData(event: ReviewEvent, thread?: ReviewThread): string {
       documentHash: event.anchor.documentHash,
       contextBefore: event.anchor.contextBefore,
       selectedText: event.anchor.selectedText,
+      ...(highlighted === undefined ? {} : { highlightedText: highlighted, highlightNote: 'The human highlighted exactly this text within the selected lines; the comment is about it.' }),
       contextAfter: event.anchor.contextAfter,
     },
     conversation: thread?.messages.map((message) => ({

@@ -77,3 +77,10 @@ test('tells Claude a PR-level comment has no code anchor', () => {
 test('asks Claude to cite code as path and line in backticks, which the review page links', () => {
   assert.match(reviewInstructions, /Cite code as `path:line` in backticks/u);
 });
+
+test('a comment on highlighted text hands Claude that text beside the lines', () => {
+  const base = event('e-mark', 'Why this?');
+  const marked = { ...base, anchor: { ...base.anchor, selectedText: '  return operation();', columns: { start: 9, end: 18 } } };
+  assert.match(buildReviewPrompt(marked), /"highlightedText": "operation"/u);
+  assert.doesNotMatch(buildReviewPrompt(base), /highlightedText/u);
+});

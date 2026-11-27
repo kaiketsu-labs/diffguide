@@ -20,6 +20,8 @@ export interface CodeAnchor {
    * `pullRequest` when it is about the PR as a whole, such as a conversation comment: no code, an empty path and document hash, placeholder line 1.
    */
   readonly scope?: 'file' | 'pullRequest';
+  /** The text the human highlighted: from `start` in the first selected line to `end` (exclusive) in the last, as character offsets. */
+  readonly columns?: { readonly start: number; readonly end: number };
 }
 
 /** A comment displayed in a native VS Code thread. */

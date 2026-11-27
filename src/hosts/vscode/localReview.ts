@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { readConversationContext } from '../../agents/claude/claudeSessions.js';
 import { CodeReview, readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
 import type { AgentCodeReview } from '../../core/agent.js';
-import { anchorFromText, fileAnchor } from '../../core/anchors.js';
+import { anchorFromText, fileAnchor, withColumns } from '../../core/anchors.js';
 import { prepareHighlighting } from '../../core/codePreview.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore, ReviewThread } from '../../core/contracts.js';
 import { resolveExecutable } from '../../core/executables.js';
@@ -360,7 +360,9 @@ export class LocalReview implements vscode.Disposable {
         const { uri, range } = this.#definitions.location(peek);
         await vscode.window.showTextDocument(uri, { selection: range, preview: true });
       },
-      comment: async ({ text, intent, ...lines }) => { await this.store.submit(await this.#anchor(lines), text, intent); },
+      comment: async ({ text, intent, columns, ...lines }) => {
+        await this.store.submit(withColumns(await this.#anchor(lines), columns), text, intent);
+      },
       commentOnFile: async (path, text, intent) => {
         onPage(path);
         await this.store.submit(fileAnchor(await readFile(join(this.root, path), 'utf8'), { path, side: 'working', baseRevision: await this.#base() }), text, intent);

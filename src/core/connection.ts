@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { pullRequestAnchor } from './anchors.js';
+import { highlightedText, pullRequestAnchor } from './anchors.js';
 import type { AgentUpdate, CodeAnchor, ConnectionDescriptor, ReviewEvent, ReviewIntent, ReviewMessage, ReviewStatus, ReviewThread } from './contracts.js';
 import { maximumIdentifierLength, maximumPathLength, maximumReviewTextLength } from './limits.js';
 
@@ -91,6 +91,10 @@ function parseAnchor(value: unknown): CodeAnchor {
     || (data.side !== 'working' && data.side !== 'original') || (data.scope !== undefined && data.scope !== 'file')) {
     throw new BridgeProtocolError('The review bridge returned invalid source context.');
   }
+  const columns = record(data.columns);
+  // Delivery may shorten a long selection, so columns that no longer fit it are dropped rather than failing the event.
+  const marked = columns === undefined ? undefined : { start: columns.start as number, end: columns.end as number };
+  const highlighted = marked !== undefined && highlightedText({ selectedText: data.selectedText, columns: marked }) !== undefined ? marked : undefined;
   return {
     path: data.path,
     startLine: data.startLine,
@@ -102,6 +106,7 @@ function parseAnchor(value: unknown): CodeAnchor {
     side: data.side,
     baseRevision: data.baseRevision,
     ...(data.scope === 'file' ? { scope: 'file' as const } : {}),
+    ...(highlighted === undefined ? {} : { columns: highlighted }),
   };
 }
 

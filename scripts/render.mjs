@@ -91,7 +91,7 @@ for (const name of names) {
     const top = (selector) => page.evaluate((s) => document.querySelector(s)?.getBoundingClientRect().top, selector);
     const before = step.stay ? await top(step.stay) : undefined;
     if (step.send) await page.evaluate((m) => window.postMessage(m, '*'), step.send);
-    if (step.select) await page.evaluate((selector) => { const node = document.querySelector(selector); if (node) getSelection().selectAllChildren(node); }, step.select);
+    if (step.select) await page.evaluate((selector) => { const node = document.querySelector(selector); if (node) getSelection().selectAllChildren(node); document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); }, step.select);
     if (step.drag) {
       const [from, to] = await Promise.all(step.drag.map((selector) => page.$eval(selector, (node) => { const r = node.getBoundingClientRect(); return { x: r.left, y: r.top + r.height / 2, right: r.right }; })));
       await page.mouse.move(from.x + 40, from.y);
@@ -151,6 +151,10 @@ for (const name of names) {
     if (step.level) {
       const [a, b] = await page.evaluate((selectors) => selectors.map((s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && r.top + r.height / 2; }), step.level);
       if (a === undefined || b === undefined || Math.abs(a - b) > 4) errors.push(`expected ${step.level[0]} (middle ${a}) level with ${step.level[1]} (middle ${b})`);
+    }
+    if (step.highlight) {
+      const text = await page.evaluate((name) => [...(CSS.highlights.get(name) ?? [])].filter((range) => range.startContainer.isConnected).map((range) => range.toString()).join('|'), step.highlight[0]);
+      if (text !== step.highlight[1]) errors.push(`expected highlight ${step.highlight[0]} to mark "${step.highlight[1]}", got "${text}"`);
     }
     if (step.value) {
       const value = await page.evaluate((selector) => document.querySelector(selector)?.value, step.value[0]);

@@ -374,3 +374,11 @@ test('a reply names the model its session reported, and a body cannot claim one'
   assert.equal(unknown.status, 200);
   assert.equal(store.threads[0]?.messages.at(-1)?.model, undefined);
 });
+
+test('a comment\'s highlighted columns reach Claude through the bridge, and the store rejects columns that mark nothing', async (t) => {
+  const { bridge, store, headers } = await fixture(t);
+  const marked = await store.submit({ ...anchor(), columns: { start: 7, end: 8 } }, 'Why 1?', 'ask');
+  const batch = readBatch(await (await fetch(`${bridge.descriptor.url}/pending`, { headers })).json(), store.workspaceRoot);
+  assert.deepEqual(batch.events.find((event) => event.threadId === marked.id)?.anchor.columns, { start: 7, end: 8 });
+  await assert.rejects(async () => store.submit({ ...anchor(), columns: { start: 3, end: 3 } }, 'Empty?', 'ask'), /highlighted columns/u);
+});

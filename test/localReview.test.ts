@@ -150,11 +150,20 @@ test('comments from the page go to the workspace review at HEAD, only on files t
   assert.equal(thread?.anchor.side, 'working');
   assert.equal(thread?.anchor.baseRevision, await getHeadRevision(root));
   assert.equal(thread?.intent, 'implement');
+  assert.equal(thread?.anchor.columns, undefined);
   assert.equal(store.pendingEvents.length, 1);
+
+  panel.receive({ action: 'comment', form: 'composer', path: 'src/changed.ts', side: 'new', startLine: 1, endLine: 1, text: 'Why const?', intent: 'ask', columns: { start: 7, end: 12 } });
+  await until(() => store.threads.length === 2);
+  assert.deepEqual(store.threads[1]?.anchor.columns, { start: 7, end: 12 });
+  // Columns past the line's end still leave the comment on its line.
+  panel.receive({ action: 'comment', form: 'composer', path: 'src/changed.ts', side: 'new', startLine: 1, endLine: 1, text: 'And here?', intent: 'ask', columns: { start: 7, end: 99 } });
+  await until(() => store.threads.length === 3);
+  assert.equal(store.threads[2]?.anchor.columns, undefined);
 
   panel.receive({ action: 'comment', form: 'composer', path: 'src/kept.ts', side: 'new', startLine: 1, endLine: 1, text: 'And this?', intent: 'ask' });
   await until(() => panel.sent.some((message) => typeof message === 'object' && message !== null && 'error' in message));
-  assert.equal(store.threads.length, 1);
+  assert.equal(store.threads.length, 3);
 });
 
 test('a comment taken back from the page leaves the review and comes back to edit where it was', async () => {

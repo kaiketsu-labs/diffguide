@@ -1,4 +1,5 @@
 import { type AgentActivity, type AgentContext, type AgentProgress, agentStatus } from '../core/agent.js';
+import { highlightedText } from '../core/anchors.js';
 import { conflictFixLabel, type WorktreeCommit } from '../core/conflicts.js';
 import type { ReviewIntent, ReviewStore, ReviewThread } from '../core/contracts.js';
 import type { ChangeRequestConversation, ChangeRequestDetails, ChangeRequestSummary, RemoteThread } from '../core/forge.js';
@@ -140,6 +141,7 @@ export function eventIntents(events: readonly { readonly id: string; readonly in
 export function threadView(thread: ReviewThread, { activity, progress, running = false, publication, linkedTo, publishable = false, commits = [], intents }: ThreadExtras = {}): OverviewState['threads'][number] {
   const last = thread.messages.at(-1);
   const wholeFile = thread.anchor.scope === 'file';
+  const marked = highlightedText(thread.anchor);
   const onPullRequest = thread.anchor.scope === 'pullRequest';
   // Claude's reply ends the thread's live log, even while the run is still wrapping up.
   const replied = last?.author === 'claude' && Date.parse(last.createdAt) >= (progress?.startedAt ?? Infinity);
@@ -161,6 +163,7 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
     side: thread.anchor.side === 'original' ? 'old' : 'new',
     startLine: thread.anchor.startLine,
     endLine: thread.anchor.endLine,
+    ...(thread.anchor.columns === undefined || marked === undefined ? {} : { columns: thread.anchor.columns, marked }),
     ...(wholeFile ? { scope: 'file' as const } : onPullRequest ? { scope: 'pullRequest' as const } : {}),
     resolved: thread.resolved,
     ...(thread.archived ? { archived: true as const } : {}),
