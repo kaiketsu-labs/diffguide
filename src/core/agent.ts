@@ -36,6 +36,8 @@ export interface CodeReviewInput {
   /** What is under review, for the prompt. */
   readonly about: string;
   readonly reviewers: readonly Reviewer[];
+  /** What the user wants the review to look at most, in their words. */
+  readonly focus?: string;
   /** Anchor for a finding's lines on the new side. */
   readonly anchor: (range: { readonly path: string; readonly side: 'new'; readonly startLine: number; readonly endLine: number }) => Promise<CodeAnchor>;
 }

@@ -3,6 +3,7 @@ import { type FindingEvidence, type FindingSeverity, type Reviewer, reviewers, t
 import { lineText } from './prAnalysis.js';
 import correctness from './prompts/correctness.md';
 import design from './prompts/design.md';
+import docs from './prompts/docs.md';
 import orchestratorTemplate from './prompts/orchestrator.md';
 import performance from './prompts/performance.md';
 import reviewerTemplate from './prompts/reviewer.md';
@@ -17,6 +18,7 @@ export const reviewerInfo: Readonly<Record<Reviewer, { readonly label: string; r
   security: { label: 'Security', description: 'Exposure, unsafe input, secrets' },
   performance: { label: 'Performance', description: 'Wasted time or resources' },
   tests: { label: 'Tests', description: 'Changes no test would catch' },
+  docs: { label: 'Docs', description: 'Docs the change made wrong' },
 };
 
 /** Why the orchestrator did not post a candidate. */
@@ -220,7 +222,7 @@ export const reviewSchema = {
   },
 } as const;
 
-const focus: Readonly<Record<Reviewer, string>> = { correctness, design, security, performance, tests };
+const focus: Readonly<Record<Reviewer, string>> = { correctness, design, security, performance, tests, docs };
 
 /** A prompt file with each `{{name}}` replaced by its value. */
 function fill(template: string, values: Readonly<Record<string, string>>): string {
@@ -256,13 +258,14 @@ function numberedDiff(file: FileDiff): string {
 const maximumFileDiffLength = 40_000;
 
 /** The orchestrator's prompt: the process, the picked reviewers and their worktrees, then the diff. */
-export function reviewPrompt(files: readonly FileDiff[], about: string, worktrees: ReadonlyMap<Reviewer, string>): string {
+export function reviewPrompt(files: readonly FileDiff[], about: string, worktrees: ReadonlyMap<Reviewer, string>, userFocus?: string): string {
   const picked = [...worktrees.keys()].map((reviewer) => `- ${reviewer}: subagent ${reviewer}-reviewer`).join('\n');
   const diff = files.map((file) => {
     const text = numberedDiff(file);
     return text.length <= maximumFileDiffLength ? text : `=== ${file.path}\nToo large to show; read the file.`;
   }).join('\n\n');
-  return `${orchestration}\n\nReviewers the user picked:\n${picked}\n\nUnder review: ${about}\n\nBEGIN DIFF\n${diff}\nEND DIFF`;
+  const asked = userFocus === undefined ? '' : `\n\nThe user asks the review to focus on this. Pass it to every reviewer in its brief and look there first; it does not narrow what a reviewer may report:\n${userFocus}`;
+  return `${orchestration}\n\nReviewers the user picked:\n${picked}${asked}\n\nUnder review: ${about}\n\nBEGIN DIFF\n${diff}\nEND DIFF`;
 }
 
 /** Plain text from untrusted output: no control characters except newlines and tabs, capped. */

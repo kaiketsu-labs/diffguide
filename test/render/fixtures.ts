@@ -462,7 +462,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { send: { state: claudeWorking }, stay: '.file[data-path="src/auth/user.ts"] tr.add', expect: '#claude-chip.working', text: 'Reading src/api/client.ts' }, { absent: '#claude-chip .chip-text:has-text("Claude")' },
     { expect: '#claude-menu .step-log' }, { expect: '#claude-menu #stop-claude:visible', shot: 'claude-working.png' },
     { send: { state: claudeReviewing }, stay: '.file[data-path="src/auth/user.ts"] tr.add', expect: '#claude-review .review-live' }, { absent: '#review-card:visible' },
+    // A lane names its phase once, in its status; a bare "candidates" read like a count.
+    { expect: '.review-lane:not(.orchestrator) .lane-status', text: 'Finding candidates' }, { absent: '.review-lane .lane-phase' }, { shot: 'claude-reviewing.png' },
     { send: { state: claudeIdle }, stay: '#files-bar', absent: '#stop-claude:visible' },
+    { click: '#review-pick', expect: '.review-menu .picker-row:has-text("Docs")' }, { fill: ['#review-focus', 'the retry loop'], shot: 'review-focus.png' },
+    { click: '#agent-review', absent: '#review-focus' },
     { click: '#claude-menu .answer-row', absent: '#claude-menu:visible' },
     { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#title', absent: '#claude-menu:visible' },
     { scroll: 900, expect: '#claude-chip:visible', below: ['#code-bar', '#files-bar'] },

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Code review has a Docs agent that finds docs, help text and doc comments a change made wrong.
+- The reviewer menu has a Focus field: tell the review what to look at first.
+- A review agent's lane lists the candidates it handed back, so a lane no longer says No candidates while its candidates go on to verification. The lane no longer shows a bare "candidates" next to its name.
 - Find in page has Match case, Match whole word and Use regular expression toggles, also on Alt+C, Alt+W and Alt+R. On large diffs the find bar opens at once and searches about twice as fast.
 - HTML previews sit on a white page like a browser's, show images stored in the repository, and drop the help line above them. Comment cards beside the preview no longer overlap when one grows, such as when you show earlier messages.
 

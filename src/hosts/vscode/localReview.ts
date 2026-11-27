@@ -444,11 +444,11 @@ export class LocalReview implements vscode.Disposable {
       answerSync: () => undefined,
       dismissSyncQuestion: () => undefined,
       stopAnalysis: () => undefined,
-      review: async (picks) => {
+      review: async (picks, focus) => {
         await savePicks(this.context.globalState, this.root, picks);
         const { files } = await this.readFiles();
         this.#codeReview.start({
-          files, reviewers: picks, about: `Uncommitted changes in ${basename(this.root)}`,
+          files, reviewers: picks, about: `Uncommitted changes in ${basename(this.root)}`, ...focus === undefined ? {} : { focus },
           anchor: (range) => this.#anchor(range),
         });
       },

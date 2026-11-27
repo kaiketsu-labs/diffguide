@@ -182,11 +182,12 @@ test('names each review agent after its reviewer with its worktree and the sonne
 });
 
 test('fills every placeholder in the bundled prompt files', () => {
-  const agents = reviewAgents(new Map([['correctness', '/tmp/wt-c'], ['design', '/tmp/wt-d'], ['security', '/tmp/wt-s'], ['performance', '/tmp/wt-p'], ['tests', '/tmp/wt-t']]));
+  const agents = reviewAgents(new Map([['correctness', '/tmp/wt-c'], ['design', '/tmp/wt-d'], ['security', '/tmp/wt-s'], ['performance', '/tmp/wt-p'], ['tests', '/tmp/wt-t'], ['docs', '/tmp/wt-o']]));
   const prompts = [...Object.values(agents).map((agent) => agent.prompt), reviewPrompt(files, '#1 Demo', new Map([['design', '/tmp/wt-d']]))];
   for (const prompt of prompts) assert.doesNotMatch(prompt, /\{\{\w+\}\}/u);
   assert.match(agents['design-reviewer']?.prompt ?? '', /^You are the Design reviewer in a code review\. You ask: is this the simplest structure/u);
-  assert.match(prompts[5] ?? '', new RegExp(`Keep at most ${maximumFindings};`, 'u'));
+  assert.match(agents['docs-reviewer']?.prompt ?? '', /^You are the Docs reviewer in a code review\. You ask: do the docs still say what the code does/u);
+  assert.match(prompts[6] ?? '', new RegExp(`Keep at most ${maximumFindings};`, 'u'));
 });
 
 test('lists only the picked reviewers in the prompt and numbers added lines on the new side', () => {
@@ -197,6 +198,12 @@ test('lists only the picked reviewers in the prompt and numbers added lines on t
   assert.match(prompt, /^ {4}2 \+const b = 3;$/mu);
   assert.match(prompt, /^ {4}3 \+const c = 4;$/mu);
   assert.match(prompt, /^ {4}1 {2}const a = 1;$/mu);
+});
+
+test('the review prompt carries the user\'s focus only when given', () => {
+  const worktrees = new Map([['design', '/tmp/wt-d']] as const);
+  assert.match(reviewPrompt(files, '#1 Demo', worktrees, 'the retry loop'), /focus on this[^\n]*\nthe retry loop\n/u);
+  assert.doesNotMatch(reviewPrompt(files, '#1 Demo', worktrees), /focus on this/u);
 });
 
 test('reads candidates and verdicts from an agent handback, skipping what does not parse', () => {
@@ -238,6 +245,13 @@ test('tracks the orchestrator and one lane per review agent through each stage',
   now = 9000;
   tracker.end();
   assert.equal(tracker.live.endedAt, 9000);
+});
+
+test('reads an agent\'s candidates from its tool result when it made no handback call', () => {
+  const tracker = new ReviewTracker('/repo', ['correctness'], new Map(), 0, () => 0);
+  tracker.read({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'a1', name: 'Agent', input: { subagent_type: 'correctness-reviewer', prompt: 'Brief.' } }] } });
+  tracker.read({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: [{ type: 'text', text: '```json\n[{"title":"Off by one","severity":"high"}]\n```' }] }] } });
+  assert.deepEqual(tracker.live.lanes[0]?.items, [{ title: 'Off by one', severity: 'high' }]);
 });
 
 test('keeps a suggestion on its lines and turns it into plain code when the span was clamped', () => {

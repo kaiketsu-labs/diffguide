@@ -48,7 +48,7 @@ Requires VS Code 1.100+, Node.js 20+, Git, and authenticated Claude Code with `a
   </tr>
   <tr>
     <td><img src="docs/media/icons/review.png" width="36" alt=""></td>
-    <td><b>Review</b> in Claude's menu checks local changes or a PR for bugs, design issues, security issues, performance issues, and gaps in tests. Findings with evidence open as review threads.</td>
+    <td><b>Review</b> in Claude's menu checks local changes or a PR for bugs, design issues, security issues, performance issues, gaps in tests, and docs the change made wrong. Findings with evidence open as review threads.</td>
   </tr>
 </table>
 
