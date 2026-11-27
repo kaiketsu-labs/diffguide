@@ -175,12 +175,33 @@ async function pageRun(browser, dump) {
     };
     return { guide: await time('guide'), files: await time('files') };
   });
+  // ⌘/Ctrl+F with the first diff line selected, to the bar painted and to its matches counted; then Enter on a new query, to the next painted frame.
+  const find = await page.evaluate(async () => {
+    const frame = () => new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
+    const cell = document.querySelector('#files td.code');
+    if (cell) getSelection().selectAllChildren(cell);
+    let start = performance.now();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', metaKey: true, ctrlKey: true, bubbles: true }));
+    // The frame that paints the bar starts at its animation frame; a timer after it would also count work the page put off past that paint.
+    const open = await new Promise((done) => requestAnimationFrame(() => done(performance.now() - start)));
+    while (!document.getElementById('find-count').textContent) await frame();
+    const seeded = performance.now() - start;
+    const input = document.getElementById('find-input');
+    input.value = 'const';
+    start = performance.now();
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await frame();
+    const search = performance.now() - start;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return { open, seeded, search };
+  });
   const state = stateMessage.state ? await deliver('state') : undefined;
   const long = await page.evaluate(() => window.__long);
   const nodes = await page.evaluate(() => document.getElementsByTagName('*').length);
   await page.close();
   if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
-  return { boot, files, ...colored ? { colored } : {}, viewed, order, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), longestTask: Math.max(0, ...long), nodes };
+  return { boot, files, ...colored ? { colored } : {}, viewed, order, find, ...state ? { state } : {}, longTasks: long.length, longTaskMs: long.reduce((sum, value) => sum + value, 0), longestTask: Math.max(0, ...long), nodes };
 }
 
 const report = { label, scale, runs, date: new Date().toISOString(), fixtures: {} };

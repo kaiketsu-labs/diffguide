@@ -91,6 +91,7 @@ for (const name of names) {
     const top = (selector) => page.evaluate((s) => document.querySelector(s)?.getBoundingClientRect().top, selector);
     const before = step.stay ? await top(step.stay) : undefined;
     if (step.send) await page.evaluate((m) => window.postMessage(m, '*'), step.send);
+    if (step.select) await page.evaluate((selector) => { const node = document.querySelector(selector); if (node) getSelection().selectAllChildren(node); }, step.select);
     if (step.click) await page.click(step.click);
     if (step.fill) await page.fill(...step.fill);
     if (step.press) await page.keyboard.press(step.press);
@@ -143,6 +144,10 @@ for (const name of names) {
     if (step.level) {
       const [a, b] = await page.evaluate((selectors) => selectors.map((s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && r.top + r.height / 2; }), step.level);
       if (a === undefined || b === undefined || Math.abs(a - b) > 4) errors.push(`expected ${step.level[0]} (middle ${a}) level with ${step.level[1]} (middle ${b})`);
+    }
+    if (step.value) {
+      const value = await page.evaluate((selector) => document.querySelector(selector)?.value, step.value[0]);
+      if (value !== step.value[1]) errors.push(`expected ${step.value[0]} to hold "${step.value[1]}", got "${value}"`);
     }
     if (step.absent && await page.$(step.absent)) errors.push(`expected no ${step.absent}`);
     if (step.shot) { await page.screenshot({ path: join(out, step.shot), fullPage: step.full === true }); shots.push(join(out, step.shot)); }
