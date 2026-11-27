@@ -20,6 +20,8 @@ export interface Scene {
 export interface Step {
   /** A host message to deliver, such as the state after an action the page posted. */
   readonly send?: ExtensionMessage;
+  /** A selector whose text to select, as a drag over it would. */
+  readonly select?: string;
   readonly click?: string;
   /** A selector and the text to type into it, replacing what it holds. */
   readonly fill?: readonly [string, string];
@@ -37,6 +39,8 @@ export interface Step {
   readonly text?: string;
   /** A selector that must not match. */
   readonly absent?: string;
+  /** An input's selector and the value it must hold. */
+  readonly value?: readonly [string, string];
   /** A selector whose top must not move through this step's send, click and scroll. */
   readonly stay?: string;
   /** Two selectors: the first must start at or below the bottom of the second, so it does not draw over it. */
@@ -391,6 +395,17 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { fill: ['#find-input', 'no such text'], wait: 400, expect: '#find-box.missing #find-count', text: 'No results' },
     { press: 'Escape', absent: '#find-box:visible' },
   ], { saved: { view: 'guide' } }),
+  'find-options': scene(pullRequest, [
+    { select: '#files td.code', press: 'ControlOrMeta+F', expect: '#find-input:focus', value: ['#find-input', '  const value1 = compute(1);'] },
+    { fill: ['#find-input', 'CONST'], wait: 400, expect: '#find-count', text: ' of ' },
+    { click: '#find-case', expect: '#find-case[aria-pressed=true]' }, { expect: '#find-box.missing #find-count', text: 'No results' },
+    { press: 'Alt+C', expect: '#find-case[aria-pressed=false]' }, { expect: '#find-count', text: ' of ' },
+    { fill: ['#find-input', 'valu'], wait: 400, expect: '#find-count', text: ' of ' },
+    { click: '#find-word', expect: '#find-box.missing #find-count', text: 'No results' }, { click: '#find-word' },
+    { fill: ['#find-input', 'compute\\(\\d+\\)'], wait: 400, expect: '#find-box.missing #find-count', text: 'No results' },
+    { press: 'Alt+R', expect: '#find-regex[aria-pressed=true]' }, { expect: '#find-count', text: ' of ', shot: 'find-options.png' },
+    { fill: ['#find-input', 'compute('], wait: 400, expect: '#find-box.missing #find-count', text: 'Invalid pattern' },
+  ], { saved: { view: 'code' } }),
   'find-typing': scene(pullRequest, [
     { press: 'ControlOrMeta+F' },
     { fill: ['#find-input', 'comp'], wait: 400, expect: '#find-count', text: ' of ' },

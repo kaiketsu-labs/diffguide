@@ -11,6 +11,7 @@ CSS.highlights.set('find-match', all);
 CSS.highlights.set('find-current', current);
 
 let matches: Range[] = [];
+let options: FindOptions = { matchCase: false, wholeWord: false, regex: false };
 let index = -1;
 let typing: ReturnType<typeof setTimeout> | undefined;
 let changed: ReturnType<typeof setTimeout> | undefined;
@@ -34,17 +35,40 @@ function searchable(parent: Element, seen: Map<Element, boolean>): boolean {
   return visible;
 }
 
-/** Every case-insensitive match of `query` in the page's visible text, in page order. */
-export function findRanges(query: string, root: Node = document.body): Range[] {
-  const needle = query.toLowerCase();
-  if (!needle) return [];
+/** How the find bar matches: as typed or as a regular expression, with or without case, anywhere or as whole words. */
+export interface FindOptions {
+  readonly matchCase: boolean;
+  readonly wholeWord: boolean;
+  readonly regex: boolean;
+}
+
+const plain: FindOptions = { matchCase: false, wholeWord: false, regex: false };
+
+const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+/** The pattern a query stands for, or undefined when it is an invalid regular expression. */
+export function findPattern(query: string, options: FindOptions): RegExp | undefined {
+  const source = options.regex ? query : escapeRegex(query);
+  try {
+    return new RegExp(options.wholeWord ? `\\b(?:${source})\\b` : source, options.matchCase ? 'gu' : 'giu');
+  } catch {
+    return undefined;
+  }
+}
+
+/** Every match of `query` in the page's visible text, in page order. */
+export function findRanges(query: string, root: Node = document.body, options: FindOptions = plain): Range[] {
+  const pattern = query ? findPattern(query, options) : undefined;
+  if (!pattern) return [];
   const runs = new Map<Element, { text: string; nodes: { node: Text; start: number }[] }>();
   const seen = new Map<Element, boolean>();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
     const parent = node.parentElement;
-    if (!parent || !node.data.trim() || !searchable(parent, seen)) continue;
+    if (!parent || !node.data.trim()) continue;
     const block = parent.closest(blocks) ?? parent;
+    // Syntax colors never hide text, so a code line is as visible as its diff table; checking each span costs most of a search.
+    if (!searchable(block.matches('td.code') ? block.closest('table') ?? block : parent, seen)) continue;
     const run = runs.get(block) ?? { text: '', nodes: [] };
     run.nodes.push({ node, start: run.text.length });
     run.text += node.data;
@@ -52,17 +76,17 @@ export function findRanges(query: string, root: Node = document.body): Range[] {
   }
   const found: Range[] = [];
   for (const { text, nodes } of runs.values()) {
-    const lower = text.toLowerCase();
-    // Lowercasing can change a string's length; offsets then only hold for the original.
-    const haystack = lower.length === text.length ? lower : text;
     const at = (offset: number, end: boolean): [Text, number] => {
       const hit = nodes.findLast(({ start, node }) => (end ? start < offset : start <= offset) && offset <= start + node.data.length) ?? nodes[0]!;
       return [hit.node, offset - hit.start];
     };
-    for (let from = haystack.indexOf(needle); from >= 0; from = haystack.indexOf(needle, from + needle.length)) {
+    pattern.lastIndex = 0;
+    for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+      // An empty match marks no text; step past it so the search ends.
+      if (match[0] === '') { pattern.lastIndex += 1; continue; }
       const range = document.createRange();
-      range.setStart(...at(from, false));
-      range.setEnd(...at(from + needle.length, true));
+      range.setStart(...at(match.index, false));
+      range.setEnd(...at(match.index + match[0].length, true));
       found.push(range);
     }
   }
@@ -71,7 +95,8 @@ export function findRanges(query: string, root: Node = document.body): Range[] {
 
 function showCount(): void {
   const query = $<HTMLInputElement>('find-input').value;
-  $('find-count').textContent = !query ? '' : matches.length === 0 ? 'No results' : `${index + 1} of ${matches.length}`;
+  const invalid = query !== '' && findPattern(query, options) === undefined;
+  $('find-count').textContent = !query ? '' : invalid ? 'Invalid pattern' : matches.length === 0 ? 'No results' : `${index + 1} of ${matches.length}`;
   $('find-box').classList.toggle('missing', query !== '' && matches.length === 0);
 }
 
@@ -96,10 +121,11 @@ function select(next: number, reveal: boolean): void {
 
 /** Search again; `reveal` jumps to the first match below the bars, otherwise the current match keeps its place. */
 function search(reveal: boolean): void {
-  drawPendingDiffs();
+  const query = $<HTMLInputElement>('find-input').value;
+  if (query) drawPendingDiffs();
   watch.takeRecords();
   const before = matches[index];
-  matches = findRanges($<HTMLInputElement>('find-input').value);
+  matches = findRanges(query, document.body, options);
   all.clear();
   for (const range of matches) all.add(range);
   if (reveal) {
@@ -117,12 +143,13 @@ export function openFind(): void {
   const box = $('find-box');
   const input = $<HTMLInputElement>('find-input');
   const selected = window.getSelection()?.toString() ?? '';
-  if (selected && !selected.includes('\n') && !box.contains(document.activeElement)) input.value = selected;
+  if (selected && !selected.includes('\n') && !box.contains(document.activeElement)) input.value = options.regex ? escapeRegex(selected) : selected;
   box.hidden = false;
   input.focus({ preventScroll: true });
   input.select();
   watch.observe(document.body, { childList: true, subtree: true, characterData: true });
-  search(false);
+  // The first search lays out the whole page, so it waits a frame and the bar shows at once.
+  requestAnimationFrame(() => setTimeout(() => { if (!box.hidden) search(false); }, 0));
 }
 
 export function closeFind(): void {
@@ -136,9 +163,20 @@ export function closeFind(): void {
   current.clear();
 }
 
+const toggles = { matchCase: 'find-case', wholeWord: 'find-word', regex: 'find-regex' } as const;
+/** VS Code's keys for the same toggles, with Alt: C, W and R. */
+const toggleKeys = { KeyC: 'matchCase', KeyW: 'wholeWord', KeyR: 'regex' } as const;
+
+function toggle(option: keyof FindOptions): void {
+  options = { ...options, [option]: !options[option] };
+  $(toggles[option]).setAttribute('aria-pressed', String(options[option]));
+  search(false);
+}
+
 /** Wire the find bar and its shortcut. */
 export function setupFind(): void {
   const input = $<HTMLInputElement>('find-input');
+  for (const option of Object.keys(toggles) as (keyof FindOptions)[]) $(toggles[option]).addEventListener('click', () => { toggle(option); input.focus(); });
   // The page opens the bar itself, so keys typed right after the shortcut land in it; the keybinding's message comes later.
   const mac = navigator.userAgent.includes('Mac');
   window.addEventListener('keydown', (event) => {
@@ -150,6 +188,10 @@ export function setupFind(): void {
   input.addEventListener('input', () => {
     clearTimeout(typing);
     typing = setTimeout(() => { typing = undefined; search(true); }, 100);
+  });
+  $('find-box').addEventListener('keydown', (event) => {
+    const option = event.altKey && !event.shiftKey && !event.ctrlKey ? toggleKeys[event.code as keyof typeof toggleKeys] as keyof FindOptions | undefined : undefined;
+    if (option) { event.preventDefault(); toggle(option); }
   });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
