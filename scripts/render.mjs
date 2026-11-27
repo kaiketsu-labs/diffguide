@@ -92,6 +92,13 @@ for (const name of names) {
     const before = step.stay ? await top(step.stay) : undefined;
     if (step.send) await page.evaluate((m) => window.postMessage(m, '*'), step.send);
     if (step.select) await page.evaluate((selector) => { const node = document.querySelector(selector); if (node) getSelection().selectAllChildren(node); }, step.select);
+    if (step.drag) {
+      const [from, to] = await Promise.all(step.drag.map((selector) => page.$eval(selector, (node) => { const r = node.getBoundingClientRect(); return { x: r.left, y: r.top + r.height / 2, right: r.right }; })));
+      await page.mouse.move(from.x + 40, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x + 120, to.y, { steps: 5 });
+      await page.mouse.up();
+    }
     if (step.click) await page.click(step.click);
     if (step.fill) await page.fill(...step.fill);
     if (step.press) await page.keyboard.press(step.press);

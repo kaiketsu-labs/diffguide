@@ -14,7 +14,7 @@ import { frameMessage } from './files/preview.js';
 import { setupCodeRefs } from './files/refs.js';
 import { setupFind } from './find.js';
 import { frameParking, renderFiles } from './files/render.js';
-import { paintDrag, pick } from './files/selection.js';
+import { paintDrag, pick, setupSelectionComment } from './files/selection.js';
 import { guideState } from './guide/model.js';
 import { openConnectMenu, openContextMenu } from './header/connect.js';
 import { clickMerge, closeMergeForm, openMethodMenu, openUpdateMenu } from './header/merge.js';
@@ -48,6 +48,7 @@ document.addEventListener('mouseup', (event) => {
   }
 });
 
+setupSelectionComment();
 setInterval(() => { for (const node of document.querySelectorAll<HTMLTimeElement>('time.when')) node.textContent = relativeTime(node.dateTime); }, 60_000);
 frameParking.hidden = true;
 document.body.append(frameParking);

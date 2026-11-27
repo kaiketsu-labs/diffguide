@@ -42,7 +42,8 @@ const waitMotion = (id: string): StepPick => ({ verb }) => {
 export function avatar(entry: Message, author: string): HTMLElement {
   if (!('avatarUrl' in entry) && entry.author === 'claude') {
     const node = el('span', 'avatar orb-avatar');
-    node.title = author;
+    // The model that wrote the message, for checking later which one answered.
+    setTip(node, 'model' in entry && entry.model !== undefined ? `${author} · ${entry.model}` : author);
     node.append(orbCanvas('avatar'));
     return node;
   }

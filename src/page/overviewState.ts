@@ -167,11 +167,11 @@ export function threadView(thread: ReviewThread, { activity, progress, running =
     ...(thread.origin === undefined ? {} : { origin: thread.origin }),
     ...(thread.finding === undefined ? {} : { finding: thread.finding }),
     ...(!wholeFile && !onPullRequest && thread.messages.some(({ text }) => parseSuggestions(text).length) ? { original: highlightSource(thread.anchor.selectedText, thread.anchor.path) } : {}),
-    messages: thread.messages.map(({ author, text, createdAt, eventId }) => {
+    messages: thread.messages.map(({ author, text, createdAt, eventId, model }) => {
       // A suggestion replaces the commented lines, and a whole-file comment has none.
       const suggestions = wholeFile || onPullRequest ? [] : parseSuggestions(text).map((suggestion) => highlightSource(suggestion.code, thread.anchor.path));
       const intent = author === 'human' && eventId !== undefined ? intents?.get(eventId) : undefined;
-      return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(intent === undefined ? {} : { intent }), ...(suggestions.length ? { suggestions } : {}) };
+      return { author, html: markdownHtml(suggestions.length ? withoutSuggestions(text) : text), createdAt, ...(intent === undefined ? {} : { intent }), ...(suggestions.length ? { suggestions } : {}), ...(model === undefined ? {} : { model }) };
     }),
     ...(publication === undefined ? {} : { url: publication.url }),
     ...(linkedTo === undefined ? {} : { linkedTo }),

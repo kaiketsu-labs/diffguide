@@ -107,7 +107,8 @@ export interface OverviewState {
     readonly original?: readonly string[];
     /** Rendered from Markdown with escaped text only; `suggestions` holds each ```suggestion block's lines as highlighted HTML, shown as options. */
     /** `intent` is what the human sent the message with; messages from before it was shown leave it out. */
-    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly intent?: ReviewIntent; readonly suggestions?: readonly (readonly string[])[] }[];
+    /** `model` is the model that wrote a Claude message, when its run reported one. */
+    readonly messages: readonly { readonly author: 'human' | 'claude'; readonly html: string; readonly createdAt: string; readonly intent?: ReviewIntent; readonly suggestions?: readonly (readonly string[])[]; readonly model?: string }[];
   }[];
   /** Diff comment threads on GitHub, by anyone; undefined while loading. */
   readonly github?: readonly GitHubThreadView[];

@@ -31,6 +31,8 @@ export interface ReviewMessage {
   readonly createdAt: string;
   /** Claude's proposed reply for the GitHub thread this local thread discusses, shorter than its answer to the human. */
   readonly githubReply?: string;
+  /** The model that wrote a Claude message, when the run that wrote it reported one. */
+  readonly model?: string;
 }
 
 /** The review agents a code review can run. */
@@ -120,6 +122,8 @@ export interface AgentUpdate {
   readonly title?: string;
   /** A reply Claude proposes posting on the GitHub thread; stored with this update's message. */
   readonly githubReply?: string;
+  /** The model of the session that sent the update, from DiffGuide's own record, never from the update's body. */
+  readonly model?: string;
 }
 
 /** Handles used by the native editor and extension lifecycle. */
@@ -144,7 +148,7 @@ export interface ReviewStore {
   /** Replace the analysis's notes that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
   replaceAnalysisNotes(notes: readonly { readonly anchor: CodeAnchor; readonly text: string }[]): Promise<readonly string[]>;
   /** Replace the code review's findings that nobody replied to or resolved with new ones; resolves with the new thread ids in order. */
-  replaceReviewFindings(findings: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly title: string; readonly finding: Finding }[]): Promise<readonly string[]>;
+  replaceReviewFindings(findings: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly title: string; readonly finding: Finding }[], model?: string): Promise<readonly string[]>;
   onChange(listener: () => void): Disposable;
   flush(): Promise<void>;
 }

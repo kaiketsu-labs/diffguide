@@ -23,7 +23,7 @@ With several checkouts, such as the window's folders, nested repositories and th
 
 When a checkout's branch has an open PR of yours, its page shows a **PR #N** chip beside the branch. The chip turns the tab into the PR's review page on that same checkout. Threads, Viewed marks and the connected Claude conversation carry over. [How DiffGuide syncs your checkout](SYNC.md)
 
-Click a line number, or drag across several, to comment. The Threads card lists every thread with its file, line and status. Claude can reply and report progress; **you decide when a thread is resolved**. **Resolve** closes it and **Reopen** continues it. Nothing is deleted.
+Click a line number, or drag across several, to comment. Or select code in the diff and click **Comment** below the selection; the comment covers exactly the selected lines. The Threads card lists every thread with its file, line and status. Claude can reply and report progress; **you decide when a thread is resolved**. **Resolve** closes it and **Reopen** continues it. Nothing is deleted.
 
 **Viewed** on a file or on selected lines works as on PR pages. Marks lapse once the code changes. The page reads the files again when they change on disk.
 
