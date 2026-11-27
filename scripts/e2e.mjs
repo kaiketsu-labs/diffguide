@@ -241,9 +241,10 @@ const scenarios = [
         ...state,
         details: { ...state.details, canEdit: true, assignees: ['e2e'], labels: [{ name: 'layout', color: 'abcdef' }], milestone: { number: 1, title: 'Layout' } },
       } }, '*'), await page.evaluate(() => window.__layoutState));
+      await page.waitForSelector('#files-bar #push:visible', { timeout: 5_000 });
       await page.click('#unpushed-chip');
-      await page.waitForSelector('#push:visible', { timeout: 5_000 });
-      if (await page.locator('#files-bar #push, #files-bar #show-unpushed').count()) throw new Error('Unpushed actions remain in the tab row');
+      await page.waitForSelector('#show-unpushed:visible', { timeout: 5_000 });
+      if (await page.locator('#unpushed-menu #push, #files-bar #show-unpushed').count()) throw new Error('Unpushed actions are misplaced');
       await workbench.screenshot({ path: join(out, 'pr-unpushed-menu.png') });
       await page.press('#unpushed-chip', 'Escape');
       const descriptionBeforeGuide = await page.evaluate(() => Boolean(document.querySelector('#body').compareDocumentPosition(document.querySelector('#overview-guide')) & Node.DOCUMENT_POSITION_FOLLOWING));
