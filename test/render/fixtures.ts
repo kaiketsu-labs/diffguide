@@ -490,6 +490,8 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { preview: { path: statusFile.path, kind: 'html', html: statusPreview, marker: 'lr-frame-fixture' } }],
   saved: { view: 'files', previewing: [statusFile.path] }, width: 1100, height: 900, steps: [
     { scrollTo: '.html-split', expect: '.html-margin > .thread', count: 2, wait: 600, css: ['.html-preview', '', 'background-color', 'rgb(255, 255, 255)'], absent: '.preview-note' },
+    // The preview scrolls on its own, so a card's title sticks to the preview's top, not below the page's bars.
+    { css: ['.html-margin > .thread > summary.strip', '', 'top', '0px'] },
     { click: '.html-margin .unfold', below: ['.html-margin > [data-anchor="h2222222-2222-2222-2222-222222222222"]', '.html-margin > [data-anchor="h1111111-1111-1111-1111-111111111111"]'], shot: 'html-margin.png' },
   ] },
   // A thread Claude works on offers its terminal when the conversation runs in one.

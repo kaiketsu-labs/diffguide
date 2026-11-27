@@ -181,7 +181,7 @@ td.code.linked{cursor:pointer}::highlight(lr-link){color:var(--vscode-textLink-a
 .md-block hr{border:0;border-top:1px solid var(--line)}
 .html-preview{display:block;width:100%;border:0;background:var(--preview-canvas)}
 .preview-note{margin:0;flex-wrap:nowrap}.preview-note>span{flex:1}
-.html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}
+.html-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-12);padding:0 var(--space-12) var(--space-12) 0}.html-margin{position:relative}.html-margin>.thread{position:absolute;left:0;right:0;margin:0}.html-margin>.thread>summary.strip{top:0}
 @media (max-width:760px){.html-split{grid-template-columns:1fr;padding-right:0}.html-margin>.thread{position:static;margin:8px 12px}}
 .html-split{max-height:min(70vh,800px);overflow:auto}
 td.num.pick{cursor:pointer;position:relative}
