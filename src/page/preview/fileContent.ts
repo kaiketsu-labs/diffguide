@@ -8,15 +8,15 @@ import type { FilePreview } from '../protocol.js';
 import { htmlPreview } from './htmlPreview.js';
 import { inlineLocalImages, markdownBlocks } from './markdown.js';
 
-/** A Markdown file in `folder` as rendered blocks with its local images inlined, or an HTML file's source for a sandboxed frame. */
+/** A Markdown file in `folder` as rendered blocks, or an HTML file's source for a sandboxed frame, each with its local images inlined. */
 export async function readFilePreview(folder: string, path: string): Promise<FilePreview> {
   const text = await readFile(join(folder, path), 'utf8');
-  if (/\.html?$/iu.test(path)) return { kind: 'html', ...htmlPreview(text) };
   const readImage = async (image: string): Promise<Buffer | undefined> => {
     const file = join(folder, image);
     const info = await lstat(file).catch(() => undefined);
     return info?.isFile() === true && info.size <= maxMediaBytes ? await readFile(file) : undefined;
   };
+  if (/\.html?$/iu.test(path)) return { kind: 'html', ...await htmlPreview(text, path, readImage) };
   const blocks = await Promise.all(markdownBlocks(text).map(async (block) => ({ ...block, html: await inlineLocalImages(block.html, path, readImage) })));
   return { kind: 'markdown', blocks };
 }

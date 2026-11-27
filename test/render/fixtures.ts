@@ -238,6 +238,20 @@ const companion: OverviewState = {
   ],
 };
 
+const statusHtml = '<!doctype html>\n<html><head><title>Status</title></head>\n<body>\n<h1>Retry status</h1>\n<p>The client retries failed requests.</p>\n<h2>Settings</h2>\n<p>Four attempts.</p>\n</body></html>\n';
+// What htmlPreview makes of statusHtml; it is async and this bundle cannot await at load.
+const statusPreview = '<!DOCTYPE html><html><head><!--lr-frame-fixture--><title data-lr-lines="2-2">Status</title></head>\n<body>\n<h1 data-lr-lines="4-4">Retry status</h1>\n<p data-lr-lines="5-5">The client retries failed requests.</p>\n<h2 data-lr-lines="6-6">Settings</h2>\n<p data-lr-lines="7-7">Four attempts.</p>\n\n</body></html>';
+const statusFile: FileDiff = { path: 'docs/status.html', change: 'added', binary: false, additions: 8, deletions: 0,
+  hunks: [{ header: '@@ -0,0 +1,8 @@', lines: lines(1, 8, 'add', (n) => statusHtml.split('\n')[n - 1] ?? '') }] };
+const htmlThread = (id: string, line: number, title: string): OverviewState['threads'][number] => ({
+  id, location: `docs/status.html:${line}`, text: title, status: 'Answered', path: statusFile.path, side: 'new', startLine: line, endLine: line, resolved: false, title,
+  messages: [{ author: 'human', html: `<p>${title}</p>`, createdAt: ago(2), intent: 'ask' }],
+});
+const answer = (minutes: number): OverviewState['threads'][number]['messages'][number] => ({ author: 'claude', createdAt: ago(minutes),
+  html: '<p>It waits 200 ms, then doubles the wait each time.</p><ul><li>Four attempts take about 3.2 s before throwing.</li><li>Line 17 omits the jitter that <code>README.md</code> mentions.</li></ul>' });
+const longThread = htmlThread('h1111111-1111-1111-1111-111111111111', 5, 'Explain the retries');
+const htmlThreads: OverviewState = { ...local, threads: [{ ...longThread, messages: [...longThread.messages, answer(8), answer(6), answer(4), answer(2)] },
+  htmlThread('h2222222-2222-2222-2222-222222222222', 6, 'Rename the heading')] };
 const filesMessage: ExtensionMessage = { files, selection: { range: { kind: 'all' }, whitespace: false }, atHead: true };
 const { conversation: _conversation, ...withoutConversation } = pullRequest;
 const { details: _details, github: _github, ...withoutDetails } = withoutConversation;
@@ -471,6 +485,13 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#connect', expect: '.connect-menu:visible' },
     { inside: ['.connect-menu', 'body'], shot: 'local-connect-menu.png' },
   ], { width: 800 }),
+  // An HTML preview sits on a white page like a browser's, with no help line, and its comment cards stay stacked when one grows in place.
+  'html-margin': { state: htmlThreads, messages: [{ state: htmlThreads }, { files: [statusFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true },
+    { preview: { path: statusFile.path, kind: 'html', html: statusPreview, marker: 'lr-frame-fixture' } }],
+  saved: { view: 'files', previewing: [statusFile.path] }, width: 1100, height: 900, steps: [
+    { scrollTo: '.html-split', expect: '.html-margin > .thread', count: 2, wait: 600, css: ['.html-preview', '', 'background-color', 'rgb(255, 255, 255)'], absent: '.preview-note' },
+    { click: '.html-margin .unfold', below: ['.html-margin > [data-anchor="h2222222-2222-2222-2222-222222222222"]', '.html-margin > [data-anchor="h1111111-1111-1111-1111-111111111111"]'], shot: 'html-margin.png' },
+  ] },
   // A thread Claude works on offers its terminal when the conversation runs in one.
   'thread-terminal': { state: readme, messages: [{ state: readme }, { files: [retryFile], selection: { range: { kind: 'all' }, whitespace: false }, atHead: true }],
     saved: { view: 'files' }, width: 1100, height: 900, steps: [

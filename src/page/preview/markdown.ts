@@ -210,16 +210,22 @@ export async function inlineLocalImages(html: string, documentPath: string, read
   const sources = [...new Set([...html.matchAll(/<img src="([^"]*)"/gu)].map((match) => match[1] ?? ''))];
   const inlined = new Map<string, string>();
   await Promise.all(sources.map(async (source) => {
-    const path = repositoryPath(source, documentPath);
-    const mime = path === undefined ? undefined : mediaType(path);
-    if (path === undefined || !mime?.startsWith('image/')) return;
-    const bytes = await readImage(path);
-    if (bytes !== undefined) inlined.set(source, `data:${mime};base64,${bytes.toString('base64')}`);
+    const data = await localImageData(source, documentPath, readImage);
+    if (data !== undefined) inlined.set(source, data);
   }));
   return html.replace(/<img src="([^"]*)"/gu, (tag, source: string) => {
     const data = inlined.get(source);
     return data === undefined ? tag : `<img src="${data}"`;
   });
+}
+
+/** A relative image link in the file at `documentPath` as a data URL, or undefined when it is not a readable image in the repository. */
+export async function localImageData(source: string, documentPath: string, readImage: (path: string) => Promise<Buffer | undefined>): Promise<string | undefined> {
+  const path = repositoryPath(source, documentPath);
+  const mime = path === undefined ? undefined : mediaType(path);
+  if (path === undefined || !mime?.startsWith('image/')) return undefined;
+  const bytes = await readImage(path);
+  return bytes === undefined ? undefined : `data:${mime};base64,${bytes.toString('base64')}`;
 }
 
 /** The repository path a relative image link names, or undefined for links with a scheme and paths outside the repository. */

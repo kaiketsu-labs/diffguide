@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- HTML previews sit on a white page like a browser's, show images stored in the repository, and drop the help line above them. Comment cards beside the preview no longer overlap when one grows, such as when you show earlier messages.
 - The code review card has a Clear button. After you confirm, the card goes and findings nobody answered or resolved are archived; Show archived brings them back.
 - Code blocks in answers, comments and the description show a Copy button on hover.
 - Claude cites code as `path:line` in backticks. On the review page such a reference to a file the page shows is a link: hovering previews the lines, clicking jumps to them.
