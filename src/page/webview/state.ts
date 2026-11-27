@@ -186,6 +186,8 @@ export interface Ui {
   reviewPicks: readonly Reviewer[] | undefined;
   /** What the next review should look at first; sent with it, then cleared. */
   reviewFocus: string;
+  /** When each running draft reply started, by thread, until Claude's own progress arrives. */
+  draftStartedAt: Map<string, number>;
   threadHoverAnchor: HTMLElement | undefined;
   hovered: { id: string; cell: HTMLElement; start: number; end: number } | undefined;
   pointer: MouseEvent | undefined;
@@ -216,6 +218,7 @@ export const ui: Ui = {
   navFolded: true,
   reviewPicks: undefined,
   reviewFocus: '',
+  draftStartedAt: new Map(),
   threadHoverAnchor: undefined,
   hovered: undefined,
   pointer: undefined,

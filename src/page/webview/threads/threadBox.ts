@@ -258,7 +258,7 @@ export function threadBox(thread: Thread): HTMLElement {
       actions.append(implement);
     }
     actions.append(primary);
-    box.append(actions);
+    box.append(actions, ...draftingLog(thread));
     return box;
   }
   if (thread.source === 'local' && isArchived(thread)) {
@@ -373,6 +373,7 @@ function draftReply(thread: Thread, notes: string): void {
   const key = 'draft:' + thread.id;
   if (sending.has(key)) return;
   sending.add(key);
+  ui.draftStartedAt.set(thread.id, Date.now());
   $('error').textContent = '';
   redrawThread(thread);
   post({ action: thread.source === 'github' ? 'github-draft-reply' : 'draft-reply', form: key, id: thread.id, text: notes });
@@ -386,6 +387,22 @@ function draftReplyButton(thread: Thread, notes: () => string): HTMLButtonElemen
   draft.title = received.current?.claude.running ? 'Claude is working on this PR. Draft when it is done'
     : 'Agent writes the GitHub comment from this text: your notes, or a draft to revise. You edit it before posting';
   return draft;
+}
+
+/** While Claude drafts this thread's reply: its steps, how long it has run, and Stop. */
+function draftingLog(thread: Thread): HTMLElement[] {
+  if (!sending.has('draft:' + thread.id)) return [];
+  const progress = received.current?.claude.running ? received.current.claude.progress : undefined;
+  const controls = el('span', 'step-actions');
+  const stop = button('', stopClaude, 'icon-button stop-claude');
+  stop.append(icon(icons.stop));
+  setTip(stop, 'Stop drafting');
+  stop.disabled = ui.stoppingClaude;
+  controls.append(stop);
+  const live = el('div', 'claude-live drafting');
+  // A draft runs without tools, so Claude's steps are often empty until it answers.
+  live.append(stepLog(progress?.steps.length ? progress.steps : [{ verb: 'Drafting', target: 'reply', done: false }], progress?.startedAt ?? ui.draftStartedAt.get(thread.id), controls));
+  return [live];
 }
 
 /** Edit a local thread's comment and post it on the PR diff, now or into the pending review. */
@@ -411,7 +428,7 @@ function publishBox(thread: Thread & { readonly source: 'local' }, draft: string
     const row = el('div', 'row actions composer-actions');
     row.append(el('span', 'gap'), button('Cancel', cancel, 'quiet'), draftReplyButton(thread, () => publishing.get(thread.id) ?? ''), comment);
     const fragment = document.createDocumentFragment();
-    fragment.append(field, row);
+    fragment.append(field, row, ...draftingLog(thread));
     return fragment;
   }
   const review = button(busySending && ui.sentPending ? 'Sending…' : 'Add to pending review', () => send(true), 'primary');
@@ -424,7 +441,7 @@ function publishBox(thread: Thread & { readonly source: 'local' }, draft: string
   const row = el('div', 'row actions composer-actions');
   row.append(...reviewing ? [titled(el('span', 'chip pending', 'Review in progress'), 'New comments go into your pending review.')] : [], el('span', 'gap'), button('Cancel', cancel, 'quiet'), draftReplyButton(thread, () => publishing.get(thread.id) ?? ''), now, review);
   const fragment = document.createDocumentFragment();
-  fragment.append(field, row);
+  fragment.append(field, row, ...draftingLog(thread));
   return fragment;
 }
 
