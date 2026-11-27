@@ -20,7 +20,7 @@ export interface Scene {
 export interface Step {
   /** A host message to deliver, such as the state after an action the page posted. */
   readonly send?: ExtensionMessage;
-  /** A selector whose text to select, as a drag over it would. */
+  /** A selector whose text to select and let go of, as a drag over it would. */
   readonly select?: string;
   /** Two selectors: press the mouse in the first's text, drag to the second's and let go. */
   readonly drag?: readonly [string, string];
@@ -43,6 +43,8 @@ export interface Step {
   readonly absent?: string;
   /** An input's selector and the value it must hold. */
   readonly value?: readonly [string, string];
+  /** A CSS highlight's name and the text its ranges on the page mark, joined by `|`. */
+  readonly highlight?: readonly [string, string];
   /** A selector whose top must not move through this step's send, click and scroll. */
   readonly stay?: string;
   /** Two selectors: the first must start at or below the bottom of the second, so it does not draw over it. */
@@ -410,6 +412,15 @@ export const scenes: Readonly<Record<string, Scene>> = {
   ], { saved: { view: 'code' } }),
   // Selected code offers Comment, which opens the form on exactly the selected lines.
   'selection-comment': scene(pullRequest, [
+    // One word: the form opens on its line and the word stays marked.
+    { select: '.file[data-path="src/auth/user.ts"] td.code[data-line="2"] .hljs-keyword', expect: '#selection-comment:visible', shot: 'selection-word.png' },
+    { click: '#selection-comment', expect: '.file[data-path="src/auth/user.ts"] .thread.draft', text: 'Line 2' }, { highlight: ['comment-span', 'const'], expect: '.thread.draft textarea[placeholder="Ask about the marked text"]', shot: 'selection-marked.png' },
+    { fill: ['.thread.draft textarea', 'Why const?'] }, { click: '.thread.draft button:has-text("Ask")' },
+    { click: '.file[data-path="src/auth/user.ts"] .thread.draft button:has-text("Cancel")', highlight: ['comment-span', ''] },
+    // A saved comment marks its text, and marks nothing once the lines hold other text.
+    { send: { state: { ...pullRequest, threads: pullRequest.threads.map((each) => each.startLine === 7 ? { ...each, columns: { start: 2, end: 4 }, marked: 'if' } : each) } }, highlight: ['comment-span', 'if'] },
+    { send: { state: { ...pullRequest, threads: pullRequest.threads.map((each) => each.startLine === 7 ? { ...each, columns: { start: 2, end: 4 }, marked: 'xx' } : each) } }, highlight: ['comment-span', ''] },
+    { send: { state: pullRequest } },
     { drag: ['.file[data-path="src/auth/user.ts"] td.code[data-line="2"]', '.file[data-path="src/auth/user.ts"] td.code[data-line="4"]'], expect: '#selection-comment:visible', shot: 'selection-comment.png' },
     { click: '#selection-comment', absent: '#selection-comment:visible' }, { expect: '.file[data-path="src/auth/user.ts"] .thread.draft', text: 'Lines 2–4' },
     { expect: '.file[data-path="src/auth/user.ts"] td.code.sel[data-line="2"]' }, { expect: '.file[data-path="src/auth/user.ts"] td.code.sel[data-line="4"]' }, { absent: '.file[data-path="src/auth/user.ts"] td.code.sel[data-line="5"]' },

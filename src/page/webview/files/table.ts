@@ -16,7 +16,7 @@ import { linesFit } from './filters.js';
 import { annotationBox, annotationsOf, loadContext, unmarkRead } from './marks.js';
 import { folderOf, openFolders } from './nav.js';
 import { drawPendingDiffs, renderFiles } from './render.js';
-import { code, num } from './selection.js';
+import { code, markSpans, num } from './selection.js';
 
 /** Unchanged new-side lines between hunks; `offset` maps them to old-side lines. */
 interface Gap { readonly from: number; readonly to: number; readonly offset: number; readonly last?: true }
@@ -281,5 +281,11 @@ export function table(file: FileDiff, threads: readonly Thread[], placed: Set<st
   });
   const last = gapList[file.hunks.length];
   if (gaps && last && file.change !== 'added' && file.change !== 'deleted' && file.change !== 'unchanged') gapRows(last, file.hunks.length);
+  markSpans(node, [
+    ...threads.flatMap((thread) => thread.source === 'local' && thread.path === file.path && thread.columns !== undefined && thread.marked !== undefined && !thread.archived
+      ? [{ side: thread.side, start: thread.startLine, end: thread.endLine, columns: thread.columns, text: thread.marked }] : []),
+    // GitHub takes whole lines, so a draft for it marks none.
+    ...draft?.columns !== undefined && draft.target !== 'github' ? [{ side: draft.side, start: draft.start, end: draft.end, columns: draft.columns }] : [],
+  ]);
   return node;
 }

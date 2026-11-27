@@ -1,7 +1,7 @@
 /** Types shared between page modules. */
 import type { AgentStep } from '../../core/agent.js';
 import type { ChangeRequestDetails, CommentKind } from '../../core/forge.js';
-import type { DiffSide, GitHubThreadView, OverviewState } from '../protocol.js';
+import type { DiffSide, GitHubThreadView, OverviewState, TextColumns } from '../protocol.js';
 import type { OrbMotion } from './orb.js';
 
 /** The page's tab: the PR's record, or its code. */
@@ -9,7 +9,8 @@ export type View = 'overview' | 'code';
 /** The order the Code tab shows files in: the file tree, or Claude's guide in reading order. */
 export type Order = 'files' | 'guide';
 export type Intent = 'ask' | 'implement';
-export interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github' }
+/** `columns` marks the text selected for the comment within its first and last line; GitHub comments cover whole lines. */
+export interface Composer { path: string; side: DiffSide; start: number; end: number; text: string; target?: 'claude' | 'github'; columns?: TextColumns }
 /** A new comment on a whole file, written above its diff. */
 export interface FileComposer { path: string; text: string; target?: 'claude' | 'github' }
 export type Thread = (OverviewState['threads'][number] & { readonly source: 'local'; readonly pending?: never; readonly outdated?: never })

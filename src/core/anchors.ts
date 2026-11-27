@@ -85,6 +85,23 @@ export function anchorFromText(
   };
 }
 
+/** The text the human highlighted within the anchor's lines, or undefined when the columns do not fit them or mark nothing. */
+export function highlightedText(anchor: Pick<CodeAnchor, 'selectedText' | 'columns'>): string | undefined {
+  if (anchor.columns === undefined) return undefined;
+  const { start, end } = anchor.columns;
+  const lines = normalizeLineEndings(anchor.selectedText).split('\n');
+  const first = lines[0] ?? '';
+  const last = lines.at(-1) ?? '';
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < 0 || start > first.length || end > last.length) return undefined;
+  const text = lines.length === 1 ? first.slice(start, end) : [first.slice(start), ...lines.slice(1, -1), last.slice(0, end)].join('\n');
+  return text.trim() === '' ? undefined : text;
+}
+
+/** The anchor with the highlighted columns when they mark text in its lines; otherwise the lines alone, which still hold the comment. */
+export function withColumns(anchor: CodeAnchor, columns: CodeAnchor['columns']): CodeAnchor {
+  return columns !== undefined && highlightedText({ selectedText: anchor.selectedText, columns }) !== undefined ? { ...anchor, columns } : anchor;
+}
+
 /** Anchor a comment on the PR as a whole, which has no code to capture. */
 export function pullRequestAnchor(baseRevision: string): CodeAnchor {
   return { scope: 'pullRequest', path: '', startLine: 1, endLine: 1, selectedText: '', contextBefore: '', contextAfter: '', documentHash: '', side: 'working', baseRevision };

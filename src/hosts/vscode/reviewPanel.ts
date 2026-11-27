@@ -7,7 +7,7 @@ import { type Reviewer, reviewers as allReviewers } from '../../core/contracts.j
 import { type ChangeRequestConversation, type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type ReactionContent, reactionContents, type ReviewEvent } from '../../core/forge.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
-import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, type FilesView, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
+import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, type FilesView, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, parseColumns, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
 import { pollWhileFocused } from './autoSync.js';
 import { workingIcon } from './claudeStatus.js';
 import { closedIcon, mergedIcon, pullRequestIcon } from './pullRequestItems.js';
@@ -171,14 +171,15 @@ export async function showPullRequestOverview(
     panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (typeof value !== 'object' || value === null) return;
       const { action, id, ids, paths, event, body, method, what, values, teams, draft, path, viewed, side, startLine, endLine, text, intent, resolved, archived, pending, form, peek, line, column, extension, message, option,
-        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command, reviewers: reviewersPicked, focus } = value as Record<string, unknown>;
+        range, whitespace, kind, hide, reason, content, on, login, run, headline, picked, branch, oid, title, deleteBranch, key, link, command, reviewers: reviewersPicked, focus, columns } = value as Record<string, unknown>;
       const formKey = typeof form === 'string' && form.length <= 200 ? form : undefined;
       try {
         if (action === 'ready') { post({ pageKey }); sendFiles(); }
         else if (action === 'theme-colors') { colors = themeColors((value as Record<string, unknown>)['colors']); updateTabIcon(); }
         else if (action === 'comment' && typeof path === 'string' && (side === 'old' || side === 'new') && isLine(startLine) && isLine(endLine)
-          && startLine <= endLine && isText(text) && commentIntents.includes(intent)) {
-          await actions.comment({ path, side, startLine, endLine, text: text.trim(), intent: intent as CommentIntent });
+          && startLine <= endLine && isText(text) && commentIntents.includes(intent) && parseColumns(columns) !== null) {
+          const marked = parseColumns(columns);
+          await actions.comment({ path, side, startLine, endLine, text: text.trim(), intent: intent as CommentIntent, ...marked ? { columns: marked } : {} });
           post({ done: formKey });
         } else if (action === 'file-comment' && typeof path === 'string' && isText(text) && commentIntents.includes(intent)) {
           await actions.commentOnFile(path, text.trim(), intent as CommentIntent);

@@ -49,7 +49,7 @@ export function composerBox(draft: Composer): HTMLElement {
     $('error').textContent = '';
     renderFiles([draft.path]);
     const where = { form: 'composer', path: draft.path, side: draft.side, startLine: draft.start, endLine: draft.end, text: draft.text } as const;
-    post(github ? { action: 'github-comment', pending, ...where } : { action: 'comment', intent, ...where });
+    post(github ? { action: 'github-comment', pending, ...where } : { action: 'comment', intent, ...where, ...draft.columns ? { columns: draft.columns } : {} });
   };
   const submit = (): void => send(true);
   const selection: LineRange = { path: draft.path, side: draft.side, startLine: draft.start, endLine: draft.end };
@@ -75,7 +75,7 @@ export function composerBox(draft: Composer): HTMLElement {
   const cancelLink = button('Cancel', cancel, 'quiet');
   const needText: HTMLButtonElement[] = [];
   const onDraft = (value: string): void => { draft.text = value; save(); for (const each of needText) each.disabled = sending.has('composer') || !value.trim(); };
-  const area = github ? githubField('composer', draft.text, 'Comment on GitHub', onDraft, submit, cancel) : textarea('composer', draft.text, 'Ask about these lines', onDraft, submit, cancel);
+  const area = github ? githubField('composer', draft.text, 'Comment on GitHub', onDraft, submit, cancel) : textarea('composer', draft.text, draft.columns ? 'Ask about the marked text' : 'Ask about these lines', onDraft, submit, cancel);
   const busySending = sending.has('composer');
   const row = el('div', 'row actions composer-actions');
   if (github) {
