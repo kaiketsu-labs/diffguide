@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Select code in a diff and a Comment button appears below the selection. It opens the comment form on exactly the selected lines.
+- Claude's answers and review findings remember the model that wrote them. Hover the Diff pair beside a message to see it. Answers from a conversation you connect yourself don't record a model.
 - While Claude drafts a reply, the form shows its progress and how long it has run, with a Stop button.
 - Code review has a Docs agent that finds docs, help text and doc comments a change made wrong.
 - The reviewer menu has a Focus field: tell the review what to look at first.

@@ -368,3 +368,15 @@ test('a re-check of an open thread leaves it open, and taking the question back 
   assert.equal(store.threads[0]?.resolved, true);
   assert.equal(store.threads[0]?.recheck, undefined);
 });
+
+test('keeps the model of a Claude message across a reload', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'diffguide-model-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'review.json');
+  const store = await createReviewStore(file, root);
+  const thread = await store.submit({ path: 'a.ts', startLine: 1, endLine: 1, selectedText: 'x', contextBefore: '', contextAfter: '', documentHash: 'h', side: 'working', baseRevision: 'HEAD' }, 'Why?', 'ask');
+  await store.updateFromAgent({ eventId: thread.latestEventId, status: 'answered', text: 'Because.', model: 'claude-opus-5-5' });
+  await store.flush();
+  const reloaded = await createReviewStore(file, root);
+  assert.equal(reloaded.threads[0]?.messages.at(-1)?.model, 'claude-opus-5-5');
+});

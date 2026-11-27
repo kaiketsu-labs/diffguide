@@ -36,6 +36,7 @@ export class ReviewTracker {
   #reporting = false;
   #endedAt: number | undefined;
   #usage: ReviewUsage | undefined;
+  #model: string | undefined;
   // Keyed by message id: the stream repeats a message once per content block.
   readonly #turns = new Map<string, WeightedTurn & { readonly agent: ReviewAgent }>();
 
@@ -51,6 +52,7 @@ export class ReviewTracker {
 
   /** Take one stream message; true when the live state changed. */
   read(message: StreamMessage): boolean {
+    if (message.type === 'system' && message['subtype'] === 'init' && typeof message['model'] === 'string') this.#model = message['model'];
     if (message.type === 'result') {
       // A result holds session totals, so the last one stands; wall time runs to the result.
       const usage = parseReviewUsage(message, this.now() - this.startedAt);
@@ -93,6 +95,11 @@ export class ReviewTracker {
       }
     }
     return changed;
+  }
+
+  /** The orchestrator's model, once the run reported it. */
+  get model(): string | undefined {
+    return this.#model;
   }
 
   /** Mark the run as over, so timers stop. */
@@ -299,7 +306,7 @@ export class CodeReview implements AgentCodeReview {
     const ids = await this.options.store.replaceReviewFindings(placed.map(({ finding, anchor }) => ({
       anchor, text: findingText(finding), title: finding.title,
       finding: { reviewers: finding.reviewers, severity: finding.severity, evidence: finding.evidence },
-    })));
+    })), this.#tracker?.model);
     const saved: CodeReviewResult = {
       createdAt: new Date().toISOString(), ran: parsed.ran, skipped: parsed.skipped, candidates: parsed.candidates,
       findings: placed.flatMap(({ finding }, index) => {

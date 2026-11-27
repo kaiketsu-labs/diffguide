@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
 import { createReviewBridge } from '../src/agents/claude/bridge.js';
+import { readSessionModel } from '../src/agents/claude/sessionModels.js';
 import { pullRequestAnchor } from '../src/core/anchors.js';
 import { parseThread, readBatch, record } from '../src/core/connection.js';
 import type { CodeAnchor, ReviewBridge, ReviewStore } from '../src/core/contracts.js';
@@ -356,4 +357,20 @@ test('remembers the conversation whose feedback receiver reached the bridge, not
   assert.equal(bridge.state.sessionId, session);
   await (await fetch(`${bridge.descriptor.url}/pending`, { headers: { ...headers, 'X-DiffGuide-Client': 'tools' } })).json();
   assert.equal(bridge.state.sessionId, session);
+});
+
+test('a reply names the model its session reported, and a body cannot claim one', async (t) => {
+  const { bridge, store, headers } = await fixture(t);
+  const session = '55555555-5555-4555-8555-555555555555';
+  readSessionModel({ type: 'system', subtype: 'init', session_id: session, model: 'claude-opus-5-5' });
+  const first = await store.submit(anchor(), 'Why?', 'ask');
+  const answered = await fetch(`${bridge.descriptor.url}/update`, { method: 'POST', headers: { ...headers, 'X-DiffGuide-Session': session }, body: JSON.stringify({ eventId: first.latestEventId, status: 'answered', text: 'Because.' }) });
+  assert.equal(answered.status, 200);
+  assert.equal(store.threads[0]?.messages.at(-1)?.model, 'claude-opus-5-5');
+  const second = await store.submit(anchor(), 'And this?', 'ask', first.id);
+  const claimed = await fetch(`${bridge.descriptor.url}/update`, { method: 'POST', headers, body: JSON.stringify({ eventId: second.latestEventId, status: 'answered', text: 'Sure.', model: 'made-up' }) });
+  assert.equal(claimed.status, 400);
+  const unknown = await fetch(`${bridge.descriptor.url}/update`, { method: 'POST', headers, body: JSON.stringify({ eventId: second.latestEventId, status: 'answered', text: 'Sure.' }) });
+  assert.equal(unknown.status, 200);
+  assert.equal(store.threads[0]?.messages.at(-1)?.model, undefined);
 });

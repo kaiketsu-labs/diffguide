@@ -10,6 +10,7 @@ import type { PullRequestRole } from '../../core/git/worktrees.js';
 import { readPrivateJson, writePrivateJson } from '../../core/privateFiles.js';
 import { quotePosix, stopProcess } from '../../core/shell.js';
 import { buildReviewBatchPrompt } from './eventPrompt.js';
+import { readSessionModel } from './sessionModels.js';
 
 /** How to start Claude for one PR worktree. */
 export interface ClaudeRunnerOptions {
@@ -292,6 +293,7 @@ export class ClaudeRunner implements AgentRunner {
     lines.on('line', (line) => {
       const message = parseLine(line);
       if (message === undefined) return;
+      readSessionModel(message);
       if (steps.read(message)) this.#set({ ...this.#activity, progress: { steps: steps.steps, startedAt } });
       tokens = contextTokens(message) ?? tokens;
       if (message.type === 'assistant') {

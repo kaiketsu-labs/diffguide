@@ -4,6 +4,7 @@ import type { BridgeState, CodeAnchor, ConnectionDescriptor, Disposable, LinkedR
 import { maximumConversationMessages, maximumConversationTextLength, maximumIdentifierLength, maximumPathLength, maximumReviewTextLength } from '../../core/limits.js';
 import { isSessionId, readSessionBinding } from '../../core/sessionBinding.js';
 import { parseAgentUpdate, ReviewStoreError } from '../../core/store.js';
+import { sessionModel } from './sessionModels.js';
 
 const maximumBodyBytes = 256 * 1024;
 const pollDurationMs = 20_000;
@@ -203,7 +204,8 @@ class DiffGuideBridge implements ReviewBridge {
           return;
         }
       }
-      const thread = await this.#store.updateFromAgent(parseAgentUpdate(parsed));
+      const model = sessionModel(request.headers['x-diffguide-session']);
+      const thread = await this.#store.updateFromAgent({ ...parseAgentUpdate(parsed), ...model === undefined ? {} : { model } });
       respond(response, 200, { thread: projectThread(thread) });
       return;
     }

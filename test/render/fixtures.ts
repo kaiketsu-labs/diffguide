@@ -22,6 +22,8 @@ export interface Step {
   readonly send?: ExtensionMessage;
   /** A selector whose text to select, as a drag over it would. */
   readonly select?: string;
+  /** Two selectors: press the mouse in the first's text, drag to the second's and let go. */
+  readonly drag?: readonly [string, string];
   readonly click?: string;
   /** A selector and the text to type into it, replacing what it holds. */
   readonly fill?: readonly [string, string];
@@ -95,7 +97,7 @@ const thread = (id: string, path: string, line: number, title: string, minutes: 
   path, side: 'new', startLine: line, endLine: line, resolved, title,
   messages: [
     { author: 'human', html: '<p>Is this null check needed here?</p>', createdAt: ago(minutes + 2), intent: 'ask' },
-    { author: 'claude', html: '<p>Yes. <code>parse</code> returns <code>undefined</code> for empty input, so the caller would throw.</p>', createdAt: ago(minutes) },
+    { author: 'claude', html: '<p>Yes. <code>parse</code> returns <code>undefined</code> for empty input, so the caller would throw.</p>', createdAt: ago(minutes), model: 'claude-opus-5-5' },
   ],
   ...resolved ? {} : { newAnswer: ago(minutes) },
 });
@@ -406,6 +408,15 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { press: 'Alt+R', expect: '#find-regex[aria-pressed=true]' }, { expect: '#find-count', text: ' of ', shot: 'find-options.png' },
     { fill: ['#find-input', 'compute('], wait: 400, expect: '#find-box.missing #find-count', text: 'Invalid pattern' },
   ], { saved: { view: 'code' } }),
+  // Selected code offers Comment, which opens the form on exactly the selected lines.
+  'selection-comment': scene(pullRequest, [
+    { drag: ['.file[data-path="src/auth/user.ts"] td.code[data-line="2"]', '.file[data-path="src/auth/user.ts"] td.code[data-line="4"]'], expect: '#selection-comment:visible', shot: 'selection-comment.png' },
+    { click: '#selection-comment', absent: '#selection-comment:visible' }, { expect: '.file[data-path="src/auth/user.ts"] .thread.draft', text: 'Lines 2–4' },
+    { expect: '.file[data-path="src/auth/user.ts"] td.code.sel[data-line="2"]' }, { expect: '.file[data-path="src/auth/user.ts"] td.code.sel[data-line="4"]' }, { absent: '.file[data-path="src/auth/user.ts"] td.code.sel[data-line="5"]' },
+    // A selection across a removed and an added line spans both sides, so it offers nothing.
+    { click: '.file[data-path="src/auth/user.ts"] .thread.draft button:has-text("Cancel")' },
+    { drag: ['.file[data-path="src/auth/user.ts"] tr.del td.code', '.file[data-path="src/auth/user.ts"] td.code[data-line="5"]'], absent: '#selection-comment:visible' },
+  ], { saved: { view: 'code' } }),
   'find-typing': scene(pullRequest, [
     { press: 'ControlOrMeta+F' },
     { fill: ['#find-input', 'comp'], wait: 400, expect: '#find-count', text: ' of ' },
@@ -638,6 +649,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   ], { saved: { view: 'code' } }),
   get since() { return reviewingScenes['since']!; },
   get drafting() { return reviewingScenes['drafting']!; },
+  get 'message-model'() { return reviewingScenes['message-model']!; },
   get submitted() { return reviewingScenes['submitted']!; },
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
@@ -727,6 +739,12 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { send: { state: { ...reviewing, threads: reviewing.threads.map((each) => each.origin === 'review' ? { ...each, resolved: true } : each) } }, expect: '.review-recheck', text: 'All findings resolved' },
     { click: '.review-recheck button:has-text("Re-check findings")', shot: 'review-recheck.png' },
   ] },
+  // Hovering Claude's Diff pair names the model that wrote the message, in a tip that stays on screen.
+  'message-model': scene(pullRequest, [
+    { hover: '.file[data-path="src/auth/user.ts"] .msg .orb-avatar', wait: 600, shot: 'message-model.png' },
+    { css: ['.file[data-path="src/auth/user.ts"] .msg .orb-avatar', '::after', 'content', '"Claude · claude-opus-5-5"'] },
+    { css: ['.file[data-path="src/auth/user.ts"] .msg .orb-avatar', '::after', 'left', '0px'] },
+  ], { saved: { view: 'code' } }),
   // Draft reply shows Claude at work under the form, with Stop, until the draft or an error arrives.
   drafting: scene(submitted, [
     { click: '.file[data-path="src/auth/user.ts"] button:has-text("Draft reply")', expect: '.claude-live.drafting .step-call', text: 'Drafting' },

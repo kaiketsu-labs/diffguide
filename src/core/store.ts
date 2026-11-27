@@ -150,7 +150,9 @@ class FileReviewStore implements ReviewStore {
 
   /** Acknowledge delivery while preserving historical replies without changing current work. */
   updateFromAgent(update: AgentUpdate): Promise<ReviewThread> {
-    const captured = parseAgentUpdate(update);
+    const { model, ...body } = update;
+    const captured = parseAgentUpdate(body);
+    const capturedModel = model === undefined ? undefined : readModel(model);
     return this.#mutate((snapshot) => {
       const event = snapshot.events.find((candidate) => candidate.id === captured.eventId);
       if (event === undefined) {
@@ -180,6 +182,7 @@ class FileReviewStore implements ReviewStore {
           id: randomUUID(), author: 'claude' as const, text: captured.text,
           createdAt: new Date().toISOString(), eventId: event.id,
           ...(captured.githubReply === undefined ? {} : { githubReply: captured.githubReply }),
+          ...(capturedModel === undefined ? {} : { model: capturedModel }),
         }]
         : thread.messages;
       const status = current && statusRank[captured.status] > statusRank[thread.status]
@@ -270,13 +273,14 @@ class FileReviewStore implements ReviewStore {
   }
 
   /** Open each code review finding as a thread that starts with Claude's message, after dropping earlier findings nobody touched. */
-  replaceReviewFindings(findings: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly title: string; readonly finding: Finding }[]): Promise<readonly string[]> {
-    return this.#replaceClaudeThreads('review', findings.map(({ title, finding, ...rest }) => ({ ...rest, extra: { title: readTitle(title), finding: readFinding(finding) } })));
+  replaceReviewFindings(findings: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly title: string; readonly finding: Finding }[], model?: string): Promise<readonly string[]> {
+    return this.#replaceClaudeThreads('review', findings.map(({ title, finding, ...rest }) => ({ ...rest, extra: { title: readTitle(title), finding: readFinding(finding) } })), model === undefined ? undefined : readModel(model));
   }
 
   #replaceClaudeThreads(
     origin: 'analysis' | 'review',
     notes: readonly { readonly anchor: CodeAnchor; readonly text: string; readonly extra?: Pick<ReviewThread, 'title' | 'finding'> }[],
+    model?: string,
   ): Promise<readonly string[]> {
     const captured = notes.map(({ anchor, text, extra }) => {
       const capturedAnchor = readAnchor(anchor);
@@ -300,7 +304,7 @@ class FileReviewStore implements ReviewStore {
         const event: ReviewEvent = { id: randomUUID(), sequence, threadId, intent: 'ask', text, anchor, createdAt, acknowledged: true };
         const thread: ReviewThread = {
           id: threadId, anchor, intent: 'ask', status: 'answered', resolved: false, outdated: false, latestEventId: event.id, origin,
-          messages: [{ id: randomUUID(), eventId: event.id, author: 'claude', text, createdAt }], ...extra,
+          messages: [{ id: randomUUID(), eventId: event.id, author: 'claude', text, createdAt, ...model === undefined ? {} : { model } }], ...extra,
         };
         return { event, thread };
       });
@@ -499,7 +503,7 @@ function readEvent(value: unknown): ReviewEvent {
 /** Validate a stored human or Claude message. */
 function readMessage(value: unknown): ReviewMessage {
   const record = readObject(value, 'message');
-  checkKeys(record, ['id', 'author', 'text', 'createdAt', 'eventId', 'githubReply']);
+  checkKeys(record, ['id', 'author', 'text', 'createdAt', 'eventId', 'githubReply', 'model']);
   if (record['author'] !== 'human' && record['author'] !== 'claude') {
     throw new ReviewStoreError('Invalid message author.');
   }
@@ -511,7 +515,15 @@ function readMessage(value: unknown): ReviewMessage {
     ...message,
     ...(record['eventId'] === undefined ? {} : { eventId: readId(record['eventId']) }),
     ...(record['githubReply'] === undefined ? {} : { githubReply: readNonemptyText(record['githubReply'], 'githubReply') }),
+    ...(record['model'] === undefined ? {} : { model: readModel(record['model']) }),
   };
+}
+
+/** A model name as Claude Code reports it, such as `claude-opus-5-5`. */
+function readModel(value: unknown): string {
+  const model = readNonemptyText(value, 'model');
+  if (model.length > 100) throw new ReviewStoreError('Model name is too long.');
+  return model;
 }
 
 /** Copy and validate line coordinates and workspace-relative code context. */

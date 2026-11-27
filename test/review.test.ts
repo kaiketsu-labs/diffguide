@@ -247,6 +247,13 @@ test('tracks the orchestrator and one lane per review agent through each stage',
   assert.equal(tracker.live.endedAt, 9000);
 });
 
+test('the tracker keeps the model the review run reports, for its findings', () => {
+  const tracker = new ReviewTracker('/repo', ['correctness'], new Map(), 0, () => 0);
+  assert.equal(tracker.model, undefined);
+  tracker.read({ type: 'system', subtype: 'init', session_id: 's', model: 'claude-opus-5-5' });
+  assert.equal(tracker.model, 'claude-opus-5-5');
+});
+
 test('reads an agent\'s candidates from its tool result when it made no handback call', () => {
   const tracker = new ReviewTracker('/repo', ['correctness'], new Map(), 0, () => 0);
   tracker.read({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'a1', name: 'Agent', input: { subagent_type: 'correctness-reviewer', prompt: 'Brief.' } }] } });
