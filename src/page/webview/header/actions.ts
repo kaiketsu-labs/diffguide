@@ -56,7 +56,18 @@ export function renderPush(): void {
   push.hidden = !ui.pushing && (unpushed === 0 || received.current?.details?.canEdit !== true);
   push.disabled = ui.pushing;
   push.classList.toggle('busy', ui.pushing);
-  push.replaceChildren(icon(ui.pushing ? icons.sync : icons.push), ui.pushing ? 'Pushing…' : 'Push ' + unpushed);
+  push.replaceChildren(icon(ui.pushing ? icons.sync : icons.push), el('span', 'push-label', ui.pushing ? 'Pushing…' : 'Push'), ui.pushing ? '' : String(unpushed));
+  push.setAttribute('aria-label', ui.pushing ? 'Pushing' : `Push ${unpushed} unpushed commits`);
+  fitPush();
+}
+
+/** Drop Push's label when the toolbar runs out of room, before Claude's chip shrinks under Finish review. */
+export function fitPush(): void {
+  const push = $('push');
+  const toolbar = push.parentElement as HTMLElement;
+  push.classList.remove('icon-only');
+  // The toolbar is end-aligned, so it overflows to the left, which scrollWidth does not count.
+  if (!push.hidden && push.getBoundingClientRect().left < toolbar.getBoundingClientRect().left) push.classList.add('icon-only');
 }
 
 export function pushCommits(): void {
