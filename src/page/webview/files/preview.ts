@@ -38,6 +38,16 @@ export function previewOnly(file: FileDiff): boolean {
   return previewKind(file) === 'media' && (file.binary || mediaType(file.path) === 'application/pdf');
 }
 
+/** Drop the previews of files whose content changed, or of every file, so the next draw reads them again. */
+export function forgetPreviews(paths?: readonly string[]): void {
+  if (paths === undefined) { previews.clear(); medias.clear(); pdfViews.clear(); return; }
+  for (const path of paths) {
+    previews.delete(path);
+    medias.delete(path);
+    for (const key of pdfViews.keys()) if (key.startsWith(path + '\0')) pdfViews.delete(key);
+  }
+}
+
 function loadMedia(file: FileDiff): void {
   const key = 'media:' + file.path;
   if (!medias.has(file.path) && !loading.has(key)) {

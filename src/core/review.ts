@@ -30,6 +30,11 @@ export const maximumFindings = 10;
 
 /** What Re-check findings asks in each open finding's thread. */
 export const recheckRequest = 'Re-check this finding against the current code. Is it fixed? Answer Fixed, Partly fixed or Not fixed first, then cite the lines that show it. Do not edit files.';
+
+/** Whether an answer to `recheckRequest` opens with Fixed, ignoring Markdown emphasis; Partly fixed and Not fixed do not. */
+export function saysFixed(answer: string): boolean {
+  return /^[\s*_#>`]*fixed\b/iu.test(answer);
+}
 const maximumDropped = 60;
 /** Lines a finding's anchor may span, as for guide notes. */
 const maximumFindingLines = 50;

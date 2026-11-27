@@ -7,11 +7,12 @@ import { commentAsks, renderConversation } from './conversation/timeline.js';
 import { $, el } from './dom.js';
 import { applyColors, dropColors } from './files/colors.js';
 import { openFolders } from './files/nav.js';
-import { medias, previews } from './files/preview.js';
+import { forgetPreviews, medias, previews } from './files/preview.js';
 import { isLarge, renderFiles } from './files/render.js';
 import { openFind } from './find.js';
 import { contextLines, jump } from './files/table.js';
 import { renderConnectMenu } from './header/connect.js';
+import { pushEnded } from './header/actions.js';
 import { closeMergeForm } from './header/merge.js';
 import { closeTitleForm, renderLinked } from './header/pullRequest.js';
 import { renderBaseMenu, renderReviewers } from './header/reviewers.js';
@@ -63,6 +64,10 @@ export function onExtensionMessage(data: ExtensionMessage): void {
     dropColors();
     setStale(false);
     const changed = changedFiles(data.files, shownAs);
+    const before = new Map(received.files?.map((file) => [file.path, JSON.stringify(file)]));
+    const edited = data.files.filter((file) => before.has(file.path) && before.get(file.path) !== JSON.stringify(file)).map((file) => file.path);
+    for (const path of edited) { loading.delete('preview:' + path); loading.delete('media:' + path); }
+    forgetPreviews(edited);
     received.files = data.files;
     for (const file of received.files) if (!collapsed.has(file.path) && (file.generated || isLarge(file))) collapsed.set(file.path, true);
     if (changed === undefined) { received.guide = undefined; contextLines.clear(); loading.clear(); renderFiles(); }
@@ -116,6 +121,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.notice) showNotice(data.notice);
   if (data.error) {
     loading.clear();
+    pushEnded(false);
     $('error').textContent = data.error;
     if (data.form && sending.delete(data.form)) { renderFiles(); if (received.current) renderConversation(received.current, true); }
   }
@@ -137,6 +143,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   }
   if (data.done === 'review') { $<HTMLTextAreaElement>('review').value = ''; closeReviewForm(); }
   if (data.done === 'merge') closeMergeForm();
+  if (data.done === 'push') pushEnded(true);
   if (data.done === 'title') closeTitleForm();
   if (data.done === 'dismiss') { ui.dismissing = undefined; if (received.current) renderReviewers(received.current, true); }
   if (data.done === 'suggestions') { batch.clear(); renderBatch(); }

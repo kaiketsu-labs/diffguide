@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { ReviewTracker } from '../src/agents/claude/reviewRunner.js';
 import type { CodeAnchor, Finding } from '../src/core/contracts.js';
-import { clearReview, findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt } from '../src/core/review.js';
+import { clearReview, findingText, handbackItems, maximumFindings, parseReviewOutput, readStoredReview, reviewAgents, reviewPrompt, saysFixed } from '../src/core/review.js';
 import { createReviewStore } from '../src/core/store.js';
 import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 
@@ -268,4 +268,9 @@ test('clearing a review forgets its result and archives only the findings nobody
   const running = { activity: { running: true }, clear: async () => { cleared += 1; } } as unknown as Parameters<typeof clearReview>[1];
   await assert.rejects(clearReview(store, running), /still running/u);
   assert.equal(cleared, 1);
+});
+
+test('a re-check answer counts as fixed only when it opens with Fixed', () => {
+  for (const answer of ['Fixed. Line 4 checks it.', '**Fixed**: see line 4', '> fixed']) assert.equal(saysFixed(answer), true, answer);
+  for (const answer of ['Partly fixed.', 'Not fixed.', 'Fixedness aside, no.', 'It is fixed.']) assert.equal(saysFixed(answer), false, answer);
 });

@@ -78,14 +78,15 @@ function renderReviewCard(): void {
   const usage = result.usage === undefined ? undefined : usageChip(result.usage);
   box.querySelector('summary')?.append(...timeLabel(result.createdAt), ...usage ? [usage.chip] : [], clearButton());
   if (usage) box.append(usage.popover);
-  const openFindings = localThreads().filter((thread) => thread.source === 'local' && thread.origin === 'review' && !thread.resolved && thread.archived !== true);
-  if (openFindings.length > 0) {
+  const findings = localThreads().filter((thread) => thread.source === 'local' && thread.origin === 'review' && thread.archived !== true);
+  if (findings.length > 0) {
+    const open = findings.filter((thread) => !thread.resolved).length;
     const recheck = agentButton('ask', 'Re-check findings', () => post({ action: 'review-recheck' }), false);
     recheck.classList.add('small');
-    recheck.disabled = openFindings.some((thread) => thread.source === 'local' && thread.working !== undefined);
-    recheck.title = 'Agent checks each open finding against the current code and answers in its thread, without editing. You resolve the fixed ones';
+    recheck.disabled = findings.some((thread) => thread.source === 'local' && thread.working !== undefined);
+    recheck.title = 'Agent checks each finding against the current code and answers in its thread, without editing. A resolved finding stays resolved only if the agent finds it fixed';
     const row = el('div', 'row review-recheck');
-    row.append(el('span', 'gap muted', openFindings.length === 1 ? '1 open finding' : openFindings.length + ' open findings'), recheck);
+    row.append(el('span', 'gap muted', open === 0 ? 'All findings resolved' : open === 1 ? '1 open finding' : open + ' open findings'), recheck);
     box.append(row);
   }
   const ran = el('div', 'review-ran muted', result.ran.length === 0 ? 'No reviewer ran.' : 'Ran ' + result.ran.map((name) => reviewerInfo[name].label).join(', '));

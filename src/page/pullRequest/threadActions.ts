@@ -2,13 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileAnchor, pullRequestAnchor } from '../../core/anchors.js';
 import { githubFeedbackRequest } from '../../core/pullRequestComments.js';
+import { recheckRequest } from '../../core/review.js';
 import type { OverviewActions } from '../protocol.js';
 import type { PageParts } from './context.js';
 
 /** What an Implement without a note asks Claude in a thread that already has a conversation. */
 export const implementThreadRequest = 'Implement what this thread discussed.';
 
-export type ThreadActions = Pick<OverviewActions, 'comment' | 'commentOnFile' | 'reply' | 'resolve' | 'archive' | 'withdraw' | 'publish' | 'postToGitHub'
+export type ThreadActions = Pick<OverviewActions, 'comment' | 'commentOnFile' | 'reply' | 'recheck' | 'resolve' | 'archive' | 'withdraw' | 'publish' | 'postToGitHub'
   | 'askAboutGitHub' | 'askAboutComment' | 'seeAnswers' | 'revealThread'>;
 
 /** The page's actions on Local threads: comments to Claude, and questions about GitHub's comments. */
@@ -31,6 +32,11 @@ export function threadActions({ page, remote, diff, findThread }: PageParts): Th
       if (thread.resolved) throw new Error('Reopen this thread before replying.');
       if (thread.archived) throw new Error('Unarchive this thread before replying.');
       await store.submit(thread.anchor, text || implementThreadRequest, intent, id);
+    },
+    recheck: async (id) => {
+      const thread = findThread(id);
+      if (thread.origin !== 'review' || thread.archived) throw new Error('Only open or resolved code review findings can be re-checked.');
+      await store.submit(thread.anchor, recheckRequest, 'ask', thread.id, true);
     },
     resolve: (id, resolved) => store.resolve(findThread(id).id, resolved),
     archive: (id, archived) => store.archive(findThread(id).id, archived),

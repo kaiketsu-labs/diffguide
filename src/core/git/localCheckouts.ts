@@ -15,6 +15,13 @@ export interface LocalCheckout {
   readonly kind: 'folder' | 'worktree' | 'pr';
   /** The PR a `pr` checkout holds. */
   readonly pullRequest?: PullRequestWorktree;
+  /** A workspace folder outside Git: its page shows the folder's files whole, without a diff. */
+  readonly plain?: true;
+}
+
+/** A workspace folder outside Git as a checkout of its own. */
+export function plainFolder(root: string): LocalCheckout {
+  return { root, name: basename(root), repository: root, branch: '', kind: 'folder', plain: true };
 }
 
 interface ListedWorktree { readonly path: string; readonly branch: string }
@@ -68,7 +75,7 @@ export async function listLocalCheckouts(repositories: readonly string[]): Promi
 /** How a checkout's row under its repository names it: the branch, or the PR's number and title. */
 export function checkoutLabel(checkout: LocalCheckout): string {
   const pr = checkout.pullRequest?.pullRequest;
-  return pr === undefined ? checkout.branch : `#${pr.number} ${pr.title}`;
+  return pr !== undefined ? `#${pr.number} ${pr.title}` : checkout.plain ? checkout.name : checkout.branch;
 }
 
 /** Whether a checkout's repository, branch, or PR number or title contains `filter`, ignoring case. */

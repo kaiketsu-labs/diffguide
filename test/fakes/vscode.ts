@@ -1,3 +1,5 @@
+import { readdir } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import type * as vscode from 'vscode';
 
@@ -480,6 +482,12 @@ export const workspace = {
     const watcher = new FakeFileSystemWatcher(pattern);
     workspace.watchers.push(watcher);
     return watcher;
+  },
+  /** Every file under the pattern's folder, without `node_modules`; the glob and exclude are not matched. */
+  async findFiles(include: RelativePattern, _exclude?: string, maxResults?: number): Promise<Uri[]> {
+    const entries = await readdir(include.base, { recursive: true, withFileTypes: true });
+    const files = entries.filter((entry) => entry.isFile() && !join(entry.parentPath, entry.name).split(sep).includes('node_modules'));
+    return files.slice(0, maxResults).map((entry) => Uri.file(join(entry.parentPath, entry.name)));
   },
   fs: {
     /** Treat loaded source documents as existing local files in native controller tests. */

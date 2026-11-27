@@ -250,6 +250,8 @@ export interface OverviewActions {
   /** Reply in a local thread; `intent` decides whether Claude answers or changes the code. An empty `text` asks Claude to implement what the thread discussed. */
   reply(threadId: string, text: string, intent: CommentIntent): Promise<void>;
   resolve(threadId: string, resolved: boolean): Promise<void>;
+  /** Ask Claude whether a code review finding is fixed; a resolved one reopens and resolves again when Claude answers Fixed. */
+  recheck(threadId: string): Promise<void>;
   /** Hide a local thread from the page, or show it again; it keeps its conversation. */
   archive(threadId: string, archived: boolean): Promise<void>;
   /** Stop Claude's work on a thread's latest comment and take the comment back, so the page can put it back in a box to edit; an Implement without a note comes back empty. */

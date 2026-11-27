@@ -1,5 +1,5 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { readConversationContext } from '../../agents/claude/claudeSessions.js';
 import { CodeReview, readPicks, reviewView, savePicks } from '../../agents/claude/reviewRunner.js';
@@ -11,7 +11,7 @@ import { resolveExecutable } from '../../core/executables.js';
 import type { ChangeRequestSummary } from '../../core/forge.js';
 import { getHeadRevision, isWorkspaceRelativePath, readGitBase } from '../../core/git/git.js';
 import { git } from '../../core/git/worktrees.js';
-import { clearReview } from '../../core/review.js';
+import { clearReview, recheckRequest } from '../../core/review.js';
 import { markRangeRead, readReadRanges, readReviewedFiles, setFileReviewed, unmarkRangesRead } from '../../core/reviewedFiles.js';
 import { applySuggestion, parseSuggestions } from '../../core/suggestions.js';
 import { type ColorFiles, colorInBatches, type FileDiff, highlightSource, knownColors, readPullRequestDiffPlainFirst, type Uncolored, wholeFileCode, wholeFileDiff } from '../../core/unifiedDiff.js';
@@ -33,6 +33,10 @@ const extrasKey = 'diffGuide.localReview.files';
 const pullRequestLookupMs = 60_000;
 /** Larger files show as binary instead of being highlighted whole. */
 const maxWholeFileBytes = 1024 * 1024;
+/** A folder outside Git shows at most this many of its files at first; Show on review page adds others. */
+const maxFolderFiles = 200;
+/** How many of a folder's files the page knows by name, for file icons and links. */
+const maxFolderListing = 10_000;
 
 /** Repository-relative paths Git reports with `-z`, keeping only safe ones. */
 export async function gitPaths(root: string, args: readonly string[]): Promise<readonly string[]> {
@@ -107,6 +111,8 @@ export class LocalReview implements vscode.Disposable {
   /** Suggestion options written to files while the page is open, by thread, and the content before, so Discard can put it back. */
   readonly #applied = new Map<string, { readonly message: number; readonly option: number; readonly path: string; readonly before: string; readonly after: string }>();
   readonly #codeReview: AgentCodeReview;
+  /** Whether the folder is outside Git, so its page shows its files whole instead of a diff. */
+  readonly #plain: Promise<boolean>;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -122,6 +128,7 @@ export class LocalReview implements vscode.Disposable {
     private readonly pageKey: string = mainPageKey,
   ) {
     this.#definitions = new DefinitionPeeks(root);
+    this.#plain = git(root, ['rev-parse', '--is-inside-work-tree']).then(() => false, () => true);
     const output = vscode.window.createOutputChannel(`Claude · Review ${basename(root)}`);
     const configuration = vscode.workspace.getConfiguration('diffGuide');
     this.#codeReview = new CodeReview({
@@ -223,18 +230,29 @@ export class LocalReview implements vscode.Disposable {
     return await getHeadRevision(this.root) ?? 'unborn';
   }
 
-  /** Changed files against HEAD, untracked files as added, then kept files and files with open threads shown whole. */
+  /** The folder's files by name, for a folder outside Git, without `node_modules`. */
+  async #folderFiles(): Promise<readonly string[]> {
+    const found = await vscode.workspace.findFiles(new vscode.RelativePattern(this.root, '**/*'), '**/node_modules/**', maxFolderListing);
+    return found.map((uri) => relative(this.root, uri.fsPath).split(sep).join('/')).filter(isWorkspaceRelativePath).sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Changed files against HEAD, untracked files as added, then kept files and files with open threads shown whole.
+   * A folder outside Git has no changes, so its first files show whole instead.
+   */
   async readFiles(select?: DiffSelection): Promise<FilesView> {
     const whitespace = select?.whitespace ?? this.#selection.whitespace;
-    const head = await getHeadRevision(this.root);
+    const plain = await this.#plain;
+    const head = plain ? undefined : await getHeadRevision(this.root);
     const [{ files: tracked, colored: trackedColored }, untracked, repositoryFiles] = await Promise.all([
       head === undefined ? { files: [] as FileDiff[], colored: undefined } : readPullRequestDiffPlainFirst(this.root, head, { ignoreWhitespace: whitespace }),
-      head === undefined ? listRepositoryFiles(this.root) : gitPaths(this.root, ['ls-files', '--others', '--exclude-standard']),
-      listRepositoryFiles(this.root).catch(() => []),
+      plain ? [] : head === undefined ? listRepositoryFiles(this.root) : gitPaths(this.root, ['ls-files', '--others', '--exclude-standard']),
+      plain ? this.#folderFiles() : listRepositoryFiles(this.root).catch(() => []),
     ]);
     const changed = new Set([...tracked.map((file) => file.path), ...untracked]);
     const threadPaths = this.store.threads.filter((thread) => !thread.resolved && thread.anchor.scope !== 'pullRequest').map((thread) => thread.anchor.path);
-    const extras = [...new Set([...this.#extras(), ...threadPaths])].filter((path) => !changed.has(path));
+    const folderFiles = plain ? repositoryFiles.slice(0, maxFolderFiles) : [];
+    const extras = [...new Set([...folderFiles, ...this.#extras(), ...threadPaths])].filter((path) => !changed.has(path));
     const preparing = prepareHighlighting([...untracked, ...extras]);
     const whole = (await Promise.all([
       ...untracked.map((path) => wholeFilePlainFirst(this.root, path, 'added')),
@@ -257,6 +275,7 @@ export class LocalReview implements vscode.Disposable {
   }
 
   async #read(): Promise<OverviewState> {
+    const plain = await this.#plain;
     const base = await this.#base();
     const paths = this.#shown.map((file) => file.path);
     const [viewed, read, current] = await Promise.all([
@@ -270,10 +289,10 @@ export class LocalReview implements vscode.Disposable {
     return {
       localMode: true,
       ...pullRequest === undefined ? {} : { branchPullRequest: { number: pullRequest.number, title: pullRequest.title } },
-      title: `Local · ${basename(this.root)} @ ${branch}`,
+      title: plain ? `Local · ${basename(this.root)}` : `Local · ${basename(this.root)} @ ${branch}`,
       heading: basename(this.root),
       author: '',
-      headBranch: branch,
+      headBranch: plain ? '' : branch,
       baseBranch: 'HEAD',
       url: '',
       viewed: [...viewed],
@@ -281,7 +300,8 @@ export class LocalReview implements vscode.Disposable {
       reviewed: { done: viewed.size, total: paths.length },
       claude: await connectedClaudeStatus(this.bridge, this.store.pendingEvents.length, this.launcher.hasTerminal),
       analysis: { running: false, stale: false },
-      review: await reviewView(this.#codeReview, readPicks(this.context.globalState, this.root)),
+      // Claude's code review reads a diff, which a folder outside Git does not have.
+      ...plain ? {} : { review: await reviewView(this.#codeReview, readPicks(this.context.globalState, this.root)) },
       threads: this.store.threads.map((thread) => {
         const view = threadView(thread, { intents });
         const applied = this.#applied.get(thread.id);
@@ -350,6 +370,11 @@ export class LocalReview implements vscode.Disposable {
         if (thread.resolved) throw new Error('Reopen this thread before replying.');
         if (thread.archived) throw new Error('Unarchive this thread before replying.');
         await this.store.submit(thread.anchor, text || implementThreadRequest, intent, id);
+      },
+      recheck: async (id) => {
+        const thread = this.#findThread(id);
+        if (thread.origin !== 'review' || thread.archived) throw new Error('Only open or resolved code review findings can be re-checked.');
+        await this.store.submit(thread.anchor, recheckRequest, 'ask', thread.id, true);
       },
       resolve: (id, resolved) => this.store.resolve(this.#findThread(id).id, resolved),
       archive: (id, archived) => this.store.archive(this.#findThread(id).id, archived),

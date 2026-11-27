@@ -7,8 +7,8 @@ DiffGuide is a preview on the [VS Code Marketplace](https://marketplace.visualst
 | Requirement | Current support |
 | --- | --- |
 | VS Code | 1.100 or newer, trusted local workspace |
-| Node.js | 22 or newer, available to Claude and its hooks |
-| Git | Available on your computer |
+| Node.js | 20 or newer, available to Claude and its hooks |
+| Git | Available on your computer. PR sync requires Git 2.40 or newer. |
 | Claude Code | Installed, authenticated, with `asyncRewake` support |
 | Operating system | macOS primary; Linux unverified; automatic connection blocked on Windows |
 
@@ -23,9 +23,9 @@ VS Code also supports `code --install-extension /path/to/diffguide-VERSION.vsix`
 
 Click **Connect Claude** on the local review page, or run **DiffGuide: Connect Claude** from the Command Palette. **Resume a conversation…** shows this project's recent conversations with names, branches and a **Running** indicator. Search by name or branch; **All conversations…** opens Claude's own picker. **New conversation** starts a fresh conversation. The launcher never silently chooses the latest session.
 
-For a conversation already running in the project, choose **Connect running Claude** on the page, or **Connect running Claude** in the Command Palette. With Claude Code **2.1.280+**, DiffGuide installs a local plugin using Claude's plugin manager. In the intended conversation, run the two commands the page menu (or, from the Command Palette, a small setup view) shows: `/reload-plugins --force`, then `/diffguide:connect`. Copy buttons avoid typing. The original process and conversation remain active; the reload rereads conversation context once. Wait for **Feedback on**. This flow works independently of the terminal's location; the authenticated walkthrough currently covers the integrated terminal.
+For a conversation already running in the project, choose **Connect running Claude** on the page, or **Connect running Claude** in the Command Palette. With Claude Code **2.1.280+**, DiffGuide installs a local plugin using Claude's plugin manager. In the intended conversation, run the two commands the page menu (or, from the Command Palette, a small setup view) shows: `/reload-plugins --force`, then `/diffguide:connect`. Copy buttons avoid typing. The original process and conversation remain active; the reload rereads conversation context once. Wait for **Feedback on**. You can run the commands in VS Code or a separate local terminal.
 
-The previous/new choices start Claude in an integrated terminal with the review connection attached. Complete normal Claude trust or tool-permission prompts. An arbitrary terminal is never attached just because it happens to be open. Running conversations must be in this project's root directory and explicitly connected; a ticket expires after 15 minutes, after which the setup action can be run again.
+**New conversation** and **Resume a conversation** from the review page start Claude in a VS Code terminal in the background. Choose **Show terminal** to open it. Complete normal Claude trust or tool-permission prompts. An arbitrary terminal is never attached just because it happens to be open. Running conversations must be in this project's root directory and explicitly connected; a ticket expires after 15 minutes, after which the setup action can be run again.
 
 After an update, reload the VS Code window and reconnect Claude once so it loads the new helpers. A normal window reload recognizes this project's existing **Claude · DiffGuide** terminal. **Show terminal** reopens it. **Switch conversation** (or **Restart connection** when delivery is inactive) explicitly replaces that managed terminal after you choose existing/new; cancelling or failing setup keeps it intact. External terminals are never closed by this action. If another receiver is active without a managed terminal, the launcher asks you to exit it first; readiness expires within 45 seconds.
 

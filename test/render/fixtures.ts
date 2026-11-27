@@ -272,24 +272,29 @@ const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) =
 export const scenes: Readonly<Record<string, Scene>> = {
   'header-actions': scene(pullRequest, [
     { expect: '.head #reviewed', text: '1/4 viewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
-    { absent: '#files-bar #push' }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
+    { expect: '#files-bar #push:visible', text: 'Push 1' }, { next: ['#claude-anchor', '#push', 12] }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
     { click: '#page-menu-button', expect: '#page-menu #pr', text: 'Open on GitHub' },
     { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { shot: 'header-menu.png' },
     { click: '#remove-worktree', expect: '.ask-menu .ask-text', text: '1 commit GitHub does not have', shot: 'header-remove.png' },
     { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' },
     { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus', shot: 'header-link.png' },
     { click: '#title' }, { click: '#unpushed-chip', expect: '#unpushed-menu #show-unpushed', text: 'Show changes' },
-    { expect: '#unpushed-menu #push', text: 'Push', shot: 'header-unpushed.png' },
+    { absent: '#unpushed-menu #push', shot: 'header-unpushed.png' },
     { click: '#show-unpushed', expect: '#view-code[aria-selected=true]' },
   ], { saved: { view: 'code' } }),
   'header-readonly': scene({ ...pullRequest, details: { ...pullRequest.details!, canEdit: false } }, [
-    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+    { expect: '#unpushed-chip' }, { absent: '#push:visible' },
   ], { saved: { view: 'code', order: 'guide' } }),
   'header-permission-change': scene(pullRequest, [
-    { click: '#unpushed-chip', expect: '#push' },
-    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, canEdit: false } } }, absent: '#push' },
-    { click: '#unpushed-chip', expect: '#show-unpushed' }, { absent: '#push' },
+    { expect: '#push:visible' },
+    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, canEdit: false } } }, absent: '#push:visible' },
   ], { saved: { view: 'code' } }),
+  // Push shows it is working until the extension answers, then hides until the next state recounts.
+  'header-pushing': scene(pullRequest, [
+    { click: '#push', expect: '#push.busy', text: 'Pushing…' }, { expect: '#push[disabled]', shot: 'header-pushing.png' },
+    { send: { error: 'GitHub refused the push.' }, expect: '#push:visible', text: 'Push 1' }, { absent: '#push.busy' },
+    { click: '#push', expect: '#push.busy' }, { send: { done: 'push', notice: { text: 'Pushed to GitHub.' } }, absent: '#push:visible' }, { expect: '#notice', text: 'Pushed to GitHub.' },
+  ], { saved: { view: 'overview' } }),
   'header-connection-change': scene(pullRequest, [
     { click: '#page-menu-button', expect: '#terminal' },
     { send: { state: { ...pullRequest, claude: { ...pullRequest.claude, link: { delivering: true, terminal: true } } } }, absent: '#terminal' },
@@ -474,6 +479,10 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { after: ['#find-box', '#view-code'] }, { after: ['#claude-anchor', '#find-box'] }, { after: ['#bar-review', '#claude-anchor'] }, { inside: ['#find-box', '#find-box'] }, { tallest: ['#files-bar', 60], shot: 'find-narrow.png' },
   ], { saved: { view: 'code' }, width: 600 }),
   'local-find': scene(local, [{ press: 'ControlOrMeta+F', stay: '#view-menu', expect: '#code-bar #find-box:visible #find-input:focus' }, { tallest: ['#find-box', 28], shot: 'local-find.png' }, { absent: '#files-bar #find-box' }]),
+  // A folder outside Git names no branch and offers no code review.
+  'local-plain': scene({ ...local, headBranch: '' }, [
+    { expect: '#byline', text: 'Files in this folder, outside Git' }, { absent: '#byline .branch-ref' }, { click: '#claude-chip', expect: '#claude-menu:visible' }, { absent: '#review-tools:visible', shot: 'local-plain.png' },
+  ]),
   local: scene(local, [
     { absent: '.tabs:visible' }, { absent: '#files-bar:visible' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' },
     { expect: '#panel-files:visible .file', count: 4 }, { expect: '.head #claude-chip:visible' }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },
@@ -613,6 +622,8 @@ export const scenes: Readonly<Record<string, Scene>> = {
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
   get 'review-clear'() { return reviewingScenes['review-clear']!; },
+  get 'review-recheck'() { return reviewingScenes['review-recheck']!; },
+  get previewRefresh() { return reviewingScenes['previewRefresh']!; },
 };
 
 const pendingMessage = (id: string, body: string): GitHubMessage => ({
@@ -690,6 +701,12 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { click: '#review-clear', expect: '.ask-menu' }, { click: '.ask-menu button:has-text("Clear")', absent: '.ask-menu' }, { expect: '#review-card details[open]' },
     { send: { state: { ...reviewing, review: { running: false, picked: ['correctness'] } } }, absent: '#review-card:visible' },
   ] },
+  // Re-check findings stays once every finding is resolved, to confirm they are fixed.
+  'review-recheck': { state: reviewing, messages: [{ state: reviewing }, filesMessage], saved: { view: 'files' }, width: 1100, steps: [
+    { scrollTo: '#review-card', expect: '.review-recheck', text: '1 open finding' },
+    { send: { state: { ...reviewing, threads: reviewing.threads.map((each) => each.origin === 'review' ? { ...each, resolved: true } : each) } }, expect: '.review-recheck', text: 'All findings resolved' },
+    { click: '.review-recheck button:has-text("Re-check findings")', shot: 'review-recheck.png' },
+  ] },
   submitted: { state: submitted, messages: [{ state: submitted }, filesMessage], steps: [{ scrollTo: '#conversation', shot: 'submitted.png' }], saved: { view: 'overview' } },
   // The details' count lags at 5; the page counts the 2 pending comments its list shows.
   pending: { state: pendingLag, messages: [{ state: pendingLag }, filesMessage], saved: { view: 'overview' }, steps: [
@@ -723,4 +740,10 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { expect: '#conversation .js-suggested-changes-blob .blob-code-addition', text: 'objects the caller passes', absent: '#conversation .js-suggested-changes-blob .blob-num:visible', scrollTo: '#conversation', shot: 'github-markup.png' },
   ] },
   since: { state: reviewing, messages: [{ state: reviewing }, { ...filesMessage, selection: { range: { kind: 'since' }, whitespace: false } }], steps: [{ shot: 'since.png' }], saved: { view: 'files' } },
+  // A previewed file that changes on disk reads its preview again.
+  previewRefresh: { state: pullRequest, messages: [{ state: pullRequest }, filesMessage], saved: { view: 'files', previewing: ['README.md'] }, steps: [
+    { send: { preview: { path: 'README.md', kind: 'markdown', blocks: [{ startLine: 1, endLine: 1, html: '<p>Old text</p>' }] } }, expect: '#files', text: 'Old text' },
+    { send: { ...filesMessage, files: files.map((each) => each.path === 'README.md' ? { ...each, additions: 7 } : each) }, expect: '#files', text: 'Loading preview' },
+    { send: { preview: { path: 'README.md', kind: 'markdown', blocks: [{ startLine: 1, endLine: 1, html: '<p>New text</p>' }] } }, expect: '#files', text: 'New text', shot: 'preview-refresh.png' },
+  ] },
 };

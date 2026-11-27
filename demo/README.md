@@ -1,11 +1,9 @@
-# DiffGuide product demo
+# Earlier DiffGuide product demo
 
 A reproducible **45-second, 1920 × 1080, 30 fps H.264 MP4 with a quiet original ambient soundtrack**. The video begins with Claude coding, then follows a switch to Review, the controlled composer beside the diff, immediate `/i` mode selection, automatic feedback delivery, an inline reply, human resolution, and a separate PR review preview and publish action.
 
-This is a **staged VS Code-style interface**. Coding, Claude responses, and the PR publish are simulated and labeled throughout. No authenticated Claude session or real GitHub write is recorded. Native VS Code styling may differ.
+This is a **staged VS Code-style interface**. Coding, Claude responses, and the PR publish are simulated and labeled throughout. No authenticated Claude session or real GitHub write is recorded. The current extension puts comments on the review page. See the [usage guide](../docs/USAGE.md).
 
-- Video: [`../docs/media/diffguide-demo.mp4`](../docs/media/diffguide-demo.mp4)
-- Poster: [`../docs/media/diffguide-poster.jpg`](../docs/media/diffguide-poster.jpg)
 - Visual QA: [`output/playwright/contact-sheet.jpg`](output/playwright/contact-sheet.jpg)
 - Container and decoded-audio metadata: [`output/playwright/metadata.json`](output/playwright/metadata.json)
 - Original synthesis metadata: [`output/playwright/audio-metadata.json`](output/playwright/audio-metadata.json)
@@ -50,9 +48,9 @@ On macOS, encode the video, encode the original soundtrack as AAC, mux it with t
 xcrun swiftc -parse-as-library demo/encode.swift -o demo/output/encode
 ./demo/output/encode demo/output/playwright demo/output/diffguide-silent.mp4 1350
 xcrun swiftc -parse-as-library demo/mix-audio.swift -o demo/output/mix-audio
-./demo/output/mix-audio demo/output/diffguide-silent.mp4 demo/output/ambient.wav docs/media/diffguide-demo.mp4
+./demo/output/mix-audio demo/output/diffguide-silent.mp4 demo/output/ambient.wav demo/output/diffguide-demo.mp4
 xcrun swiftc -parse-as-library demo/inspect.swift -o demo/output/inspect
-./demo/output/inspect docs/media/diffguide-demo.mp4 demo/output/playwright demo/motion.json
+./demo/output/inspect demo/output/diffguide-demo.mp4 demo/output/playwright demo/motion.json
 node demo/inspect-container.mjs
 ```
 
@@ -62,7 +60,7 @@ Alternatively, with a complete FFmpeg installation:
 ffmpeg -framerate 30 -i demo/output/playwright/frame-%04d.png \
   -i demo/output/ambient.wav -c:v libx264 -crf 18 -pix_fmt yuv420p \
   -c:a aac -b:a 128k -movflags +faststart -shortest \
-  docs/media/diffguide-demo.mp4
+  demo/output/diffguide-demo.mp4
 ```
 
 Make the `sharp` Node package available and run `node demo/contact-sheet.mjs` to regenerate the contact sheet and poster. Set `DEMO_SHARP` to its module path if needed. Encoded keyframes are preferred over preview captures. Generated full frame sequences, intermediate audio/video, browser files, and compiled native tools are ignored by Git.

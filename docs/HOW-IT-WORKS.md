@@ -4,11 +4,9 @@
 
 **Inspect changes, settle questions and improve the code together, right in VS Code.** Your agent receives sent feedback automatically and answers in the same comment thread.
 
-The images are staged examples of the UI, not a recording of a verified live session.
-
 ## Connect once
 
-Open your project in VS Code and run **DiffGuide: Connect Claude**. Start a new Claude Code conversation or resume an earlier one. The connected conversation runs in the integrated terminal. A Claude session you started separately does not connect automatically. [Installation and connection](INSTALL.md)
+Open your project in VS Code and run **DiffGuide: Connect Claude**. Start a new Claude Code conversation, resume an earlier one, or connect a running one. Choose **Show terminal** to open a conversation DiffGuide started from the review page. [Installation and connection](INSTALL.md)
 
 ## Comment on the code
 
@@ -49,16 +47,5 @@ The hook configuration starts the waiting helper on `SessionStart`, `UserPromptS
 The local handoff uses an authenticated connection on `127.0.0.1`. Claude keeps using its configured provider for the model itself. Generated integration files live in workspace storage, outside the project repository. No project files such as `.claude/settings.json` or `.mcp.json` are rewritten. [Connection check](../src/core/connection.ts) · [Local server](../src/agents/claude/bridge.ts) · [Integration files](../src/hosts/vscode/setup.ts)
 
 **Why hooks are the default:** they fit the current terminal and gateway workflow. The alternative Channels mode forwards notifications to Claude through MCP and must be chosen explicitly. It is a research preview with special sign-in and organization requirements. According to the Claude documentation, Bedrock, Vertex AI and Microsoft Foundry are not supported for it, so compatibility with an arbitrary gateway is not guaranteed. Channels stays an optional alternative. [Claude Code documentation on Channels](https://code.claude.com/docs/en/channels) · [Transport choice](../src/hosts/vscode/setup.ts) · [Channel notifications](../src/agents/claude/channel.ts)
-
-</details>
-
-<details>
-<summary>About the diagram and test status</summary>
-
-The [SVG diagram](media/diffguide-flow.svg) shows the shared review cycle with staged comments and real JavaScript snippets. Neutral light surfaces, clear type and quiet accents keep the focus on the code and the review decisions. The diagram has no external dependencies.
-
-The [PNG version](media/diffguide-flow.png) rendered from it is used in the README and the package, because VS Code's package check rejects SVG images in the README.
-
-As of version 0.4.4. The diagram explains the implemented UI and is not proof of a fully verified live session. [REVIEW.md](REVIEW.md) records the current test status.
 
 </details>

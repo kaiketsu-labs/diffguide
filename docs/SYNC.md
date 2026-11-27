@@ -28,39 +28,6 @@ git update-ref "refs/diffguide/backup/<checkout>/<time>" "$backup"
 
 `git status` shows the same state before and after.
 
-## Current behavior
-
-Every path below either loses work or stops on an error. Line numbers are at `b16ecec`.
-
-### Loses work
-
-The first two rows are fixed: both now save a backup first (`src/core/git/backups.ts`). On someone else's PR, the cleanup still removes your files from the worktree; they are only recoverable from the backup until it discards just Claude's files.
-
-| Where | What happens |
-|---|---|
-| `src/hosts/vscode/pullRequestSessions.ts:318` | On someone else's PR, after Claude's run, `discardSince` runs `reset --hard` and `clean -d --force` when the worktree was clean at the start. Edits or new files you made in the worktree during the run are deleted. |
-| `src/core/git/worktrees.ts:156` | Remove worktree runs `git worktree remove`, which refuses uncommitted changes but not unpushed commits. On the detached HEAD, those commits become unreachable. Reproduced in a temp repo: `git fsck` lists the commit as unreachable after removal. The page's confirm text does not mention commits. |
-| `src/core/git/git.ts:14` | `runGit` treats exit codes 1 and 128 as "no output". A failed read, such as a missing commit after a force push, shows an empty file instead of an error. No data is lost, but the page shows the wrong code. |
-
-### Stops on an error
-
-| Where | Situation | Message today |
-|---|---|---|
-| `conflicts.ts:25` | Local commits on top of GitHub's head | "has commits that are not on GitHub. Push or drop them first." |
-| `conflicts.ts:26` | Local commits and new GitHub commits (diverged) | "Rebase them onto the PR's latest commit or drop them first." |
-| `conflicts.ts:24`, `worktreeActions.ts:56` | Force push seen on the first poll after the page opens: `previous` is unset, so the old head is unknown and the worktree reads as diverged | Same as the row above |
-| `conflicts.ts:30` | GitHub changed files that have local edits | "Commit, push or discard them to update." |
-| `conflicts.ts:9` | Fix conflicts with uncommitted changes | "Commit or discard them first." |
-| `worktreeActions.ts:40` | `followBase` fetch fails (offline, auth) and is not caught, so the whole poll fails and the head never syncs | Nothing: `pollWhileFocused` drops the error |
-| `conflicts.ts:20` via `worktreeActions.ts:56` | PR head fetch fails (offline, auth) | Raw `git fetch failed` |
-| `suggestionActions.ts:27`, `pullRequestPageActions.ts:136` | Apply or commit a suggestion on a file with local edits | "has uncommitted changes. Commit or discard them first." |
-| `pullRequestPageActions.ts:140` | Commit suggestions while unpushed commits changed those files | "Push or rebase the unpushed commits first." |
-| `conflicts.ts:86` | Push rejected because GitHub moved meanwhile | Raw `git push failed` (the commit is taken back) |
-| `worktreeActions.ts:54` | Your own checkout is behind GitHub | "Pull them to see them here." |
-| `linkedChanges.ts:202` | Linked branch is checked out in your own checkout | "Switch that checkout to another branch" |
-| none | Claude's conflict run stops mid-merge (crash, stop): `MERGE_HEAD` stays, and the next sync fails on "resolve your current index first" | Raw Git error |
-| none | `index.lock` held by VS Code's Git extension or a terminal | Raw Git error |
-
 ## Decision table
 
 Rows are what the checkout holds. Columns are what GitHub did since the last sync. "Edits" means uncommitted or untracked files. "Local commits" means commits GitHub's head does not contain.

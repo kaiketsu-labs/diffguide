@@ -2,7 +2,7 @@
   "name": "diffguide",
   "displayName": "DiffGuide",
   "description": "Review local changes and GitHub pull requests with Claude Code on one review page, with automatic feedback delivery.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "icon": "resources/icon.png",
   "galleryBanner": {
     "color": "#101B29",
@@ -347,7 +347,7 @@
     "viewsWelcome": [
       {
         "view": "diffGuide.local",
-        "contents": "Open a Git repository to review its local changes with Claude.",
+        "contents": "Open a folder to review its local changes with Claude.",
         "when": "!diffGuide.localAvailable"
       },
       {

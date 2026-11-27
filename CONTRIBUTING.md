@@ -1,6 +1,6 @@
 # Contributing
 
-Start with an [issue](https://github.com/kaiketsu-labs/diffguide/issues/new/choose) describing the user problem and a concrete example. For UX changes, include the intended interaction and keyboard behavior. Existing review findings are tracked in [docs/REVIEW.md](docs/REVIEW.md).
+Start with an [issue](https://github.com/kaiketsu-labs/diffguide/issues/new/choose) describing the user problem and a concrete example. For UX changes, include the intended interaction and keyboard behavior.
 
 ## Local development
 
