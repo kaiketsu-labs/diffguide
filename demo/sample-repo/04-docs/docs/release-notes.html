@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>field-notes 2.4 release notes</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1f2328; }
+    h1 { border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+    .badge { display: inline-block; padding: 0 .5rem; border-radius: 1rem; background: #ddf4ff; color: #0969da; font-size: .85rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #d0d7de; padding: .4rem .6rem; text-align: left; }
+    button { padding: .4rem .9rem; border-radius: 6px; border: 1px solid #1f883d; background: #1f883d; color: #fff; }
+  </style>
+</head>
+<body>
+  <h1>field-notes <span class="badge">2.4</span></h1>
+  <p>This release adds streaming export and a one-step importer for v1 notes.</p>
+  <h2>Changes</h2>
+  <ul>
+    <li>Export notes as newline-delimited JSON with <code>store.exportTo</code>.</li>
+    <li>Imported v1 notes are tagged <code>imported</code>.</li>
+    <li>Titles that end in a space no longer show it before the ellipsis.</li>
+  </ul>
+  <h2>Compatibility</h2>
+  <table>
+    <tr><th>Runtime</th><th>Minimum version</th></tr>
+    <tr><td>Node.js</td><td>20</td></tr>
+    <tr><td>Bun</td><td>1.1</td></tr>
+  </table>
+  <p><button type="button">Read the export guide</button></p>
+</body>
+</html>
