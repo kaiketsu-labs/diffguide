@@ -12,6 +12,39 @@
 - Find in page has Match case, Match whole word and Use regular expression toggles, also on Alt+C, Alt+W and Alt+R. On large diffs the find bar opens at once and searches about twice as fast.
 - HTML previews sit on a white page like a browser's, show images stored in the repository, and drop the help line above them. Comment cards beside the preview no longer overlap when one grows, such as when you show earlier messages.
 
+## [0.11.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.10.0...v0.11.0) (2026-11-28)
+
+
+### Features
+
+* **demo:** add make demo, an isolated window with a sample PR ([#87](https://github.com/kaiketsu-labs/diffguide/issues/87)) ([ece4563](https://github.com/kaiketsu-labs/diffguide/commit/ece4563f721b4d8c7843653a0969f8bd417ffb59))
+* **local:** review folders outside Git ([d22bff6](https://github.com/kaiketsu-labs/diffguide/commit/d22bff6c80f04ccd062bcd88678249b5d71262d2))
+* **page:** comment on selected code, and show the model of each Claude message ([543c23a](https://github.com/kaiketsu-labs/diffguide/commit/543c23a2bdbc44c55ea9a9a2a46e0d9c11410fbe))
+* **page:** diffGuide.fontSize sizes the review page's text, not the diff ([#86](https://github.com/kaiketsu-labs/diffguide/issues/86)) ([af337c4](https://github.com/kaiketsu-labs/diffguide/commit/af337c4506b2dd87a0d15304523d9e1350323c38))
+* **page:** Esc clears a code selection; threads show and highlight their marked text ([ab4cc33](https://github.com/kaiketsu-labs/diffguide/commit/ab4cc3349236c4e0bd0e1eb1a87f9cb5fbc2c69a))
+* **page:** find options for case, whole word and regex, faster find on large diffs ([f9e0f10](https://github.com/kaiketsu-labs/diffguide/commit/f9e0f10f089a0436a2c51b60994f0a87fa8e646c))
+* **page:** keep the text selected for a comment marked, and send it to Claude ([f5e95ff](https://github.com/kaiketsu-labs/diffguide/commit/f5e95ff69c901f5fcd13b9930772a4be9dd526fc))
+* **page:** Push beside Claude's chip, with a Pushing state ([8ce3183](https://github.com/kaiketsu-labs/diffguide/commit/8ce31833479ae0f40c7f99e9d6a981f698650762))
+* **page:** show Draft reply's progress with a Stop button ([19a2e17](https://github.com/kaiketsu-labs/diffguide/commit/19a2e17f8e6932d26243a3064c908353159ec4ff))
+* **review:** docs reviewer groups stale places under one finding ([d03b772](https://github.com/kaiketsu-labs/diffguide/commit/d03b7723ed65ca33d3aff91e1844ff199b701c2e))
+* **review:** docs reviewer, review focus, lane candidates from tool results ([906c5e8](https://github.com/kaiketsu-labs/diffguide/commit/906c5e844ac7beed8a02c65a6feff46bb3defbf9))
+* **review:** keep Re-check findings once all are resolved ([900b1c2](https://github.com/kaiketsu-labs/diffguide/commit/900b1c2828d1a3bb935a7c93109d76f7be121d0f))
+
+
+### Bug Fixes
+
+* **claude:** keep the review terminal in the background while Claude edits ([b3250dc](https://github.com/kaiketsu-labs/diffguide/commit/b3250dc53792cb8151604c9b6ddbb8f4b20fcfaf))
+* **page:** drop Push's label when the tab row runs out of room ([f6f6327](https://github.com/kaiketsu-labs/diffguide/commit/f6f6327e5d8907f048d9002e48fb09c3db5a0d3e))
+* **page:** find bar tooltips show in full, and the match count keeps its width ([2122946](https://github.com/kaiketsu-labs/diffguide/commit/212294686ca5c97635cc04e9b0af1d712d4734b6))
+* **page:** hide find toggles on narrow pages ([6ecbaf8](https://github.com/kaiketsu-labs/diffguide/commit/6ecbaf85ce2fb4be49b388aa533af0f7d5016cb3))
+* **page:** read previews again when their file changes ([5f89d83](https://github.com/kaiketsu-labs/diffguide/commit/5f89d83f9e709fe55199ab8119c5c6957ed7c2b4))
+* **page:** show the HTML preview on a white page with images, stack comment cards ([#84](https://github.com/kaiketsu-labs/diffguide/issues/84)) ([4170346](https://github.com/kaiketsu-labs/diffguide/commit/41703462edbca2eee2e8417e12e1a1c04da67b34))
+
+
+### Documentation
+
+* **readme:** center the intro and links ([6236274](https://github.com/kaiketsu-labs/diffguide/commit/62362747876b2eb45855abd6b47e55a21633290a))
+
 ## [0.10.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.9.0...v0.10.0) (2026-11-21)
 
 
