@@ -8,6 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse } from 'jsonc-parser';
 import { chromium } from 'playwright-core';
+import { buildSampleRepository, bundleSampleRepository, quietSettings } from './demoProfile.mjs';
 import { createRequire } from 'node:module';
 
 const args = process.argv.slice(2);
@@ -25,6 +26,7 @@ const fixtures = resolve('.render/e2e-fixtures.cjs');
 if (args.includes('--prepare')) {
   const { build } = await import('esbuild');
   await build({ entryPoints: ['test/render/fixtures.ts'], outfile: fixtures, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error' });
+  await bundleSampleRepository();
   process.exit(0);
 }
 const { scenes } = createRequire(import.meta.url)(fixtures);
@@ -38,18 +40,8 @@ const claude = join(root, 'mock-claude');
 const terminalLaunch = join(root, 'terminal-launch.json');
 await writeFile(claude, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(terminalLaunch)}, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));\nsetInterval(() => {}, 1000);\n`);
 await chmod(claude, 0o755);
-const git = (...command) => execFileSync('git', command, { cwd: repo, stdio: 'pipe' });
-await mkdir(join(repo, 'src'), { recursive: true });
-const before = Array.from({ length: 12 }, (_, index) => `export const value${index + 1} = ${index + 1};`);
-await writeFile(join(repo, 'src/app.ts'), before.join('\n') + '\n');
-git('init', '-q', '-b', 'main');
-git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.test', 'add', '.');
-git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.test', 'commit', '-q', '-m', 'init');
-// The mock forge checks PRs out on top of origin/main.
-execFileSync('git', ['clone', '-q', '--bare', repo, join(root, 'origin.git')], { stdio: 'pipe' });
-git('remote', 'add', 'origin', join(root, 'origin.git'));
-git('fetch', '-q', 'origin');
-await writeFile(join(repo, 'src/app.ts'), before.map((line, index) => index === 4 ? 'export const value5 = parse(input) ?? 5;' : line).join('\n') + '\n');
+// The demo repository: its checkout holds the PR branch with one unpushed commit and one uncommitted edit, and `origin` the PR itself.
+await buildSampleRepository(repo);
 
 const userSettings = process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/Code/User/settings.json') : join(homedir(), '.config/Code/User/settings.json');
 const theme = existsSync(userSettings) ? parse(await readFile(userSettings, 'utf8'))?.['workbench.colorTheme'] : undefined;
@@ -57,9 +49,7 @@ await mkdir(join(userData, 'User'), { recursive: true });
 // A user shortcut for maximizing the panel, pressed while a review page has focus.
 await writeFile(join(userData, 'User/keybindings.json'), JSON.stringify([{ key: 'ctrl+alt+m', command: 'workbench.action.toggleMaximizedPanel' }]));
 await writeFile(join(userData, 'User/settings.json'), JSON.stringify({
-  'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'workbench.tips.enabled': false,
-  'update.mode': 'none', 'extensions.autoUpdate': false, 'telemetry.telemetryLevel': 'off', 'window.restoreWindows': 'none',
-  'chat.disableAIFeatures': true, 'diffGuide.mockPullRequests': true, 'diffGuide.claudePath': claude, ...theme ? { 'workbench.colorTheme': theme } : {},
+  ...quietSettings, 'diffGuide.mockPullRequests': true, 'diffGuide.claudePath': claude, ...theme ? { 'workbench.colorTheme': theme } : {},
 }));
 // Only themes that ship with VS Code are available in the throwaway profile; others fall back to the default.
 execFileSync(cli, ['--user-data-dir', userData, '--extensions-dir', extensions, '--install-extension', vsix, '--force'], { stdio: 'pipe' });
@@ -100,7 +90,7 @@ async function fakeAgent(stop) {
         answered.add(event.id);
         const update = (body) => fetch(`${descriptor.url}/update`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ eventId: event.id, ...body }) });
         await update({ status: 'received' });
-        await update({ status: 'answered', text: 'Simulated agent: `parse` returns undefined for empty input, so the fallback keeps 5.', title: 'Fallback for empty input' });
+        await update({ status: 'answered', text: 'Simulated agent: the batch size only changes how often the stream waits for the disk.', title: 'Batch size' });
       }
     }
     await new Promise((done) => setTimeout(done, 500));
@@ -133,19 +123,19 @@ const scenarios = [
       await page.waitForSelector('#panel-files:visible #code-bar', { timeout: 5_000 });
       if (await page.isVisible('#panel-overview')) throw new Error('Local mode still shows Overview');
       step('Local mode opened Code directly without tabs, Overview or Finish review');
-      const line = 'td.num.pick[data-path="src/app.ts"][data-side="new"]';
+      const line = 'td.num.pick[data-path="src/export/stream.ts"][data-side="new"]';
       await page.waitForSelector(line, { timeout: 15_000 });
-      await page.waitForSelector('.file[data-path="src/app.ts"] td.code span', { timeout: 15_000 });
+      await page.waitForSelector('.file[data-path="src/export/stream.ts"] td.code span', { timeout: 15_000 });
       step('The diff got its syntax colors');
-      const cell = await until('line 5 of src/app.ts', async () => {
-        for (const each of await page.$$(line)) if ((await each.textContent())?.trim() === '5') return each;
+      const cell = await until('line 12 of src/export/stream.ts', async () => {
+        for (const each of await page.$$(line)) if ((await each.textContent())?.trim() === '12') return each;
         return undefined;
       });
       await cell.click();
       await page.waitForSelector('textarea[data-draft="composer"]', { timeout: 5_000 });
-      await page.fill('textarea[data-draft="composer"]', 'Why the fallback here?');
+      await page.fill('textarea[data-draft="composer"]', 'Why a bigger batch here?');
       await page.click('.composer-actions button:has-text("Ask")');
-      step('Commented on src/app.ts:5 and sent it with Ask');
+      step('Commented on src/export/stream.ts:12 and sent it with Ask');
 
       await page.waitForSelector('#files tr.inline .thread >> text=Simulated agent:', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'local-answered.png') });
@@ -168,25 +158,26 @@ const scenarios = [
     async run(workbench, step) {
       await palette(workbench, 'Focus on Pull Requests View');
       const row = (title) => workbench.locator(`.monaco-list-row[aria-label*="${title}"]`).first();
-      await row('Add pull request sidebar').waitFor({ timeout: 30_000 });
+      await row('feat(export): stream notes').waitFor({ timeout: 30_000 });
+      await row('Add pull request sidebar').waitFor({ timeout: 5_000 });
       await row('Migrate auth to OAuth device flow').waitFor({ timeout: 5_000 });
       await workbench.screenshot({ path: join(out, 'pr-sidebar.png') });
       step('The sidebar listed the mock PRs in Mine and Review requested');
 
-      await row('Migrate auth to OAuth device flow').click();
-      const page = await reviewPage(workbench, 'text=Sample pull request');
+      await row('feat(export): stream notes').click();
+      const page = await reviewPage(workbench, 'text=stream notes as newline-delimited JSON');
       await page.evaluate(() => {
         window.__layoutState = JSON.parse(document.querySelector('#initial').textContent).state;
         window.addEventListener('message', (event) => { if (event.data?.state) window.__layoutState = event.data.state; });
       });
       await page.click('#view-code');
-      await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
+      await page.waitForSelector('td.num.pick[data-path="docs/release-notes.html"][data-side="new"]', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'pr-files.png') });
-      step('Opening #201 checked it out and showed its diff');
+      step('Opening the demo PR checked it out and showed its diff');
       // The tab shown while the worktree is made is the one the page opens in.
-      const tabs = await workbench.locator('.tabs-container .tab[aria-label*="201"]').count();
-      if (tabs !== 1) throw new Error(`expected one tab for #201, found ${tabs}`);
-      step('The page of #201 opened in the tab shown while its worktree was made');
+      const tabs = await workbench.locator('.tabs-container .tab[aria-label*="142"]').count();
+      if (tabs !== 1) throw new Error(`expected one tab for #142, found ${tabs}`);
+      step('The page of #142 opened in the tab shown while its worktree was made');
 
       await page.click('#refresh');
       await page.locator('#notice', { hasText: 'Refreshed.' }).waitFor({ timeout: 30_000 });
@@ -274,23 +265,26 @@ const scenarios = [
     },
   },
   {
-    name: 'pending mock PR checks',
+    name: 'review of a demo PR you do not own',
     async run(workbench, step) {
       await palette(workbench, 'Focus on Pull Requests View');
+      // Scrolled to the top, no sticky group header covers the row.
+      await workbench.keyboard.press('Home');
       await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
-      const page = await reviewPage(workbench, 'text=Sample pull request');
+      const page = await reviewPage(workbench, 'text=Migrate auth to OAuth device flow');
       await page.click('#view-code');
       for (const verdict of ['comment', 'requestChanges', 'approve']) {
         await page.click('#finish-review');
         await page.fill('#review', `Mock QA ${verdict} summary`);
         await page.click(`[data-verdict="${verdict}"]`);
         await page.click('#submit-review');
-        await page.locator('#error', { hasText: 'Sample pull requests cannot be reviewed.' }).waitFor({ timeout: 10_000 });
-        if (await page.inputValue('#review') !== `Mock QA ${verdict} summary`) throw new Error('Failed review lost its summary');
-        await page.waitForSelector('#submit-review:not([disabled])', { timeout: 5_000 });
-        await page.press('#review', 'Escape');
+        await page.waitForSelector('#review-box', { state: 'hidden', timeout: 10_000 });
+        if (await page.textContent('#error')) throw new Error(`The ${verdict} review reported an error`);
       }
-      step('All three verdicts reached the mock host, showed its rejection, preserved the summary and released the submit button');
+      await page.click('#view-overview');
+      for (const verdict of ['comment', 'requestChanges', 'approve']) await page.locator('#conversation', { hasText: `Mock QA ${verdict} summary` }).waitFor({ timeout: 10_000 });
+      await page.click('#view-code');
+      step('All three verdicts reached the demo forge, closed the form and showed up in the conversation');
 
       // Host refreshes cannot replace a controlled page state while its UI is under test.
       await page.evaluate(() => window.addEventListener('message', (event) => {
@@ -380,17 +374,17 @@ const scenarios = [
       await palette(workbench, 'DiffGuide: Review local changes');
       await reviewPage(workbench, 'body');
       await palette(workbench, 'Focus on Pull Requests View');
-      await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
-      const before = await reviewPage(workbench, 'text=Sample pull request');
+      await workbench.locator('.monaco-list-row[aria-label*="feat(export): stream notes"]').first().click();
+      const before = await reviewPage(workbench, 'text=stream notes as newline-delimited JSON');
       await before.click('#view-code');
       await before.click('#order-guide');
       await before.waitForSelector('#order-guide[aria-pressed=true]', { timeout: 5_000 });
       await before.click('#nav-toggle');
       await before.waitForSelector('#files-layout.list-hidden', { timeout: 5_000 });
-      step('Opened the local page and the page of #201, on Code in Guide order with the list hidden');
+      step('Opened the local page and the page of #142, on Code in Guide order with the list hidden');
 
       const tab = (label) => workbench.locator(`.tabs-container .tab[aria-label*="${label}"]`).first();
-      const prTab = (await tab('201').getAttribute('aria-label')) ?? '';
+      const prTab = (await tab('142').getAttribute('aria-label')) ?? '';
       // The page holds keyboard focus, which swallows the palette shortcut.
       await workbench.click('.part.sidebar .composite.title');
       const loaded = await workbench.evaluate(() => performance.timeOrigin);
@@ -398,7 +392,7 @@ const scenarios = [
       await until('the window to reload', async () => await workbench.evaluate(() => performance.timeOrigin) !== loaded && await workbench.$('.monaco-workbench .tabs-container .tab'), 60_000);
       step('Reloaded the window');
 
-      const after = await reviewPage(workbench, 'text=Sample pull request');
+      const after = await reviewPage(workbench, 'text=stream notes as newline-delimited JSON');
       await after.waitForSelector('#view-code[aria-selected=true]', { timeout: 10_000 });
       // The hidden list hides the order switch too.
       await after.waitForSelector('#order-guide[aria-pressed=true]', { state: 'attached', timeout: 5_000 });
@@ -408,7 +402,7 @@ const scenarios = [
 
       await tab('Local ·').click();
       const local = await until('the local page after the reload', async () => {
-        for (const frame of workbench.frames()) if (await frame.$('#view-code') && !await frame.$('text=Sample pull request')) return frame;
+        for (const frame of workbench.frames()) if (await frame.$('#view-code') && !await frame.$('text=stream notes as newline-delimited JSON')) return frame;
         return undefined;
       });
       await local.waitForSelector('#panel-files:visible #code-bar', { timeout: 5_000 });
