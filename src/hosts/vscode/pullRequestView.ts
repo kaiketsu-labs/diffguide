@@ -42,6 +42,9 @@ export function registerPullRequestView(
   };
   const view = vscode.window.createTreeView('diffGuide.pullRequests', { treeDataProvider: tree, dragAndDropController });
   const sync = pollWhileFocused(60_000, () => view.visible, () => tree.pollGitHub());
+  // Set by scripts/demo.mjs, so the demo window shows the sidebar and the demo PR without clicks.
+  const demoLink = process.env['DIFFGUIDE_DEMO_PR'];
+  if (demoLink !== undefined) void vscode.commands.executeCommand('workbench.view.extension.diffGuide').then(() => tree.openLink(demoLink)).then(undefined, report);
   return vscode.Disposable.from(
     view,
     legend,

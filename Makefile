@@ -3,7 +3,7 @@ NAME := $(shell node -p "require('./package.json').name")
 VSIX := $(NAME)-$(VERSION).vsix
 
 .DEFAULT_GOAL := help
-.PHONY: help deps build typecheck test check package install clean
+.PHONY: help deps build typecheck test check package install demo clean
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -28,5 +28,8 @@ package: ## Build the installable VSIX
 install: package ## Build the VSIX and install it into VS Code; reload the window afterwards
 	code --install-extension $(VSIX) --force
 
+demo: ## Open an isolated VS Code window on this worktree's build with a sample PR
+	npm run demo
+
 clean: ## Remove build output and VSIX files
-	rm -rf dist .test-dist *.vsix
+	rm -rf dist .test-dist .demo *.vsix

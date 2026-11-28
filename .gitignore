@@ -7,3 +7,4 @@ dist/
 .render/
 .vscode-test/
 .bench/
+.demo/

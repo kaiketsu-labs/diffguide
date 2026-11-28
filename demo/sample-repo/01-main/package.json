@@ -1,0 +1,7 @@
+{
+  "name": "field-notes",
+  "version": "2.3.0",
+  "type": "module",
+  "description": "Plain-text notes with tags and a small export API.",
+  "scripts": { "test": "node --test" }
+}
