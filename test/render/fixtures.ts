@@ -284,12 +284,31 @@ const longHeader: OverviewState = {
 };
 /** On one row from 900 px, the byline, facts and toolbar must not overlap; below, the facts hide and at 760 px the byline wraps to its own row. */
 const rowChecks = (width: number): Step[] => width > 900 ? [{ after: ['#facts', '#byline'] }, { after: ['#head .toolbar', '#facts'] }] : width > 760 ? [{ after: ['#head .toolbar', '#byline'] }] : [{ below: ['#byline', '#title'] }, { next: ['#byline .ref:nth-of-type(2)', '#byline .ref', 40] }];
+/** Hover icons sit beside their chip, never over text or each other: the number's copy icon on its left, a branch's on its right (over the arrow), the base pencil after that, and the title pencil before the byline. */
+const hoverChecks = (width: number): Step[] => [
+  { hover: '#number .ref' }, { after: ['#number .ref', '#number .copy'] }, { inside: ['#number .copy', 'body'] }, { css: ['#number .copy', '', 'opacity', '1'] }, { shot: `header-hover-number-${width}.png` },
+  { hover: '#byline .ref:first-child' }, { after: ['#byline .ref:first-child .copy', '#byline .ref:first-child'] }, { after: ['#byline .ref:nth-of-type(2)', '#byline .ref:first-child .copy'] }, { css: ['#byline .to', '', 'opacity', '0'] },
+  { hover: '#byline .ref:nth-of-type(2)' }, { after: ['#byline .ref:nth-of-type(2) .copy', '#byline .ref:nth-of-type(2)'] }, { after: ['#change-base', '#byline .ref:nth-of-type(2) .copy'] }, { css: ['#change-base', '', 'opacity', '1'] },
+  ...width > 900 ? [{ after: ['#facts', '#change-base'] } as Step] : width > 760 ? [{ after: ['#head .toolbar', '#change-base'] } as Step] : [],
+  { shot: `header-hover-branch-${width}.png` },
+  { hover: '#title' }, { after: ['#edit-title', '#title'] }, { after: ['#head .toolbar', '#edit-title'] }, { css: ['#edit-title', '', 'opacity', '1'] }, ...width > 760 ? [{ after: ['#byline', '#edit-title'] } as Step] : [],
+  { shot: `header-hover-title-${width}.png` },
+  { click: '#change-base', expect: '.base-menu' }, { inside: ['.base-menu', 'body'] }, { shot: `header-menu-base-${width}.png` }, { press: 'Escape' },
+  { press: 'Shift+Tab' }, { expect: '#change-base:focus-visible' }, { shot: `header-focus-pencil-${width}.png` }, { press: 'Shift+Tab' }, { expect: '#byline .ref:nth-of-type(2):focus-visible' }, { css: ['#byline .ref:nth-of-type(2) .copy', '', 'opacity', '1'] }, { shot: `header-focus-${width}.png` },
+];
 const headerFits = (width: number): Scene => scene(longHeader, [
   { tallest: ['#claude-chip', 30] }, { inside: ['#claude-chip .chip-new', '#claude-chip'] }, { inside: ['#claude-chip', '#claude-chip'] },
   { tallest: ['#byline', 26] }, ...rowChecks(width), { after: ['#reviewed', '#verdict'] }, { inside: ['#finish-review', '#finish-review'] }, { tallest: ['#finish-review', 30] },
   { level: ['#title', '#finish-review'] }, { inside: ['#byline .ref:nth-of-type(2)', '#byline'] }, { after: ['#head .toolbar', '#title'] }, { tallest: ['#push', 30] }, { inside: ['#push', '#push'] }, { shot: `header-long-${width}.png` },
+  ...hoverChecks(width),
   { click: '#tab-files', wait: 200 }, { tallest: ['.seg', 30] }, { inside: ['.seg > *', '.seg'] }, { shot: `header-long-${width}-files.png` },
 ], { width, height: 500 });
+
+const foldedHtml = '<details><summary>Test output</summary><p>All 12 passed.</p></details>';
+const foldedPullRequest: OverviewState = {
+  ...pullRequest, details: { ...pullRequest.details!, bodyHtml: foldedHtml },
+  conversation: { ...pullRequest.conversation!, timeline: pullRequest.conversation!.timeline.map((item) => item.kind === 'comment' ? { ...item, bodyHtml: foldedHtml } : item) },
+};
 
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
@@ -378,6 +397,13 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#merge-box #checks li', count: 2 }, { absent: '#merge-status :has-text("failing check")' },
     { absent: '#merge-status :has-text("All checks passed")' }, { expect: '#checks li:has-text("Pre-commit")', count: 1 },
   ], { saved: { view: 'overview' } }),
+  // Folded sections show our chevron, not the browser's triangle: no list marker, a drawn 14 px chevron that turns when closed.
+  'fold-markers': scene(foldedPullRequest, [
+    { click: '#tab-conversation' }, { css: ['#details-box > summary', '', 'list-style-type', 'none'] }, { expect: '#details-box > summary > svg' }, { css: ['#details-box > summary > svg', '', 'width', '14px'] },
+    { css: ['#body details > summary', '', 'list-style-type', 'none'] }, { css: ['#body details > summary', '::before', 'width', '14px'] }, { css: ['#body details > summary', '::before', 'transform', 'matrix(0, -1, 1, 0, 0, 0)'] },
+    { click: '#body details > summary' }, { css: ['#body details > summary', '::before', 'transform', 'none'] }, { click: '#details-box > summary' }, { shot: 'fold-markers.png' },
+    { css: ['.msg-text details > summary', '', 'list-style-type', 'none'] }, { css: ['.msg-text details > summary', '::before', 'width', '14px'] },
+  ], { width: 900, height: 600 }),
   'overview-details': scene(pullRequest, [
     { absent: '#pick-assignees:visible' }, { absent: '#pick-labels:visible' }, { absent: '#pick-milestone:visible' },
     { click: '#details-box > summary', expect: '#details-box #pick-assignees:visible' },

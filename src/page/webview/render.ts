@@ -82,7 +82,7 @@ export function render(state: OverviewState): void {
     if (ui.toolbarMenu?.anchor === 'change-base') closeToolbarMenu();
     if (state.localMode && !state.headBranch) $('byline').replaceChildren('Files in this folder, outside Git');
     else if (state.localMode) $('byline').replaceChildren('on ', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
-    else $('byline').replaceChildren(branchRef(state.headBranch), '→', branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
+    else $('byline').replaceChildren(branchRef(state.headBranch), el('span', 'to', '→'), branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
   }
   if (!state.localMode) $('facts').replaceChildren(...pullRequestFacts(state));
   $('opened').replaceChildren(...openedLine(state));

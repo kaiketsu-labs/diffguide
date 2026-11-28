@@ -145,7 +145,7 @@ for (const name of names) {
       if (height === undefined || height > step.tallest[1]) errors.push(`expected ${step.tallest[0]} at most ${step.tallest[1]} px tall, got ${height}`);
     }
     if (step.css) {
-      const value = await page.evaluate(([selector, pseudo, property]) => getComputedStyle(document.querySelector(selector), pseudo).getPropertyValue(property), step.css);
+      const value = await page.evaluate(([selector, pseudo, property]) => { const found = document.querySelector(selector); return found ? getComputedStyle(found, pseudo).getPropertyValue(property) : 'no such element'; }, step.css);
       if (value !== step.css[3]) errors.push(`expected ${step.css[0]} ${step.css[1]} ${step.css[2]} to be ${step.css[3]}, got ${value}`);
     }
     if (step.level) {
