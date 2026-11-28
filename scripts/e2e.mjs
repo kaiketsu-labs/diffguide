@@ -170,13 +170,8 @@ const scenarios = [
         window.__layoutState = JSON.parse(document.querySelector('#initial').textContent).state;
         window.addEventListener('message', (event) => { if (event.data?.state) window.__layoutState = event.data.state; });
       });
-<<<<<<< HEAD
-      await page.click('#view-code');
-      await page.waitForSelector('td.num.pick[data-path="docs/release-notes.html"][data-side="new"]', { timeout: 30_000 });
-=======
       await page.click('#tab-files');
-      await page.waitForSelector('td.num.pick[data-path="docs/sample-page.html"][data-side="new"]', { timeout: 30_000 });
->>>>>>> b868e3b (test(page): render scenes, e2e selectors and changelog for the two-row header)
+      await page.waitForSelector('td.num.pick[data-path="docs/release-notes.html"][data-side="new"]', { timeout: 30_000 });
       await workbench.screenshot({ path: join(out, 'pr-files.png') });
       step('Opening the demo PR checked it out and showed its diff');
       // The tab shown while the worktree is made is the one the page opens in.
@@ -275,13 +270,8 @@ const scenarios = [
       // Scrolled to the top, no sticky group header covers the row.
       await workbench.keyboard.press('Home');
       await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
-<<<<<<< HEAD
       const page = await reviewPage(workbench, 'text=Migrate auth to OAuth device flow');
-      await page.click('#view-code');
-=======
-      const page = await reviewPage(workbench, 'text=Sample pull request');
       await page.click('#tab-files');
->>>>>>> b868e3b (test(page): render scenes, e2e selectors and changelog for the two-row header)
       for (const verdict of ['comment', 'requestChanges', 'approve']) {
         await page.click('#finish-review');
         await page.fill('#review', `Mock QA ${verdict} summary`);
@@ -290,9 +280,9 @@ const scenarios = [
         await page.waitForSelector('#review-box', { state: 'hidden', timeout: 10_000 });
         if (await page.textContent('#error')) throw new Error(`The ${verdict} review reported an error`);
       }
-      await page.click('#view-overview');
+      await page.click('#tab-conversation');
       for (const verdict of ['comment', 'requestChanges', 'approve']) await page.locator('#conversation', { hasText: `Mock QA ${verdict} summary` }).waitFor({ timeout: 10_000 });
-      await page.click('#view-code');
+      await page.click('#tab-files');
       step('All three verdicts reached the demo forge, closed the form and showed up in the conversation');
 
       // Host refreshes cannot replace a controlled page state while its UI is under test.
@@ -383,18 +373,10 @@ const scenarios = [
       await palette(workbench, 'DiffGuide: Review local changes');
       await reviewPage(workbench, 'body');
       await palette(workbench, 'Focus on Pull Requests View');
-<<<<<<< HEAD
       await workbench.locator('.monaco-list-row[aria-label*="feat(export): stream notes"]').first().click();
       const before = await reviewPage(workbench, 'text=stream notes as newline-delimited JSON');
-      await before.click('#view-code');
-      await before.click('#order-guide');
-      await before.waitForSelector('#order-guide[aria-pressed=true]', { timeout: 5_000 });
-=======
-      await workbench.locator('.monaco-list-row[aria-label*="Migrate auth to OAuth device flow"]').first().click();
-      const before = await reviewPage(workbench, 'text=Sample pull request');
       await before.click('#tab-guide');
       await before.waitForSelector('#tab-guide[aria-selected=true]', { timeout: 5_000 });
->>>>>>> b868e3b (test(page): render scenes, e2e selectors and changelog for the two-row header)
       await before.click('#nav-toggle');
       await before.waitForSelector('#files-layout.list-hidden', { timeout: 5_000 });
       step('Opened the local page and the page of #142, on Code in Guide order with the list hidden');
@@ -408,26 +390,15 @@ const scenarios = [
       await until('the window to reload', async () => await workbench.evaluate(() => performance.timeOrigin) !== loaded && await workbench.$('.monaco-workbench .tabs-container .tab'), 60_000);
       step('Reloaded the window');
 
-<<<<<<< HEAD
       const after = await reviewPage(workbench, 'text=stream notes as newline-delimited JSON');
-      await after.waitForSelector('#view-code[aria-selected=true]', { timeout: 10_000 });
-      // The hidden list hides the order switch too.
-      await after.waitForSelector('#order-guide[aria-pressed=true]', { state: 'attached', timeout: 5_000 });
-=======
-      const after = await reviewPage(workbench, 'text=Sample pull request');
       await after.waitForSelector('#tab-guide[aria-selected=true]', { timeout: 10_000 });
->>>>>>> b868e3b (test(page): render scenes, e2e selectors and changelog for the two-row header)
       await after.waitForSelector('#files-layout.list-hidden', { timeout: 5_000 });
       await workbench.screenshot({ path: join(out, 'reload-pr.png') });
       step(`The PR page opened again in its tab (${prTab}), on Code in Guide order with the list hidden`);
 
       await tab('Local ·').click();
       const local = await until('the local page after the reload', async () => {
-<<<<<<< HEAD
-        for (const frame of workbench.frames()) if (await frame.$('#view-code') && !await frame.$('text=stream notes as newline-delimited JSON')) return frame;
-=======
-        for (const frame of workbench.frames()) if (await frame.$('#tab-files') && !await frame.$('text=Sample pull request')) return frame;
->>>>>>> b868e3b (test(page): render scenes, e2e selectors and changelog for the two-row header)
+        for (const frame of workbench.frames()) if (await frame.$('#tab-files') && !await frame.$('text=stream notes as newline-delimited JSON')) return frame;
         return undefined;
       });
       await local.waitForSelector('#panel-files:visible #code-bar', { timeout: 5_000 });
