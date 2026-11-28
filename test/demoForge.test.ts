@@ -54,6 +54,12 @@ test('the demo PR is the first row and carries every kind of seed data', async (
   assert.ok(details.labels.length > 0 && details.milestone !== undefined);
 });
 
+test('the demo PR can be found by number, as opening its link needs', async () => {
+  const forge = createDemoForge();
+  assert.equal((await forge.pullRequest(demoNumber))?.number, demoNumber);
+  assert.equal(await forge.pullRequest(999), undefined);
+});
+
 test('writes to the demo PR can be read back and do not outlive the forge', async () => {
   const forge = createDemoForge();
   const comment: ChangeRequestComment = { path: 'src/notes/store.ts', body: 'Name this `exportTo` option.', commitId: demoCommits.pushed[3], side: 'RIGHT', lines: { start: 4, end: 5 } };

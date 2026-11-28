@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 export const quietSettings = {
   'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'workbench.tips.enabled': false,
   'update.mode': 'none', 'extensions.autoUpdate': false, 'telemetry.telemetryLevel': 'off', 'window.restoreWindows': 'none',
-  'chat.disableAIFeatures': true,
+  'chat.disableAIFeatures': true, 'workbench.secondarySideBar.defaultVisibility': 'hidden',
 };
 
 /** The user's own VS Code settings folder, per https://code.visualstudio.com/docs/editor/settings. */

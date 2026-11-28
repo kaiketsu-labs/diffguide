@@ -109,7 +109,7 @@ export function createDemoForge(): Forge {
     search: async () => [],
     openCount: async () => 0,
     openPullRequests: async () => [],
-    pullRequest: async () => undefined,
+    pullRequest: async (number) => [...fixture.mine.map(editSummary), ...fixture.reviewRequested].find((each) => each.number === number),
     conversation: async () => ({ ...fixture.conversation, timeline }),
     async addComment(_number, body) {
       const id = nextId('comment');
