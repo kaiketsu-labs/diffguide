@@ -516,6 +516,8 @@ export interface ExtensionMessage {
   readonly reveal?: string | undefined;
   /** Open the page's find bar; VS Code's ⌘/Ctrl+F keybinding sends it, since VS Code receives every key the page gets. */
   readonly find?: true;
+  /** The `diffGuide.fontSize` setting changed: size the page's UI text to it. */
+  readonly fontSize?: number;
   /** A guide step's key: show the guided layout at that step. */
   readonly revealStep?: string | undefined;
   /** A guide group's key: show the guided layout at that section. */

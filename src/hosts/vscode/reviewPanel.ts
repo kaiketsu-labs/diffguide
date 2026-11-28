@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type Reviewer, reviewers as allReviewers } from '../../core/contracts.js';
 import { type ChangeRequestConversation, type CommentKind, type HideReason, type MergeMessage, type MergeMethod, type ReactionContent, reactionContents, type ReviewEvent } from '../../core/forge.js';
+import { defaultUiFontSize } from '../../page/designTokens.js';
 import { overviewHtml } from '../../page/html.js';
 import { icons } from '../../page/icons.js';
 import { type CommentIntent, commentIntents, commentKinds, type DiffSelection, editActions, type ExtensionMessage, type FilesView, hideReasons, isLine, isNameList, isOid, isOptionalText, isText, maximumReviewLength, parseColumns, mergeMethods, type OverviewActions, type OverviewReveal, type OverviewState, parseClaudeChoice, parseRange, type PickedSuggestion, type PickTarget, pickTargets, pullRequestActions, reviewEvents } from '../../page/protocol.js';
@@ -470,6 +471,7 @@ export async function showPullRequestOverview(
     if (notice !== undefined) post({ notice });
   });
   subscriptions.push(sync, panel.onDidChangeViewState(({ webviewPanel }) => { if (webviewPanel.visible) sync.now(); }));
+  subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('diffGuide.fontSize')) post({ fontSize: uiFontSize() }); }));
   if (onDidChangeFiles !== undefined) subscriptions.push(onDidChangeFiles(() => { sendFiles(); }));
   sync.now();
   if (changedEarly) redraw();
@@ -493,8 +495,11 @@ const createReviewPanel = (title: string, extensionUri: vscode.Uri): vscode.Webv
 
 function showState(panel: vscode.WebviewPanel, state: OverviewState, extensionUri: vscode.Uri): void {
   const resource = (...parts: string[]): string => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...parts)).toString();
-  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'));
+  panel.webview.html = overviewHtml(state, resource('dist', 'overview.js'), resource('dist', 'pdf.js'), uiFontSize());
 }
+
+/** The size of the review page's UI text, from `diffGuide.fontSize`. */
+const uiFontSize = (): number => vscode.workspace.getConfiguration('diffGuide').get<number>('fontSize', defaultUiFontSize);
 
 /** Show a tab with `state` until the page `key` opens in it; false when that page is opening already, which then opens in the tab shown. */
 export function showOpeningPage(key: string, state: OverviewState, extensionUri: vscode.Uri): boolean {

@@ -143,6 +143,7 @@ A PR with a linked PR shows **Linked changes** on Overview. Its rows show each l
 | `diffGuide.claudePath` | Choose your Claude executable when multiple installations exist. |
 | `diffGuide.nodePath` | Choose the Node.js 20+ executable used by the integration. |
 | `diffGuide.transport` | `hooks` is the default. `channels` is an experimental alternative with additional prerequisites. |
+| `diffGuide.fontSize` | Size in pixels of the review page's text, such as menus, threads and replies (12 by default). The diff keeps the editor's font size. |
 
 ## Limits
 

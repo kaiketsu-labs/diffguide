@@ -189,6 +189,22 @@ test('a comment taken back from the page leaves the review and comes back to edi
   assert.equal(store.pendingEvents.length, 0);
 });
 
+test('the page opens at diffGuide.fontSize and follows a change to it', async () => {
+  const { review } = await fixture();
+  workspace.configurationValues.set('diffGuide.fontSize', 15);
+  cleanup.push(() => { workspace.configurationValues.delete('diffGuide.fontSize'); });
+  await review.open();
+  const panel = window.panels.at(-1);
+  assert.ok(panel !== undefined);
+  cleanup.push(() => { panel.dispose(); });
+  assert.match(panel.webview.html, /body\{--ui-scale:1\.25\}/u);
+
+  workspace.configurationValues.set('diffGuide.fontSize', 18);
+  workspace.changeConfiguration('diffGuide.transport');
+  workspace.changeConfiguration('diffGuide.fontSize');
+  assert.deepEqual(panel.sent.filter((message) => typeof message === 'object' && message !== null && 'fontSize' in message), [{ fontSize: 18 }]);
+});
+
 test('opening an unchanged file shows it whole until it is closed', async () => {
   const { review } = await fixture();
   await review.openFile('src/kept.ts');

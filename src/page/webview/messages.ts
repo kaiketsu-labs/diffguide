@@ -1,5 +1,6 @@
 /** Handles messages from the extension. */
 import type { FileDiff } from '../../core/unifiedDiff.js';
+import { uiScale } from '../designTokens.js';
 import type { ExtensionMessage } from '../protocol.js';
 import { edits } from './conversation/comment.js';
 import { renderedPreviews } from './conversation/mentions.js';
@@ -100,6 +101,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.definition) { peeks.length = ui.peekAt + 1; peeks.push(data.definition); ui.peekAt = peeks.length - 1; renderPeek(); }
   if (data.probe) { probes.set(data.probe.id, data.probe.found); showLink(); }
   if (data.find && $('find-box').hidden) openFind();
+  if (data.fontSize !== undefined) document.body.style.setProperty('--ui-scale', String(uiScale(data.fontSize)));
   if (data.revealStep) revealStep(data.revealStep);
   if (data.revealGroup) revealGroup(data.revealGroup);
   if (data.revealThread) {
