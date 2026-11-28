@@ -9,7 +9,7 @@ import { githubField } from '../conversation/mentions.js';
 import { $, agentButton, button, chevronMark, el, icon, iconButton, keepInView, personAvatar, setTip, timeLabel, titled } from '../dom.js';
 import { renderFiles } from '../files/render.js';
 import { linkCodeRefs } from '../files/refs.js';
-import { range } from '../files/selection.js';
+import { hoverSpan, range } from '../files/selection.js';
 import { previewTabs } from '../messages.js';
 import { orbCanvas, stepMotion } from '../orb.js';
 import { isUnpushed, showCommits } from '../range.js';
@@ -140,7 +140,9 @@ export function threadBox(thread: Thread): HTMLElement {
     : thread.status.split(' · ').filter((part) => !fromClaude || part !== 'Answered');
   const summary = strip('summary', threadKind(thread),
     github ? (thread.pending ? 'Only you see it until you submit your review.' : 'Everyone on the PR sees it.') : fromAnalysis ? 'From Claude\'s guide. Reply to ask about it.' : fromClaude ? 'From Claude\'s code review. Reply to ask about it.' : 'Only you and Claude see it.',
-    status, thread.scope === 'pullRequest' ? 'Whole PR' : thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine), thread.source === 'local' ? thread.title : undefined);
+    status, thread.scope === 'pullRequest' ? 'Whole PR' : thread.scope === 'file' ? 'Whole file' : (thread.side === 'old' ? 'Base · ' : '') + range(thread.startLine, thread.endLine, thread.source === 'local' && thread.marked !== undefined ? thread.columns : undefined), thread.source === 'local' ? thread.title : undefined);
+  box.addEventListener('mouseenter', () => { hoverSpan(thread.id); });
+  box.addEventListener('mouseleave', () => { hoverSpan(undefined); });
   summary.addEventListener('click', () => { if (box.open) keepInView(box, summary); });
   if (finding !== undefined) {
     summary.querySelector('.source')?.after(...agentTags(finding.reviewers));

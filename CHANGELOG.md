@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Select code in a diff and a + button appears below the selection. It opens the comment form on the selected lines and keeps the selected text marked. Claude gets that text with the comment, and the thread keeps it marked while the code still holds it.
+- Select code in a diff and a + button appears below the selection. It opens the comment form on the selected lines and keeps the selected text marked. Claude gets that text with the comment, and the thread keeps it marked while the code still holds it. Esc clears a selection. The thread's header shows which characters it marks, such as `Line 8 · 22-41`, and hovering the thread highlights its text.
 - Claude's answers and review findings remember the model that wrote them. Hover the Diff pair beside a message to see it. Answers from a conversation you connect yourself don't record a model.
 - While Claude drafts a reply, the form shows its progress and how long it has run, with a Stop button.
 - Code review has a Docs agent that finds docs, help text and doc comments a change made wrong.
