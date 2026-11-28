@@ -19,6 +19,13 @@ const demoPullRequest = 'https://github.com/acme/field-notes/pull/142';
 const built = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', shell: process.platform === 'win32' });
 if (built.status !== 0) process.exit(built.status ?? 1);
 
+// An open demo window loads the new build on reload; wiping its profile under it would break it.
+const running = process.platform !== 'win32' && spawnSync('pgrep', ['-f', userData]).status === 0;
+if (running) {
+  console.log(`A demo window for ${basename(worktree)} is open. Reload it (Developer: Reload Window) to load the new build.`);
+  process.exit(0);
+}
+
 await rm(demo, { recursive: true, force: true });
 await rm(userData, { recursive: true, force: true });
 await mkdir(join(userData, 'User'), { recursive: true });
@@ -50,10 +57,14 @@ for (const name of existsSync(ownExtensions) ? await readdir(ownExtensions) : []
 }
 if (existsSync(join(own, 'keybindings.json'))) await copyFile(join(own, 'keybindings.json'), join(userData, 'User/keybindings.json'));
 
-const child = spawn('code', [
+const codeArguments = [
   '--user-data-dir', userData, '--extensions-dir', join(demo, 'extensions'), `--extensionDevelopmentPath=${worktree}`,
   '--new-window', '--disable-workspace-trust', '--skip-welcome', repo,
-], { stdio: 'ignore', detached: true, env: { ...cleanEnvironment(), DIFFGUIDE_DEMO_PR: demoPullRequest }, shell: process.platform === 'win32' });
+];
+// On macOS, `open -g` starts the window behind the current app, so it doesn't take focus.
+const child = process.platform === 'darwin'
+  ? spawn('open', ['-g', '-n', '-a', 'Visual Studio Code', '--env', `DIFFGUIDE_DEMO_PR=${demoPullRequest}`, '--args', ...codeArguments], { stdio: 'ignore', detached: true })
+  : spawn('code', codeArguments, { stdio: 'ignore', detached: true, env: { ...cleanEnvironment(), DIFFGUIDE_DEMO_PR: demoPullRequest }, shell: process.platform === 'win32' });
 child.on('error', (error) => { console.error(`Could not run the code command (${error.message}). In VS Code, run "Shell Command: Install 'code' command in PATH".`); process.exitCode = 1; });
 child.unref();
-console.log(`Demo window opening for ${basename(worktree)}. Repository: ${repo}. Profile: ${userData}`);
+console.log(`Demo window opening in the background for ${basename(worktree)}. Repository: ${repo}. Profile: ${userData}`);
