@@ -1,20 +1,24 @@
 // Opens an isolated VS Code window on this worktree's build with the demo pull request. Usage: make demo
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { applyEdits, modify } from 'jsonc-parser';
 import { bundleSampleRepository, buildSampleRepository, cleanEnvironment, quietSettings, userSettingsFolder } from './demoProfile.mjs';
 
 const worktree = resolve('.');
 const demo = join(worktree, '.demo');
-const userData = join(demo, 'user-data');
+// VS Code puts its IPC socket in the profile folder, and macOS caps socket paths at 103 characters, so the profile lives in a short temp path.
+const userData = join(tmpdir(), `diffguide-demo-${createHash('sha256').update(worktree).digest('hex').slice(0, 8)}`);
 const repo = join(demo, 'repo');
 
 const built = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', shell: process.platform === 'win32' });
 if (built.status !== 0) process.exit(built.status ?? 1);
 
 await rm(demo, { recursive: true, force: true });
+await rm(userData, { recursive: true, force: true });
 await mkdir(join(userData, 'User'), { recursive: true });
 await mkdir(join(demo, 'extensions'), { recursive: true });
 await bundleSampleRepository();
@@ -38,4 +42,4 @@ const child = spawn('code', [
 ], { stdio: 'ignore', detached: true, env: cleanEnvironment(), shell: process.platform === 'win32' });
 child.on('error', (error) => { console.error(`Could not run the code command (${error.message}). In VS Code, run "Shell Command: Install 'code' command in PATH".`); process.exitCode = 1; });
 child.unref();
-console.log(`Demo window opening for ${basename(worktree)}. Data and repository: ${demo}`);
+console.log(`Demo window opening for ${basename(worktree)}. Repository: ${repo}. Profile: ${userData}`);
