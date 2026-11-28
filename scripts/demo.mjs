@@ -61,23 +61,7 @@ const codeArguments = [
   '--user-data-dir', userData, '--extensions-dir', join(demo, 'extensions'), `--extensionDevelopmentPath=${worktree}`,
   '--new-window', '--disable-workspace-trust', '--skip-welcome', repo,
 ];
-const frontProcess = () => /pid\s*=\s*(\d+)/u.exec(spawnSync('lsappinfo', ['info', '-only', 'pid', spawnSync('lsappinfo', ['front']).stdout.toString().trim()]).stdout.toString())?.[1];
-const demoProcesses = () => new Set(spawnSync('pgrep', ['-f', userData]).stdout.toString().split('\n').filter(Boolean));
-const activate = (pid) => spawnSync('osascript', ['-l', 'JavaScript', '-e', `ObjC.import('AppKit'); $.NSRunningApplication.runningApplicationWithProcessIdentifier(${pid}).activateWithOptions(0)`]);
-const previous = process.platform === 'darwin' ? frontProcess() : undefined;
-// VS Code brings a new window to the front even when started with `open -g`, so focus goes back to the app the user was in.
-const child = process.platform === 'darwin'
-  ? spawn('open', ['-g', '-n', '-a', 'Visual Studio Code', '--env', `DIFFGUIDE_DEMO_PR=${demoPullRequest}`, '--args', ...codeArguments], { stdio: 'ignore', detached: true })
-  : spawn('code', codeArguments, { stdio: 'ignore', detached: true, env: { ...cleanEnvironment(), DIFFGUIDE_DEMO_PR: demoPullRequest }, shell: process.platform === 'win32' });
+const child = spawn('code', codeArguments, { stdio: 'ignore', detached: true, env: { ...cleanEnvironment(), DIFFGUIDE_DEMO_PR: demoPullRequest }, shell: process.platform === 'win32' });
 child.on('error', (error) => { console.error(`Could not run the code command (${error.message}). In VS Code, run "Shell Command: Install 'code' command in PATH".`); process.exitCode = 1; });
 child.unref();
-if (previous !== undefined) {
-  const started = Date.now();
-  let givenBack;
-  while (Date.now() - started < 45_000 && (givenBack === undefined || Date.now() - givenBack < 5_000)) {
-    await new Promise((done) => { setTimeout(done, 250); });
-    const front = frontProcess();
-    if (front !== undefined && front !== previous && demoProcesses().has(front)) { activate(previous); givenBack = Date.now(); }
-  }
-}
-console.log(`Demo window opening in the background for ${basename(worktree)}. Repository: ${repo}. Profile: ${userData}`);
+console.log(`Demo window opening for ${basename(worktree)}. Repository: ${repo}. Profile: ${userData}`);
