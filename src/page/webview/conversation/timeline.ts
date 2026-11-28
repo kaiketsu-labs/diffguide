@@ -66,6 +66,7 @@ export function renderConversation(state: OverviewState, force = false): void {
     $('conversation').classList.toggle('folded', prefs.conversationFolded);
     $('fold-conversation').setAttribute('aria-expanded', String(!prefs.conversationFolded));
     $('conversation-count').textContent = nodes.length ? String(nodes.length) : '';
+    $('conversation-tab-count').textContent = $('conversation-count').textContent;
     const hidden = ui.conversationAll ? 0 : Math.max(0, nodes.length - recentEntries - 1);
     const more = button('Show ' + hidden + ' earlier entries', () => { ui.conversationAll = true; if (received.current) renderConversation(received.current, true); }, 'quiet');
     more.classList.add('timeline-more');

@@ -10,7 +10,6 @@ import { changePullRequest } from '../status.js';
 import { post } from '../transport.js';
 import { closeMergeForm, drawMergeButtons, mergeChecklist, methodLabels } from './merge.js';
 
-const verdictText = { changes: ['bad', 'Changes requested by '], approved: ['ok', 'Approved by '], commented: ['muted', 'Commented: '] } as const;
 
 /** Your open PR from the local page's branch; clicking turns this tab into its review page. */
 export function pullRequestChip({ number, title }: NonNullable<OverviewState['branchPullRequest']>): HTMLButtonElement {
@@ -118,13 +117,32 @@ export function renderState(details: ChangeRequestDetails): void {
   $('state-actions').replaceChildren(...ui.asking?.key === 'state' ? [askRow(ui.asking)] : actions);
 }
 
-export function verdict(reviewers: ChangeRequestDetails['reviewers']): readonly [string, string] {
-  for (const key of ['changes', 'approved', 'commented'] as const) {
-    const names = reviewers.filter((reviewer) => reviewer.state === key).map((reviewer) => reviewer.name);
-    if (names.length) return [verdictText[key][0], verdictText[key][1] + names.join(', ')];
+/** A header status: a colored dot and a short text; `who` shows on hover. */
+interface HeadStatus { readonly tone: 'ok' | 'bad'; readonly label: string; readonly who: string }
+
+/** "Approved" or "Changes requested", naming who on hover; nothing while the review is only comments or still waiting. */
+export function reviewVerdict(reviewers: ChangeRequestDetails['reviewers']): HeadStatus | undefined {
+  for (const [state, tone, label] of [['changes', 'bad', 'Changes requested'], ['approved', 'ok', 'Approved']] as const) {
+    const names = reviewers.filter((reviewer) => reviewer.state === state).map((reviewer) => reviewer.name);
+    if (names.length) return { tone, label, who: label + ' by ' + names.join(', ') };
   }
-  const waiting = reviewers.filter((reviewer) => reviewer.state === 'requested').map((reviewer) => reviewer.name);
-  return waiting.length ? ['wait', 'Waiting for ' + waiting.join(', ')] : ['muted', 'No reviews yet'];
+  return undefined;
+}
+
+/** "Pre-commit failing" for one failing check, "2 checks failing" for more. */
+export function failingCheck(details: ChangeRequestDetails): HeadStatus | undefined {
+  const failing = details.checks.filter((check) => check.state === 'failure').map((check) => check.name);
+  const [first] = failing;
+  return first === undefined ? undefined : { tone: 'bad', label: failing.length === 1 ? first + ' failing' : failing.length + ' checks failing', who: failing.join(', ') };
+}
+
+/** Draw a header status into its node, or hide the node. */
+export function showHeadStatus(node: HTMLElement, status: HeadStatus | undefined): void {
+  node.hidden = status === undefined;
+  if (!status) return;
+  node.dataset.tone = status.tone;
+  node.title = status.who;
+  node.replaceChildren(el('span', 'label', status.label));
 }
 
 /** The Linked changes card: each other repository's PR and its state, or the branch Claude made there, with their actions. */
@@ -214,14 +232,16 @@ export function closeTitleForm(): void {
   $('edit-title').hidden = received.current?.details?.canEdit !== true;
 }
 
-/** "Opened 3d ago · Updated 2h ago · +312 −48 in 14 files", leaving out what GitHub did not send. */
+/** "+312 −48", leaving out what GitHub did not send. */
 export function pullRequestFacts(state: OverviewState): (string | Node)[] {
+  if (!state.changes) return [];
+  return [el('span', 'stat-add', '+' + state.changes.additions), ' ', el('span', 'stat-del', '−' + state.changes.deletions)];
+}
+
+/** "octo opened this 3d ago · Updated 2h ago", leaving out what GitHub did not send. */
+export function openedLine(state: OverviewState): (string | Node)[] {
   const parts: (string | Node)[][] = [];
-  if (state.createdAt) parts.push(['Opened ', ...timeLabel(state.createdAt)]);
+  if (state.createdAt) parts.push([state.author + ' opened this ', ...timeLabel(state.createdAt)]);
   if (state.updatedAt) parts.push(['Updated ', ...timeLabel(state.updatedAt)]);
-  if (state.changes) {
-    const { additions, deletions, files } = state.changes;
-    parts.push([el('span', 'stat-add', '+' + additions), ' ', el('span', 'stat-del', '−' + deletions), ' in ' + files + (files === 1 ? ' file' : ' files')]);
-  }
   return parts.flatMap((part, index) => index === 0 ? part : [' · ', ...part]);
 }

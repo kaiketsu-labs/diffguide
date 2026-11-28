@@ -72,10 +72,10 @@ function drawDiffsOnScreen(): void {
 /** Redraw the file list; given paths, or 'state' for files whose state changed, redraw only those boxes when the rest are on the page. */
 export function renderFiles(only?: readonly (string | undefined)[] | 'state'): void {
   for (const name of ['unified', 'split'] as const) $(name).setAttribute('aria-pressed', String(prefs.layout === name));
-  for (const name of ['overview', 'code'] as const) $('view-' + name).setAttribute('aria-selected', String(prefs.view === name));
+  const tab = prefs.view === 'overview' ? 'conversation' : guided() ? 'guide' : 'files';
+  for (const name of ['guide', 'files', 'conversation'] as const) $('tab-' + name).setAttribute('aria-selected', String(tab === name));
   $('panel-overview').hidden = prefs.view !== 'overview';
   $('panel-files').hidden = prefs.view === 'overview';
-  $('files-bar').classList.toggle('on-overview', prefs.view === 'overview');
   showCodeTab();
   renderRangeControls();
   setTip($('fold-all'), allFolded() ? 'Expand all files' : 'Collapse all files');
