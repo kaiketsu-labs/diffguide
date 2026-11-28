@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.11.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.10.0...v0.11.0) (2026-11-28)
+
+
+### Notes
+
 - New setting `diffGuide.fontSize` sizes the review page's text, such as menus, threads and replies, without changing the diff's code. Open pages follow a change right away.
 - Select code in a diff and a + button appears below the selection. It opens the comment form on the selected lines and keeps the selected text marked. Claude gets that text with the comment, and the thread keeps it marked while the code still holds it. Esc clears a selection. The thread's header shows which characters it marks, such as `Line 8 · 22-41`, and hovering the thread highlights its text.
 - Claude's answers and review findings remember the model that wrote them. Hover the Diff pair beside a message to see it. Answers from a conversation you connect yourself don't record a model.
@@ -11,9 +16,6 @@
 - A review agent's lane lists the candidates it handed back, so a lane no longer says No candidates while its candidates go on to verification. The lane no longer shows a bare "candidates" next to its name.
 - Find in page has Match case, Match whole word and Use regular expression toggles, also on Alt+C, Alt+W and Alt+R. On large diffs the find bar opens at once and searches about twice as fast.
 - HTML previews sit on a white page like a browser's, show images stored in the repository, and drop the help line above them. Comment cards beside the preview no longer overlap when one grows, such as when you show earlier messages.
-
-## [0.11.0](https://github.com/kaiketsu-labs/diffguide/compare/v0.10.0...v0.11.0) (2026-11-28)
-
 
 ### Features
 
