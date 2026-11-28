@@ -181,7 +181,7 @@ function prose(step: GuideStep, part: FileDiff | undefined): HTMLElement {
   const node = el('p', 'chapter-prose');
   for (const segment of noteSegments(step.note ?? '', step.refs, part)) {
     if (segment.ref === undefined) { node.append(...inlineText(segment.text)); continue; }
-    const phrase = el('span', 'ref');
+    const phrase = el('span', 'line-ref');
     phrase.dataset.from = String(segment.ref.from);
     phrase.dataset.to = String(segment.ref.to);
     phrase.append(...inlineText(segment.text), el('sup', '', lineLabel(segment.ref.from, segment.ref.to)));

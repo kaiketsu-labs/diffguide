@@ -28,10 +28,10 @@ export function setupChapterLinks(): void {
     const target = event.target instanceof Element ? event.target : null;
     const chapter = target?.closest<HTMLElement>('.step-wrap.chapter') ?? null;
     if (target === null || chapter === null) { clear(); return; }
-    const phrase = target.closest<HTMLElement>('.chapter-prose .ref');
+    const phrase = target.closest<HTMLElement>('.chapter-prose .line-ref');
     if (phrase !== null) { light(chapter, phrase); return; }
     const line = Number(target.closest('.chapter-code tr')?.querySelector<HTMLElement>('td.code[data-line]')?.dataset.line);
-    const cited = Number.isNaN(line) ? undefined : [...chapter.querySelectorAll<HTMLElement>('.chapter-prose .ref')]
+    const cited = Number.isNaN(line) ? undefined : [...chapter.querySelectorAll<HTMLElement>('.chapter-prose .line-ref')]
       .find((ref) => Number(ref.dataset.from) <= line && line <= Number(ref.dataset.to));
     if (cited === undefined) clear(); else light(chapter, cited);
   });

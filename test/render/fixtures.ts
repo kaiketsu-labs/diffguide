@@ -556,7 +556,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // A chapter is two columns: its note on the left, its file's diff on the right; no severity label, no "About this file" tag, no tree.
   'guide-chapters': scene(pullRequest, [
     { expect: '.step-wrap.chapter', count: 2 }, { expect: '.chapter-meta', text: '0 of 1 viewed' }, { expect: '.chapter-title', text: 'user.ts null check' },
-    { expect: '.chapter-prose', text: 'instead of throwing.' }, { expect: '.chapter-prose .ref', count: 1 }, { expect: '.chapter-prose .ref sup', text: 'L5-7' },
+    { expect: '.chapter-prose', text: 'instead of throwing.' }, { expect: '.chapter-prose .line-ref', count: 1 }, { expect: '.chapter-prose .line-ref sup', text: 'L5-7' }, { css: ['#byline .ref', '', 'text-decoration-line', 'none'] }, { css: ['.chapter-prose .line-ref', '', 'background-color', 'rgba(0, 0, 0, 0)'] },
     { expect: '.chapter-code .file[data-path="src/auth/user.ts"]' }, { after: ['.step-wrap[data-key="g0.0"] .chapter-code', '.step-wrap[data-key="g0.0"] .chapter-side'] },
     { css: ['.step-wrap[data-key="g0.0"] .chapter-side', '', 'position', 'sticky'] },
     { absent: '.guide-group .sev' }, { absent: ':text("Significant")' }, { absent: ':text("About this file")' }, { absent: ':text("exactly one step")' }, { absent: '#file-nav .nav-step' },
@@ -568,9 +568,9 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // Hovering a phrase that cites lines lights them, and hovering a cited line lights the phrase.
   'guide-line-links': scene(pullRequest, [
     { absent: '.ref.lit' }, { absent: '.chapter-code tr.lit' },
-    { hover: '.chapter-prose .ref', expect: '.chapter-prose .ref.lit' }, { expect: '.chapter-code tr.lit', count: 3 }, { shot: 'guide-line-links.png' },
+    { hover: '.chapter-prose .line-ref', expect: '.chapter-prose .line-ref.lit' }, { expect: '.chapter-code tr.lit', count: 3 }, { shot: 'guide-line-links.png' },
     { hover: '.chapter-title', absent: '.ref.lit' }, { absent: '.chapter-code tr.lit' },
-    { hover: '.step-wrap[data-key="g0.0"] td.code[data-line="6"]', expect: '.chapter-prose .ref.lit' }, { expect: '.chapter-code tr.lit', count: 3 },
+    { hover: '.step-wrap[data-key="g0.0"] td.code[data-line="6"]', expect: '.chapter-prose .line-ref.lit' }, { expect: '.chapter-code tr.lit', count: 3 },
     { hover: '.step-wrap[data-key="g0.0"] td.code[data-line="9"]', absent: '.ref.lit' },
   ], { saved: { view: 'code', order: 'guide' } }),
   // The chapter's questions and Claude's answers sit beside its note; Claude's own note is not repeated, and the Ask field opens the existing reply box.

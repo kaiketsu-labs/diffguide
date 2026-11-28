@@ -55,7 +55,7 @@ export function avatar(entry: Message, author: string): HTMLElement {
 /** Avatar on the left, text beside it. GitHub messages name their author; local ones are You or Claude, which the avatar already says. */
 function message(entry: Message, thread?: Thread): HTMLElement {
   const author = 'avatarUrl' in entry ? entry.author : entry.author === 'claude' ? 'Claude' : 'You';
-  const item = el('div', 'msg');
+  const item = el('div', author === 'Claude' ? 'msg from-agent' : 'msg');
   const main = el('div', 'msg-main');
   item.append(avatar(entry, author), main);
   if ('avatarUrl' in entry && thread?.source === 'github') {
