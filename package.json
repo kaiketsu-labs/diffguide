@@ -585,6 +585,13 @@
           "minimum": 0,
           "description": "Remove a PR worktree that was not opened for this many days. Worktrees of merged or closed PRs are removed regardless. Worktrees with uncommitted changes or unpushed commits are always kept. 0 removes only merged or closed ones."
         },
+        "diffGuide.fontSize": {
+          "type": "number",
+          "default": 12,
+          "minimum": 8,
+          "maximum": 32,
+          "description": "Font size in pixels for the review page's menus, threads and replies. The diff keeps the editor's font size."
+        },
         "diffGuide.mockPullRequests": {
           "type": "boolean",
           "default": false,

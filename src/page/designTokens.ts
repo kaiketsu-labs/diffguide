@@ -80,6 +80,23 @@ const fixedTokens: Readonly<Record<string, string>> = {
   'radius-pill': '999px',
 };
 
+/** The UI text size `diffGuide.fontSize` defaults to; every `--text-*` and `--line-*` token is its size at this base. */
+export const defaultUiFontSize = 12;
+
+/** The factor that sizes UI text for `fontSize`, set as `--ui-scale` on the page's body. */
+export function uiScale(fontSize: number): number {
+  return fontSize / defaultUiFontSize;
+}
+
+const textSizes = [9, 10, 11, 12, 13, 14, 18, 19, 20];
+/** Line heights, and the heights of boxes that hold one line of text, such as chips, small buttons and inputs. */
+const lineSizes = [16, 18, 19, 20, 22, 24, 26, 28, 32];
+// Declared on body too: VS Code rewrites the root's style attribute, so the page sets `--ui-scale` on body, and a token resolves where it is declared.
+const scaledTokens = [
+  ...textSizes.map((size) => `--text-${size}:calc(${size}px * var(--ui-scale));`),
+  ...lineSizes.map((size) => `--line-${size}:calc(${size}px * var(--ui-scale));`),
+].join('');
+
 /** High-contrast themes carry contrast in their own variables: tints go transparent and lines use the contrast border. */
 const highContrast: Readonly<Record<string, string>> = {
   'brand-soft': 'transparent', 'agent-soft': 'transparent', 'github-soft': 'transparent', 'pending-soft': 'transparent', 'merged-soft': 'transparent', 'danger-soft': 'transparent',
@@ -100,4 +117,5 @@ export const designTokenStyles = [
   `body.vscode-light,body.vscode-high-contrast-light{${declarations('light')}}`,
   `body.vscode-high-contrast,body.vscode-high-contrast-light{${Object.entries(highContrast).map(([name, value]) => `--${name}:${value};`).join('')}}`,
   `:root,body{${Object.entries(aliases).map(([name, target]) => `--${name}:var(--${target});`).join('')}}`,
+  `:root{--ui-scale:1}:root,body{${scaledTokens}}`,
 ].join('\n');

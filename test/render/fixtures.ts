@@ -664,6 +664,8 @@ export const scenes: Readonly<Record<string, Scene>> = {
   get since() { return reviewingScenes['since']!; },
   get drafting() { return reviewingScenes['drafting']!; },
   get 'message-model'() { return reviewingScenes['message-model']!; },
+  get 'ui-font-size'() { return reviewingScenes['ui-font-size']!; },
+  get 'ui-font-size-guide'() { return reviewingScenes['ui-font-size-guide']!; },
   get submitted() { return reviewingScenes['submitted']!; },
   get githubMarkup() { return reviewingScenes['githubMarkup']!; },
   get stale() { return reviewingScenes['stale']!; },
@@ -759,6 +761,16 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { css: ['.file[data-path="src/auth/user.ts"] .msg .orb-avatar', '::after', 'content', '"Claude · claude-opus-5-5"'] },
     { css: ['.file[data-path="src/auth/user.ts"] .msg .orb-avatar', '::after', 'left', '0px'] },
   ], { saved: { view: 'code' } }),
+  // diffGuide.fontSize sizes the page's text and the boxes holding it, and the code keeps the editor's size.
+  'ui-font-size': scene(pullRequest, [
+    { css: ['.file[data-path="src/auth/user.ts"] .thread', '', 'font-size', '13px'], expect: '.file[data-path="src/auth/user.ts"] td.code' },
+    { send: { fontSize: 16 }, css: ['.file[data-path="src/auth/user.ts"] .thread', '', 'font-size', '17.3333px'] },
+    { css: ['.file[data-path="src/auth/user.ts"] .thread', '', 'line-height', '26.6667px'] },
+    { css: ['.claude-chip', '', 'min-height', '29.3333px'] }, { css: ['#files-bar .tabs button', '', 'font-size', '18.6667px'] },
+    { inside: ['.claude-chip', '.claude-chip'] }, { inside: ['.tabs .count', '.tabs .count'] }, { inside: ['label.viewed', 'label.viewed'] },
+    { css: ['.file[data-path="src/auth/user.ts"] tr.hunk td', '', 'font-size', '11px'], shot: 'ui-font-size.png' },
+  ], { saved: { view: 'code' } }),
+  'ui-font-size-guide': scene(pullRequest, [{ send: { fontSize: 16 }, wait: 300, shot: 'ui-font-size-guide.png' }], { saved: { view: 'code', order: 'guide' } }),
   // Draft reply shows Claude at work under the form, with Stop, until the draft or an error arrives.
   drafting: scene(submitted, [
     { click: '.file[data-path="src/auth/user.ts"] button:has-text("Draft reply")', expect: '.claude-live.drafting .step-call', text: 'Drafting' },

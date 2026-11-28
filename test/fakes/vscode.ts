@@ -465,8 +465,15 @@ interface FakeContentProvider {
   provideTextDocumentContent(uri: Uri): string | PromiseLike<string>;
 }
 
+const configurationChanges = new EventEmitter<vscode.ConfigurationChangeEvent>();
+
 /** Exercise real navigator provider registration and cached in-memory documents. */
 export const workspace = {
+  /** Fire with `changeConfiguration` after setting `configurationValues`. */
+  onDidChangeConfiguration: configurationChanges.event,
+  changeConfiguration(...sections: readonly string[]): void {
+    configurationChanges.fire({ affectsConfiguration: (section) => sections.some((changed) => changed === section || changed.startsWith(section + '.')) });
+  },
   textDocuments: [] as FakeTextDocument[],
   providers: new Map<string, FakeContentProvider>(),
   beforeOpen: undefined as (() => Promise<void>) | undefined,
