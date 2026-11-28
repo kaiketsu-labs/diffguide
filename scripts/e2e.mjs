@@ -241,7 +241,7 @@ const scenarios = [
       await page.waitForSelector('#files-bar #push:visible', { timeout: 5_000 });
       await page.click('#push-menu');
       await page.waitForSelector('#show-unpushed:visible', { timeout: 5_000 });
-      if (await page.locator('#unpushed-menu #push, #files-bar #show-unpushed').count()) throw new Error('Unpushed actions are misplaced');
+      if (await page.locator('#unpushed-menu #push, #tabs-row #show-unpushed').count()) throw new Error('Unpushed actions are misplaced');
       await workbench.screenshot({ path: join(out, 'pr-unpushed-menu.png') });
       await page.press('#push-menu', 'Escape');
       if (await page.isVisible('#panel-overview .guide-intro')) throw new Error('Conversation still shows the guide');
@@ -336,7 +336,7 @@ const scenarios = [
         const cell = body.querySelector('td.code');
         return cell.textContent.trim();
       });
-      await page.click('#head-gap');
+      await page.click('#tabs-row .gap');
       await workbench.keyboard.press('Control+f');
       await workbench.keyboard.type(target);
       await workbench.keyboard.press('Enter');
