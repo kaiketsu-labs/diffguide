@@ -32,7 +32,7 @@ export function copyRef(text: string, value: string, what: string): HTMLButtonEl
   copy.classList.add('copy');
   const done = icon(icons.check);
   done.classList.add('done');
-  ref.append(text, copy, done);
+  ref.append(el('span', 'ref-text', text), copy, done);
   ref.addEventListener('click', () => {
     void navigator.clipboard.writeText(value).then(() => {
       ref.classList.add('copied');

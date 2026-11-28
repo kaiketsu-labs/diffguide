@@ -276,8 +276,25 @@ const syncQuestionHtml = '<p>GitHub\'s new commit renames <code>retryDelay</code
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) => ({ ...hunk, lines: hunk.lines.map((line) => ({ ...line, html: line.html.replace(/<[^>]*>/gu, '') })) })) }));
 
+/** The demo PR's long title, long branch and Claude's unseen answers: the header must not squash, wrap or clip at any width. */
+const longHeader: OverviewState = {
+  ...pullRequest, heading: 'feat(export): stream notes as newline-delimited JSON', headBranch: 'feature/streaming-export',
+  changes: { additions: 125, deletions: 20, files: files.length },
+  details: { ...pullRequest.details!, title: 'feat(export): stream notes as newline-delimited JSON', checks: [{ name: 'e2e', state: 'failure' }] },
+};
+/** On one row from 900 px, the byline, facts and toolbar must not overlap; below, the facts hide and at 760 px the byline wraps to its own row. */
+const rowChecks = (width: number): Step[] => width > 900 ? [{ after: ['#facts', '#byline'] }, { after: ['#head .toolbar', '#facts'] }] : width > 760 ? [{ after: ['#head .toolbar', '#byline'] }] : [{ below: ['#byline', '#title'] }, { next: ['#byline .ref:nth-of-type(2)', '#byline .ref', 40] }];
+const headerFits = (width: number): Scene => scene(longHeader, [
+  { tallest: ['#claude-chip', 30] }, { inside: ['#claude-chip .chip-new', '#claude-chip'] }, { inside: ['#claude-chip', '#claude-chip'] },
+  { tallest: ['#byline', 26] }, ...rowChecks(width), { after: ['#reviewed', '#verdict'] }, { inside: ['#finish-review', '#finish-review'] }, { tallest: ['#finish-review', 30] },
+  { level: ['#title', '#finish-review'] }, { inside: ['#byline .ref:nth-of-type(2)', '#byline'] }, { after: ['#head .toolbar', '#title'] }, { tallest: ['#push', 30] }, { inside: ['#push', '#push'] }, { shot: `header-long-${width}.png` },
+  { click: '#tab-files', wait: 200 }, { tallest: ['.seg', 30] }, { inside: ['.seg > *', '.seg'] }, { shot: `header-long-${width}-files.png` },
+], { width, height: 500 });
+
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
+  'header-local': { ...scene({ ...pullRequest, localMode: true, headBranch: 'feature/streaming-export' }, [{ next: ['#byline', '#title', 24] }, { tallest: ['#byline', 26] }, { shot: 'header-local.png' }]), width: 1100, height: 400 },
+  'header-long-1280': headerFits(1280), 'header-long-1100': headerFits(1100), 'header-long-900': headerFits(900), 'header-long-760': headerFits(760),
   'header-actions': scene(pullRequest, [
     // Two rows: what the PR is and its actions, then the tabs with the viewed progress.
     { expect: '#files-bar > #head.head #title', text: 'Fix parser' }, { expect: '#files-bar > #tabs-row #tab-guide', text: 'Guide' }, { below: ['#tabs-row', '#head'] },
@@ -285,7 +302,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#tabs-row #reviewed', text: '1 of 4 viewed' }, { absent: '#head #reviewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
     { expect: '#head #number', text: '#42' }, { expect: '#head #byline', text: 'fix/parser' }, { expect: '#head #byline', text: 'main' }, { expect: '#head #facts', text: '+24 −8' },
     { absent: '#head:has-text("wants to merge")' }, { absent: '#head:has-text("Opened")' },
-    { expect: '#head #check-status:visible', text: 'Pre-commit failing' }, { expect: '#head #verdict:visible', text: 'Approved' }, { absent: '#unpushed-chip, #unpushed-anchor' },
+    { expect: '#tabs-row #check-status:visible', text: 'Pre-commit failing' }, { expect: '#tabs-row #verdict:visible', text: 'Approved' }, { absent: '#unpushed-chip, #unpushed-anchor' },
     { expect: '#head #push-split #push:visible', text: 'Push 1' }, { next: ['#claude-anchor', '#push-split', 12] }, { absent: '#files-bar #show-unpushed' }, { expect: '#claude-chip .chip-text', text: 'Claude' }, { absent: '#claude-chip .chip-text:has-text("Idle")' },
     { click: '#page-menu-button', expect: '#page-menu #pr', text: 'Open on GitHub' },
     { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { expect: '#page-menu #refresh', text: 'Refresh' }, { absent: '#refresh-button, #head > #refresh' }, { shot: 'header-menu.png' },
@@ -557,7 +574,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     // One header row: the page, its branch, how many files, then Claude and More; Files is the only tab.
     { expect: '#head #title', text: 'Local changes' }, { expect: '#head #byline', text: 'on feat/parser' }, { expect: '#head #facts', text: '4 files' }, { expect: '#head #claude-chip:visible' }, { expect: '#head #page-menu-button:visible' },
     { after: ['#claude-chip', '#facts'] }, { level: ['#title', '#claude-chip'] },
-    { absent: '#tab-guide:visible' }, { absent: '#tab-conversation:visible' }, { expect: '#tab-files:visible', text: 'Files' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' }, { absent: '#push-split:visible' }, { absent: '#head #check-status:visible' },
+    { absent: '#tab-guide:visible' }, { absent: '#tab-conversation:visible' }, { expect: '#tab-files:visible', text: 'Files' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' }, { absent: '#push-split:visible' }, { absent: '#tabs-row #check-status:visible' },
     { expect: '#panel-files:visible .file', count: 4 }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },
     { shot: 'local.png' }, { click: '#page-menu-button', expect: '#page-menu #refresh', text: 'Refresh' }, { absent: '#page-menu #pr' }, { absent: '#page-menu #terminal' },
     { click: '#claude-chip', expect: '#claude-menu:visible' },
