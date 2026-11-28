@@ -283,7 +283,7 @@ export function table(file: FileDiff, threads: readonly Thread[], placed: Set<st
   if (gaps && last && file.change !== 'added' && file.change !== 'deleted' && file.change !== 'unchanged') gapRows(last, file.hunks.length);
   markSpans(node, [
     ...threads.flatMap((thread) => thread.source === 'local' && thread.path === file.path && thread.columns !== undefined && thread.marked !== undefined && !thread.archived
-      ? [{ side: thread.side, start: thread.startLine, end: thread.endLine, columns: thread.columns, text: thread.marked }] : []),
+      ? [{ side: thread.side, start: thread.startLine, end: thread.endLine, columns: thread.columns, text: thread.marked, thread: thread.id }] : []),
     // GitHub takes whole lines, so a draft for it marks none.
     ...draft?.columns !== undefined && draft.target !== 'github' ? [{ side: draft.side, start: draft.start, end: draft.end, columns: draft.columns }] : [],
   ]);

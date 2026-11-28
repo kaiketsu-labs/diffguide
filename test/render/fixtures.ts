@@ -414,11 +414,14 @@ export const scenes: Readonly<Record<string, Scene>> = {
   'selection-comment': scene(pullRequest, [
     // One word: the form opens on its line and the word stays marked.
     { select: '.file[data-path="src/auth/user.ts"] td.code[data-line="2"] .hljs-keyword', expect: '#selection-comment:visible', shot: 'selection-word.png' },
+    { press: 'Escape', absent: '#selection-comment:visible' },
+    { select: '.file[data-path="src/auth/user.ts"] td.code[data-line="2"] .hljs-keyword', expect: '#selection-comment:visible' },
     { click: '#selection-comment', expect: '.file[data-path="src/auth/user.ts"] .thread.draft', text: 'Line 2' }, { highlight: ['comment-span', 'const'], expect: '.thread.draft textarea[placeholder="Ask about the marked text"]', shot: 'selection-marked.png' },
     { fill: ['.thread.draft textarea', 'Why const?'] }, { click: '.thread.draft button:has-text("Ask")' },
     { click: '.file[data-path="src/auth/user.ts"] .thread.draft button:has-text("Cancel")', highlight: ['comment-span', ''] },
     // A saved comment marks its text, and marks nothing once the lines hold other text.
     { send: { state: { ...pullRequest, threads: pullRequest.threads.map((each) => each.startLine === 7 ? { ...each, columns: { start: 2, end: 4 }, marked: 'if' } : each) } }, highlight: ['comment-span', 'if'] },
+    { expect: '#thread-11111111-1111-1111-1111-111111111111 > summary', text: 'Line 7 · 3-4', hover: '#thread-11111111-1111-1111-1111-111111111111 > summary', highlight: ['comment-span-hovered', 'if'], shot: 'selection-hovered.png' },
     { send: { state: { ...pullRequest, threads: pullRequest.threads.map((each) => each.startLine === 7 ? { ...each, columns: { start: 2, end: 4 }, marked: 'xx' } : each) } }, highlight: ['comment-span', ''] },
     { send: { state: pullRequest } },
     { drag: ['.file[data-path="src/auth/user.ts"] td.code[data-line="2"]', '.file[data-path="src/auth/user.ts"] td.code[data-line="4"]'], expect: '#selection-comment:visible', shot: 'selection-comment.png' },

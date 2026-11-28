@@ -69,8 +69,11 @@ export function pick(path: string, side: DiffSide, line: number, extend: boolean
   return prefs.composer;
 }
 
-export function range(start: number, end: number): string {
-  return start === end ? 'Line ' + start : 'Lines ' + start + '–' + end;
+export function range(start: number, end: number, columns?: TextColumns): string {
+  const lines = start === end ? 'Line ' + start : 'Lines ' + start + '–' + end;
+  if (columns === undefined) return lines;
+  // Columns are counted from 0 with the end left out; people count characters from 1.
+  return lines + ' · ' + (columns.start + 1 === columns.end ? String(columns.end) : columns.start + 1 + '-' + columns.end);
 }
 
 /** The selected lines as plain text, for a suggestion to start from. */
@@ -130,10 +133,20 @@ export function selectedLines(selection: Selection | null, split = prefs.layout 
   return { path, side: from.side, start: from.line, end: to.line, columns: { start: startColumn, end: endColumn } };
 }
 
-/** Each diff table's marked comment text, so a redrawn table's ranges leave the highlight. */
-const markedSpans = new Map<HTMLTableElement, Range[]>();
+/** Each diff table's marked comment text, with the thread each range belongs to, so a redrawn table's ranges leave the highlights. */
+const markedSpans = new Map<HTMLTableElement, { range: Range; thread: string | undefined }[]>();
 const spanHighlight = new Highlight();
 CSS.highlights.set('comment-span', spanHighlight);
+const hoveredSpan = new Highlight();
+hoveredSpan.priority = 1;
+CSS.highlights.set('comment-span-hovered', hoveredSpan);
+
+/** Mark one thread's text more strongly, or none. */
+export function hoverSpan(thread: string | undefined): void {
+  hoveredSpan.clear();
+  if (thread === undefined) return;
+  for (const marks of markedSpans.values()) for (const mark of marks) if (mark.thread === thread) hoveredSpan.add(mark.range);
+}
 
 /** A range over characters `from` to `to` of a cell's text. */
 function cellRange(cell: HTMLElement, from: number, to: number): Range | undefined {
@@ -151,14 +164,14 @@ function cellRange(cell: HTMLElement, from: number, to: number): Range | undefin
 }
 
 /** Mark the text each comment in `spans` highlights in a diff table; a span with `text` is marked only where the lines still hold that text. */
-export function markSpans(table: HTMLTableElement, spans: readonly { readonly side: DiffSide; readonly start: number; readonly end: number; readonly columns: TextColumns; readonly text?: string }[], split = prefs.layout === 'split'): void {
-  for (const [other, ranges] of markedSpans) {
+export function markSpans(table: HTMLTableElement, spans: readonly { readonly side: DiffSide; readonly start: number; readonly end: number; readonly columns: TextColumns; readonly text?: string; readonly thread?: string }[], split = prefs.layout === 'split'): void {
+  for (const [other, marks] of markedSpans) {
     if (other !== table && other.isConnected) continue;
-    for (const range of ranges) spanHighlight.delete(range);
+    for (const { range } of marks) { spanHighlight.delete(range); hoveredSpan.delete(range); }
     markedSpans.delete(other);
   }
   if (spans.length === 0) return;
-  const ranges: Range[] = [];
+  const marks: { range: Range; thread: string | undefined }[] = [];
   const cells = [...table.querySelectorAll<HTMLTableCellElement>('td.code')].flatMap((cell) => {
     const place = cellPlace(cell, split);
     return place ? [{ cell, ...place }] : [];
@@ -173,11 +186,11 @@ export function markSpans(table: HTMLTableElement, spans: readonly { readonly si
     if (span.text !== undefined && pieces.map(({ cell, from, to }) => (cell.textContent ?? '').slice(from, to)).join('\n') !== span.text) continue;
     for (const { cell, from, to } of pieces) {
       const range = cellRange(cell, from, to);
-      if (range) ranges.push(range);
+      if (range) marks.push({ range, thread: span.thread });
     }
   }
-  markedSpans.set(table, ranges);
-  for (const range of ranges) spanHighlight.add(range);
+  markedSpans.set(table, marks);
+  for (const { range } of marks) spanHighlight.add(range);
 }
 
 /** Comment beside a text selection in a diff, which opens the comment form on exactly the selected lines. */
@@ -219,6 +232,9 @@ export function setupSelectionComment(): void {
       comment.style.top = Math.max(4, Math.min(window.innerHeight - comment.offsetHeight - 4, at.bottom + 4)) + 'px';
       comment.style.left = Math.max(4, Math.min(window.innerWidth - comment.offsetWidth - 4, at.right - comment.offsetWidth / 2)) + 'px';
     }, 0);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && lines) { window.getSelection()?.removeAllRanges(); hide(); }
   });
   document.addEventListener('selectionchange', () => { if (window.getSelection()?.isCollapsed !== false) hide(); });
   document.addEventListener('scroll', hide, { capture: true, passive: true });
