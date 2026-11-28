@@ -579,6 +579,9 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { absent: '.chapter-talk :text("Returns null for empty input instead of throwing.")' }, { absent: '.chapter-talk summary:visible' },
     { absent: '.chapter-code #thread-' + noteId }, { expect: '.chapter-talk .ask-chapter', text: 'Ask about this chapter' }, { shot: 'guide-chapter-ask.png' },
     { click: '.ask-chapter', expect: '.chapter-talk textarea' }, { fill: ['.chapter-talk textarea', 'And for a missing token?'] },
+    // A chapter's questions are about understanding: Ask only, no Implement.
+    { expect: '.chapter-talk .composer-actions button:has-text("Ask")' }, { absent: '.chapter-talk .composer-actions button:has-text("Implement")' }, { shot: 'guide-chapter-reply.png' },
+    { click: '.chapter-code .thread:has-text("Null check in parseUser") button:has-text("Reply")', expect: '.chapter-code .composer-actions button:has-text("Implement")' },
     { click: '.chapter-talk .composer-actions button:has-text("Ask")', expect: '.chapter-talk button:has-text("Sending")' },
   ], { saved: { view: 'code', order: 'guide' } }),
   'guide-narrow': scene(withChapterTalk, [

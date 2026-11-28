@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A reply in a Guide chapter's conversation offers Ask only. Implement stays on code threads, since a chapter's questions are about understanding.
 - The header's hover icons no longer cover text or each other: the copy icons and the change-base and edit-title pencils sit beside their chips. Folded Details sections show the page's own chevron instead of the browser's triangle.
 - The Guide tab reads as chapters: a short "What this PR does", then each guide step with its note, a Viewed count and Claude's questions and answers on the left, and its diff on the right. Phrases in a note that cite lines light those lines when you hover them. "Ask about this chapter" replies in the step's guide thread. The steps tree, the severity labels and the "About this file" tag are gone, and files the guide does not place sit in a last "Not in a chapter" section. New guides cite line ranges in their notes; older ones still show as before.
 - The review page header is two rows: the PR (number, title, branches, changes, status, Push, Claude, Finish review and a ··· menu with Refresh) and the tabs. The tabs are Guide, Files and Conversation, with the viewed progress on the right; a page saved before keeps its place. Unpushed commits are listed in Push's menu, a failing check and the review state show as status text, and the local page's header is one row.

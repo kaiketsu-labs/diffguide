@@ -264,12 +264,15 @@ function drawThread(thread: Thread, chapter: boolean): HTMLElement {
       for (const each of [implement, ask]) { each.disabled = busySending; actions.append(each); }
     } else {
       primary.title = 'Agent answers without editing';
-      const implement = agentButton('implement', 'Implement', () => submit('implement'));
-      implement.title = 'Agent changes the code. Without a note, it implements what the thread discussed';
-      implement.disabled = busySending;
       needText.push(primary);
       onReply(reply);
-      actions.append(implement);
+      // A chapter's questions are about understanding, so only code threads offer Implement.
+      if (!chapter) {
+        const implement = agentButton('implement', 'Implement', () => submit('implement'));
+        implement.title = 'Agent changes the code. Without a note, it implements what the thread discussed';
+        implement.disabled = busySending;
+        actions.append(implement);
+      }
     }
     actions.append(primary);
     box.append(actions, ...draftingLog(thread));
