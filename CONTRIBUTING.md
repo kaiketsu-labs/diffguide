@@ -24,6 +24,12 @@ npm run package
 
 `npm run render` screenshots the review page with fixture data in your VS Code theme and reports page script errors; the PNGs land in `.render/`. `npm run e2e:docker` packages the VSIX and drives it in headless VS Code inside Docker, with a simulated agent; `npm run e2e` does the same in a visible window. `make check` runs the type check and tests, and `make install` packages the VSIX and installs it into VS Code. Run `make` for the full list.
 
+### Trying a change in a demo window
+
+`make demo` builds this worktree and opens an isolated VS Code window (own user data and extensions folder under `.demo/`, no other extensions) on a fixed sample repository with one feature-rich fake pull request: reviewers, checks, comment threads in every state, a Claude guide and two Local threads. Your own `settings.json` and `keybindings.json` are copied in, with `diffGuide.mockPullRequests` on. Ask and Implement use your real Claude Code. Run it in several worktrees at once; each window title names its worktree. Edits to the sample PR stay in memory and reset when the window closes. `.demo/` is rebuilt on every run, so quit the window first. It needs the `code` command on your PATH.
+
+The seed data is `src/forges/demo/fixture.ts` and the repository recipe is `demo/sample-repo/`.
+
 The automated tests use isolated storage, local Git repositories, and local hook processes. They do not call an LLM. A successful automated run does not replace a real VS Code + Claude walkthrough.
 
 ## Change guidelines
