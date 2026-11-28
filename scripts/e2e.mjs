@@ -375,10 +375,12 @@ const scenarios = [
       await palette(workbench, 'Focus on Pull Requests View');
       await workbench.locator('.monaco-list-row[aria-label*="feat(export): stream notes"]').first().click();
       const before = await reviewPage(workbench, 'text=stream notes as newline-delimited JSON');
-      await before.click('#tab-guide');
-      await before.waitForSelector('#tab-guide[aria-selected=true]', { timeout: 5_000 });
+      // The Guide tab has no file list and hides its column itself; the toggle belongs to the Files tab.
+      await before.click('#tab-files');
       await before.click('#nav-toggle');
       await before.waitForSelector('#files-layout.list-hidden', { timeout: 5_000 });
+      await before.click('#tab-guide');
+      await before.waitForSelector('#tab-guide[aria-selected=true]', { timeout: 5_000 });
       step('Opened the local page and the page of #142, on Code in Guide order with the list hidden');
 
       const tab = (label) => workbench.locator(`.tabs-container .tab[aria-label*="${label}"]`).first();

@@ -143,7 +143,8 @@ export const pullRequest: OverviewState = {
       head: 'a'.repeat(40), createdAt: ago(60), overview: 'Adds null handling to user parsing and a retry to the API client. Risk sits in the token refresh path.',
       files: [{ path: 'src/auth/user.ts', note: 'Holds the behavior change.' }],
       groups: [{ severity: 'significant', title: 'Parsing and retries', steps: [
-        { blocks: [{ path: 'src/auth/user.ts', signature: signatureOf('src/auth/user.ts') }], title: 'user.ts null check', note: 'Returns null for empty input instead of throwing.' },
+        { blocks: [{ path: 'src/auth/user.ts', signature: signatureOf('src/auth/user.ts') }], title: 'user.ts null check', note: 'Returns null for empty input instead of throwing.',
+          refs: [{ text: 'null for empty input', path: 'src/auth/user.ts', from: 5, to: 7 }, { text: 'throwing', path: 'src/auth/user.ts', from: 90, to: 91 }] },
         { blocks: [{ path: 'src/api/client.ts', signature: signatureOf('src/api/client.ts') }], title: 'client.ts retry', note: 'Retries a request once on timeout.' },
       ] }],
     },
@@ -267,6 +268,22 @@ const { reviewed: _reviewed, ...withoutReviewed } = pullRequest;
 const listPending: OverviewState = { ...withoutReviewed, reviewedPending: true };
 const { linked: _linked, ...withoutLinked } = pullRequest;
 const withoutGuide: OverviewState = { ...pullRequest, analysis: { running: false, stale: false } };
+const noteId = '55555555-5555-5555-5555-555555555555';
+const withChapterTalk: OverviewState = {
+  ...pullRequest,
+  threads: [...pullRequest.threads, {
+    id: noteId, location: 'src/auth/user.ts:5', text: 'Returns null for empty input instead of throwing.', status: 'Answered', origin: 'analysis',
+    path: 'src/auth/user.ts', side: 'new', startLine: 5, endLine: 7, resolved: false,
+    messages: [
+      { author: 'claude', html: '<p>Returns null for empty input instead of throwing.</p>', createdAt: ago(60) },
+      { author: 'human', html: '<p>Why null and not an error?</p>', createdAt: ago(9), intent: 'ask' },
+      { author: 'claude', html: '<p>Callers already branch on a missing user, so null fits.</p>', createdAt: ago(8), model: 'claude-opus-5-5' },
+    ],
+  }],
+  analysis: { ...pullRequest.analysis, result: { ...pullRequest.analysis.result!, groups: pullRequest.analysis.result!.groups.map((group) => ({
+    ...group, steps: group.steps.map((step, index) => index === 0 ? { ...step, threadId: noteId } : step),
+  })) } },
+};
 const opening = openingOverviewState({
   number: pullRequest.number ?? 1, title: pullRequest.heading ?? '', url: pullRequest.url, author: pullRequest.author, draft: false,
   headBranch: pullRequest.headBranch, baseBranch: pullRequest.baseBranch, ...pullRequest.changes === undefined ? {} : { changes: pullRequest.changes },
@@ -447,7 +464,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   'code-guide': scene(pullRequest, [
     { absent: '#tab-files[aria-selected=true]' }, { expect: '#tab-guide[aria-selected=true]' }, { absent: '#nav-order .seg' }, { absent: '#search-toggle:visible' },
     { expect: '#files tr:is(.context,.add,.del)', count: 78 }, { expect: '.folded-lines .folded-body[hidden=until-found] tr.context' },
-    { expect: '.nav-step[data-nav-step="u:README.md"].done' }, { expect: '#file-nav .nav-step .nav-number', text: '1' },
+    { expect: '.chapter-meta', text: '01 / 02' }, { expect: '.chapter.unplaced .chapter-title', text: 'Not in a chapter' }, { absent: '#nav-col:visible' },
     { expect: '.guide-intro .section-head button', text: 'Rebuild' }, { absent: '#analyze' },
     { shot: 'code-guide.png' },
     { expect: '.folded-body[hidden]', count: 6 },
@@ -529,13 +546,45 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { scroll: 0, click: '#nav-toggle', expect: '#files-layout.list-hidden' }, { absent: '#nav-col:visible' }, { expect: '#nav-toggle:visible', shot: 'list-hidden.png' },
   ], { saved: { view: 'code', order: 'files' } }),
   'toolbar-guide': scene(pullRequest, [
-    { expect: '#code-bar #nav-toggle:visible' }, { expect: '#code-bar #range:visible' }, { absent: '#code-bar #analyze' },
+    { absent: '#code-bar #nav-toggle:visible' }, { expect: '#code-bar #range:visible' }, { absent: '#code-bar #analyze' },
   ], { saved: { view: 'code', order: 'guide' } }),
   'order-switch': scene(pullRequest, [
-    { click: '#tab-guide', expect: '.step-wrap[data-key="g0.0"] .file-head', text: 'user.ts null check' },
+    { click: '#tab-guide', expect: '.step-wrap[data-key="g0.0"] .chapter-title', text: 'user.ts null check' },
     { expect: '#files tr:is(.context,.add,.del)', count: 78 },
     { click: '#tab-files', absent: '.step-wrap' }, { expect: '#files tr:is(.context,.add,.del)', count: 78 },
   ], { saved: { view: 'code', order: 'files' } }),
+  // A chapter is two columns: its note on the left, its file's diff on the right; no severity label, no "About this file" tag, no tree.
+  'guide-chapters': scene(pullRequest, [
+    { expect: '.step-wrap.chapter', count: 2 }, { expect: '.chapter-meta', text: '0 of 1 viewed' }, { expect: '.chapter-title', text: 'user.ts null check' },
+    { expect: '.chapter-prose', text: 'instead of throwing.' }, { expect: '.chapter-prose .ref', count: 1 }, { expect: '.chapter-prose .ref sup', text: 'L5-7' },
+    { expect: '.chapter-code .file[data-path="src/auth/user.ts"]' }, { after: ['.step-wrap[data-key="g0.0"] .chapter-code', '.step-wrap[data-key="g0.0"] .chapter-side'] },
+    { css: ['.step-wrap[data-key="g0.0"] .chapter-side', '', 'position', 'sticky'] },
+    { absent: '.guide-group .sev' }, { absent: ':text("Significant")' }, { absent: ':text("About this file")' }, { absent: ':text("exactly one step")' }, { absent: '#file-nav .nav-step' },
+    { expect: '.guide-intro .section-head h3', text: 'What this PR does' }, { expect: '.guide-intro .section-head button', text: 'Rebuild' },
+    { expect: '.chapter.unplaced .file[data-path="README.md"]' }, { expect: '.chapter.unplaced .chapter-meta', text: '1 of 2 viewed' },
+    { click: '.step-wrap[data-key="g0.0"] label.viewed input', expect: '.chapter-meta', text: '1 of 1 viewed' },
+    { scrollTo: '.step-wrap[data-key="g0.1"]', shot: 'guide-chapters.png' },
+  ], { saved: { view: 'code', order: 'guide' } }),
+  // Hovering a phrase that cites lines lights them, and hovering a cited line lights the phrase.
+  'guide-line-links': scene(pullRequest, [
+    { absent: '.ref.lit' }, { absent: '.chapter-code tr.lit' },
+    { hover: '.chapter-prose .ref', expect: '.chapter-prose .ref.lit' }, { expect: '.chapter-code tr.lit', count: 3 }, { shot: 'guide-line-links.png' },
+    { hover: '.chapter-title', absent: '.ref.lit' }, { absent: '.chapter-code tr.lit' },
+    { hover: '.step-wrap[data-key="g0.0"] td.code[data-line="6"]', expect: '.chapter-prose .ref.lit' }, { expect: '.chapter-code tr.lit', count: 3 },
+    { hover: '.step-wrap[data-key="g0.0"] td.code[data-line="9"]', absent: '.ref.lit' },
+  ], { saved: { view: 'code', order: 'guide' } }),
+  // The chapter's questions and Claude's answers sit beside its note; Claude's own note is not repeated, and the Ask field opens the existing reply box.
+  'guide-chapter-ask': scene(withChapterTalk, [
+    { expect: '.step-wrap[data-key="g0.0"] .chapter-talk .msg', count: 2 }, { expect: '.chapter-talk', text: 'Callers already branch on a missing user' },
+    { absent: '.chapter-talk :text("Returns null for empty input instead of throwing.")' }, { absent: '.chapter-talk summary:visible' },
+    { absent: '.chapter-code #thread-' + noteId }, { expect: '.chapter-talk .ask-chapter', text: 'Ask about this chapter' }, { shot: 'guide-chapter-ask.png' },
+    { click: '.ask-chapter', expect: '.chapter-talk textarea' }, { fill: ['.chapter-talk textarea', 'And for a missing token?'] },
+    { click: '.chapter-talk .composer-actions button:has-text("Ask")', expect: '.chapter-talk button:has-text("Sending")' },
+  ], { saved: { view: 'code', order: 'guide' } }),
+  'guide-narrow': scene(withChapterTalk, [
+    { expect: '.step-wrap.chapter', count: 2 }, { css: ['.step-wrap[data-key="g0.0"] .chapter-side', '', 'position', 'static'] },
+    { below: ['.step-wrap[data-key="g0.0"] .chapter-code', '.step-wrap[data-key="g0.0"] .chapter-side'] }, { shot: 'guide-narrow.png' },
+  ], { saved: { view: 'code', order: 'guide' }, width: 700 }),
   'guide-unbuilt': scene(withoutGuide, [
     { expect: '#tab-guide[aria-selected=true]' }, { expect: '#files .guide-intro button', text: 'Build guide' }, { expect: '#files .file', count: 4, shot: 'guide-unbuilt.png' },
   ], { saved: { view: 'code', order: 'guide' } }),

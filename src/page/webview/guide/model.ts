@@ -47,12 +47,9 @@ export function stepViewed(step: GuideStep): boolean {
   return isStepViewed(step, received.files?.find((item) => item.path === step.path), received.readRanges, received.viewed.has(step.path));
 }
 
-export function stepCollapsed(step: GuideStep): boolean {
-  return collapsed.get(guideState('step', step.key)) ?? stepViewed(step);
-}
-
-export function groupCollapsed(group: GuideGroup): boolean {
-  return collapsed.get(guideState('group', group.key)) ?? group.severity === 'trivial';
+/** A chapter's diff is folded once it is viewed, and from the start when it belongs to the trivial changes. */
+export function stepCollapsed(step: GuideStep, trivial = false): boolean {
+  return collapsed.get(guideState('step', step.key)) ?? (trivial || stepViewed(step));
 }
 
 /** Which step shows each thread and the draft: a note's own step, otherwise the step whose lines, `parts` by step key, include it. */
@@ -82,8 +79,7 @@ export function guideOwners(groups: readonly GuideGroup[], parts: ReadonlyMap<st
 export function guideIntro(): HTMLElement {
   const analysis = received.current?.analysis;
   const card = el('section', 'card guide-intro');
-  card.append(el('h3', '', 'Guide'), el('p', '', 'Claude reads the changes, groups them by severity, puts them in reading order and explains each step. '
-    + 'Each note is a thread you can reply to. Every change lands in exactly one step, so once every step is Viewed, the whole PR is.'));
+  card.append(el('h3', '', 'Guide'), el('p', '', 'Claude reads the changes, groups them by severity, puts them in reading order and explains each step. Each note is a thread you can reply to.'));
   if (analysis?.running && analysis.progress !== undefined) {
     const controls = el('span', 'step-actions');
     const stop = button('', () => post({ action: 'analysis-stop' }), 'icon-button');
@@ -108,7 +104,7 @@ export function guideSummary(result: Analysis, groups: readonly GuideGroup[]): H
   const analysis = received.current?.analysis;
   const card = el('section', 'card guide-intro');
   const head = el('div', 'section-head');
-  head.append(el('h3', '', 'Guide'));
+  head.append(el('h3', '', 'What this PR does'));
   if (analysis?.running) {
     const stop = button('Stop', () => post({ action: 'analysis-stop' }), 'quiet small');
     head.append(el('span', 'chip agent working', 'Guide · ' + (analysis.step ?? 'Working')), stop);
@@ -117,7 +113,6 @@ export function guideSummary(result: Analysis, groups: readonly GuideGroup[]): H
   if (analysis?.stale) card.append(staleGuideRow(result, groups));
   if (analysis?.error) card.append(el('p', 'bad', 'Guide failed: ' + analysis.error));
   if (result.overview) card.append(el('p', 'text', result.overview));
-  card.append(el('p', 'muted', 'Every change is in exactly one step. Viewed on every step marks the whole PR viewed.'));
   return card;
 }
 

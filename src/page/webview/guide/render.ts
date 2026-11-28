@@ -1,39 +1,37 @@
 /** Draws the Guide tab and its navigation. */
-import { buildGuide, groupReadMarks, type GuideGroup, type GuideStep, type Severity, type StepSpan, stepSpans } from '../../../core/prAnalysis.js';
-import { fullyRead } from '../../../core/readLines.js';
+import { buildGuide, groupReadMarks, type GuideGroup, type GuideStep, noteSegments, type StepSpan, stepSpans } from '../../../core/prAnalysis.js';
+import { fullyRead, rangeReadIds } from '../../../core/readLines.js';
 import type { FileDiff } from '../../../core/unifiedDiff.js';
 import type { DiffSide } from '../../protocol.js';
 import { icons } from '../../icons.js';
 import { toolButton } from '../conversation/comment.js';
 import { $, button, chevronMark, el, icon } from '../dom.js';
 import { markViewed, selectedReadIds, unmarkRead } from '../files/marks.js';
-import { changeLetters, iconNode, localMark, markCurrentNavFile } from '../files/nav.js';
+import { changeLetters, iconNode, localMark } from '../files/nav.js';
 import { mediaNode, previewKind, previewNode, previewOnly } from '../files/preview.js';
 import { headTools, previewSwitch, renderFiles, wholeFileBlock } from '../files/render.js';
 import { table } from '../files/table.js';
-import { revealGroup, revealStep } from '../render.js';
 import { collapsed, prefs, previewing, received, save, ui } from '../state.js';
-import { threadBox } from '../threads/threadBox.js';
+import { chapterThread } from '../threads/threadBox.js';
 import { post } from '../transport.js';
 import { openFileComposer } from '../threads/composer.js';
 import type { Composer, Thread } from '../types.js';
-import { groupCollapsed, guideOwners, guideState, guideSummary, spanDiff, stepCollapsed, stepViewed } from './model.js';
+import { guideOwners, guideState, guideSummary, spanDiff, stepCollapsed, stepViewed } from './model.js';
 
-const severityLabels: Record<Severity | 'unclassified', string> = { critical: 'Critical', significant: 'Significant', routine: 'Routine', trivial: 'Trivial', unclassified: 'Unclassified' };
 const stepKeys = new Map<string, string>();
 
+/** A slim band above a group's chapters: its theme, how far it is viewed, and one Viewed for all of them. */
 function groupHead(group: GuideGroup): HTMLElement {
-  const head = el('div', 'guide-group sev-' + group.severity);
+  const head = el('div', 'guide-group');
   head.dataset.group = group.key;
   const label = el('label', 'viewed');
-  label.title = 'Mark every step in this section read.';
-  label.addEventListener('click', (event) => { event.stopPropagation(); });
+  label.title = 'Mark every chapter in this section read.';
   const check = el('input');
   check.type = 'checkbox';
   check.checked = group.steps.every(stepViewed);
   check.addEventListener('change', () => { setGroupViewed(group, check.checked); });
   label.append(check, 'Viewed');
-  head.append(el('span', 'sev', severityLabels[group.severity]), el('span', 'title', group.title), el('span', 'muted progress'), label);
+  head.append(el('span', 'title', group.title), el('span', 'muted progress'), label);
   return head;
 }
 
@@ -93,15 +91,18 @@ function foldToggle(isCollapsed: boolean): HTMLElement {
 
 function updateGuideProgress(groups: readonly GuideGroup[]): void {
   for (const group of groups) {
+    const done = group.steps.filter(stepViewed).length;
     const head = document.querySelector('[data-group="' + CSS.escape(group.key) + '"]');
     const progress = head?.querySelector('.progress');
-    if (progress) progress.textContent = group.steps.filter(stepViewed).length + '/' + group.steps.length + ' viewed';
+    if (progress) progress.textContent = done + '/' + group.steps.length + ' viewed';
     const check = head?.querySelector<HTMLInputElement>('label.viewed input');
     if (check) check.checked = group.steps.every(stepViewed);
+    const section = document.querySelector('.chapter-side[data-group="' + CSS.escape(group.key) + '"] .chapter-progress');
+    if (section) section.textContent = done + ' of ' + group.steps.length + ' viewed';
   }
 }
 
-/** The guided layout: Claude's steps by severity, each a slice of the diff with its note and a Viewed checkbox. */
+/** The guided layout: Claude's steps by severity, each a chapter with its note beside the diff and a Viewed checkbox. */
 export function renderGuide(only?: readonly (string | undefined)[] | 'state'): void {
   const container = $('files');
   const result = received.current?.analysis.result;
@@ -116,93 +117,111 @@ export function renderGuide(only?: readonly (string | undefined)[] | 'state'): v
     return file ? [[step.key, spanDiff(file, spans.get(step.key) ?? [])] as const] : [];
   }));
   const owners = guideOwners(groups, parts);
-  const visible = groups.filter((group) => !groupCollapsed(group)).flatMap((group) => group.steps);
-  const keyOf = (step: GuideStep): string => JSON.stringify([stepViewed(step), stepCollapsed(step), received.readRanges.filter((marked) => marked.path === step.path), received.current?.local?.[step.path] ?? null,
+  const chapters = groups.filter((group) => group.severity !== 'unclassified').flatMap((group) => group.steps);
+  const trivial = new Set(groups.filter((group) => group.severity === 'trivial').flatMap((group) => group.steps.map((step) => step.key)));
+  const keyOf = (step: GuideStep): string => JSON.stringify([stepViewed(step), stepCollapsed(step, trivial.has(step.key)), received.readRanges.filter((marked) => marked.path === step.path), received.current?.local?.[step.path] ?? null,
     owners.threads.get(step.key) ?? [], owners.notes.get(step.key) ?? null, owners.draft === step.key ? [ui.author, received.current?.details?.pendingComments] : null]);
-  const numbers = stepNumbers(groups);
   const draw = (step: GuideStep): HTMLElement => {
     stepKeys.set(step.key, keyOf(step));
-    return stepBox(step, numbers.get(step.key) ?? 0, spans.get(step.key) ?? [], owners.threads.get(step.key) ?? [], owners.notes.get(step.key), owners.draft === step.key);
+    const number = chapters.indexOf(step) + 1;
+    return stepBox(step, number > 0 ? { number, total: chapters.length } : undefined, parts.get(step.key), spans.get(step.key) ?? [], owners.threads.get(step.key) ?? [], owners.notes.get(step.key), owners.draft === step.key, trivial.has(step.key));
   };
   const boxes = new Map([...container.querySelectorAll<HTMLElement>('.step-wrap')].map((node) => [node.dataset.key, node]));
-  const targets = only === 'state' ? visible.filter((step) => stepKeys.get(step.key) !== keyOf(step))
-    : only ? visible.filter((step) => only.includes(step.path)) : undefined;
-  if (targets && boxes.size === visible.length && targets.every((step) => boxes.has(step.key))) {
+  const targets = only === 'state' ? steps.filter((step) => stepKeys.get(step.key) !== keyOf(step))
+    : only ? steps.filter((step) => only.includes(step.path)) : undefined;
+  if (targets && boxes.size === steps.length && targets.every((step) => boxes.has(step.key))) {
     for (const step of targets) boxes.get(step.key)?.replaceWith(draw(step));
   } else {
     stepKeys.clear();
     container.replaceChildren(guideSummary(result, groups));
     for (const group of groups) {
-      const isCollapsed = groupCollapsed(group);
-      const { node, rail } = railNode(groupHead(group), 0, isCollapsed, () => { collapsed.set(guideState('group', group.key), !isCollapsed); save(); renderFiles(); });
-      container.append(node);
-      if (!isCollapsed) for (const step of group.steps) rail.append(railItem(draw(step)));
+      if (group.severity === 'unclassified') { container.append(unplacedSection(group, draw)); continue; }
+      container.append(groupHead(group));
+      for (const step of group.steps) container.append(draw(step));
     }
   }
   updateGuideProgress(groups);
-  renderGuideNav(groups);
+  $('file-nav').replaceChildren();
 }
 
-/** Steps numbered through the whole guide, so a number names one step. */
-function stepNumbers(groups: readonly GuideGroup[]): Map<string, number> {
-  return new Map(groups.flatMap((group) => group.steps).map((step, index) => [step.key, index + 1]));
+/** Files the guide does not place: one section with a note, then their diffs one under another. */
+function unplacedSection(group: GuideGroup, draw: (step: GuideStep) => HTMLElement): HTMLElement {
+  const section = el('section', 'chapter unplaced');
+  const side = el('div', 'chapter-side');
+  side.dataset.group = group.key;
+  const meta = el('div', 'chapter-meta');
+  meta.append(el('span', 'chapter-progress'));
+  side.append(meta, el('h2', 'chapter-title', 'Not in a chapter'), el('p', 'chapter-prose', 'Changes the guide does not cover, such as files added since it was built.'));
+  const code = el('div', 'chapter-code');
+  code.append(...group.steps.map(draw));
+  section.append(side, code);
+  return section;
 }
 
-/** The guide's sections and numbered steps beside the steps, each with its Viewed state; a click scrolls to it. */
-function renderGuideNav(groups: readonly GuideGroup[]): void {
-  const nav = $('file-nav');
-  nav.classList.toggle('folded', ui.navFolded);
-  const steps = groups.flatMap((group) => group.steps);
-  const numbers = stepNumbers(groups);
-  const head = el('button', 'nav-head');
-  head.setAttribute('aria-expanded', String(!ui.navFolded));
-  head.append(chevronMark(ui.navFolded), steps.length + (steps.length === 1 ? ' step' : ' steps'));
-  head.addEventListener('click', () => { ui.navFolded = !ui.navFolded; renderGuideNav(groups); });
-  const list = el('ul', 'nav-list');
-  for (const group of groups) {
-    const isCollapsed = groupCollapsed(group);
-    const fold = chevronMark(isCollapsed);
-    fold.title = isCollapsed ? 'Unfold section' : 'Fold section';
-    fold.addEventListener('click', (event) => { event.stopPropagation(); collapsed.set(guideState('group', group.key), !isCollapsed); save(); renderFiles(); });
-    const row = el('button', 'nav-section sev-' + group.severity);
-    row.title = severityLabels[group.severity] + ': ' + group.title;
-    row.append(fold, el('span', 'nav-sev'), el('span', 'nav-name', group.title), el('span', 'nav-progress', group.steps.filter(stepViewed).length + '/' + group.steps.length));
-    row.addEventListener('click', () => revealGroup(group.key));
-    const item = el('li');
-    item.append(row);
-    list.append(item);
-    if (isCollapsed) continue;
-    for (const step of group.steps) {
-      const done = stepViewed(step);
-      const stepRow = el('button', 'nav-file nav-step' + (done ? ' done' : ''));
-      stepRow.dataset.navStep = step.key;
-      stepRow.title = step.path + (step.note === undefined ? '' : '\n\n' + step.note);
-      const mark = el('span', 'nav-done');
-      if (done) mark.append(icon(icons.check));
-      stepRow.append(el('span', 'nav-number', String(numbers.get(step.key) ?? '')), el('span', 'nav-name', step.title ?? step.path.split('/').at(-1) ?? step.path), mark);
-      stepRow.addEventListener('click', () => revealStep(step.key));
-      const stepItem = el('li');
-      stepItem.append(stepRow);
-      list.append(stepItem);
-    }
+/** Changed blocks of a chapter that are read, and all of them; a file with no line changes counts as one. */
+function chapterBlocks(step: GuideStep): { done: number; all: number } {
+  const file = received.files?.find((item) => item.path === step.path);
+  if (step.blocks.length === 0 || file === undefined) return { done: stepViewed(step) ? 1 : 0, all: 1 };
+  if (stepViewed(step)) return { done: step.blocks.length, all: step.blocks.length };
+  return { done: step.blocks.filter((block) => rangeReadIds(file, received.readRanges, block.range) !== undefined).length, all: step.blocks.length };
+}
+
+/** `L86-88`, or `L86` for one line. */
+function lineLabel(from: number, to: number): string {
+  return 'L' + from + (to > from ? '-' + to : '');
+}
+
+/** Text with `identifier` spans as code. */
+function inlineText(text: string): (string | HTMLElement)[] {
+  return text.split(/(`[^`]+`)/u).filter(Boolean).map((part) => part.length > 2 && part.startsWith('`') && part.endsWith('`') ? el('code', '', part.slice(1, -1)) : part);
+}
+
+/** A chapter's note, with the phrases that cite lines of the diff beside it linked to them. */
+function prose(step: GuideStep, part: FileDiff | undefined): HTMLElement {
+  const node = el('p', 'chapter-prose');
+  for (const segment of noteSegments(step.note ?? '', step.refs, part)) {
+    if (segment.ref === undefined) { node.append(...inlineText(segment.text)); continue; }
+    const phrase = el('span', 'ref');
+    phrase.dataset.from = String(segment.ref.from);
+    phrase.dataset.to = String(segment.ref.to);
+    phrase.append(...inlineText(segment.text), el('sup', '', lineLabel(segment.ref.from, segment.ref.to)));
+    node.append(phrase);
   }
-  nav.replaceChildren(head, list);
-  markCurrentNavFile();
+  return node;
 }
 
-function stepBox(step: GuideStep, number: number, spans: readonly StepSpan[], threads: readonly Thread[], note: Thread | undefined, hasDraft: boolean): HTMLElement {
-  const wrap = el('div', 'step-wrap');
+/** The chapter's left column: where it sits, its title, its note and Claude's conversation about it. */
+function chapterSide(step: GuideStep, where: { number: number; total: number }, part: FileDiff | undefined, note: Thread | undefined): HTMLElement {
+  const side = el('div', 'chapter-side');
+  const { done, all } = chapterBlocks(step);
+  const meta = el('div', 'chapter-meta');
+  meta.append(el('span', '', String(where.number).padStart(2, '0') + ' / ' + String(where.total).padStart(2, '0')), el('span', '', '·'), el('span', 'chapter-progress', done + ' of ' + all + ' viewed'));
+  side.append(meta, el('h2', 'chapter-title', step.title ?? step.path.split('/').at(-1) ?? step.path));
+  if (step.transition) side.append(el('p', 'chapter-transition', step.transition));
+  if (step.note) side.append(prose(step, part));
+  if (note) {
+    const talk = el('div', 'chapter-talk');
+    talk.append(chapterThread(note));
+    side.append(talk);
+  }
+  return side;
+}
+
+/** A step's file box; with `where` it is a chapter, the note and conversation in a column beside it, otherwise just the box. */
+function stepBox(step: GuideStep, where: { number: number; total: number } | undefined, part: FileDiff | undefined, spans: readonly StepSpan[], threads: readonly Thread[], note: Thread | undefined, hasDraft: boolean, trivial: boolean): HTMLElement {
+  const wrap = el('div', 'step-wrap' + (where ? ' chapter' : ''));
   wrap.dataset.key = step.key;
-  if (step.transition) wrap.append(el('div', 'transition', '↓ ' + step.transition));
   const file = received.files?.find((item) => item.path === step.path);
   if (!file) return wrap;
-  const isCollapsed = stepCollapsed(step);
+  const column = where ? el('div', 'chapter-code') : wrap;
+  if (where) wrap.append(chapterSide(step, where, part, note), column);
+  const isCollapsed = stepCollapsed(step, trivial);
   const box = el('div', 'file step' + (isCollapsed ? ' collapsed' : ''));
   box.dataset.path = step.path;
   const head = el('div', 'file-head');
   const chevron = chevronMark(isCollapsed);
   const name = el('span', 'name');
-  name.append(el('span', 'step-title', number + '.' + (step.title ? ' ' + step.title : '')), el('span', 'step-path', file.oldPath ? file.oldPath + ' → ' + file.path : file.path));
+  name.append(file.oldPath ? file.oldPath + ' → ' + file.path : file.path);
   name.title = file.path;
   const toggle = (): void => { collapsed.set(guideState('step', step.key), !isCollapsed); save(); renderFiles([step.path]); };
   chevron.addEventListener('click', toggle);
@@ -245,13 +264,7 @@ function stepBox(step: GuideStep, number: number, spans: readonly StepSpan[], th
     headTools(commentFile, toolButton(icons.openExternal, 'Open in editor', () => post({ action: 'editor', path: step.path }))), label);
   box.append(head);
   const diff = el('div', 'diff');
-  if (step.fileNote) {
-    const about = el('div', 'file-note');
-    about.append(el('span', 'tag', 'About this file'), ' ', step.fileNote);
-    diff.append(about);
-  }
-  if (note) diff.append(threadBox(note));
-  else if (step.note) diff.append(el('div', 'step-note', step.note));
+  if (step.fileNote && !(step.note ?? '').includes(step.fileNote)) diff.append(el('div', 'file-note', step.fileNote));
   const placed = new Set<string>();
   const whole = wholeFileBlock(file.path, threads, placed, false);
   if (whole) diff.append(whole);
@@ -261,7 +274,7 @@ function stepBox(step: GuideStep, number: number, spans: readonly StepSpan[], th
   else if (!spans.length) diff.append(el('div', 'note muted', file.change === 'renamed' ? 'Renamed without changes.' : 'No content changes.'));
   else if (!isCollapsed) diff.append(...stepTables(step, file, spans, threads, placed, hasDraft ? prefs.composer : null));
   box.append(diff);
-  wrap.append(box);
+  column.append(box);
   return wrap;
 }
 

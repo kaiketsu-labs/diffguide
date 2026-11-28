@@ -12,6 +12,7 @@ import { allFolded, applyFilters, closeSearch, filtersOn, openFilterMenu, openSe
 import { markCurrentNavFile, markEndingFiles, openFolders, showNavThreadsHeight, showNavWidth } from './files/nav.js';
 import { frameMessage } from './files/preview.js';
 import { setupCodeRefs } from './files/refs.js';
+import { setupChapterLinks } from './guide/links.js';
 import { setupFind } from './find.js';
 import { frameParking, renderFiles } from './files/render.js';
 import { paintDrag, pick, setupSelectionComment } from './files/selection.js';
@@ -83,6 +84,7 @@ blockBrowserShortcuts();
 setupFind();
 setupCodeCopy();
 setupCodeRefs();
+setupChapterLinks();
 document.addEventListener('mousemove', (event) => {
   ui.pointer = event;
   if (event.metaKey || event.ctrlKey) probeAt(event);
