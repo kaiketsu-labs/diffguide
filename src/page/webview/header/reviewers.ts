@@ -11,15 +11,20 @@ import { post } from '../transport.js';
 
 let reviewersStamp = '';
 
-export function baseButton(): HTMLElement {
+/** The base branch chip with its change pencil beside it, as one item of the byline. */
+export function baseRef(chip: HTMLElement): HTMLElement {
+  const anchor = el('span', 'menu-anchor base-ref');
+  anchor.append(chip, baseButton());
+  return anchor;
+}
+
+function baseButton(): HTMLElement {
   const edit = toolButton(icons.edit, 'Change base branch', openBaseMenu);
   edit.id = 'change-base';
   edit.classList.add('icon-button');
   edit.dataset.prAction = '';
   edit.setAttribute('aria-haspopup', 'true');
-  const anchor = el('span', 'menu-anchor');
-  anchor.append(edit);
-  return anchor;
+  return edit;
 }
 
 /** The reviewers and their tools, with the dismiss form under the reviewer it is open for; redrawn only when they change, so the form keeps its focus. */

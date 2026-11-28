@@ -283,23 +283,23 @@ const longHeader: OverviewState = {
   details: { ...pullRequest.details!, title: 'feat(export): stream notes as newline-delimited JSON', checks: [{ name: 'e2e', state: 'failure' }] },
 };
 /** On one row from 900 px, the byline, facts and toolbar must not overlap; below, the facts hide and at 760 px the byline wraps to its own row. */
-const rowChecks = (width: number): Step[] => width > 900 ? [{ after: ['#facts', '#byline'] }, { after: ['#head .toolbar', '#facts'] }] : width > 760 ? [{ after: ['#head .toolbar', '#byline'] }] : [{ below: ['#byline', '#title'] }, { next: ['#byline .ref:nth-of-type(2)', '#byline .ref', 40] }];
+const rowChecks = (width: number): Step[] => width > 900 ? [{ after: ['#facts', '#byline'] }, { after: ['#head .toolbar', '#facts'] }] : width > 760 ? [{ after: ['#head .toolbar', '#byline'] }] : [{ below: ['#byline', '#title'] }, { next: ['#byline .base-ref .ref', '#byline .ref', 40] }];
 /** Hover icons sit beside their chip, never over text or each other: the number's copy icon on its left, a branch's on its right (over the arrow), the base pencil after that, and the title pencil before the byline. */
 const hoverChecks = (width: number): Step[] => [
   { hover: '#number .ref' }, { after: ['#number .ref', '#number .copy'] }, { inside: ['#number .copy', 'body'] }, { css: ['#number .copy', '', 'opacity', '1'] }, { shot: `header-hover-number-${width}.png` },
-  { hover: '#byline .ref:first-child' }, { after: ['#byline .ref:first-child .copy', '#byline .ref:first-child'] }, { after: ['#byline .ref:nth-of-type(2)', '#byline .ref:first-child .copy'] }, { css: ['#byline .to', '', 'opacity', '0'] },
-  { hover: '#byline .ref:nth-of-type(2)' }, { after: ['#byline .ref:nth-of-type(2) .copy', '#byline .ref:nth-of-type(2)'] }, { after: ['#change-base', '#byline .ref:nth-of-type(2) .copy'] }, { css: ['#change-base', '', 'opacity', '1'] },
+  { hover: '#byline .ref:first-child' }, { after: ['#byline .ref:first-child .copy', '#byline .ref:first-child'] }, { after: ['#byline .base-ref .ref', '#byline .ref:first-child .copy'] }, { css: ['#byline .to', '', 'opacity', '0'] },
+  { hover: '#byline .base-ref .ref' }, { after: ['#byline .base-ref .ref .copy', '#byline .base-ref .ref'] }, { after: ['#change-base', '#byline .base-ref .ref .copy'] }, { css: ['#change-base', '', 'opacity', '1'] },
   ...width > 900 ? [{ after: ['#facts', '#change-base'] } as Step] : width > 760 ? [{ after: ['#head .toolbar', '#change-base'] } as Step] : [],
   { shot: `header-hover-branch-${width}.png` },
   { hover: '#title' }, { after: ['#edit-title', '#title'] }, { after: ['#head .toolbar', '#edit-title'] }, { css: ['#edit-title', '', 'opacity', '1'] }, ...width > 760 ? [{ after: ['#byline', '#edit-title'] } as Step] : [],
   { shot: `header-hover-title-${width}.png` },
-  { click: '#change-base', expect: '.base-menu' }, { inside: ['.base-menu', 'body'] }, { shot: `header-menu-base-${width}.png` }, { press: 'Escape' },
-  { press: 'Shift+Tab' }, { expect: '#change-base:focus-visible' }, { shot: `header-focus-pencil-${width}.png` }, { press: 'Shift+Tab' }, { expect: '#byline .ref:nth-of-type(2):focus-visible' }, { css: ['#byline .ref:nth-of-type(2) .copy', '', 'opacity', '1'] }, { shot: `header-focus-${width}.png` },
+  { hover: '#byline .base-ref .ref' }, { click: '#change-base', expect: '.base-menu' }, { inside: ['.base-menu', 'body'] }, { shot: `header-menu-base-${width}.png` }, { press: 'Escape' },
+  { press: 'Shift+Tab' }, { expect: '#change-base:focus-visible' }, { shot: `header-focus-pencil-${width}.png` }, { press: 'Shift+Tab' }, { expect: '#byline .base-ref .ref:focus-visible' }, { css: ['#byline .base-ref .ref .copy', '', 'opacity', '1'] }, { shot: `header-focus-${width}.png` },
 ];
 const headerFits = (width: number): Scene => scene(longHeader, [
-  { tallest: ['#claude-chip', 30] }, { inside: ['#claude-chip .chip-new', '#claude-chip'] }, { inside: ['#claude-chip', '#claude-chip'] },
+  { css: ['#byline', '', 'padding-right', '0px'] }, { tallest: ['#claude-chip', 30] }, { inside: ['#claude-chip .chip-new', '#claude-chip'] }, { inside: ['#claude-chip', '#claude-chip'] },
   { tallest: ['#byline', 26] }, ...rowChecks(width), { after: ['#reviewed', '#verdict'] }, { inside: ['#finish-review', '#finish-review'] }, { tallest: ['#finish-review', 30] },
-  { level: ['#title', '#finish-review'] }, { inside: ['#byline .ref:nth-of-type(2)', '#byline'] }, { after: ['#head .toolbar', '#title'] }, { tallest: ['#push', 30] }, { inside: ['#push', '#push'] }, { shot: `header-long-${width}.png` },
+  { level: ['#title', '#finish-review'] }, { inside: ['#byline .base-ref .ref', '#byline'] }, { after: ['#head .toolbar', '#title'] }, { tallest: ['#push', 30] }, { inside: ['#push', '#push'] }, { shot: `header-long-${width}.png` },
   ...hoverChecks(width),
   { click: '#tab-files', wait: 200 }, { tallest: ['.seg', 30] }, { inside: ['.seg > *', '.seg'] }, { shot: `header-long-${width}-files.png` },
 ], { width, height: 500 });
@@ -339,8 +339,8 @@ export const scenes: Readonly<Record<string, Scene>> = {
   ], { saved: { view: 'code' } }),
   // Copy icons and the title's pencil show on hover; clicking the title edits it.
   'header-hover': scene(pullRequest, [
-    { css: ['#number .ref svg.copy', '', 'opacity', '0'] }, { css: ['#edit-title', '', 'opacity', '0'] }, { css: ['#change-base', '', 'opacity', '0'] },
-    { hover: '#number .ref', css: ['#number .ref svg.copy', '', 'opacity', '1'] }, { hover: '#title', css: ['#edit-title', '', 'opacity', '1'] }, { hover: '#byline .ref', css: ['#change-base', '', 'opacity', '1'] },
+    { css: ['#number .ref svg.copy', '', 'display', 'none'] }, { css: ['#edit-title', '', 'opacity', '0'] }, { css: ['#change-base', '', 'opacity', '0'] },
+    { hover: '#number .ref', css: ['#number .ref svg.copy', '', 'display', 'block'] }, { hover: '#title', css: ['#edit-title', '', 'opacity', '1'] }, { hover: '#byline .ref', css: ['#change-base', '', 'opacity', '1'] },
     { click: '#title', expect: '#title-form input:focus' }, { absent: '#title:visible' },
   ], { saved: { view: 'code' } }),
   // Pages saved before the Guide, Files and Conversation tabs keep their place; a page nothing was saved for opens on Guide.

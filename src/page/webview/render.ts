@@ -12,7 +12,7 @@ import { drawPendingDiffs, renderFiles } from './files/render.js';
 import { guideState } from './guide/model.js';
 import { renderPush } from './header/actions.js';
 import { branchRef, copyRef, failingCheck, openedLine, pullRequestChip, pullRequestFacts, renderLinked, renderState, reviewVerdict, showHeadStatus } from './header/pullRequest.js';
-import { baseButton, renderReviewers } from './header/reviewers.js';
+import { baseRef, renderReviewers } from './header/reviewers.js';
 import { renderSync } from './header/sync.js';
 import { closeToolbarMenu } from './menus.js';
 import { renderRangeControls, requestFiles, sameRange } from './range.js';
@@ -82,7 +82,7 @@ export function render(state: OverviewState): void {
     if (ui.toolbarMenu?.anchor === 'change-base') closeToolbarMenu();
     if (state.localMode && !state.headBranch) $('byline').replaceChildren('Files in this folder, outside Git');
     else if (state.localMode) $('byline').replaceChildren('on ', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
-    else $('byline').replaceChildren(branchRef(state.headBranch), el('span', 'to', '→'), branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
+    else $('byline').replaceChildren(branchRef(state.headBranch), el('span', 'to', '→'), canChangeBase ? baseRef(branchRef(state.baseBranch)) : branchRef(state.baseBranch));
   }
   if (!state.localMode) $('facts').replaceChildren(...pullRequestFacts(state));
   $('opened').replaceChildren(...openedLine(state));
