@@ -47,6 +47,8 @@ const pullRequest: ChangeRequestSummary = {
 const published: { number: number; comment: ChangeRequestComment; pending: boolean }[] = [];
 const provider: Forge = {
   ...mockPullRequestProvider,
+  // This repository is not the demo one, so GitHub's head is unknown.
+  conversation: async (number) => { const demo = await mockPullRequestProvider.conversation(number); return { ...demo, merge: { ...demo.merge, headOid: '' } }; },
   readRepository: async () => ({ name: 'acme/app', url: 'https://github.com/acme/app' }),
   listMine: async () => [],
   listReviewRequested: async () => [],
