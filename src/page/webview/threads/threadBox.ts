@@ -55,7 +55,7 @@ export function avatar(entry: Message, author: string): HTMLElement {
 /** Avatar on the left, text beside it. GitHub messages name their author; local ones are You or Claude, which the avatar already says. */
 function message(entry: Message, thread?: Thread): HTMLElement {
   const author = 'avatarUrl' in entry ? entry.author : entry.author === 'claude' ? 'Claude' : 'You';
-  const item = el('div', 'msg');
+  const item = el('div', author === 'Claude' ? 'msg from-agent' : 'msg');
   const main = el('div', 'msg-main');
   item.append(avatar(entry, author), main);
   if ('avatarUrl' in entry && thread?.source === 'github') {
@@ -126,13 +126,22 @@ export function strip<K extends keyof HTMLElementTagNameMap>(tag: K, kind: Threa
 }
 
 export function threadBox(thread: Thread): HTMLElement {
+  return drawThread(thread, false);
+}
+
+/** A guide chapter's conversation: the thread without its strip or Claude's note (the chapter shows it), and an Ask field in place of its buttons. */
+export function chapterThread(thread: Thread): HTMLElement {
+  return drawThread(thread, true);
+}
+
+function drawThread(thread: Thread, chapter: boolean): HTMLElement {
   const github = thread.source === 'github';
   const fromAnalysis = thread.source === 'local' && thread.origin === 'analysis';
   const finding = thread.source === 'local' && thread.origin === 'review' ? thread.finding : undefined;
   const fromClaude = fromAnalysis || (thread.source === 'local' && thread.origin === 'review');
   const box = el('details', 'thread ' + thread.source + (thread.pending ? ' pending' : '') + (fromAnalysis ? ' analysis' : '') + (thread.source === 'local' && thread.origin === 'review' ? ' review' : ''));
   box.id = 'thread-' + thread.id;
-  box.open = threadOpen.get(thread.id) ?? !thread.resolved;
+  box.open = chapter || (threadOpen.get(thread.id) ?? !thread.resolved);
   box.addEventListener('toggle', () => {
     if (box.open === !thread.resolved) threadOpen.delete(thread.id); else threadOpen.set(thread.id, box.open);
   });
@@ -156,6 +165,7 @@ export function threadBox(thread: Thread): HTMLElement {
     open.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); post({ action: 'github', id: thread.id }); });
     summary.append(open);
   }
+  summary.hidden = chapter;
   box.append(summary);
   const folded = thread.messages.length > foldThreadsAbove ? thread.messages.length - unfoldedMessages : 0;
   const foldedItems: HTMLElement[] = [];
@@ -163,6 +173,7 @@ export function threadBox(thread: Thread): HTMLElement {
   const startedBy = (time: string): Thread[] => nested.splice(0, nested.filter((local) => started(local) <= Date.parse(time)).length);
   thread.messages.forEach((entry, index) => {
     box.append(...startedBy(entry.createdAt).map(threadBox));
+    if (chapter && index === 0) return;
     const item = message(entry, thread);
     if (thread.source === 'local' && thread.newAnswer !== undefined && index === thread.messages.length - 1) watchAnswer(item, thread);
     if (index < folded) {
@@ -253,15 +264,22 @@ export function threadBox(thread: Thread): HTMLElement {
       for (const each of [implement, ask]) { each.disabled = busySending; actions.append(each); }
     } else {
       primary.title = 'Agent answers without editing';
-      const implement = agentButton('implement', 'Implement', () => submit('implement'));
-      implement.title = 'Agent changes the code. Without a note, it implements what the thread discussed';
-      implement.disabled = busySending;
       needText.push(primary);
       onReply(reply);
-      actions.append(implement);
+      // A chapter's questions are about understanding, so only code threads offer Implement.
+      if (!chapter) {
+        const implement = agentButton('implement', 'Implement', () => submit('implement'));
+        implement.title = 'Agent changes the code. Without a note, it implements what the thread discussed';
+        implement.disabled = busySending;
+        actions.append(implement);
+      }
     }
     actions.append(primary);
     box.append(actions, ...draftingLog(thread));
+    return box;
+  }
+  if (chapter) {
+    if (!thread.resolved) box.append(button('Ask about this chapter', () => { replies.set(thread.id, ''); ui.focusNext = key; save(); redrawThread(thread); }, 'ask-chapter'));
     return box;
   }
   if (thread.source === 'local' && isArchived(thread)) {

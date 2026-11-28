@@ -91,7 +91,7 @@ export class PullRequestAnalysis implements AgentGuideAnalysis {
     const prompt = analysisPrompt(input.files, blocks, input.about, await this.options.instructions?.() ?? '');
     if (prompt.length > maximumPromptLength) throw new Error(`This PR is too large to analyze (${blocks.length} changed blocks).`);
     const output = await this.#spawn(prompt);
-    const analysis = parseClaudeAnalysis(output, blocks, input.head, new Date().toISOString());
+    const analysis = parseClaudeAnalysis(output, blocks, input.head, new Date().toISOString(), input.files);
     const byRef = new Map(blocks.map((block) => [block.path + '\0' + block.signature, block]));
     const anchors = await Promise.all(analysis.groups.flatMap((group) => group.steps).map(async (step) => {
       const first = step.blocks[0];

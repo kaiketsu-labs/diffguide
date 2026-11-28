@@ -1,5 +1,4 @@
 /** Renders the whole page from the extension's state, and switches tabs. */
-import { buildGuide } from '../../core/prAnalysis.js';
 import { icons } from '../icons.js';
 import type { OverviewState } from '../protocol.js';
 import { renderAnswers } from './answers.js';
@@ -242,30 +241,21 @@ export function showCodeTab(): void {
   showListToggle();
 }
 
-/** Show the guided layout with a step's group and the step open, scrolled to it. */
+/** Show the guided layout with a step's chapter open, scrolled to it. */
 export function revealStep(key: string): void {
   prefs.view = 'code';
   prefs.order = 'guide';
-  const result = received.current?.analysis.result;
-  if (received.files && result) {
-    received.guide ??= buildGuide(result, received.files);
-    const group = received.guide.find((item) => item.steps.some((step) => step.key === key));
-    if (group) {
-      collapsed.set(guideState('group', group.key), false);
-      collapsed.set(guideState('step', key), false);
-    }
-  }
+  collapsed.set(guideState('step', key), false);
   save();
   renderFiles();
   document.querySelector('.step-wrap[data-key="' + CSS.escape(key) + '"]')?.scrollIntoView({ block: 'start' });
 }
 
-/** Show the guided layout with a section unfolded, scrolled to its head. */
+/** Show the guided layout scrolled to a section's first chapter. */
 export function revealGroup(key: string): void {
   prefs.view = 'code';
   prefs.order = 'guide';
-  collapsed.set(guideState('group', key), false);
   save();
   renderFiles();
-  document.querySelector('[data-group="' + CSS.escape(key) + '"]')?.closest('.tree-node')?.scrollIntoView({ block: 'start' });
+  document.querySelector('[data-group="' + CSS.escape(key) + '"]')?.scrollIntoView({ block: 'start' });
 }

@@ -57,8 +57,10 @@ export function closeSearch(): void {
 
 /** The file list's collapse icon, with a dot while a hidden list still filters the files. */
 export function showListToggle(): void {
-  $('files-layout').classList.toggle('list-hidden', prefs.listHidden);
+  const chapters = guided() && received.current?.analysis.result !== undefined;
+  $('files-layout').classList.toggle('list-hidden', prefs.listHidden || chapters);
   const toggle = $('nav-toggle');
+  toggle.hidden = chapters;
   setTip(toggle, prefs.listHidden ? 'Expand file list' : 'Collapse file list');
   toggle.setAttribute('aria-expanded', String(!prefs.listHidden));
   toggle.classList.toggle('filtered', prefs.listHidden && prefs.view === 'code' && !guided() && filtersOn());
