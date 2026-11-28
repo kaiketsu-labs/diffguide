@@ -256,7 +256,7 @@ const scenarios = [
       }
       await page.evaluate((state) => window.postMessage({ state }, '*'), original);
       await page.click('#tab-files');
-      step('Controlled host states kept Push permission-gated, placed unpushed actions in Push's menu, kept the guide out of Conversation, and opened all three Details pickers');
+      step('Controlled host states kept Push permission-gated, placed unpushed actions in the Push menu, kept the guide out of Conversation, and opened all three Details pickers');
 
       // Finish review opens its form under the button and stays on Code.
       await page.click('#finish-review');
