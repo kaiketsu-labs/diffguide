@@ -22,11 +22,17 @@ export interface ChangeBlock {
 }
 
 export interface BlockRef { readonly path: string; readonly signature: string }
+
+/** A phrase of a step's note that points to lines of the step's file, new-side numbers, `from` to `to`. */
+export interface LineRef { readonly text: string; readonly path: string; readonly from: number; readonly to: number }
+
 export interface AnalysisStep {
   readonly blocks: readonly BlockRef[];
   /** A few words naming the step; missing in analyses made before titles existed. */
   readonly title?: string;
   readonly note: string;
+  /** Phrases of the note that cite lines; missing in analyses made before line references existed. */
+  readonly refs?: readonly LineRef[];
   /** Links the step to the one before it. */
   readonly transition?: string;
   /** The review thread that carries the note, so the reviewer can reply. */
@@ -51,6 +57,7 @@ export interface GuideStep {
   readonly blocks: readonly ChangeBlock[];
   readonly title?: string;
   readonly note?: string;
+  readonly refs?: readonly LineRef[];
   readonly transition?: string;
   readonly threadId?: string;
   /** Set on the first step of each file. */
@@ -119,7 +126,16 @@ export const analysisSchema = {
             type: 'array',
             items: {
               type: 'object', additionalProperties: false, required: ['blocks', 'title', 'note'],
-              properties: { blocks: { type: 'array', items: { type: 'string' } }, title: { type: 'string' }, note: { type: 'string' }, transition: { type: 'string' } },
+              properties: {
+                blocks: { type: 'array', items: { type: 'string' } }, title: { type: 'string' }, note: { type: 'string' }, transition: { type: 'string' },
+                refs: {
+                  type: 'array',
+                  items: {
+                    type: 'object', additionalProperties: false, required: ['text', 'path', 'from', 'to'],
+                    properties: { text: { type: 'string' }, path: { type: 'string' }, from: { type: 'integer' }, to: { type: 'integer' } },
+                  },
+                },
+              },
             },
           },
         },
@@ -136,6 +152,7 @@ The diff marks each run of changed lines with an id such as [b12].
 - Order the steps inside a group so they are easiest to follow: definitions before their callers, causes before effects.
 - title: two to five words naming the step, such as "Gate integrated loudness".
 - note: what the step changes and why it matters, in one to three sentences. Name the risk the reviewer should check, if any.
+- refs: optionally, up to four phrases of the note that point to lines of the step's file. Each has text (a few words copied exactly from the note, which stays plain text), path (the step's file, exactly as in the diff) and from and to (new-file line numbers, from <= to, lines the diff shows). Each block's id is followed by its line numbers; count from them. Leave a ref out when unsure of its lines.
 - transition: optionally, one sentence on how the step follows from the one before it.
 - files: a one-sentence note on a file's role in the PR, only where it helps.
 - overview: two to four sentences on what the PR does and where its risk is.
@@ -145,14 +162,14 @@ const maximumFileDiffLength = 40_000;
 
 /** The prompt for one analysis run: instructions, then each file's hunks with block ids. */
 export function analysisPrompt(files: readonly FileDiff[], blocks: readonly ChangeBlock[], about: string, custom = ''): string {
-  const starts = new Map(blocks.map((block) => [`${block.path}\0${block.hunk}\0${block.first}`, block.id]));
+  const starts = new Map(blocks.map((block) => [`${block.path}\0${block.hunk}\0${block.first}`, { id: block.id, side: block.range.side, start: block.range.startLine, end: block.range.endLine }]));
   const parts = files.map((file) => {
     const head = `=== ${file.path} (${file.change}${file.oldPath ? `, was ${file.oldPath}` : ''})`;
     if (file.binary) return `${head}\nBinary file, no blocks.`;
     const sign = (line: DiffLine): string => (line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' ') + lineText(line);
     const hunks = file.hunks.map((hunk, hunkIndex) => [hunk.header, ...hunk.lines.flatMap((line, index) => {
       const marker = starts.get(`${file.path}\0${hunkIndex}\0${index}`);
-      return marker === undefined ? [sign(line)] : [`[${marker}]`, sign(line)];
+      return marker === undefined ? [sign(line)] : [`[${marker.id}] ${marker.side} lines ${marker.start}-${marker.end}`, sign(line)];
     })].join('\n'));
     const full = [head, ...hunks].join('\n');
     if (full.length <= maximumFileDiffLength) return full;
@@ -177,8 +194,55 @@ const records = (value: unknown): Record<string, unknown>[] => Array.isArray(val
   ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
   : [];
 
+const maximumRefs = 4;
+
+/** The new-side line numbers a file's diff shows, changed or not. */
+function shownLines(file: FileDiff): Set<number> {
+  return new Set(file.hunks.flatMap((hunk) => hunk.lines).flatMap((line) => line.kind !== 'del' && line.newLine !== undefined ? [line.newLine] : []));
+}
+
+/**
+ * The line references of a step's note that hold: the phrase is in the note, the path is the step's file, and both ends are integer lines in order.
+ * With `file`, both ends must also be lines it shows; anything else is dropped, so the note keeps its plain text.
+ */
+export function checkLineRefs(raw: unknown, note: string, path: string, file?: FileDiff): LineRef[] {
+  const shown = file === undefined ? undefined : shownLines(file);
+  const refs: LineRef[] = [];
+  for (const item of records(raw)) {
+    const text = cleanText(item['text'], 200);
+    const { path: itemPath, from, to } = item;
+    if (text === undefined || itemPath !== path || !Number.isSafeInteger(from) || !Number.isSafeInteger(to)) continue;
+    const start = from as number;
+    const end = to as number;
+    if (start < 1 || end < start || !note.includes(text) || refs.some((ref) => ref.text === text)) continue;
+    if (shown !== undefined && !(shown.has(start) && shown.has(end))) continue;
+    refs.push({ text, path, from: start, to: end });
+    if (refs.length === maximumRefs) break;
+  }
+  return refs;
+}
+
+/** A run of a note: plain text, or the phrase of a line reference. */
+export interface NoteSegment { readonly text: string; readonly ref?: LineRef }
+
+/** A note cut into plain runs and the phrases of its references that still point to lines `file` shows; the first occurrence of a phrase links, and overlapping phrases keep the earlier one. */
+export function noteSegments(note: string, refs: readonly LineRef[] | undefined, file: FileDiff | undefined): NoteSegment[] {
+  const valid = file === undefined ? [] : checkLineRefs(refs, note, file.path, file);
+  const placed = valid.flatMap((ref) => { const at = note.indexOf(ref.text); return at < 0 ? [] : [{ ref, at }]; }).sort((a, b) => a.at - b.at);
+  const segments: NoteSegment[] = [];
+  let cursor = 0;
+  for (const { ref, at } of placed) {
+    if (at < cursor) continue;
+    if (at > cursor) segments.push({ text: note.slice(cursor, at) });
+    segments.push({ text: ref.text, ref });
+    cursor = at + ref.text.length;
+  }
+  if (cursor < note.length || segments.length === 0) segments.push({ text: note.slice(cursor) });
+  return segments;
+}
+
 /** Validate Claude's structured output against the diff it saw; unknown or repeated block ids are dropped. */
-export function parseClaudeAnalysis(raw: unknown, blocks: readonly ChangeBlock[], head: string, createdAt: string): Analysis {
+export function parseClaudeAnalysis(raw: unknown, blocks: readonly ChangeBlock[], head: string, createdAt: string, diffs: readonly FileDiff[] = []): Analysis {
   const record = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
   const byId = new Map(blocks.map((block) => [block.id, block]));
   const used = new Set<string>();
@@ -197,10 +261,13 @@ export function parseClaudeAnalysis(raw: unknown, blocks: readonly ChangeBlock[]
       for (const block of own) used.add(block.id);
       const transition = cleanText(step['transition'], 600);
       const title = cleanText(step['title'], 80);
+      const note = cleanText(step['note'], 4000) ?? 'No note.';
+      const refs = path === undefined ? [] : checkLineRefs(step['refs'], note, path, diffs.find((file) => file.path === path));
       return [{
         blocks: own.map(({ path: blockPath, signature }) => ({ path: blockPath, signature })),
         ...(title === undefined ? {} : { title }),
-        note: cleanText(step['note'], 4000) ?? 'No note.',
+        note,
+        ...(refs.length === 0 ? {} : { refs }),
         ...(transition === undefined ? {} : { transition }),
       }];
     });
@@ -233,8 +300,10 @@ export function readStoredAnalysis(raw: unknown): Analysis | undefined {
       const note = cleanText(step['note'], 4000);
       const transition = cleanText(step['transition'], 600);
       const title = cleanText(step['title'], 80);
+      const path = blocks[0]?.path;
+      const refs = path === undefined || note === undefined ? [] : checkLineRefs(step['refs'], note, path);
       return blocks.length === 0 || note === undefined ? [] : [{
-        blocks, ...(title === undefined ? {} : { title }), note, ...(transition === undefined ? {} : { transition }), ...(isId(step['threadId']) ? { threadId: step['threadId'] } : {}),
+        blocks, ...(title === undefined ? {} : { title }), note, ...(refs.length === 0 ? {} : { refs }), ...(transition === undefined ? {} : { transition }), ...(isId(step['threadId']) ? { threadId: step['threadId'] } : {}),
       }];
     });
     const title = cleanText(group['title'], 120);
@@ -272,7 +341,7 @@ export function buildGuide(analysis: Analysis, files: readonly FileDiff[]): Guid
       if (path === undefined) return [];
       return [{
         key: 'g' + groupIndex + '.' + stepIndex, path, blocks: found.sort((a, b) => a.hunk - b.hunk || a.first - b.first),
-        ...(step.title === undefined ? {} : { title: step.title }), note: step.note,
+        ...(step.title === undefined ? {} : { title: step.title }), note: step.note, ...(step.refs === undefined ? {} : { refs: step.refs }),
         ...(step.transition === undefined ? {} : { transition: step.transition }), ...(step.threadId === undefined ? {} : { threadId: step.threadId }),
       }];
     }),

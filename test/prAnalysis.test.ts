@@ -7,7 +7,7 @@ import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 import { type AnalysisOptions, PullRequestAnalysis, runStructuredClaude } from '../src/agents/claude/prAnalysisRunner.js';
 import type { CodeAnchor } from '../src/core/contracts.js';
-import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, parseClaudeAnalysis, readStoredAnalysis, stepSpans, stepViewed } from '../src/core/prAnalysis.js';
+import { analysisPrompt, buildGuide, changeBlocks, groupReadMarks, noteSegments, parseClaudeAnalysis, readStoredAnalysis, stepSpans, stepViewed } from '../src/core/prAnalysis.js';
 import { createReviewStore } from '../src/core/store.js';
 import { parseUnifiedDiff } from '../src/core/unifiedDiff.js';
 import { settle } from './fakes/vscode.js';
@@ -48,7 +48,7 @@ test('splits a diff into change blocks with the lines to mark read', () => {
     ['b4', 'src/b.ts', 'new', 2, 2],
   ]);
   const prompt = analysisPrompt(parseUnifiedDiff(diff), blocks, '#1 Demo');
-  assert.match(prompt, /\[b2\]\n-const g = 7;/u);
+  assert.match(prompt, /\[b2\] old lines 7-7\n-const g = 7;/u);
   assert.match(prompt, /logo\.png \(modified\)\nBinary file, no blocks\./u);
 });
 
@@ -246,4 +246,49 @@ test('summarizes a file whose diff is too large to show in full', () => {
   const prompt = analysisPrompt(files, changeBlocks(files), '#1 Lock');
   assert.match(prompt, /\[b1\] new lines 2-3001, 3000 changed\n\+  "package-0"/u);
   assert.ok(prompt.length < 5000);
+});
+
+const refDiff = parseUnifiedDiff(diff);
+const refNote = 'Changes b to three, then adds an export.';
+const refStep = (refs: unknown): unknown => ({ overview: 'x', files: [], groups: [{ severity: 'routine', title: 'All', steps: [{ blocks: ['b1'], note: refNote, refs }] }] });
+const parseRefs = (refs: unknown): readonly { text: string; path: string; from: number; to: number }[] | undefined =>
+  parseClaudeAnalysis(refStep(refs), changeBlocks(refDiff), 'head1', '2026-11-03T00:00:00.000Z', refDiff).groups[0]?.steps[0]?.refs;
+
+test('keeps line references that cite shown lines of the step file and links their phrases', () => {
+  const given = [{ text: 'b to three', path: 'src/a.ts', from: 2, to: 3 }];
+  const refs = parseRefs(given);
+  assert.deepEqual(refs, given);
+  assert.deepEqual(noteSegments(refNote, refs, refDiff[0]).map((segment) => [segment.text, segment.ref?.from]), [['Changes ', undefined], ['b to three', 2], [', then adds an export.', undefined]]);
+  const analysis = parseClaudeAnalysis(refStep(given), changeBlocks(refDiff), 'h', 'c', refDiff);
+  assert.deepEqual(readStoredAnalysis(JSON.parse(JSON.stringify(analysis))), analysis);
+});
+
+test('shows a reference as plain text when its path is unknown, its lines are out of range or its phrase is not in the note', () => {
+  assert.equal(parseRefs([{ text: 'b to three', path: 'src/other.ts', from: 2, to: 2 }]), undefined);
+  assert.equal(parseRefs([{ text: 'b to three', path: 'src/a.ts', from: 2, to: 99 }]), undefined);
+  assert.equal(parseRefs([{ text: 'b to three', path: 'src/a.ts', from: 0, to: 2 }]), undefined);
+  assert.equal(parseRefs([{ text: 'b to three', path: 'src/a.ts', from: 3, to: 2 }]), undefined);
+  assert.equal(parseRefs([{ text: 'b to three', path: 'src/a.ts', from: 1.5, to: 2 }]), undefined);
+  assert.equal(parseRefs([{ text: 'not in the note', path: 'src/a.ts', from: 2, to: 2 }]), undefined);
+  assert.equal(parseRefs('src/a.ts:2'), undefined);
+  const stale = { text: 'b to three', path: 'src/a.ts', from: 2, to: 3 };
+  assert.deepEqual(noteSegments(refNote, [stale], { ...refDiff[0]!, hunks: [] }), [{ text: refNote }]);
+  assert.deepEqual(noteSegments(refNote, [stale], refDiff[1]), [{ text: refNote }]);
+});
+
+test('renders a guide stored before line references existed', () => {
+  const stored = readStoredAnalysis({
+    head: 'h', createdAt: 'c', overview: 'x', files: [],
+    groups: [{ severity: 'routine', title: 'All', steps: [{ blocks: [{ path: 'src/a.ts', signature: changeBlocks(refDiff)[0]?.signature }], note: refNote }] }],
+  });
+  const step = stored?.groups[0]?.steps[0];
+  assert.ok(step !== undefined && !('refs' in step));
+  const guided = buildGuide(stored!, refDiff)[0]?.steps[0];
+  assert.deepEqual(noteSegments(guided?.note ?? '', guided?.refs, refDiff[0]), [{ text: refNote }]);
+});
+
+test('tells Claude each block\'s line numbers and how to cite them', () => {
+  const prompt = analysisPrompt(refDiff, changeBlocks(refDiff), '#1 Demo');
+  assert.match(prompt, /\[b1\] new lines 2-2\n-const b = 2;\n\+const b = 3;/u);
+  assert.match(prompt, /refs: .*from and to/u);
 });
