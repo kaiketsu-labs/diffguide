@@ -61,17 +61,10 @@ document.addEventListener('mouseover', (event) => {
 }, { passive: true });
 document.addEventListener('scroll', hideThreadHover, { capture: true, passive: true });
 
-if (initial.state.localMode) $('refresh').before($('claude-anchor'));
 $('page-menu-button').addEventListener('click', openPageMenu);
-$('unpushed-chip').addEventListener('click', openUnpushedMenu);
+$('push-menu').addEventListener('click', openUnpushedMenu);
 $('push').addEventListener('click', pushCommits);
 $('retry').addEventListener('click', () => post({ action: 'retry' }));
-const refresh = $<HTMLButtonElement>('refresh');
-refresh.addEventListener('click', () => {
-  refresh.disabled = true;
-  refresh.classList.add('busy');
-  post({ action: 'refresh' });
-});
 $('stop-claude').addEventListener('click', stopClaude);
 $('connect').addEventListener('click', openConnectMenu);
 $('context').addEventListener('click', openContextMenu);
@@ -146,8 +139,9 @@ $('peek-open').addEventListener('click', () => {
 });
 $('unified').addEventListener('click', () => { prefs.layout = 'unified'; save(); renderFiles(); });
 $('split').addEventListener('click', () => { prefs.layout = 'split'; save(); renderFiles(); });
-for (const name of ['overview', 'code'] as const) $('view-' + name).addEventListener('click', () => { setView(name); });
-for (const name of ['files', 'guide'] as const) $('order-' + name).addEventListener('click', () => { setView('code', name); });
+$('tab-guide').addEventListener('click', () => { setView('code', 'guide'); });
+$('tab-files').addEventListener('click', () => { setView('code', 'files'); });
+$('tab-conversation').addEventListener('click', () => { setView('overview'); });
 $('finish-review').addEventListener('click', toggleReviewForm);
 for (const choice of $('verdicts').querySelectorAll<HTMLButtonElement>('[data-verdict]')) choice.addEventListener('click', () => { pickVerdict(choice.dataset.verdict as ReviewEvent); });
 $('pending-list').addEventListener('click', closeReviewForm);
@@ -292,6 +286,7 @@ $('fix-conflicts').addEventListener('click', () => {
   post({ action: 'fix-conflicts' });
 });
 $('edit-title').addEventListener('click', editTitle);
+$('title').addEventListener('click', () => { if (received.current?.details?.canEdit === true && document.getElementById('title-form') === null) editTitle(); });
 $('edit-body').addEventListener('click', editBody);
 for (const what of ['reviewers', 'assignees', 'labels', 'milestone'] as const) $('pick-' + what).addEventListener('click', () => openPicker(what));
 document.addEventListener('pointerdown', (event) => {

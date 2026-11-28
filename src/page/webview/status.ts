@@ -9,6 +9,14 @@ import { post } from './transport.js';
 import type { CheckState, LiveLog, ReviewerState, StepPick } from './types.js';
 
 
+/** Re-read the page from the extension; More shows it is busy until the extension replies. */
+export function refreshPage(): void {
+  const more = $('page-menu-button');
+  if (more.classList.contains('busy')) return;
+  more.classList.add('busy');
+  post({ action: 'refresh' });
+}
+
 export const elapsed = (since: number, until = Date.now()): string => {
   const seconds = Math.max(0, Math.floor((until - since) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -138,7 +146,7 @@ export function clearNotice(): void {
   close.addEventListener('click', () => { dismiss({ action: 'dismiss-sync-undo' }); });
   $('notice').replaceChildren(...syncUndo !== undefined
     ? [el('span', '', syncUndo), button('Undo', () => { dismiss({ action: 'undo-sync' }); }, 'small'), close]
-    : stale ? [el('span', '', 'The base branch moved on GitHub. Refresh to see the current changes.'), button('Refresh', () => { $('refresh').click(); }, 'primary small')] : []);
+    : stale ? [el('span', '', 'The base branch moved on GitHub. Refresh to see the current changes.'), button('Refresh', refreshPage, 'primary small')] : []);
 }
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');

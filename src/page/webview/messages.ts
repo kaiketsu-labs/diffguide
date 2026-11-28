@@ -210,7 +210,7 @@ export function onExtensionMessage(data: ExtensionMessage): void {
   if (data.idle) setBusy(false);
   if (data.stale) setStale(true);
   if (data.pageKey !== undefined) setPageKey(data.pageKey);
-  if (data.refreshed) { const refresh = $<HTMLButtonElement>('refresh'); refresh.disabled = false; refresh.classList.remove('busy'); }
+  if (data.refreshed) $('page-menu-button').classList.remove('busy');
   if (heldFiles && data.state && !data.state.reviewedPending) {
     const held = heldFiles;
     heldFiles = undefined;

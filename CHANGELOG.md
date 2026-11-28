@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The header's hover icons no longer cover text or each other: the copy icons and the change-base and edit-title pencils sit beside their chips. Folded Details sections show the page's own chevron instead of the browser's triangle.
+- The review page header is two rows: the PR (number, title, branches, changes, status, Push, Claude, Finish review and a ··· menu with Refresh) and the tabs. The tabs are Guide, Files and Conversation, with the viewed progress on the right; a page saved before keeps its place. Unpushed commits are listed in Push's menu, a failing check and the review state show as status text, and the local page's header is one row.
 - New setting `diffGuide.fontSize` sizes the review page's text, such as menus, threads and replies, without changing the diff's code. Open pages follow a change right away.
 - Select code in a diff and a + button appears below the selection. It opens the comment form on the selected lines and keeps the selected text marked. Claude gets that text with the comment, and the thread keeps it marked while the code still holds it. Esc clears a selection. The thread's header shows which characters it marks, such as `Line 8 · 22-41`, and hovering the thread highlights its text.
 - Claude's answers and review findings remember the model that wrote them. Hover the Diff pair beside a message to see it. Answers from a conversation you connect yourself don't record a model.

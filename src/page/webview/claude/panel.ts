@@ -44,5 +44,5 @@ export function renderClaude(state: OverviewState): void {
     const time = el('span', 'time', elapsed(progress.startedAt));
     time.dataset.since = String(progress.startedAt);
     text?.replaceChildren(status + ' · ', time);
-  } else text?.replaceChildren(claude.running ? status : review ?? status);
+  } else text?.replaceChildren(claude.running ? status : review ?? (status === 'Idle' ? 'Claude' : status));
 }

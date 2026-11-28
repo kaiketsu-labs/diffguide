@@ -276,22 +276,81 @@ const syncQuestionHtml = '<p>GitHub\'s new commit renames <code>retryDelay</code
 const scene = (state: OverviewState, steps: readonly Step[], extra: Partial<Scene> = {}): Scene => ({ state, messages: [{ state }, filesMessage], steps, ...extra });
 const uncolored = files.map((each) => ({ ...each, hunks: each.hunks.map((hunk) => ({ ...hunk, lines: hunk.lines.map((line) => ({ ...line, html: line.html.replace(/<[^>]*>/gu, '') })) })) }));
 
+/** The demo PR's long title, long branch and Claude's unseen answers: the header must not squash, wrap or clip at any width. */
+const longHeader: OverviewState = {
+  ...pullRequest, heading: 'feat(export): stream notes as newline-delimited JSON', headBranch: 'feature/streaming-export',
+  changes: { additions: 125, deletions: 20, files: files.length },
+  details: { ...pullRequest.details!, title: 'feat(export): stream notes as newline-delimited JSON', checks: [{ name: 'e2e', state: 'failure' }] },
+};
+/** On one row from 900 px, the byline, facts and toolbar must not overlap; below, the facts hide and at 760 px the byline wraps to its own row. */
+const rowChecks = (width: number): Step[] => width > 900 ? [{ after: ['#facts', '#byline'] }, { after: ['#head .toolbar', '#facts'] }] : width > 760 ? [{ after: ['#head .toolbar', '#byline'] }] : [{ below: ['#byline', '#title'] }, { next: ['#byline .base-ref .ref', '#byline .ref', 40] }];
+/** Hover icons sit beside their chip, never over text or each other: the number's copy icon on its left, a branch's on its right (over the arrow), the base pencil after that, and the title pencil before the byline. */
+const hoverChecks = (width: number): Step[] => [
+  { hover: '#number .ref' }, { after: ['#number .ref', '#number .copy'] }, { inside: ['#number .copy', 'body'] }, { css: ['#number .copy', '', 'opacity', '1'] }, { shot: `header-hover-number-${width}.png` },
+  { hover: '#byline .ref:first-child' }, { after: ['#byline .ref:first-child .copy', '#byline .ref:first-child'] }, { after: ['#byline .base-ref .ref', '#byline .ref:first-child .copy'] }, { css: ['#byline .to', '', 'opacity', '0'] },
+  { hover: '#byline .base-ref .ref' }, { after: ['#byline .base-ref .ref .copy', '#byline .base-ref .ref'] }, { after: ['#change-base', '#byline .base-ref .ref .copy'] }, { css: ['#change-base', '', 'opacity', '1'] },
+  ...width > 900 ? [{ after: ['#facts', '#change-base'] } as Step] : width > 760 ? [{ after: ['#head .toolbar', '#change-base'] } as Step] : [],
+  { shot: `header-hover-branch-${width}.png` },
+  { hover: '#title' }, { after: ['#edit-title', '#title'] }, { after: ['#head .toolbar', '#edit-title'] }, { css: ['#edit-title', '', 'opacity', '1'] }, ...width > 760 ? [{ after: ['#byline', '#edit-title'] } as Step] : [],
+  { shot: `header-hover-title-${width}.png` },
+  { hover: '#byline .base-ref .ref' }, { click: '#change-base', expect: '.base-menu' }, { inside: ['.base-menu', 'body'] }, { shot: `header-menu-base-${width}.png` }, { press: 'Escape' },
+  { press: 'Shift+Tab' }, { expect: '#change-base:focus-visible' }, { shot: `header-focus-pencil-${width}.png` }, { press: 'Shift+Tab' }, { expect: '#byline .base-ref .ref:focus-visible' }, { css: ['#byline .base-ref .ref .copy', '', 'opacity', '1'] }, { shot: `header-focus-${width}.png` },
+];
+const headerFits = (width: number): Scene => scene(longHeader, [
+  { css: ['#byline', '', 'padding-right', '0px'] }, { tallest: ['#claude-chip', 30] }, { inside: ['#claude-chip .chip-new', '#claude-chip'] }, { inside: ['#claude-chip', '#claude-chip'] },
+  { tallest: ['#byline', 26] }, ...rowChecks(width), { after: ['#reviewed', '#verdict'] }, { inside: ['#finish-review', '#finish-review'] }, { tallest: ['#finish-review', 30] },
+  { level: ['#title', '#finish-review'] }, { inside: ['#byline .base-ref .ref', '#byline'] }, { after: ['#head .toolbar', '#title'] }, { tallest: ['#push', 30] }, { inside: ['#push', '#push'] }, { shot: `header-long-${width}.png` },
+  ...hoverChecks(width),
+  { click: '#tab-files', wait: 200 }, { tallest: ['.seg', 30] }, { inside: ['.seg > *', '.seg'] }, { shot: `header-long-${width}-files.png` },
+], { width, height: 500 });
+
+const foldedHtml = '<details><summary>Test output</summary><p>All 12 passed.</p></details>';
+const foldedPullRequest: OverviewState = {
+  ...pullRequest, details: { ...pullRequest.details!, bodyHtml: foldedHtml },
+  conversation: { ...pullRequest.conversation!, timeline: pullRequest.conversation!.timeline.map((item) => item.kind === 'comment' ? { ...item, bodyHtml: foldedHtml } : item) },
+};
+
 /** Scenes by name; `npm run render -- <name>` renders one, no name renders all. */
 export const scenes: Readonly<Record<string, Scene>> = {
+  'header-local': { ...scene({ ...pullRequest, localMode: true, headBranch: 'feature/streaming-export' }, [{ next: ['#byline', '#title', 24] }, { tallest: ['#byline', 26] }, { shot: 'header-local.png' }]), width: 1100, height: 400 },
+  'header-long-1280': headerFits(1280), 'header-long-1100': headerFits(1100), 'header-long-900': headerFits(900), 'header-long-760': headerFits(760),
   'header-actions': scene(pullRequest, [
-    { expect: '.head #reviewed', text: '1/4 viewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
-    { expect: '#files-bar #push:visible', text: 'Push 1' }, { next: ['#claude-anchor', '#push', 12] }, { absent: '#files-bar #show-unpushed' }, { expect: '.byline #unpushed-chip', text: '1 unpushed' },
+    // Two rows: what the PR is and its actions, then the tabs with the viewed progress.
+    { expect: '#files-bar > #head.head #title', text: 'Fix parser' }, { expect: '#files-bar > #tabs-row #tab-guide', text: 'Guide' }, { below: ['#tabs-row', '#head'] },
+    { expect: '#tabs-row #tab-files', text: 'Files' }, { expect: '#tabs-row #tab-conversation', text: 'Conversation' }, { absent: '#view-overview, #view-code, #nav-order .seg' },
+    { expect: '#tabs-row #reviewed', text: '1 of 4 viewed' }, { absent: '#head #reviewed' }, { absent: '#file-nav > .nav-head:has-text("viewed")' },
+    { expect: '#head #number', text: '#42' }, { expect: '#head #byline', text: 'fix/parser' }, { expect: '#head #byline', text: 'main' }, { expect: '#head #facts', text: '+24 −8' },
+    { absent: '#head:has-text("wants to merge")' }, { absent: '#head:has-text("Opened")' },
+    { expect: '#tabs-row #check-status:visible', text: 'Pre-commit failing' }, { expect: '#tabs-row #verdict:visible', text: 'Approved' }, { absent: '#unpushed-chip, #unpushed-anchor' },
+    { expect: '#head #push-split #push:visible', text: 'Push 1' }, { next: ['#claude-anchor', '#push-split', 12] }, { absent: '#files-bar #show-unpushed' }, { expect: '#claude-chip .chip-text', text: 'Claude' }, { absent: '#claude-chip .chip-text:has-text("Idle")' },
     { click: '#page-menu-button', expect: '#page-menu #pr', text: 'Open on GitHub' },
-    { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { shot: 'header-menu.png' },
+    { expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' }, { expect: '#page-menu #link-pr', text: 'Link a PR' }, { expect: '#page-menu #refresh', text: 'Refresh' }, { absent: '#refresh-button, #head > #refresh' }, { shot: 'header-menu.png' },
     { click: '#remove-worktree', expect: '.ask-menu .ask-text', text: '1 commit GitHub does not have', shot: 'header-remove.png' },
     { click: '.ask-menu button:has-text("Cancel")', absent: '.ask-menu' },
     { click: '#page-menu-button' }, { click: '#link-pr', expect: '#page-menu .link-form input:focus', shot: 'header-link.png' },
-    { click: '#title' }, { click: '#unpushed-chip', expect: '#unpushed-menu #show-unpushed', text: 'Show changes' },
-    { absent: '#unpushed-menu #push', shot: 'header-unpushed.png' },
-    { click: '#show-unpushed', expect: '#view-code[aria-selected=true]' },
+    { click: '#head-gap' }, { click: '#push-menu', expect: '#unpushed-menu #show-unpushed', text: 'Show changes' },
+    { expect: '#unpushed-menu', text: 'Use the configured limit' }, { absent: '#unpushed-menu #push', shot: 'header-unpushed.png' },
+    { click: '#show-unpushed', expect: '#tab-files[aria-selected=true]' },
   ], { saved: { view: 'code' } }),
+  // The header's status words: one failing check by name, the review as Approved or Changes requested with who on hover, nothing for a passing PR.
+  'header-status': scene({ ...pullRequest, details: { ...pullRequest.details!, reviewers: [{ name: 'alice', state: 'changes' }, { name: 'bob', state: 'approved' }], checks: [{ name: 'Check', state: 'failure' }, { name: 'Pre-commit', state: 'failure' }] } }, [
+    { expect: '#verdict:visible', text: 'Changes requested' }, { expect: '#verdict[title="Changes requested by alice"]' }, { expect: '#check-status:visible', text: '2 checks failing' }, { expect: '#check-status[title="Check, Pre-commit"]' },
+    { send: { state: { ...pullRequest, details: { ...pullRequest.details!, reviewers: [{ name: 'bob', state: 'requested' }], checks: [{ name: 'Check', state: 'success' }] } } }, absent: '#check-status:visible' }, { absent: '#verdict:visible' },
+  ], { saved: { view: 'code' } }),
+  // Copy icons and the title's pencil show on hover; clicking the title edits it.
+  'header-hover': scene(pullRequest, [
+    { css: ['#number .ref svg.copy', '', 'display', 'none'] }, { css: ['#edit-title', '', 'opacity', '0'] }, { css: ['#change-base', '', 'opacity', '0'] },
+    { hover: '#number .ref', css: ['#number .ref svg.copy', '', 'display', 'block'] }, { hover: '#title', css: ['#edit-title', '', 'opacity', '1'] }, { hover: '#byline .ref', css: ['#change-base', '', 'opacity', '1'] },
+    { click: '#title', expect: '#title-form input:focus' }, { absent: '#title:visible' },
+  ], { saved: { view: 'code' } }),
+  // Pages saved before the Guide, Files and Conversation tabs keep their place; a page nothing was saved for opens on Guide.
+  'saved-default': scene(pullRequest, [{ expect: '#tab-guide[aria-selected=true]' }, { absent: '#tab-files[aria-selected=true]' }, { absent: '#panel-overview:visible' }, { expect: '#files .step-wrap' }]),
+  'saved-guided-layout': scene(pullRequest, [{ expect: '#tab-guide[aria-selected=true]' }, { expect: '#files .step-wrap' }], { saved: { layout: 'guided' } }),
+  'saved-code-guide': scene(pullRequest, [{ expect: '#tab-guide[aria-selected=true]' }], { saved: { view: 'code', order: 'guide' } }),
+  'saved-code-files': scene(pullRequest, [{ expect: '#tab-files[aria-selected=true]' }, { absent: '.step-wrap' }], { saved: { view: 'code', order: 'files' } }),
+  'saved-overview': scene(pullRequest, [{ expect: '#tab-conversation[aria-selected=true]' }, { expect: '#panel-overview:visible' }, { expect: '#tab-conversation .count', text: '2' }], { saved: { view: 'overview' } }),
   'header-readonly': scene({ ...pullRequest, details: { ...pullRequest.details!, canEdit: false } }, [
-    { expect: '#unpushed-chip' }, { absent: '#push:visible' },
+    { expect: '#push-menu:visible', text: '1 unpushed' }, { absent: '#push:visible' },
   ], { saved: { view: 'code', order: 'guide' } }),
   'header-permission-change': scene(pullRequest, [
     { expect: '#push:visible' },
@@ -309,9 +368,9 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { absent: '#remove-worktree' }, { click: '#page-menu-button', absent: '#terminal' }, { absent: '#remove-worktree' },
   ], { saved: { view: 'code' } }),
   'header-placement': scene(pullRequest, [
-    { expect: '.head:not(#files-bar) #page-menu-button:visible' }, { absent: '#files-bar #page-menu-button' },
-    { expect: '.head:not(#files-bar) #reviewed', text: '1/4 viewed' }, { expect: '.byline #unpushed-chip:visible' },
-    { absent: '#files-bar #unpushed-chip' },
+    { expect: '#head #page-menu-button:visible' }, { absent: '#tabs-row #page-menu-button' },
+    { expect: '#tabs-row #reviewed', text: '1 of 4 viewed' }, { expect: '#head #push-split:visible' },
+    { absent: '#tabs-row #push-split' },
   ], { saved: { view: 'code' } }),
   'header-terminal': scene(pullRequest, [
     { click: '#page-menu-button', expect: '#page-menu #terminal', text: 'Open in terminal' }, { absent: '#claude-menu #terminal' },
@@ -321,11 +380,11 @@ export const scenes: Readonly<Record<string, Scene>> = {
   ], { saved: { view: 'code' } }),
   'header-progress': scene(pullRequest, [
     { absent: '#file-nav > .nav-head:has-text("viewed")' },
-    { click: '#order-guide', absent: '#file-nav > .nav-head:has-text("viewed")' },
+    { click: '#tab-guide', absent: '#file-nav > .nav-head:has-text("viewed")' },
   ], { saved: { view: 'code' } }),
   'overview-order': scene(pullRequest, [
-    { expect: '#panel-overview .main-col > section:first-child #body' }, { below: ['#overview-guide', '#body'] },
-    { expect: '#overview-guide:visible', text: 'Risk sits in the token refresh path.' },
+    { expect: '#panel-overview .main-col > section:first-child #body' }, { expect: '#opened', text: 'octo opened this' }, { expect: '#opened', text: 'Updated' },
+    { absent: '#panel-overview .guide-intro' }, { absent: '#panel-overview :has-text("Read in guide order")' },
   ], { saved: { view: 'overview' } }),
   'overview-linked': scene(pullRequest, [
     { absent: '#linked:visible' },
@@ -338,6 +397,13 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#merge-box #checks li', count: 2 }, { absent: '#merge-status :has-text("failing check")' },
     { absent: '#merge-status :has-text("All checks passed")' }, { expect: '#checks li:has-text("Pre-commit")', count: 1 },
   ], { saved: { view: 'overview' } }),
+  // Folded sections show our chevron, not the browser's triangle: no list marker, a drawn 14 px chevron that turns when closed.
+  'fold-markers': scene(foldedPullRequest, [
+    { click: '#tab-conversation' }, { css: ['#details-box > summary', '', 'list-style-type', 'none'] }, { expect: '#details-box > summary > svg' }, { css: ['#details-box > summary > svg', '', 'width', '14px'] },
+    { css: ['#body details > summary', '', 'list-style-type', 'none'] }, { css: ['#body details > summary', '::before', 'width', '14px'] }, { css: ['#body details > summary', '::before', 'transform', 'matrix(0, -1, 1, 0, 0, 0)'] },
+    { click: '#body details > summary' }, { css: ['#body details > summary', '::before', 'transform', 'none'] }, { click: '#details-box > summary' }, { shot: 'fold-markers.png' },
+    { css: ['.msg-text details > summary', '', 'list-style-type', 'none'] }, { css: ['.msg-text details > summary', '::before', 'width', '14px'] },
+  ], { width: 900, height: 600 }),
   'overview-details': scene(pullRequest, [
     { absent: '#pick-assignees:visible' }, { absent: '#pick-labels:visible' }, { absent: '#pick-milestone:visible' },
     { click: '#details-box > summary', expect: '#details-box #pick-assignees:visible' },
@@ -357,7 +423,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   ], { saved: { view: 'overview' } }),
   'overview-layout': scene(pullRequest, [
     { expect: '#panel-overview .main-col > section:first-child #body' },
-    { below: ['#overview-guide', '#body'] }, { expect: '#overview-guide', text: 'Risk sits in the token refresh path.' },
+    { absent: '#panel-overview .guide-intro' }, { expect: '#tab-conversation[aria-selected=true]' },
     { absent: '#linked:visible' }, { expect: '#merge-box #checks li', count: 2 },
     { absent: '#merge-status :has-text("failing check")' }, { absent: '#merge-status :has-text("All checks passed")' },
     { absent: '#pick-assignees:visible' }, { expect: '#details-summary', text: 'octo · bug · No milestone' }, { shot: 'overview-layout.png', full: true },
@@ -366,12 +432,12 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '#pick-assignees' }, { click: '#pick-labels', expect: '#details-box .picker input[placeholder="Filter labels"]' },
     { click: '#pick-labels' }, { click: '#pick-milestone', expect: '#details-box .picker input[placeholder="Filter milestones"]', shot: 'overview-details.png' },
     { click: '#pick-milestone' }, { click: '#merge', absent: '#merge.primary', expect: '#merge-form:visible' },
-    { click: '#merge-cancel' }, { click: '#overview-guide button:has-text("Read in guide order")', expect: '#order-guide[aria-pressed=true]' },
+    { click: '#merge-cancel' }, { click: '#tab-guide', expect: '#tab-guide[aria-selected=true]' }, { expect: '.guide-intro .section-head button', text: 'Rebuild' },
   ], { saved: { view: 'overview' } }),
   overview: scene(pullRequest, [{ absent: '#nav-toggle:visible' }, { absent: '#code-bar:visible' }, { expect: '#finish-review:visible', shot: 'overview.png', full: true }], { saved: { view: 'overview' } }),
   // A page saved before the Code tab remembers 'files' or 'guide' as its view; both open Code in that order.
   'code-files': scene(pullRequest, [
-    { expect: '#view-code[aria-selected=true]' }, { expect: '#order-files[aria-pressed=true]' }, { expect: '#nav-threads .nav-head', text: 'Threads' },
+    { expect: '#tab-files[aria-selected=true]' }, { absent: '#tab-guide[aria-selected=true]' }, { expect: '#nav-threads .nav-head', text: 'Threads' },
     { expect: '#nav-threads .nav-thread .nav-name', text: 'Null check in parseUser' },
     // Every line of the three unviewed files; README.md is Viewed and folded in both orders.
     { expect: '#files tr:is(.context,.add,.del)', count: 78 },
@@ -379,7 +445,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { scroll: 0, click: '#page-menu-button' }, { click: '#remove-worktree', expect: '.ask-text', text: 'It has 1 commit GitHub does not have', shot: 'remove-worktree.png' },
   ], { saved: { view: 'files' } }),
   'code-guide': scene(pullRequest, [
-    { expect: '#view-code[aria-selected=true]' }, { expect: '#order-guide[aria-pressed=true]' }, { absent: '#view-guide' }, { absent: '#search-toggle:visible' },
+    { absent: '#tab-files[aria-selected=true]' }, { expect: '#tab-guide[aria-selected=true]' }, { absent: '#nav-order .seg' }, { absent: '#search-toggle:visible' },
     { expect: '#files tr:is(.context,.add,.del)', count: 78 }, { expect: '.folded-lines .folded-body[hidden=until-found] tr.context' },
     { expect: '.nav-step[data-nav-step="u:README.md"].done' }, { expect: '#file-nav .nav-step .nav-number', text: '1' },
     { expect: '.guide-intro .section-head button', text: 'Rebuild' }, { absent: '#analyze' },
@@ -389,7 +455,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   ], { saved: { view: 'guide' } }),
   find: scene(pullRequest, [
     { absent: '#find-box:visible' },
-    { send: { find: true }, stay: '#view-code', expect: '#files-bar #find-box:visible #find-input:focus' }, { after: ['#find-box', '#view-code'] }, { after: ['#claude-anchor', '#find-box'] },
+    { send: { find: true }, stay: '#tab-files', expect: '#files-bar #find-box:visible #find-input:focus' }, { after: ['#find-box', '#tab-conversation'] }, { after: ['#reviewed', '#find-box'] },
     { tallest: ['#find-box', 28] },
     // The first match sits in folded lines, which open for it.
     { fill: ['#find-input', 'compute(1);'], wait: 400, expect: '#find-count', text: '1 of ' }, { expect: '.folded-body[hidden]', count: 5, shot: 'find.png' },
@@ -434,7 +500,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
   'find-typing': scene(pullRequest, [
     { press: 'ControlOrMeta+F' },
     { fill: ['#find-input', 'comp'], wait: 400, expect: '#find-count', text: ' of ' },
-    { scroll: 100 },
+    { scroll: 40 },
     { fill: ['#find-input', 'compu'], stay: '#files', wait: 400 },
     { fill: ['#find-input', 'comput'], stay: '#files', wait: 400 },
     { fill: ['#find-input', 'compute'], stay: '#files', wait: 400, shot: 'find-typing.png' },
@@ -449,9 +515,9 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { press: 'ControlOrMeta+F', stay: '#files', expect: '#find-input:focus', shot: 'find-scroll.png' },
   ], { saved: { view: 'code' } }),
   search: scene(pullRequest, [
-    { expect: '#search-toggle.filtered' }, { absent: '#filter-box:visible' }, { expect: '#order-files:visible' },
-    { click: '#search-toggle', expect: '#nav-order.searching #file-filter:focus' }, { absent: '#order-files:visible', shot: 'search-open.png' },
-    { click: '#title', absent: '#nav-order.searching' }, { expect: '#search-toggle.filtered:visible', shot: 'search-closed.png' },
+    { expect: '#search-toggle.filtered' }, { absent: '#filter-box:visible' },
+    { click: '#search-toggle', expect: '#nav-order.searching #file-filter:focus', shot: 'search-open.png' },
+    { click: '#head-gap', absent: '#nav-order.searching' }, { expect: '#search-toggle.filtered:visible', shot: 'search-closed.png' },
   ], { saved: { view: 'code', order: 'files', filter: 'user' } }),
   toolbar: scene(pullRequest, [
     { expect: '#code-bar #nav-toggle:visible' }, { expect: '#code-bar #range:visible' }, { expect: '#code-bar #view-menu:visible' }, { absent: '#column-toggle' },
@@ -466,19 +532,19 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#code-bar #nav-toggle:visible' }, { expect: '#code-bar #range:visible' }, { absent: '#code-bar #analyze' },
   ], { saved: { view: 'code', order: 'guide' } }),
   'order-switch': scene(pullRequest, [
-    { click: '#order-guide', expect: '.step-wrap[data-key="g0.0"] .file-head', text: 'user.ts null check' },
+    { click: '#tab-guide', expect: '.step-wrap[data-key="g0.0"] .file-head', text: 'user.ts null check' },
     { expect: '#files tr:is(.context,.add,.del)', count: 78 },
-    { click: '#order-files', absent: '.step-wrap' }, { expect: '#files tr:is(.context,.add,.del)', count: 78 },
+    { click: '#tab-files', absent: '.step-wrap' }, { expect: '#files tr:is(.context,.add,.del)', count: 78 },
   ], { saved: { view: 'code', order: 'files' } }),
   'guide-unbuilt': scene(withoutGuide, [
-    { expect: '#order-guide[aria-pressed=true]' }, { expect: '#files .guide-intro button', text: 'Build guide' }, { expect: '#files .file', count: 4, shot: 'guide-unbuilt.png' },
+    { expect: '#tab-guide[aria-selected=true]' }, { expect: '#files .guide-intro button', text: 'Build guide' }, { expect: '#files .file', count: 4, shot: 'guide-unbuilt.png' },
   ], { saved: { view: 'code', order: 'guide' } }),
   working: scene(working, [{ shot: 'working.png' }], { saved: { view: 'files' } }),
   // A long step shortens the chip, which stays beside Finish review.
   'working-long-step': scene({ ...working, claude: { ...working.claude, text: 'Running sed -n 225,236p src/service/classification/classifier.py' } }, [{ next: ['#bar-review', '#claude-chip', 12], shot: 'working-long-step.png' }], { saved: { view: 'files' }, width: 1200 }),
-  // Claude sits in one chip in the tab row, which stays in view while you scroll; its menu holds the live steps, Review, Stop, Open in terminal and new answers.
+  // Claude sits in one chip in the header, which stays in view while you scroll; its menu holds the live steps, Review, Stop, Open in terminal and new answers.
   claude: scene(claudeIdle, [
-    { expect: '#files-bar #claude-chip .chip-text', text: 'Idle' }, { absent: '#claude-chip .chip-text:has-text("Claude")' }, { absent: '#claude:has-text("Claude")' }, { level: ['#claude-chip', '#finish-review'] }, { absent: '#claude-menu:visible' }, { absent: '#column-toggle' }, { absent: '#claude-col' },
+    { expect: '#head #claude-chip .chip-text', text: 'Claude' }, { absent: '#claude-chip .chip-text:has-text("Idle")' }, { expect: '#claude', text: 'Idle' }, { absent: '#claude:has-text("Claude")' }, { level: ['#claude-chip', '#finish-review'] }, { absent: '#claude-menu:visible' }, { absent: '#column-toggle' }, { absent: '#claude-col' },
     { expect: '#files tr.inline #thread-11111111-1111-1111-1111-111111111111' }, { absent: '.margin-mark' },
     // The answer on screen counts as seen; the one in client.ts, below, stays new.
     { expect: '#claude-chip .chip-new', text: '1 new' },
@@ -493,7 +559,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '#review-pick', expect: '.review-menu .picker-row:has-text("Docs")' }, { fill: ['#review-focus', 'the retry loop'], shot: 'review-focus.png' },
     { click: '#agent-review', absent: '#review-focus' },
     { click: '#claude-menu .answer-row', absent: '#claude-menu:visible' },
-    { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#title', absent: '#claude-menu:visible' },
+    { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#head-gap', absent: '#claude-menu:visible' },
     { scroll: 900, expect: '#claude-chip:visible', below: ['#code-bar', '#files-bar'] },
   ], { saved: { view: 'code', order: 'files' } }),
   // Claude working on a thread off screen, below or above, moves nothing on screen.
@@ -514,13 +580,16 @@ export const scenes: Readonly<Record<string, Scene>> = {
   // The answer toast and the activity box above the tabs are gone; Overview shows Claude in the chip.
   overviewChip: scene(working, [{ absent: '#answers' }, { absent: '.claude-box' }, { expect: '#claude-chip.working:visible' }], { saved: { view: 'overview' } }),
   // Half of a 1440 px window, as with two pages side by side.
-  narrow: scene(pullRequest, [{ level: ['#view-code', '#finish-review'], shot: 'narrow.png' },
+  // Below 900 px the header drops "+24 −8" and the status words (the dots stay, the words show on hover); below 760 the branches wrap under the title. Title, chip and buttons keep their size.
+  narrow: scene(pullRequest, [{ level: ['#title', '#finish-review'], shot: 'narrow.png' },
+    { expect: '#byline:visible', text: 'fix/parser' }, { below: ['#byline', '#title'] }, { absent: '#facts:visible' }, { absent: '#head-gap:visible' }, { absent: '#head .head-status .label:visible' },
+    { inside: ['#page-menu-button', '#files-bar'] }, { inside: ['#tabs-row', '#tabs-row'] }, { absent: '#reviewed .bar:visible' }, { expect: '#reviewed', text: '1 of 4 viewed' },
     // A long step shortens the chip instead of breaking the row.
-    { send: { state: working }, stay: '#code-bar', level: ['#view-code', '#claude-chip'] }, { level: ['#view-code', '#finish-review'] },
-    { tallest: ['#finish-review', 26] }, { tallest: ['#claude-chip', 26] }, { after: ['#claude-chip', '#view-code'], shot: 'narrow-working.png' }], { saved: { view: 'files' }, width: 700, height: 900 }),
+    { send: { state: working }, stay: '#code-bar', level: ['#title', '#claude-chip'] }, { level: ['#title', '#finish-review'] },
+    { tallest: ['#finish-review', 26] }, { tallest: ['#claude-chip', 26] }, { after: ['#claude-chip', '#title'], shot: 'narrow-working.png' }], { saved: { view: 'files' }, width: 700, height: 900 }),
   'find-narrow': scene(pullRequest, [
     { send: { find: true }, expect: '#find-box:visible' }, { fill: ['#find-input', 'compute(1);'], wait: 400 },
-    { after: ['#find-box', '#view-code'] }, { after: ['#claude-anchor', '#find-box'] }, { after: ['#bar-review', '#claude-anchor'] }, { inside: ['#find-box', '#find-box'] }, { tallest: ['#files-bar', 60], shot: 'find-narrow.png' },
+    { after: ['#find-box', '#tab-conversation'] }, { after: ['#reviewed', '#find-box'] }, { after: ['#bar-review', '#claude-anchor'] }, { inside: ['#find-box', '#find-box'] }, { tallest: ['#files-bar', 140], shot: 'find-narrow.png' },
   ], { saved: { view: 'code' }, width: 600 }),
   'local-find': scene(local, [{ press: 'ControlOrMeta+F', stay: '#view-menu', expect: '#code-bar #find-box:visible #find-input:focus' }, { tallest: ['#find-box', 28], shot: 'local-find.png' }, { absent: '#files-bar #find-box' }]),
   // A folder outside Git names no branch and offers no code review.
@@ -528,11 +597,15 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { expect: '#byline', text: 'Files in this folder, outside Git' }, { absent: '#byline .branch-ref' }, { click: '#claude-chip', expect: '#claude-menu:visible' }, { absent: '#review-tools:visible', shot: 'local-plain.png' },
   ]),
   local: scene(local, [
-    { absent: '.tabs:visible' }, { absent: '#files-bar:visible' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' },
-    { expect: '#panel-files:visible .file', count: 4 }, { expect: '.head #claude-chip:visible' }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },
-    { shot: 'local.png' }, { click: '#claude-chip', expect: '#claude-menu:visible' },
+    // One header row: the page, its branch, how many files, then Claude and More; Files is the only tab.
+    { expect: '#head #title', text: 'Local changes' }, { expect: '#head #byline', text: 'on feat/parser' }, { expect: '#head #facts', text: '4 files' }, { expect: '#head #claude-chip:visible' }, { expect: '#head #page-menu-button:visible' },
+    { after: ['#claude-chip', '#facts'] }, { level: ['#title', '#claude-chip'] },
+    { absent: '#tab-guide:visible' }, { absent: '#tab-conversation:visible' }, { expect: '#tab-files:visible', text: 'Files' }, { absent: '#finish-review:visible' }, { absent: '#panel-overview:visible' }, { absent: '#push-split:visible' }, { absent: '#tabs-row #check-status:visible' },
+    { expect: '#panel-files:visible .file', count: 4 }, { expect: '#nav-threads .nav-name', text: 'Null check in parseUser' },
+    { shot: 'local.png' }, { click: '#page-menu-button', expect: '#page-menu #refresh', text: 'Refresh' }, { absent: '#page-menu #pr' }, { absent: '#page-menu #terminal' },
+    { click: '#claude-chip', expect: '#claude-menu:visible' },
   ]),
-  'local-saved-overview': scene(local, [{ expect: '#panel-files:visible .file', count: 4 }, { absent: '#panel-overview:visible' }, { absent: '.tabs:visible' }], { saved: { view: 'overview' }, width: 700 }),
+  'local-saved-overview': scene(local, [{ expect: '#panel-files:visible .file', count: 4 }, { absent: '#panel-overview:visible' }, { absent: '#tab-conversation:visible' }, { absent: '#tab-guide:visible' }], { saved: { view: 'overview' }, width: 700 }),
   // The connect menu inside Claude's menu opens leftward when it would run past the window's right edge.
   'local-connect-menu': scene({ ...local, claude: { ...local.claude, link: { delivering: true, terminal: true } } }, [
     { click: '#claude-chip', expect: '#claude-menu:visible' }, { click: '#connect', expect: '.connect-menu:visible' },
@@ -574,7 +647,7 @@ export const scenes: Readonly<Record<string, Scene>> = {
     { click: '.msg-text code[data-ref="src/api/client.ts:6"]', absent: '.ref-preview:popover-open' },
     { expect: '.file[data-path="src/api/client.ts"] tr.ref-flash td.code[data-line="6"]', shot: 'code-refs-jump.png' },
   ], { width: 1000 }),
-  'local-header-chip': scene(local, [{ expect: '.head:not(#files-bar) #claude-chip:visible' }]),
+  'local-header-chip': scene(local, [{ expect: '#head #claude-chip:visible' }]),
   // Claude merged GitHub's new commits with local edits: Undo stays under other notices until clicked.
   syncUndo: scene({ ...pullRequest, syncUndo: syncUndoText }, [
     { expect: '#notice', text: syncUndoText, shot: 'sync-undo.png' },
@@ -798,7 +871,7 @@ export const reviewingScenes: Readonly<Record<string, Scene>> = {
     { send: { done: 'review' }, absent: '#review-box:visible' }, { expect: '#finish-label', text: 'Finish review' },
     { click: '#finish-review', expect: '[data-verdict="comment"][aria-pressed="true"]' },
     { click: '#finish-review', absent: '#review-box:visible' }, { click: '#finish-review', expect: '#review-box:visible' },
-    { click: '#view-code', absent: '#review-box:visible' },
+    { click: '#tab-files', absent: '#review-box:visible' },
   ] },
   stale: { state: reviewing, messages: [{ state: reviewing }, filesMessage, { stale: true }], saved: { view: 'files' }, steps: [
     { expect: '#notice', text: 'The base branch moved on GitHub' },

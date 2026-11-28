@@ -94,10 +94,12 @@ export interface Prefs {
   conversationDraft: string;
   conversationFolded: boolean;
 }
+/** A page nothing was saved for opens on the Guide tab. */
+const fresh = saved.view === undefined && saved.layout === undefined && saved.order === undefined;
 export const prefs: Prefs = {
   layout: saved.layout === 'split' ? 'split' : 'unified',
-  view: initial.state.localMode === true || saved.view === 'code' || saved.view === 'files' || saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'code' : 'overview',
-  order: saved.order ?? (saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : 'files'),
+  view: initial.state.localMode === true || fresh || saved.view === 'code' || saved.view === 'files' || saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'code' : 'overview',
+  order: saved.order ?? (fresh || saved.view === 'guide' || (saved.view === undefined && saved.layout === 'guided') ? 'guide' : 'files'),
   allFiles: saved.allFiles ?? initial.state.localMode === true,
   listHidden: saved.listHidden === true,
   navWidth: saved.navWidth,
@@ -116,7 +118,7 @@ export const prefs: Prefs = {
   conversationFolded: saved.conversationFolded === true,
 };
 
-/** Whether the Code tab shows Claude's guide order; local pages have no guide. */
+/** Whether the Guide tab is showing; local pages have no guide. */
 export function guided(): boolean {
   return prefs.view === 'code' && prefs.order === 'guide' && initial.state.localMode !== true;
 }

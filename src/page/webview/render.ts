@@ -6,13 +6,13 @@ import { renderAnswers } from './answers.js';
 import { renderClaude } from './claude/panel.js';
 import { isWriter, reactionsRow, toolButton } from './conversation/comment.js';
 import { renderConversation } from './conversation/timeline.js';
-import { $, button, detailsLoading, el, icon, placeholders, stateIcon } from './dom.js';
+import { $, detailsLoading, el, icon, placeholders, stateIcon } from './dom.js';
 import { openSearch, showListToggle } from './files/filters.js';
 import { drawPendingDiffs, renderFiles } from './files/render.js';
-import { guideState, guideSummary } from './guide/model.js';
+import { guideState } from './guide/model.js';
 import { renderPush } from './header/actions.js';
-import { branchRef, copyRef, pullRequestChip, pullRequestFacts, renderLinked, renderState, verdict } from './header/pullRequest.js';
-import { baseButton, renderReviewers } from './header/reviewers.js';
+import { branchRef, copyRef, failingCheck, openedLine, pullRequestChip, pullRequestFacts, renderLinked, renderState, reviewVerdict, showHeadStatus } from './header/pullRequest.js';
+import { baseRef, renderReviewers } from './header/reviewers.js';
 import { renderSync } from './header/sync.js';
 import { closeToolbarMenu } from './menus.js';
 import { renderRangeControls, requestFiles, sameRange } from './range.js';
@@ -67,7 +67,7 @@ function placeholderRow(width: number): HTMLElement {
 
 export function render(state: OverviewState): void {
   noteWorking(received.current, state);
-  if (ui.toolbarMenu?.anchor === 'unpushed-chip' && (received.current?.details?.canEdit !== state.details?.canEdit || received.current?.unpushed?.length !== state.unpushed?.length)) closeToolbarMenu();
+  if (ui.toolbarMenu?.anchor === 'push-menu' && (received.current?.details?.canEdit !== state.details?.canEdit || received.current?.unpushed?.length !== state.unpushed?.length)) closeToolbarMenu();
   if (ui.toolbarMenu?.anchor === 'page-menu-button' && (received.current?.claude.link === undefined) !== (state.claude.link === undefined)) closeToolbarMenu();
   received.current = state;
   queueMicrotask(renderAnswers);
@@ -76,28 +76,22 @@ export function render(state: OverviewState): void {
   $('number').replaceChildren(...state.number === undefined ? [] : [copyRef('#' + state.number, state.url, 'link to the pull request')]);
   $('title').textContent = state.heading ?? state.title;
   const canChangeBase = state.details?.canEdit === true && state.details.open;
-  const byline = JSON.stringify([state.author, state.headBranch, state.baseBranch, canChangeBase, state.branchPullRequest]);
+  const byline = JSON.stringify([state.headBranch, state.baseBranch, canChangeBase, state.branchPullRequest]);
   if ($('byline').dataset.stamp !== byline) {
     $('byline').dataset.stamp = byline;
     if (ui.toolbarMenu?.anchor === 'change-base') closeToolbarMenu();
     if (state.localMode && !state.headBranch) $('byline').replaceChildren('Files in this folder, outside Git');
-    else if (state.localMode) $('byline').replaceChildren('Uncommitted changes on', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
-    else $('byline').replaceChildren(state.author + ' wants to merge', branchRef(state.headBranch), 'into', branchRef(state.baseBranch), ...canChangeBase ? [baseButton()] : []);
+    else if (state.localMode) $('byline').replaceChildren('on ', branchRef(state.headBranch), ...state.branchPullRequest ? [pullRequestChip(state.branchPullRequest)] : []);
+    else $('byline').replaceChildren(branchRef(state.headBranch), el('span', 'to', '→'), canChangeBase ? baseRef(branchRef(state.baseBranch)) : branchRef(state.baseBranch));
   }
-  $('facts').replaceChildren(...pullRequestFacts(state));
+  if (!state.localMode) $('facts').replaceChildren(...pullRequestFacts(state));
+  $('opened').replaceChildren(...openedLine(state));
   const { details } = state;
   const loading = detailsLoading(state);
   const body = $('body');
   if (!details) body.replaceChildren(...state.detailsError ? [el('span', 'muted', 'Could not load from GitHub: ' + state.detailsError)] : placeholders(70, 55));
   else if (!ui.editingBody && details.bodyHtml.trim()) body.innerHTML = details.bodyHtml;
   else if (!ui.editingBody) body.replaceChildren(el('span', 'muted', 'No description.'));
-  const overviewGuide = $('overview-guide');
-  overviewGuide.hidden = state.analysis.result === undefined;
-  if (state.analysis.result) {
-    const summary = guideSummary(state.analysis.result, buildGuide(state.analysis.result, received.files ?? []));
-    summary.querySelector('.section-head')?.append(button('Read in guide order', () => setView('code', 'guide'), 'small'));
-    overviewGuide.replaceChildren(summary);
-  }
   renderReviewers(state);
   const checks = $('checks');
   checks.replaceChildren();
@@ -119,6 +113,7 @@ export function render(state: OverviewState): void {
   } else if (loading) checks.append(placeholderRow(60));
   for (const id of ['pick-reviewers', 'pick-assignees', 'pick-labels', 'pick-milestone']) $(id).hidden = !details?.canEdit;
   $('edit-title').hidden = !details?.canEdit || document.getElementById('title-form') !== null;
+  $('title').classList.toggle('editable', details?.canEdit === true);
   $('milestone').replaceChildren(...details ? [details.milestone ? el('span', '', details.milestone.title) : el('span', 'muted', 'No milestone.')] : loading ? placeholders(40) : []);
   const linked = state.conversation?.linkedIssues ?? [];
   $('development').hidden = linked.length === 0;
@@ -163,7 +158,7 @@ export function render(state: OverviewState): void {
     const fill = el('span');
     fill.style.width = (state.reviewed.total ? 100 * state.reviewed.done / state.reviewed.total : 0) + '%';
     wrap.append(fill);
-    reviewed.append(wrap, el('span', '', state.reviewed.done + '/' + state.reviewed.total + ' viewed'));
+    reviewed.append(wrap, el('span', '', state.reviewed.done + ' of ' + state.reviewed.total + ' viewed'));
   } else if (state.reviewedPending) {
     const bar = el('span', 'skeleton');
     bar.style.width = '160px';
@@ -171,9 +166,7 @@ export function render(state: OverviewState): void {
   }
   renderClaude(state);
   const unpushed = state.unpushed?.length ?? 0;
-  $('unpushed-anchor').hidden = !unpushed;
-  $('unpushed-chip').replaceChildren(unpushed + ' unpushed', icon(icons.chevronDown));
-  if (!unpushed && ui.toolbarMenu?.anchor === 'unpushed-chip') closeToolbarMenu();
+  if (!unpushed && ui.toolbarMenu?.anchor === 'push-menu') closeToolbarMenu();
   renderPush();
   renderThreadList();
   renderLinked(state);
@@ -181,13 +174,8 @@ export function render(state: OverviewState): void {
   setBusy(ui.busy);
   renderPendingList(pendingCount() !== undefined);
   showReviewForm();
-  const badge = $('verdict');
-  badge.hidden = !details;
-  if (details) {
-    const [tone, label] = verdict(details.reviewers);
-    badge.className = 'verdict ' + tone;
-    badge.textContent = label;
-  }
+  showHeadStatus($('verdict'), details?.open ? reviewVerdict(details.reviewers) : undefined);
+  showHeadStatus($('check-status'), details?.open ? failingCheck(details) : undefined);
   const prState = $('pr-state');
   const ended = details && !details.open ? (details.merged ? 'merged' : 'closed') : undefined;
   prState.hidden = ended === undefined;
@@ -228,7 +216,7 @@ export function render(state: OverviewState): void {
 /** Paths with local work at the last full draw, so folder marks redraw when the set changes. */
 let shownLocalPaths = '';
 
-/** Switch tabs, and with `order` the Code tab's order, keeping the tab bar where it is when the page is scrolled past the header. */
+/** Switch to Conversation, or to the Guide or Files tab (`order`), keeping the tab bar where it is when the page is scrolled past the header. */
 export function setView(next: View, order: Order = prefs.order): void {
   prefs.view = next;
   prefs.order = order;
@@ -242,13 +230,14 @@ export function setView(next: View, order: Order = prefs.order): void {
   if (window.scrollY > panelTop) window.scrollTo(0, panelTop);
 }
 
-/** The Code tab's count of changed files, and the Guide order button, which moves while Claude builds the guide and warns when it is out of date. */
+/** The Files tab's count of changed files (and the local header's), and the Guide tab, which moves while Claude builds the guide and warns when it is out of date. */
 export function showCodeTab(): void {
   const analysis = received.current?.analysis;
-  $('order-guide').classList.toggle('busy', analysis?.running === true);
+  $('tab-guide').classList.toggle('busy', analysis?.running === true);
   $('guide-stale').hidden = analysis?.running === true || analysis?.result === undefined || !analysis.stale;
-  $('files-count').textContent = received.files ? String(received.files.filter((file) => file.change !== 'unchanged').length) : '';
-  for (const name of ['files', 'guide'] as const) $('order-' + name).setAttribute('aria-pressed', String(prefs.order === name));
+  const changed = received.files?.filter((file) => file.change !== 'unchanged').length;
+  $('files-count').textContent = changed === undefined ? '' : String(changed);
+  if (received.current?.localMode) $('facts').textContent = changed === undefined ? '' : changed + (changed === 1 ? ' file' : ' files');
   $('nav-tools').classList.toggle('off-view', guided() && analysis?.result !== undefined);
   showListToggle();
 }

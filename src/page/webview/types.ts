@@ -4,9 +4,9 @@ import type { ChangeRequestDetails, CommentKind } from '../../core/forge.js';
 import type { DiffSide, GitHubThreadView, OverviewState, TextColumns } from '../protocol.js';
 import type { OrbMotion } from './orb.js';
 
-/** The page's tab: the PR's record, or its code. */
+/** The page's tab: Conversation (the PR's record), or the code, which Guide and Files both show. */
 export type View = 'overview' | 'code';
-/** The order the Code tab shows files in: the file tree, or Claude's guide in reading order. */
+/** What the code tabs show: the Files tab's file tree, or the Guide tab's reading order. */
 export type Order = 'files' | 'guide';
 export type Intent = 'ask' | 'implement';
 /** `columns` marks the text selected for the comment within its first and last line; GitHub comments cover whole lines. */
