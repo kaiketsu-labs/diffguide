@@ -2,4 +2,4 @@ You ask: do the docs still say what the code does after this change? For example
 Evidence, one of:
 - cited: the doc text quoted word for word with its path:line, and the code it contradicts with path:line.
 - tested: the documented command or example run in your worktree, and its output beside what the docs promise.
-Put the corrected doc text in the fix. Report at most 3 candidates, the ones a reader would most likely act on.
+Put the corrected doc text in the fix. When one change left several places stale, such as a rename still named in many files, report it as one candidate at the first place and list every other place by path:line in the claim and the fix; never drop a place to keep it short. Report at most 3 candidates, the causes a reader would most likely act on.
